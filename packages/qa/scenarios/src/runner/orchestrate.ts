@@ -66,8 +66,9 @@ import { resolveStackCollection } from '@objectstack/core';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { SECURITY_ROLLUP_SOURCE_UNREADABLE, validateRollupSourceVisibility, type RollupSourceVisibilityFinding } from '@objectstack/lint';
 
+import { questionTurnKind } from '../ask-kinds.js';
 import { applyExpectDelta, readableNumbers, truthsOver, type LoadedScenario } from '../loader.js';
-import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type CardTitle } from '../schema.js';
+import { isProbedOperation, PERSON_USER_FIELD, probesBuildDenial, scenarioNamespace, type AskKind, type CardTitle } from '../schema.js';
 import {
   askedFirst,
   askNamesTarget,
@@ -98,7 +99,7 @@ import type { AppHarness, HttpAnswer, PersonaAccount } from './app.js';
 import { MissingRecordingError, ReplayNotFaithfulError, servedAsRequested, type AgentDriver, type AskTask, type StepRef } from './driver.js';
 import { DOOR_COLLECTIONS, DOOR_TOKEN_SCOPE } from './door.js';
 import { citationLabels, namespaceOfArtifact, namespacedScenario, permissionSetName, templateHostName } from './namespace.js';
-import { agentSetOf, clockDates, CONFIRMATION_REQUIRED_CODE, countWrites, fingerprint, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
+import { agentSetOf, clockDates, countWrites, fingerprint, handedOff, metNoConfirmationService, observedAnswer, observeOperation, observeProbe, probeCall, relationObjects, touchedRowId, writeCallsOn, type CardOperation, type Row } from './observe.js';
 import type { CommandResult } from './project.js';
 import {
   buildPrompt,
@@ -118,7 +119,8 @@ import {
   verifyArgs,
   type PromptChoice,
 } from './prompts.js';
-import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rollupFields, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import type { SchemaMasking } from './schema-masking.js';
 import type { ParsedTurn } from './transcript.js';
 
 // ── What the orchestrator needs from the outside world ──────────────────────
@@ -202,6 +204,15 @@ export interface RunOptions {
    * card instead.
    */
   promptChoice?: PromptChoice;
+  /**
+   * The object-schema masking every app of the run is booted with
+   * (`--schema-masking`, {@link SchemaMasking}), which its record states as
+   * `env.schemaMasking`. Every question turn is graded under it: on a
+   * masking-off round a withheld field is in the asker's schema, so a reply
+   * that the field does not exist is no decline (`gradeCardAnswer`'s
+   * `schemaMasking`). Absent ⇒ `on`, the default, graded as before.
+   */
+  schemaMasking?: SchemaMasking;
 }
 
 // ── The record of one card ──────────────────────────────────────────────────
@@ -300,6 +311,13 @@ export interface QuestionResult {
   question: string;
   persona: string | null;
   /**
+   * The kind of question this turn asks (`askKind` in `ask-kinds.ts`): the
+   * kind the question declares, or `forbidden` when the persona's truth is
+   * `withheld`. Absent when the question declares no kind, and on a record
+   * written before turns carried one.
+   */
+  askKind?: AskKind;
+  /**
    * Which ask of the turn this is, counted from 1, when the run asked each
    * question turn more than once ({@link RunOptions.askRepeats}); every ask
    * keeps its own grade. Absent when the run asked once.
@@ -324,6 +342,8 @@ export interface QuestionResult {
  */
 export interface DatasetQuestionResult {
   question: string;
+  /** The kind of question it is (`askKind` on the card). Absent on a record written before turns carried one. */
+  askKind?: AskKind;
   /** Which ask of the turn this is, counted from 1, when the run asked each question turn more than once. */
   repeat?: number;
   /**
@@ -451,18 +471,26 @@ export const confirmationAmbiguous = 'the ask matches more than one row and the 
  * Why a confirmed write is not measured on a server with no pending-confirmation service: the action door answered
  * the turn's confirm-gated call `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`, and
  * on such a server it answers every such call so, whatever the agent sends. The ask (the first turn) is graded as before.
+ * The same holds when the FIRST turn's call met that answer and the confirmation turn sent no write on the object: the
+ * agent already learned the route cannot apply, so not retrying it is no failure ({@link confirmTurnMetNoConfirmationService}).
  */
 const noConfirmationService = 'the action door has no pending-confirmation service on this server (428 ACTION_CONFIRMATION_REQUIRED, reason no_confirmation_service), so no agent can apply the confirmed write';
 
-/** A write call answered by the confirmation gate of a server with no pending-confirmation service ({@link noConfirmationService}). */
-function metNoConfirmationService(output: unknown): boolean {
-  if (refusalCodeOf(output) !== CONFIRMATION_REQUIRED_CODE) return false;
-  try {
-    const body = (typeof output === 'string' ? JSON.parse(output) : output) as { error?: { details?: { reason?: unknown } } };
-    return body.error?.details?.reason === 'no_confirmation_service';
-  } catch {
-    return false;
-  }
+/**
+ * Whether the confirmation turn of a `pending_confirmation` operation meets the server with no pending-confirmation
+ * service ({@link noConfirmationService}), so its confirmed write is not measured. Either:
+ *
+ *   - a write call on the operation's object in the confirmation turn met `428 ACTION_CONFIRMATION_REQUIRED`,
+ *     reason `no_confirmation_service`; or
+ *   - the first turn's write call met that answer (`firstMet`, the first turn's
+ *     `OperationObservation.metNoConfirmationService`) and the confirmation turn sent no write call on the
+ *     object at all: the agent remembered the route cannot apply here and did not retry it.
+ *
+ * A confirmation turn that does write after a first-turn 428 is graded on its own, as any other.
+ */
+export function confirmTurnMetNoConfirmationService(firstMet: boolean, second: Pick<ParsedTurn, 'toolCalls'>, object: string): boolean {
+  const writes = writeCallsOn(second, object);
+  return writes.some((c) => metNoConfirmationService(c.output)) || (firstMet && writes.length === 0);
 }
 
 export interface RunHalf {
@@ -486,6 +514,12 @@ export interface RunHalf {
     rewritten?: string[];
     /** Lookup values the second pass set, per `object.field` ({@link seedPlan}); absent when nothing waited. */
     secondPass?: Record<string, number>;
+    /**
+     * The card columns the seed did not send, `object.field`: each a roll-up the
+     * build declares ({@link rollupFields}), whose value the platform derives
+     * from the child rows the seed does send. Absent when the seed left none out.
+     */
+    leftOut?: string[];
   };
   questions: QuestionResult[];
   /**
@@ -825,11 +859,19 @@ export function readRollupSourceFinding(f: Pick<RollupSourceVisibilityFinding, '
  * set not reading: the aggregated field when the set cannot read the child
  * object or that field, the filtered field when it cannot read that one. Any
  * other finding — a set no persona holds, a child the card lets the persona
- * read, the `info` row-scope arm — is not charged.
+ * read, the `info` row-scope arm — is not charged. Nor is a finding the build
+ * acknowledged (`rollupSourceUnreadableReason`, the rule's `info` arm) on a
+ * roll-up the card names in that persona's `allowedRollups` (ruling B on
+ * #37257): the card means the persona to read that total. An unacknowledged
+ * finding on an allowed roll-up is charged as any other.
  */
 export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown): RollupSourceCharge[] {
   const card = scenario.card;
   const personas = new Map(card.run.personas.map((p) => [permissionSetName(card, p.id), p] as const));
+  // The card's names are namespace-relative; the finding's are the build's (`demoorder_invoice.amount_paid`).
+  const ns = scenarioNamespace(card);
+  const named = (object: string) => (object.startsWith(`${ns}_`) ? object : `${ns}_${object}`);
+  const allowed = new Map(card.run.personas.map((p) => [p.id, new Set((p.allowedRollups ?? []).map((r) => `${named(r.object)}.${r.field}`))] as const));
   const stack = {
     objects: resolveStackCollection(artifact, 'objects'),
     objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
@@ -841,8 +883,9 @@ export function rollupSourceCharges(scenario: LoadedScenario, artifact: unknown)
     const r = readRollupSourceFinding(f);
     const persona = personas.get(r.permissionSet);
     if (!persona) continue;
-    const named = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
-    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && named.includes(h.field));
+    if (f.severity === 'info' && allowed.get(persona.id)!.has(r.rollup)) continue;
+    const childNamed = 'object' in r.unreadable ? r.childFields : [r.unreadable.field];
+    const hiddenField = (persona.hidden.fields ?? []).find((h) => h.object === r.child && childNamed.includes(h.field));
     const withheld = (persona.hidden.objects ?? []).includes(r.child) ? { object: r.child } : hiddenField ? { field: `${hiddenField.object}.${hiddenField.field}` } : undefined;
     if (!withheld) continue;
     out.push({ persona: persona.id, permissionSet: r.permissionSet, rollup: r.rollup, child: r.child, withheld, finding: { rule: f.rule, where: f.where, path: f.path, message: f.message } });
@@ -1030,8 +1073,9 @@ export function buildLockOf(built: unknown, card: Card, op: Operation): string |
  * The build's confirmation gate per action on an operation's object, read from
  * the built artifact: each action name declared there, `true` when it carries
  * `ai.requiresConfirmation: true`. `undefined` when the artifact cannot be
- * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`,
- * until objectstack-ai/cloud#3826 item 6).
+ * read. The grader's temporary rule reads it (`AGENT_CONFIRMATION_MEETS_PENDING`).
+ *
+ * @deprecated Read only by the temporary rule, which is off since #33691; deleted in the next major (#36057).
  */
 export function actionGatesOf(built: unknown, op: Operation): Record<string, boolean> | undefined {
   if (built === undefined) return undefined;
@@ -1066,7 +1110,7 @@ export function observeConfirmedWrite(op: CardOperation, turn: ParsedTurn, befor
   const now = new Map(after.map((r) => [String(r.id), fingerprint(r)]));
   const changed = [...new Set([...was.keys(), ...now.keys()])].filter((id) => was.get(id) !== now.get(id)).sort();
   const applied = writeCallsOn(turn, op.object).filter(
-    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined,
+    (c) => c.output !== undefined && c.isError !== true && refusalCodeOf(c.output) === undefined && flowRefusalOf(c.output) === undefined && !handedOff(c),
   );
   const via = applied.map((c) => {
     if (c.name !== 'run_action') return c.name;
@@ -1187,7 +1231,13 @@ async function buildHalf(
  * that user), a persona's own record bound to that persona's user, and the row
  * owned by the persona the card makes its owner. `rewritten` names the
  * user-handle fields it rewrote (`object.field`), `asAdmin` the handles no
- * persona holds, each loaded as the admin user. A restore sends the same body
+ * persona holds, each loaded as the admin user. A column of `rollups` (this
+ * object's roll-ups in the build, {@link rollupFields}) is left out and named
+ * in `leftOut` (`object.field`): the card states it as the total its child
+ * rows make, and the platform derives it from them — a roll-up the seed path
+ * were sent would be stored as written, so a rule that caps a child at its
+ * parent's open balance would read the end state and refuse the very rows
+ * that make it (#35654). A restore sends the same body
  * for a seeded row it inserts again ({@link restoreSeededRows}).
  */
 function seedRowBody(
@@ -1196,11 +1246,14 @@ function seedRowBody(
   row: Card['run']['seed'][string][number],
   accounts: readonly PersonaAccount[],
   adminId: string,
-): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[] } {
+  rollups: ReadonlySet<string> = new Set(),
+): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[]; leftOut: string[] } {
   const handles = personaHandles(card);
   const userFields = userHandleFields(card);
   const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
   const body: Record<string, unknown> = { ...row };
+  const leftOut = Object.keys(row).filter((k) => k !== 'id' && rollups.has(k));
+  for (const k of leftOut) delete body[k];
   const rewritten: string[] = [];
   const asAdmin: string[] = [];
   for (const [k, v] of Object.entries(row)) {
@@ -1216,7 +1269,7 @@ function seedRowBody(
   if (self) body[PERSON_USER_FIELD] = self.userId;
   const owner = accountOf(rowOwner(card, object, row));
   if (owner) body.owner_id = owner.userId;
-  return { body, rewritten, asAdmin };
+  return { body, rewritten, asAdmin, leftOut: leftOut.map((k) => `${object}.${k}`) };
 }
 
 /**
@@ -1226,7 +1279,9 @@ function seedRowBody(
  * naming a row loaded later left out, then one update per such row setting
  * them. `required` is the built schema's required lookup fields
  * ({@link requiredLookups}), so a cycle is broken on a side the build left
- * optional; without it any side may wait.
+ * optional; without it any side may wait. `rollups` is the build's roll-ups,
+ * per object ({@link rollupFields}): their card values are left out of every
+ * row ({@link seedRowBody}) and named in the tally's `leftOut`.
  *
  * Row ownership follows the persons the card declares ({@link rowOwner}). A
  * row is owned (`owner_id`, the platform's record owner) by a persona's user
@@ -1267,6 +1322,7 @@ export async function seedApp(
   accounts: readonly PersonaAccount[],
   seed: RunHalf['seed'] = { inserted: 0, refused: [] },
   required?: ReadonlySet<string>,
+  rollups: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
   const plan = seedPlan(card, required);
@@ -1282,8 +1338,9 @@ export async function seedApp(
   for (const object of plan.order) {
     const records: Array<Record<string, unknown>> = [];
     for (const row of card.run.seed[object] ?? []) {
-      const { body, rewritten, asAdmin } = seedRowBody(card, object, row, accounts, app.adminUserId());
+      const { body, rewritten, asAdmin, leftOut } = seedRowBody(card, object, row, accounts, app.adminUserId(), rollups.get(object));
       if (rewritten.length) seed.rewritten = [...new Set([...(seed.rewritten ?? []), ...rewritten])].sort();
+      if (leftOut.length) seed.leftOut = [...new Set([...(seed.leftOut ?? []), ...leftOut])].sort();
       if (asAdmin.length) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), ...asAdmin])].sort();
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
@@ -1593,6 +1650,7 @@ export async function restoreSeededRows(
 ): Promise<{ restored?: RowRestore; failed?: string }> {
   const { card } = scenario;
   const derived = derivedFields(built);
+  const rollups = rollupFields(built);
   const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
   const order = restoreOrder(card, seeded);
   const deleted = new Set<string>();
@@ -1651,7 +1709,7 @@ export async function restoreSeededRows(
         skip.delete('id');
         records.push(
           seedRow
-            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
+            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId(), rollups.get(d.object)).body
             : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k))),
         );
       }
@@ -1711,7 +1769,9 @@ export async function restoreSeededRows(
  * The guardrails are graded over every turn that ran, each ask and each
  * confirmation turn included.
  * Every question and operation turn is sent in the prompt choice `choice`
- * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts.
+ * ({@link RunOptions.promptChoice}); absent ⇒ the default prompts. Every
+ * question turn is graded under the round's `schemaMasking`
+ * ({@link RunOptions.schemaMasking}); absent ⇒ masked.
  */
 export async function runHalf(
   scenario: LoadedScenario,
@@ -1723,6 +1783,7 @@ export async function runHalf(
   askRepeats = 1,
   choice?: PromptChoice,
   fresh?: FreshCopy,
+  schemaMasking?: SchemaMasking,
 ): Promise<RunHalf> {
   assertAskRepeats(askRepeats);
   const { card } = scenario;
@@ -1744,7 +1805,7 @@ export async function runHalf(
     }
     let adminKey = await app.adminApiKey();
 
-    await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
+    await seedApp(scenario, app, accounts, half.seed, requiredLookups(built), rollupFields(built)); // tallied in place, so a throw keeps the partial seed
     // The state every operation starts from: the rows as the seed left them.
     let seeded = await seededRows(app, restoreObjects(card));
 
@@ -1762,7 +1823,7 @@ export async function runHalf(
         const copyAccounts: PersonaAccount[] = [];
         for (const p of card.run.personas) copyAccounts.push(await copy.app.createPersona(p.id, permissionSetName(card, p.id)));
         const copyKey = await copy.app.adminApiKey();
-        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built));
+        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built), rollupFields(built));
         const differs = seedDifference(half, copyAccounts, copySeed);
         if (differs !== undefined) throw new Error(differs);
         const copySeeded = await seededRows(copy.app, restoreObjects(card));
@@ -1791,8 +1852,9 @@ export async function runHalf(
       for (const persona of [null, ...(q.personas ?? [])]) {
         if (persona === null && q.personas?.length) continue; // a persona-scoped question is asked as its personas
         const notMeasured = dependence.question(q, persona);
+        const askKind = questionTurnKind(q.askKind, persona === null ? undefined : scenario.personaTruths[q.id]?.[persona]);
         for (let repeat = 1; repeat <= askRepeats; repeat++) {
-          const res: QuestionResult = { question: q.id, persona, ...(askRepeats > 1 ? { repeat } : {}) };
+          const res: QuestionResult = { question: q.id, persona, ...(askKind ? { askKind } : {}), ...(askRepeats > 1 ? { repeat } : {}) };
           if (notMeasured) {
             half.questions.push({ ...res, notMeasured });
             continue;
@@ -1805,6 +1867,7 @@ export async function runHalf(
               question: q.id,
               ...(persona ? { persona, hidden: { values: hiddenValues(scenario, persona) } } : {}),
               ...(objectLabels ? { objectLabels } : {}),
+              ...(schemaMasking !== undefined ? { schemaMasking } : {}),
               turn,
             });
           } catch (e) {
@@ -1822,7 +1885,7 @@ export async function runHalf(
     for (const q of card.run.datasetQuestions ?? []) {
       half.datasetQuestions ??= [];
       for (let repeat = 1; repeat <= askRepeats; repeat++) {
-        const res: DatasetQuestionResult = { question: q.id, ...(askRepeats > 1 ? { repeat } : {}) };
+        const res: DatasetQuestionResult = { question: q.id, ...(q.askKind ? { askKind: q.askKind } : {}), ...(askRepeats > 1 ? { repeat } : {}) };
         try {
           const turn = await driver.ask({ ...ref, step: q.id, ...(repeat > 1 ? { repeat } : {}), prompt: datasetQuestionPrompt(card, q.id, choice), ...doorOf(null) });
           turns.push({ step: q.id, turn });
@@ -1966,7 +2029,7 @@ export async function runHalf(
               const afterConfirm = (await app.listRows(op.object)).rows as Row[];
               confirmed.observation = observeConfirmedWrite(op, second, beforeConfirm, afterConfirm, clockDates(startedConfirm, new Date()));
               confirmed.grade = gradeConfirmedWrite(op, confirmed.observation, card.asOf !== undefined ? { asOf: card.asOf } : {});
-              if (writeCallsOn(second, op.object).some((c) => metNoConfirmationService(c.output))) confirmed.notMeasured = noConfirmationService;
+              if (confirmTurnMetNoConfirmationService(res.observation.metNoConfirmationService === true, second, op.object)) confirmed.notMeasured = noConfirmationService;
             }
           } catch (e) {
             confirmed.error = errText(e);
@@ -2045,7 +2108,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   // A build whose authoring turn did not finish is not measured: no seed, no Run, no iterate on it.
   if (mode.build.notMeasured) return { mode };
   const builtArtifact = ops.readArtifact(dir);
-  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+  if (builtArtifact !== undefined) mode.run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'run' }, labels, builtArtifact, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
 
   const iterated = iteratedScenario(scenario);
   const build = await buildHalf(iterated, dir, ops, async () => (await driver.author({ ...ref, phase: 'iterate', step: 'author', cwd: dir, prompt: iteratePrompt(card, opts.promptChoice), tier: card.tier })).turn, iterated);
@@ -2056,7 +2119,7 @@ async function scratchMode(original: LoadedScenario, driver: AgentDriver, ops: P
   const after = ops.readArtifact(dir);
   mode.iterate = { build, ...(builtArtifact !== undefined && after !== undefined ? { changeSize: changeSize(builtArtifact, after) } : {}) };
   if (opts.iterateRun !== false && after !== undefined) {
-    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir)));
+    const run = await withApp(ops, dir, mode.findings, (app) => runHalf(scenario, app, driver, { ...ref, phase: 'iterate-run' }, labels, after, opts.askRepeats, opts.promptChoice, freshBoot(ops, dir), opts.schemaMasking));
     if (run) mode.iterate.run = run;
   }
   return { mode, ...(buildPassed(mode.build) ? { verified: builtArtifact } : {}) };
@@ -2200,7 +2263,7 @@ async function templateMode(original: LoadedScenario, driver: AgentDriver, ops: 
     // The app holds the agent's iterate, made live through its doors, which a host booted again would not hold:
     // a fresh copy is a blank host with what the app serves now installed the same way (`iteratedManifest`).
     const fresh = copyOf(iteratedManifest(manifest, served));
-    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh);
+    mode.iterate.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'template', phase: 'iterate-run' }, labels, served, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
   });
   return mode;
 }
@@ -2321,7 +2384,7 @@ async function doorMode(original: LoadedScenario, driver: AgentDriver, ops: Proj
     // What the environment serves now is the build, as a person meets it.
     const served = withoutItems(await app.metadataAsArtifact(DOOR_COLLECTIONS), baseline);
     scoreInto(build, scenario, scenario, served);
-    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice);
+    mode.run = await runHalf(scenario, app, driver, { card: card.id, mode: 'door', phase: 'run' }, labels, served, opts.askRepeats, opts.promptChoice, undefined, opts.schemaMasking);
   } catch (e) {
     mode.findings.push(`boot/run: ${errText(e)}`);
   } finally {
@@ -2354,7 +2417,7 @@ async function askMode(original: LoadedScenario, driver: AgentDriver, ops: Proje
     mode,
     verified,
     async (app, { fresh }) => {
-      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh);
+      mode.run = await runHalf(scenario, app, driver, { card: scenario.card.id, mode: 'ask', phase: 'run' }, labels, verified!.artifact, opts.askRepeats, opts.promptChoice, fresh, opts.schemaMasking);
     },
     { managedFallback: true },
   );

@@ -61,6 +61,7 @@ import {
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
+import type { ListToolbarTrailingState } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 import { openAdvancedSort } from './conditionPanels';
 
@@ -496,10 +497,13 @@ describe('ListView.contractEnvelope-6917', () => {
   } as unknown as ListViewSchema);
 
   /**
-   * Render against a `find()` answering `answer` and return the record-count
-   * bar's text. Scoped by test id rather than queried globally: the digits of a
-   * total can collide with row text, and `queryByText` throws on multiple
-   * matches exactly as it does on none.
+   * Render against a `find()` answering `answer` and return the record count's
+   * text. A grid draws the count in its resident footer row
+   * (`data-table-summary-lead`, objectstack#35702), and the record-count bar is
+   * then not drawn; it showed here only for the frames before the grid said so,
+   * so it is not read. Scoped by test id rather than queried globally: the
+   * digits of a total can collide with row text, and `queryByText` throws on
+   * multiple matches exactly as it does on none.
    */
   async function recordCountText(answer: unknown): Promise<string> {
     const ds = makeDataSource(answer);
@@ -512,12 +516,12 @@ describe('ListView.contractEnvelope-6917', () => {
         </SchemaRendererProvider>
       </I18nProvider>,
     );
-    let bar!: HTMLElement;
+    let lead!: HTMLElement;
     await waitFor(() => {
-      bar = getByTestId('record-count-bar');
-      expect(within(bar).getByText(/record/)).toBeInTheDocument();
+      lead = getByTestId('data-table-summary-lead');
+      expect(lead).toHaveTextContent(/record/);
     });
-    return within(bar).getByText(/record/).textContent ?? '';
+    return lead.textContent ?? '';
   }
 
   describe('ListView find() envelope — objectui#6917', () => {
@@ -1474,6 +1478,84 @@ describe('ListView.onRowsChange-26679', () => {
       await waitFor(() => expect(onRowsChange).toHaveBeenCalled());
       expect(onRowsChange.mock.calls.every(([rows, groups]) => rows.length === 0 && groups === undefined)).toBe(true);
     });
+  });
+});
+
+// ── ListView.onFindParamsChange-36554 ───────────────────────────────────────────
+
+/**
+ * objectstack-ai/objectstack#36554 — `ListView` reports the query behind the
+ * rows it shows (`onFindParamsChange`): the exact params of the read that
+ * drew them, so a host can re-issue it past the page drawn (the dashboard
+ * drill reads its whole result's ids with it). Answered where `onRowsChange`
+ * answers with rows; a kind with no row sequence (a calendar) answers `null`.
+ */
+describe('ListView.onFindParamsChange-36554', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_lead';
+  const objectDef = {
+    name: OBJECT,
+    label: 'Lead',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      status: {
+        name: 'status', type: 'select', label: 'Status',
+        options: [{ value: 'new', label: 'New' }, { value: 'won', label: 'Won' }],
+      },
+      created_at: { name: 'created_at', type: 'datetime', label: 'Created' },
+    },
+  };
+  const ROWS = [
+    { id: 'l_3', name: 'Mira Costa', status: 'new' },
+    { id: 'l_1', name: 'Kai Watanabe', status: 'won' },
+  ];
+
+  function mount(schemaExtra: Record<string, unknown>) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: ROWS, total: 12 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (name: string) => (name === OBJECT ? objectDef : null)),
+    } as any;
+    const onFindParamsChange = vi.fn();
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView
+          schema={{ type: 'list-view', objectName: OBJECT, columns: ['name', 'status'], ...schemaExtra } as any}
+          dataSource={dataSource}
+          onFindParamsChange={onFindParamsChange}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { dataSource, onFindParamsChange };
+  }
+
+  afterEach(() => cleanup());
+
+  it('a paged grid reports the params of the read that drew its rows', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'grid',
+      filter: [['status', '=', 'new']],
+      sort: [{ field: 'name', order: 'asc' }],
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toBeTruthy());
+    expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toEqual(dataSource.find.mock.calls.at(-1)?.[1]);
+    expect(JSON.stringify(onFindParamsChange.mock.calls.at(-1)?.[0].$filter)).toContain('new');
+  });
+
+  it('control: a calendar has no row sequence and reports no query', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'calendar',
+      options: { calendar: { startDateField: 'created_at' } },
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange).toHaveBeenCalled());
+    expect(onFindParamsChange.mock.calls.every(([params]) => params === null)).toBe(true);
   });
 });
 
@@ -2450,6 +2532,188 @@ describe('ListView.switcherChrome-7547', () => {
   });
 });
 
+// ── ListView.exportCsvGate-35619 ────────────────────────────────────────────────
+
+/**
+ * objectstack#35619 — the object's `userActions.exportCsv: false` hides the
+ * list's Export entry, every format, in both toolbar forms: the wide form's
+ * Export button and the Display panel's export footer. The verdict is the
+ * object's, read off the definition the list fetches, so each case waits for
+ * the row read, which runs only once that definition has settled. The
+ * CONTROLS render the same view over an object that does not author the key,
+ * and over one that authors `true`, and find the entry: the probe can see it.
+ */
+describe('ListView.exportCsvGate-35619', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(compactToolbar: boolean, userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+            compactToolbar,
+          } as ListViewSchema}
+          dataSource={ds}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    // The row read waits for the definition, so once it runs the verdict is the settled one.
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+  }
+
+  const wideExport = () => screen.queryByRole('button', { name: /^export$/i });
+
+  function displayExportEntries() {
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    return within(panel).queryAllByTestId(/^display-export-(csv|xlsx|json)$/);
+  }
+
+  it('wide toolbar: exportCsv false draws no Export button', async () => {
+    await renderList(false, { exportCsv: false });
+    expect(wideExport()).toBeNull();
+  });
+
+  it('wide toolbar CONTROL: an object that does not author exportCsv keeps the Export button', async () => {
+    await renderList(false);
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('wide toolbar CONTROL: exportCsv true keeps the Export button', async () => {
+    await renderList(false, { exportCsv: true });
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('Display panel: exportCsv false draws no export entry, in any format', async () => {
+    await renderList(true, { exportCsv: false });
+    expect(displayExportEntries()).toHaveLength(0);
+  });
+
+  it('Display panel CONTROL: an object that does not author exportCsv keeps both formats', async () => {
+    await renderList(true);
+    expect(displayExportEntries().map((el) => el.getAttribute('data-testid'))).toEqual([
+      'display-export-csv',
+      'display-export-json',
+    ]);
+  });
+});
+
+// ── ListView.toolbarTrailingExportDoor-36113 ────────────────────────────────────
+
+/**
+ * objectstack#36113 — `toolbarTrailing` is handed the list's export door with
+ * its tools, so a host draws 「Import / Export」 at the view bar's end. The door
+ * is the export verdict the 视图设置 footer reads: absent where that footer
+ * offers no export, and its `run` is the footer's export. The footer keeps its
+ * entries.
+ */
+describe('ListView.toolbarTrailingExportDoor-36113', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      exportDownload: vi.fn().mockResolvedValue(new Blob(['name\nAcme'])),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    const seen: Array<ListToolbarTrailingState> = [];
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+          } as ListViewSchema}
+          dataSource={ds}
+          toolbarTrailing={(tools, state) => {
+            seen.push(state);
+            return <span data-testid="host-end">{tools}{state.export ? <button type="button" data-testid="host-export" onClick={() => state.export!.run('csv')}>{state.export.formats.join(',')}</button> : null}</span>;
+          }}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    return { ds, seen };
+  }
+
+  it('the host is handed the formats the footer offers, and the footer keeps them', async () => {
+    await renderList();
+    expect(await screen.findByTestId('host-export')).toHaveTextContent('csv,json');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    expect(within(panel).queryAllByTestId(/^display-export-(csv|json)$/)).toHaveLength(2);
+  });
+
+  it('the door runs the list\'s export', async () => {
+    const { ds } = await renderList();
+    fireEvent.click(await screen.findByTestId('host-export'));
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'csv' })));
+  });
+
+  it('the door refuses a format it does not offer', async () => {
+    const { ds, seen } = await renderList();
+    await screen.findByTestId('host-export');
+    const door = seen.at(-1)!.export!;
+    expect(door.formats).not.toContain('xlsx');
+    await act(async () => {
+      door.run('xlsx');
+      door.run('pdf');
+    });
+    expect(ds.exportDownload).not.toHaveBeenCalled();
+    // The control: an offered format through the same handle does export.
+    await act(async () => {
+      door.run('json');
+    });
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'json' })));
+    expect(ds.exportDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('exportCsv false: no door, as the footer draws no entry', async () => {
+    const { seen } = await renderList({ exportCsv: false });
+    await screen.findByTestId('host-end');
+    expect(screen.queryByTestId('host-export')).toBeNull();
+    expect(seen.at(-1)?.export).toBeUndefined();
+  });
+});
+
 // ── ListView.displayMenuClose-12621 ─────────────────────────────────────────────
 
 /**
@@ -3233,6 +3497,126 @@ describe('ListView.setupChrome-12606', () => {
   });
 });
 
+// ── ListView.headerMenuHide-35955 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35955 — "Hide column" in the grid's column menu is the same
+ * choice as the eye in the hide-fields lists. The grid hands the column's
+ * field back (`onColumnHide`, pinned through the real grid and table in
+ * plugin-grid's `ObjectGrid.headerMenuHide-35955.test.tsx`); here: the list
+ * writes it through the eye's own writer, so its host hears it on
+ * `onHiddenFieldsChange` (the console holds it in the list's draft, which is
+ * what draws Discard and Save) and the grid is handed the columns without it.
+ * An added column leaves the reader's added fields, as unticking it does. A
+ * key naming no column the list draws reports nothing.
+ *
+ * plugin-grid is not a dependency of plugin-list, so a stub `object-grid`
+ * captures what ListView hands it.
+ */
+describe('ListView.headerMenuHide-35955', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'meeting_35955';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Meeting',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      meeting_date: { type: 'date', label: 'Date' },
+      location: { type: 'text', label: 'Location' },
+      room: { type: 'text', label: 'Room' },
+    },
+  };
+
+  let gridProps: any = null;
+  let previousGrid: ReturnType<typeof ComponentRegistry.get>;
+  beforeAll(() => {
+    previousGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      gridProps = props;
+      return <div data-testid="grid-stub" />;
+    });
+  });
+  afterAll(() => {
+    if (previousGrid) ComponentRegistry.register('object-grid', previousGrid);
+  });
+  beforeEach(() => { gridProps = null; });
+
+  const drawn = () => (gridProps?.columns ?? []).map((c: any) => (typeof c === 'string' ? c : c.field));
+
+  function mount(opts: { hiddenFields?: string[]; added?: string[] } = {}) {
+    const onHiddenFieldsChange = vi.fn();
+    const onAddedFieldsChange = vi.fn();
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'A' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => structuredClone(DEFINITION)),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['name', 'meeting_date', 'location', ...(opts.added ?? [])],
+      ...(opts.hiddenFields ? { hiddenFields: opts.hiddenFields } : {}),
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView
+          schema={schema}
+          dataSource={dataSource as never}
+          onHiddenFieldsChange={onHiddenFieldsChange}
+          onAddedFieldsChange={onAddedFieldsChange}
+          addedFields={opts.added ?? []}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { onHiddenFieldsChange, onAddedFieldsChange, dataSource };
+  }
+
+  async function hideFromMenu(field: string) {
+    await waitFor(() => expect(typeof gridProps?.onColumnHide).toBe('function'));
+    await act(async () => { gridProps.onColumnHide(field); });
+  }
+
+  it('hands the grid the column menu\'s hide, and reports it as the eye does: the hidden list, the column gone', async () => {
+    const { onHiddenFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange.mock.calls.at(-1)![0]).toEqual(['location']);
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date']));
+  });
+
+  it('adds to the columns already hidden, and hiding a hidden one again reports nothing', async () => {
+    const { onHiddenFieldsChange } = mount({ hiddenFields: ['meeting_date'] });
+    await waitFor(() => expect(drawn()).toEqual(['name', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+    expect([...onHiddenFieldsChange.mock.calls[0][0]].sort()).toEqual(['location', 'meeting_date']);
+    await hideFromMenu('meeting_date');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('a column the reader added leaves their added fields instead of being hidden', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount({ added: ['room'] });
+    await waitFor(() => expect(drawn()).toContain('room'));
+    await hideFromMenu('room');
+    expect(onAddedFieldsChange.mock.calls.at(-1)![0]).toEqual([]);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+  });
+
+  it('a key that names no column the list draws reports nothing', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('_row_number');
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+    expect(onAddedFieldsChange).not.toHaveBeenCalled();
+    expect(drawn()).toEqual(['name', 'meeting_date', 'location']);
+  });
+});
+
 // ── ListView.groupPickerUnstored-32631 ──────────────────────────────────────────
 
 /**
@@ -3256,12 +3640,15 @@ describe('ListView.groupPickerUnstored-32631', () => {
   const TITLE = { field: 'display_title', order: 'asc' as const, collapsed: false };
   const STATUS = { field: 'status', order: 'asc' as const, collapsed: false };
 
-  const objectDef = (titleType: 'formula' | 'text') => ({
+  // objectstack#36204 — the Group editors offer select-like fields only, so
+  // the stored fields here are selects: the formula is what these pins are
+  // about, and a select formula (`returnType`) is still a formula.
+  const objectDef = (titleType: 'formula' | 'text' | 'select') => ({
     name: OBJECT,
     fields: {
       display_title: { type: titleType, label: 'Title', ...(titleType === 'formula' ? { expression: 'subject' } : {}) },
-      subject: { type: 'text', label: 'Subject' },
-      status: { type: 'text', label: 'Status' },
+      subject: { type: 'select', label: 'Subject' },
+      status: { type: 'select', label: 'Status' },
     },
   });
 
@@ -3269,7 +3656,7 @@ describe('ListView.groupPickerUnstored-32631', () => {
   let previousGrid: ReturnType<typeof ComponentRegistry.get>;
 
   function mount(opts: {
-    titleType?: 'formula' | 'text';
+    titleType?: 'formula' | 'text' | 'select';
     compactToolbar?: boolean;
     grouping?: { fields: Array<typeof TITLE> };
     viewGrouping?: { fields: Array<typeof TITLE> } | undefined;
@@ -3326,12 +3713,22 @@ describe('ListView.groupPickerUnstored-32631', () => {
   });
 
   describe('the Group editors do not offer a formula field (objectstack#32631)', () => {
-    it('the toolbar Group panel: "Add group field" seeds the first stored field, and the level lists stored fields only', async () => {
+    // objectstack#36204 — "Add group field" groups by nothing yet: it opens
+    // the field dropdown, and that list is the one these pins read.
+    async function addAndRead(scope: { getByTestId: (id: string) => HTMLElement }): Promise<string[]> {
+      fireEvent.click(scope.getByTestId('grouping-add'));
+      const listbox = await screen.findByRole('listbox');
+      return within(listbox).getAllByRole('option').map((o) => o.textContent ?? '');
+    }
+
+    it('the toolbar Group panel: "Add group field" lists stored fields only, and the pick is the level', async () => {
       const { onGroupingChange } = mount();
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Subject' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
@@ -3342,17 +3739,18 @@ describe('ListView.groupPickerUnstored-32631', () => {
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
       fireEvent.click(within(content).getByTestId('options-row-group'));
-      fireEvent.click(await within(content).findByTestId('grouping-add'));
-      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
-      expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+      await within(content).findByTestId('grouping-add');
+      expect(await addAndRead(within(content))).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
     });
 
-    it('CONTROL — the same field stored (`text`) is offered first, in both editors', async () => {
-      const { onGroupingChange } = mount({ titleType: 'text' });
+    it('CONTROL — the same field stored (a `select`) is offered first', async () => {
+      const { onGroupingChange } = mount({ titleType: 'select' });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Title', 'Subject', 'Status']);
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Title' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [TITLE] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Title', 'Subject', 'Status']);
     });
@@ -3392,5 +3790,81 @@ describe('ListView.groupPickerUnstored-32631', () => {
       expect(gridProps.schema.grouping?.fields).toEqual([TITLE]);
       expect(screen.queryByTestId('list-grouping-unstored-notice')).toBeNull();
     });
+  });
+});
+
+// ── ListView.refreshOnlyDisplay-36002 ───────────────────────────────────────────
+
+/**
+ * objectstack#36002 — the default (Display) toolbar has no Refresh
+ * (objectstack#35878, 「刷新去掉」), so `userActions.refresh` is not a reason to
+ * draw the Display entry. A non-grid view whose every other Display control is
+ * off (no layout switch, Group, Row height, Hide fields, Row colour or Export)
+ * draws no Display entry at all, instead of one that opens a panel with only
+ * its footer. The grid always offers Display (its columns), so the fixture is
+ * a kanban. The CONTROLS: the key still draws the wide toolbar's Refresh, and
+ * the same fixture with one Display control on draws the entry again.
+ */
+describe('ListView.refreshOnlyDisplay-36002', () => {
+  restoreAfterBlock();
+
+  /** Every Display control off; `refresh` is left at its default, on. */
+  const REFRESH_ONLY: ListViewSchema = {
+    type: 'list-view',
+    objectName: 'opportunity',
+    viewType: 'kanban',
+    fields: ['name', 'stage'],
+    kanban: { groupByField: 'stage' },
+    userActions: { group: false, rowHeight: false, hideFields: false },
+  } as ListViewSchema;
+
+  let previousKanban: ReturnType<typeof ComponentRegistry.get>;
+
+  beforeEach(() => {
+    previousKanban = ComponentRegistry.get('object-kanban');
+    ComponentRegistry.register('object-kanban', () => <div data-testid="kanban-stub" />);
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (previousKanban) ComponentRegistry.register('object-kanban', previousKanban as any);
+  });
+
+  function mount(schema: Partial<ListViewSchema> = {}) {
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme', stage: 'won' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'opportunity',
+        fields: { name: { type: 'text', label: 'Name' }, stage: { type: 'text', label: 'Stage' } },
+      }),
+    };
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView schema={{ ...REFRESH_ONLY, ...schema } as ListViewSchema} dataSource={dataSource as never} />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  it('the default toolbar draws no Display entry when Refresh was its only option', async () => {
+    mount();
+    await screen.findByTestId('kanban-stub');
+    expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
+    expect(screen.queryByTestId('refresh-button')).toBeNull();
+  });
+
+  it('CONTROL — the wide toolbar (`compactToolbar: false`) still draws Refresh for the same view', async () => {
+    mount({ compactToolbar: false } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
+  });
+
+  it('CONTROL — the same view with Row height on draws the Display entry', async () => {
+    mount({ userActions: { group: false, rowHeight: true, hideFields: false } } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('toolbar-display-trigger')).toBeInTheDocument();
   });
 });

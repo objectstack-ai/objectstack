@@ -19,7 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const navigateMock = vi.fn();
@@ -30,6 +30,8 @@ const state = vi.hoisted(() => ({
   agents: [] as Array<{ name: string }>,
   askAgent: false,
   buildAgent: false,
+  /** Set once the stand-in has drawn the catalog's answer (objectstack#37227). */
+  answered: false,
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -76,6 +78,7 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => {
         if (phase === 'idle') setPhase('loading');
         else if (phase === 'loading') setPhase('answered');
       }, [phase]);
+      if (phase === 'answered') state.answered = true;
       return { agents: phase === 'answered' ? state.agents : [], isLoading: phase === 'loading' };
     },
     isAskAgent: () => state.askAgent,
@@ -164,6 +167,7 @@ beforeEach(() => {
   state.agents = [];
   state.askAgent = false;
   state.buildAgent = false;
+  state.answered = false;
 });
 
 afterEach(() => {
@@ -177,12 +181,15 @@ describe('the greeting row (objectstack#29147)', () => {
     expectPhoneTarget(screen.getByTestId('home-start-template'), ['h-8'], ['max-sm:h-11']);
   });
 
-  it('"Build an app" and "Build with AI" are 44 px below sm and 32 px from sm', async () => {
-    state.agents = [{ name: 'builder' }];
+  it('with the build agent served, neither "Build an app" nor "Build with AI" joins the row (objectstack#37227)', async () => {
+    state.agents = [{ name: 'build' }];
     state.buildAgent = true;
     render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-build-app'), ['h-8'], ['max-sm:h-11']);
-    expectPhoneTarget(screen.getByTestId('home-build-with-ai'), ['h-8'], ['max-sm:h-11']);
+    expectPhoneTarget(await screen.findByTestId('home-start-template'), ['h-8'], ['max-sm:h-11']);
+    // Absence is read after the catalog answers: before it, neither was drawn anyway.
+    await waitFor(() => expect(state.answered).toBe(true));
+    expect(screen.queryByTestId('home-build-app')).toBeNull();
+    expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
   });
 
   it('"Ask AI" is 44 px below sm and 32 px from sm', async () => {
@@ -193,13 +200,89 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 
   it('with no app yet, the empty state\'s "Ask AI" is 44 px below sm', async () => {
-    state.apps = [];
-    state.agents = [{ name: 'ask' }];
-    state.askAgent = true;
-    render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    const restoreWidth = atPhoneWidth();
+    try {
+      state.apps = [];
+      state.agents = [{ name: 'ask' }];
+      state.askAgent = true;
+      render(<HomePage />);
+      expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    } finally {
+      restoreWidth();
+    }
   });
 });
+
+/**
+ * objectstack#37227 — the phone's zero-app admin welcome no longer promises
+ * building with AI where the build agent is deployed: its 「Build with AI」
+ * button is gone, so the title is the plain no-apps one and the description is
+ * the NoBuild / NoAi copy every other deployment reads. A deployment without
+ * the build agent keeps the welcome title (the control).
+ */
+describe('the phone zero-app admin welcome (objectstack#37227)', () => {
+  async function renderZeroAppPhone(): Promise<() => void> {
+    const restoreWidth = atPhoneWidth();
+    state.apps = [];
+    render(<HomePage />);
+    await waitFor(() => expect(state.answered).toBe(true));
+    return restoreWidth;
+  }
+
+  it('build agent deployed: the no-apps title and the NoAi copy, no build promise', async () => {
+    state.agents = [{ name: 'build' }];
+    state.buildAgent = true;
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcome»')).toBeNull();
+      expect(screen.queryByText('«home.welcomeAdminDescription»')).toBeNull();
+      expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
+      // cloud#1674: "Ask AI" stays withheld for a maker.
+      expect(screen.queryByTestId('home-ask-ai')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('build and ask agents deployed: the NoBuild copy', async () => {
+    state.agents = [{ name: 'build' }, { name: 'ask' }];
+    state.buildAgent = true;
+    state.askAgent = true;
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoBuild»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcomeAdminDescription»')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('CONTROL — no agent: the welcome title and the NoAi copy, as before', async () => {
+    const restore = await renderZeroAppPhone();
+    try {
+      expect(screen.getByText('«home.welcome»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.noAppsTitle»')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});
+
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
 
 describe('"Your apps" (objectstack#29147)', () => {
   it('the heading\'s links are 44 px tall below sm', () => {

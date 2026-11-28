@@ -26,8 +26,8 @@ import {
     stripInjectedSystemColumns,
 } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
-import { type FormView } from '@objectstack/spec/ui';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { type FormView, type MetadataListViewParsed } from '@objectstack/spec/ui';
+import { METADATA_FORM_REGISTRY, METADATA_LIST_REGISTRY } from '@objectstack/spec/system';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import {
@@ -56,6 +56,13 @@ import {
  * layout derived from their JSON Schema (acceptable for simple types).
  */
 const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
+
+/**
+ * Canonical Studio list layout per metadata type — the columns its metadata
+ * list shows — from the shared {@link METADATA_LIST_REGISTRY}, served beside
+ * the form as `list`. Types without an entry get Studio's default list.
+ */
+const TYPE_TO_LIST: Readonly<Record<string, MetadataListViewParsed>> = METADATA_LIST_REGISTRY;
 
 /**
  * The ONE canonical spelling of a metadata type at the `/meta` read/write/delete
@@ -398,7 +405,7 @@ function toJsonSchemaSafe(schema: z.ZodTypeAny, typeLabel?: string): Record<stri
  * cannot be safely converted via `z.toJSONSchema()` (e.g. due to recursive
  * references or non-representable constructs like `z.lazy()` chains).
  *
- * These mirror the shape consumed by the corresponding `*.form.ts` layouts,
+ * These mirror the shape consumed by the corresponding `*.metadata-form.ts` layouts,
  * so the SchemaForm renderer can still produce a real form (instead of
  * falling back to the raw JSON editor). All fields use lenient types
  * (`string | object | array`) because the widget hint in the form layout
@@ -422,7 +429,7 @@ const HAND_CRAFTED_SCHEMAS: Record<string, Record<string, unknown>> = {
                 // display order. The SchemaForm engine recognises
                 // `additionalProperties` as a Record and dispatches to
                 // the `record` form-field renderer (ADR-0007). The form
-                // layout in `object.form.ts` declares `type: 'record'`
+                // layout in `object.metadata-form.ts` declares `type: 'record'`
                 // so the inner `additionalProperties` schema is used to
                 // shape each value.
                 type: 'object',
@@ -619,6 +626,7 @@ function declaredKeySchema(schema: unknown, key: string, depth: number): z.ZodTy
 export {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
+    TYPE_TO_LIST,
     canonicalizeMetaRequestType,
     resolveOverlaySchema,
     toJsonSchemaSafe,

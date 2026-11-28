@@ -179,7 +179,7 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/plans/push');
     // Each dispatch carries ITS OWN record under `_rowRecord` — the same
-    // row-context key the list_item path attaches, which is what lets the
+    // row-context key the record_row path attaches, which is what lets the
     // host's api handler perform `recordIdParam` injection unchanged.
     const sentIds = fetchMock.mock.calls
       .map(c => JSON.parse((c[1] as any).body)._rowRecord.id)
@@ -760,5 +760,172 @@ describe('an aggregate run reports its BulkActionResult per row', () => {
     expect(screen.queryByText(/Failed/)).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-unconfirmed-records')).not.toBeInTheDocument();
     expect(screen.queryByTestId('bulk-aggregate-unreadable')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36915 — a per-record bulk `type: 'flow'` action whose run ended
+ * `refused` (an `end` node with `outcome: 'refused'`). The handler answers
+ * `success: true` with the refusal on `refusal`; before the fix the grid read
+ * only `success`, so the result said "Succeeded 3 / 3". Now each record is
+ * dispatched with `reportsRefusal` (so the console's handler opens no notice of
+ * its own) and a refused record is counted and listed apart, with its own
+ * sentence and no Retry.
+ */
+describe('a per-record bulk flow that refuses some records (objectstack#36915)', () => {
+  const CREATE_CAMPAIGN = { name: 'create_campaign', label: 'Add to Campaign', type: 'flow', target: 'enroll' };
+  const LEADS = [
+    { id: 'l1', name: 'Ann' },
+    { id: 'l2', name: 'Bea' },
+    { id: 'l3', name: 'Cy' },
+  ];
+  const SENTENCE: Record<string, string> = {
+    l1: 'Ann has opted out of email, so the lead was not added to the campaign.',
+    l3: 'Cy has opted out of email, so the lead was not added to the campaign.',
+  };
+
+  /** The console's flow handler, as it answers: a refused run is a handed-off success carrying `refusal`. */
+  function flowHandler(refusing: string[]) {
+    return vi.fn(async (action: any, _ctx: any) => {
+      const id = String(action.params?._rowRecord?.id);
+      return refusing.includes(id)
+        ? { success: true, silent: true, handedOff: true, refusal: { message: SENTENCE[id] } }
+        : { success: true, data: { status: 'completed' } };
+    });
+  }
+
+  async function runOn(rows: typeof LEADS, refusing: string[]) {
+    const handler = flowHandler(refusing);
+    const ds = renderGrid({
+      objectActions: [CREATE_CAMPAIGN],
+      schema: { bulkActions: ['create_campaign'] },
+      handlers: { flow: handler },
+      rows,
+    });
+    await waitFor(() => expect(screen.getByText(rows[0].name)).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('thead [role="checkbox"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('thead [role="checkbox"]') as HTMLElement);
+    fireEvent.click(await screen.findByTestId('bulk-action-create_campaign'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(rows.length));
+    return { handler, ds };
+  }
+
+  it("the card's repro: 1 succeeded and 2 refused, each refused record with its own sentence and no Retry", async () => {
+    const { handler } = await runOn(LEADS, ['l1', 'l3']);
+
+    // Every record went out with `reportsRefusal`, the signal the console's
+    // flow handler reads to open no notice of its own.
+    expect(handler.mock.calls.map(([, ctx]) => ctx.reportsRefusal)).toEqual([true, true, true]);
+    await waitFor(() => expect(screen.getByText(/Succeeded 1 \/ 3/)).toBeInTheDocument());
+    expect(screen.getByText(/Refused 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-refused-row-l1')).toHaveTextContent(`Ann: ${SENTENCE.l1}`);
+    expect(screen.getByTestId('bulk-refused-row-l3')).toHaveTextContent(`Cy: ${SENTENCE.l3}`);
+    expect(screen.queryByTestId('bulk-refused-row-l2')).not.toBeInTheDocument();
+    // A refusal is no failure: nothing in the error list, no Retry to offer.
+    expect(screen.queryByTestId('bulk-error-inspector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-l1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-l3')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bulk-succeeded-records')).toHaveTextContent('Bea');
+    expect(screen.getByTestId('bulk-succeeded-records')).not.toHaveTextContent('Ann');
+  });
+
+  it('a single refused record reads Succeeded 0 / 1 with its sentence', async () => {
+    await runOn([LEADS[0]], ['l1']);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 0 \/ 1/)).toBeInTheDocument());
+    expect(screen.getByText(/Refused 1/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-refused-row-l1')).toHaveTextContent(SENTENCE.l1);
+    expect(screen.queryByTestId('bulk-error-retry-l1')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36931 — a per-record bulk `type: 'flow'` action whose run paused
+ * at a screen for some records. The console's handler answers such a run as a
+ * handed-off success carrying `paused` (its screen goes to the host's flow
+ * runner, which shows every queued screen in turn). Before the fix the grid
+ * read only `success`, so a paused record counted as succeeded. Now it is
+ * counted and listed apart as waiting for input, with no Retry.
+ */
+describe('a per-record bulk flow that pauses some records at a screen (objectstack#36931)', () => {
+  const QUALIFY = { name: 'qualify', label: 'Qualify', type: 'flow', target: 'qualify_lead' };
+  const LEADS = [
+    { id: 'l1', name: 'Ann' },
+    { id: 'l2', name: 'Bea' },
+    { id: 'l3', name: 'Cy' },
+  ];
+
+  /** The console's flow handler, as it answers: a paused run is a handed-off success carrying `paused`. */
+  function flowHandler(pausing: string[]) {
+    return vi.fn(async (action: any, _ctx: any) => {
+      const id = String(action.params?._rowRecord?.id);
+      return pausing.includes(id)
+        ? { success: true, silent: true, handedOff: true, paused: { runId: `run-${id}` } }
+        : { success: true, data: { status: 'completed' } };
+    });
+  }
+
+  async function runOn(rows: typeof LEADS, pausing: string[]) {
+    const handler = flowHandler(pausing);
+    const ds = renderGrid({
+      objectActions: [QUALIFY],
+      schema: { bulkActions: ['qualify'] },
+      handlers: { flow: handler },
+      rows,
+    });
+    await waitFor(() => expect(screen.getByText(rows[0].name)).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('thead [role="checkbox"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('thead [role="checkbox"]') as HTMLElement);
+    fireEvent.click(await screen.findByTestId('bulk-action-qualify'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(rows.length));
+    return ds;
+  }
+
+  it("the card's repro: 1 succeeded and 2 waiting for input, each waiting record named, no Retry", async () => {
+    await runOn(LEADS, ['l1', 'l3']);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 1 \/ 3/)).toBeInTheDocument());
+    expect(screen.getByText(/Waiting for input 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-paused-records')).toHaveTextContent(/waiting for input/i);
+    expect(screen.getByTestId('bulk-paused-row-l1')).toHaveTextContent('Ann');
+    expect(screen.getByTestId('bulk-paused-row-l3')).toHaveTextContent('Cy');
+    expect(screen.queryByTestId('bulk-paused-row-l2')).not.toBeInTheDocument();
+    // Waiting is no failure and no refusal: no error list, no Retry, no refused list.
+    expect(screen.queryByTestId('bulk-error-inspector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-l1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-refused-records')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bulk-succeeded-records')).toHaveTextContent('Bea');
+    expect(screen.getByTestId('bulk-succeeded-records')).not.toHaveTextContent('Ann');
+  });
+
+  it('control: a run where no record pauses reads Succeeded 3 / 3 with no waiting list', async () => {
+    await runOn(LEADS, []);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 3 \/ 3/)).toBeInTheDocument());
+    expect(screen.queryByText(/Waiting for input/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-paused-records')).not.toBeInTheDocument();
+  });
+
+  // A run in which EVERY record paused succeeded nowhere, yet it changed
+  // something (the steps before each screen may have written) and its records
+  // must not be re-run while their screens wait. So closing the result clears
+  // the selection and re-reads the grid, as a run with successes does; a total
+  // failure keeps both (bulkActionRefresh.test.tsx).
+  it('closing an all-paused run clears the selection and re-reads the grid', async () => {
+    const headerChecked = () =>
+      (document.querySelector('thead [role="checkbox"]') as HTMLElement)?.getAttribute('data-state');
+    const ds = await runOn(LEADS, ['l1', 'l2', 'l3']);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 0 \/ 3/)).toBeInTheDocument());
+    expect(screen.getByText(/Waiting for input 3/)).toBeInTheDocument();
+    expect(headerChecked()).toBe('checked');
+    const before = ds.find.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+    await waitFor(() => expect(ds.find.mock.calls.length).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).not.toBeInTheDocument());
+    await waitFor(() => expect(headerChecked()).toBe('unchecked'));
   });
 });

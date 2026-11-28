@@ -163,16 +163,23 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   RequireOrganization: ({ children }: { children?: ReactNode }) => <>{children}</>,
   ConsoleToaster: () => null,
   LoadingScreen: () => <div data-testid="loading-screen" />,
+  // objectstack#35981 — the permission scope's loading fallback is the console's
+  // boot fallback, which is the splash off an app route.
+  LoadingFallback: () => <div data-testid="loading-screen" />,
   DefaultHomePage: () => <HomeRosterProbe />,
+  // objectstack#36732 — from 768 px up `/home` redirects into an app; the page
+  // these cases read is a phone's (and a desktop's with no product app), so
+  // they render at phone width.
+  usePhoneViewport: () => true,
   DefaultAppContent: () => <AppContentProbe />,
-  BuilderLanding: () => <StudioBuilderProbe />,
+  StudioEntryRedirect: () => <StudioBuilderProbe />,
   StudioDesignSurface: () => <StudioBuilderProbe />,
   getProductName: () => 'ObjectOS',
   getFaviconUrl: () => '',
 }));
 
 // Chrome that decides nothing about visibility, by the module id `HomeLayout`
-// and the Studio frame import it through.
+// imports it through.
 vi.mock('../../../../packages/app-shell/src/layout/AppHeader', () => ({ AppHeader: () => null }));
 vi.mock('../../../../packages/app-shell/src/chrome/CommandPalette', () => ({ CommandPalette: () => null }));
 vi.mock('../../../../packages/app-shell/src/hooks/useAiSurface', async (importOriginal) => ({

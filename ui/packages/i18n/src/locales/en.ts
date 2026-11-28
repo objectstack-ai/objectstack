@@ -33,6 +33,7 @@ const en = {
       manage_metadata: 'Manage Metadata',
       manage_mailboxes: 'Manage Mailboxes',
       manage_connector_connections: 'Manage Connector Connections',
+      manage_knowledge_sources: 'Manage Knowledge Sources',
       manage_platform_settings: 'Manage Platform Settings',
       setup_access: 'Setup Access',
       setup_write: 'Write Settings',
@@ -49,6 +50,9 @@ const en = {
     noRecords: 'No records found',
     createNew: 'Create new',
     createNamed: 'Create new "{{name}}"',
+    // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
+    createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
     showingResults: 'Showing {{shown}} of {{total}} results',
     showAllResults: 'Show all results ({{count}})',
     selectedBadge: 'Selected',
@@ -68,6 +72,16 @@ const en = {
     nextPage: 'Next page',
     jumpToPage: 'Jump to page',
     retry: 'Retry',
+    // objectstack#36249 — why a pick left an amount empty: the picked amount is
+    // in another currency than the field it would fill (nothing is converted).
+    autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
+    autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
+    autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
+    autofillKept: '{{field}} still holds its earlier value.',
+    autofillNowSameCurrency: '{{field}} was not filled when it was picked. The record is now in {{to}}: pick again to fill {{amount}}.',
+    autofillNowSameCurrencyHeld: '{{field}} was not filled when it was picked and still holds its earlier value. The record is now in {{to}}: clear {{field}}, then pick again to fill {{amount}}.',
+    autofillCopiedUnder: '{{field}} was copied as {{amount}}, but the record is now in {{to}}. Enter {{field}} in {{to}} if it should change.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -190,6 +204,10 @@ const en = {
     // handler for an undoable success toast.
     failed: 'Action failed',
     parallelFailed: 'One or more parallel actions failed',
+    // A `type: 'api'` action whose backing service this deployment does not
+    // run or cannot reach (503 SERVICE_UNAVAILABLE, 501 NOT_IMPLEMENTED, a route
+    // miss), shown instead of the server's operator prose (objectstack#36840).
+    serviceUnavailable: 'This action needs a service that is not available in this environment. Contact your administrator.',
     // The two row-count refusals of a single-record action launched from a
     // list toolbar (`resolveServerActionRecordId` in `@object-ui/core`); the
     // runner asks for them before any confirmation or param dialog opens
@@ -263,6 +281,7 @@ const en = {
     // `validation.formInvalidJoiner` — because the fix is to the metadata, not
     // to anything the person filling the form can type.
     visibleWhenFaulted: "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    uiReadonlyWhenFaulted: "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     fieldRequired: 'This field is required',
     saveError: 'Failed to save',
     unsavedChanges: 'You have unsaved changes. Are you sure you want to leave?',
@@ -360,6 +379,9 @@ const en = {
       noChildObject: 'This panel has no child object configured: set {{property}} to the object whose rows it lists.',
     },
     keepEditing: 'Keep editing',
+    // The create dialog's 「Create more」 switch (objectstack#35980): on, a save
+    // keeps the dialog open on an empty form for the next record.
+    createMore: 'Create more',
     discard: 'Discard',
     conflictTitle: 'Save conflict',
     conflictMessage: 'This record was changed by someone else while you were editing. Overwriting will replace their changes with yours.',
@@ -479,6 +501,24 @@ const en = {
     scan: {
       button: 'Scan code',
       failed: 'Could not scan',
+    },
+    // The in-page file preview dialog (objectstack#36442).
+    filePreview: {
+      title: 'File preview',
+      previous: 'Previous file',
+      next: 'Next file',
+      download: 'Download',
+      openInNewTab: 'Open in new tab',
+      loading: 'Loading preview…',
+      tooLarge: 'This file is too large to preview. Please download it.',
+      unsupported: 'This file type cannot be previewed. Please download it.',
+      denied: 'You do not have access to this file.',
+      loadFailed: 'The preview could not be loaded.',
+      blocked: 'This file cannot be read in the page. Open it in a new tab instead.',
+      pdfOutside: 'On this device, a PDF opens in a new tab or in the device viewer.',
+      truncatedRows: 'Showing the first {{limit}} rows.',
+      truncatedLines: 'Showing the first {{limit}} lines.',
+      empty: 'This file is empty.',
     },
     image: {
       upload: 'Upload image',
@@ -743,6 +783,10 @@ const en = {
     // one key, read by both its `aria-label` and its `title`. The chooser's
     // button reads `table.columns`, the footer `form.masterDetail.total` and
     // the drag handle `view.dragToReorder`.
+    //
+    // objectstack#36004 — `columnHelp` names a column header's info button
+    // with one short word; the help itself is the button's description, so it
+    // stays out of the column name a screen reader reads with every cell.
     grid: {
       addLine: 'Add line',
       noItems: 'No items',
@@ -752,6 +796,7 @@ const en = {
       openRow: 'Open row',
       duplicateRow: 'Duplicate row',
       removeRow: 'Remove row',
+      columnHelp: 'Help',
     },
   },
   table: {
@@ -795,9 +840,20 @@ const en = {
     cancelChanges: 'Cancel changes',
     saveRow: 'Save row',
     cellReadOnly: 'This cell can\'t be edited here.',
+    // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
+    cellNotNumber: 'Enter a number.',
+    cellInvalid: 'This value isn\'t valid.',
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: 'Copy',
+    pasteCell: 'Paste',
+    clearCell: 'Clear',
+    pasteNotValue: 'The copied text can\'t go in this cell.',
+    pasteUnavailable: 'The browser didn\'t let the list read the clipboard. Select the cell and press Ctrl+V (⌘V) to paste.',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',
+    // objectstack#35689 — what the list's live region says when cells saved.
+    cellSavedAnnouncement: 'Saved: {{fields}}',
     openRecordToFinish: 'Open the record to finish this change',
   },
   grid: {
@@ -811,6 +867,7 @@ const en = {
       objectReadOnly: 'These records can\'t be edited here.',
       noPermission: 'You don\'t have permission to edit these records.',
       approvalLocked: 'This record is locked while it\'s in approval.',
+      checking: 'Checking whether this record can be edited…',
       noRecordPermission: 'You don\'t have permission to edit this record.',
     },
     // objectstack#35685 — the confirm before a list cell moves a state-machine field.
@@ -823,6 +880,7 @@ const en = {
     actions: 'Actions',
     edit: 'Edit',
     delete: 'Delete',
+    changeOwner: 'Change Owner',
     export: 'Export',
     exportAs: 'Export as {{format}}',
     loading: 'Loading grid…',
@@ -868,6 +926,7 @@ const en = {
       needsWholeRows:
         'Grouping needs every record, but this grid was handed one page of them, so the groups cannot be counted. Hand in every record, or let the grid fetch them from a data source that implements queryGroupHeaders.',
       draftOnly: 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
+      moreGroupsNotLoaded: 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
     },
     // Column-footer aggregate prefixes, keyed by the spec's `ColumnSummary`
     // vocabulary (objectui#4024). The footer already formatted its NUMBER
@@ -905,7 +964,7 @@ const en = {
       earliest: 'Earliest',
       latest: 'Latest',
       pageName: '{{label}} (this page)',
-      calculate: 'Calculate',
+      calculate: 'Add calculation',
       none: 'None',
       menuPercentEmpty: 'Percent empty',
       menuPercentFilled: 'Percent filled',
@@ -1039,6 +1098,9 @@ const en = {
       errorRowPrefix: 'Row {{row}}: ',
       referenceNotFound: 'No matching record for "{{value}}"',
       referenceAmbiguous: '"{{value}}" matches more than one record — use a unique value or the record id',
+      referenceOutOfScope: '"{{value}}" was found, but not under {{scope}}',
+      scopeEntry: '{{label}} "{{value}}"',
+      scopeSeparator: ', ',
       invalidBoolean: '"{{value}}" is not a valid true/false value',
       invalidNumber: '"{{value}}" is not a valid number',
       invalidDate: '"{{value}}" is not a valid date',
@@ -1111,6 +1173,10 @@ const en = {
       aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       resultNotConfirmed: ' \u00b7 Not confirmed {{count}}',
       notConfirmedRecords: 'The action did not report on these records. Check their current values:',
+      resultRefused: ' \u00b7 Refused {{count}}',
+      refusedRecords: 'The action refused these records:',
+      resultPaused: ' \u00b7 Waiting for input {{count}}',
+      pausedRecords: 'These records are waiting for input. Their screens open one after another:',
       aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
@@ -1282,6 +1348,7 @@ const en = {
     layout: 'Layout',
     resetToViewDefault: 'Reset to view default',
     addGroup: 'Add group field',
+    noGroupableFields: 'No field here can group the list',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
     groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
@@ -1292,6 +1359,21 @@ const en = {
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
     // The list's Options menu.
     optionsMenu: {
+      // objectstack#36370 — a board's own settings.
+      kanbanLaneField: "Columns by",
+      kanbanLanes: "Visible columns",
+      kanbanCardFields: "Card fields",
+      kanbanAddCardField: "Add field",
+      kanbanShowFieldLabels: "Show field names",
+      kanbanHideEmptyFields: "Hide empty fields",
+      kanbanFooterComments: "Show comment count",
+      kanbanFooterAttachments: "Show attachment count",
+      kanbanSummary: "Column summary",
+      kanbanSummaryAvg: "Average",
+      kanbanSummaryMin: "Minimum",
+      kanbanSummaryMax: "Maximum",
+      kanbanHiddenLanes: "Hidden columns",
+      kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
       fields: 'Fields',
       fieldsShown: '{{count}} shown',
@@ -1335,10 +1417,26 @@ const en = {
     },
   },
   kanban: {
+    // objectstack#36370 — the lane header's 「+」 and 「⋯」 menu, and an empty lane's create row.
+    laneMenu: {
+      actions: "{{column}} column actions",
+      collapse: "Collapse column",
+      expand: "Expand column",
+      hide: "Hide column",
+      hideHint: "Its cards move to Uncategorized",
+      createIn: "New record in {{column}}",
+      create: "New",
+    },
+    // objectstack#36423 — a card's foot counts (`kanban.cardFooter`).
+    cardFooter: {
+      comments: "Open comments: {{count}}",
+      attachments: "Attachments: {{count}}",
+    },
     addCard: 'Add card',
     addColumn: 'Add column',
     moveCard: 'Move card',
     noCards: 'No cards',
+    notLoaded: 'Cards not loaded: {{count}}',
     columnCards: '{{column}} cards',
     laneCards: '{{column}} - {{lane}} cards',
     dropBlocked: 'A card in {{from}} cannot be moved to {{to}}.',
@@ -1526,6 +1624,7 @@ const en = {
   },
   view: {
     editViewConfig: 'Edit view config',
+    showViewConfig: 'View config',
     rename: 'Rename',
     duplicateView: 'Duplicate View',
     shareView: 'Share View',
@@ -1562,12 +1661,32 @@ const en = {
       typeLabel: 'View type',
       includeCurrent: 'Include the current filters and sort',
       scopeShared: 'Shared',
-      scopeHint: 'Shared views are seen by everyone who can see this list',
+      scopeHint: 'Shared views are seen by everyone who can see this list, unless the view is limited to the holders of a capability',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Who sees this view',
+      audienceEveryone: 'Everyone who can see this list',
+      audienceAdd: 'Limit to a capability…',
+      audienceAllAdded: 'All capabilities added',
+      audienceLoading: 'Loading capabilities…',
+      audienceLoadFailed: 'The capabilities could not be loaded, so none can be added: {{message}}',
+      audienceNone: 'No capability is defined yet. Capabilities are granted on permission sets, in Setup.',
+      audienceGrantedBy: 'Granted by {{sets}}',
+      audienceRemove: 'Remove {{name}}',
+      audiencePositions: '{{positions}} will see this view',
+      audienceNoPosition: 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see this view',
+      audienceSelf: 'This applies to you too: if you do not hold every capability picked, the view leaves your own list once it is created',
+      audiencePositionsUnread: 'The positions could not be read, so who will see this view is not shown',
+      // objectstack#36409 — a shared view's name already taken, and a view that is gone.
+      shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',
+      viewGone: 'The view you opened is no longer available, so the list shows its default view.',
       create: 'Create',
     },
     dragToReorder: 'Drag to reorder',
     defaultView: 'Default view',
     defaultBadge: 'default',
+    customizedBadge: 'customized',
+    customizedTitle: 'Changed here: everyone sees this copy instead of the version its package ships.',
+    restoreFactory: 'Restore factory version',
     tabActionsFor: 'View actions for {{name}}',
     readonlyAriaLabel: 'Read-only view',
     readonlyTooltip: 'System view — defined in code, read-only.',
@@ -1606,6 +1725,7 @@ const en = {
     approvalPendingEditable: 'In approval · editable',
     approvalPendingTooltip: 'This record has a pending approval request; this step still allows editing',
     approvalPending: 'In approval',
+    approvalPendingStep: 'In approval · {{step}}',
     approvalPendingNotEditableTooltip: 'This record has a pending approval request',
     approvalProgress: 'Approvals — {{got}} of {{need}}',
     approvalProgressGroups: 'Sign-off — {{got}} of {{need}} groups',
@@ -1636,6 +1756,8 @@ const en = {
     pathStageChangeConflict: 'Someone else changed this record, and the latest version is now shown. Press the stage again if the move still applies.',
     pathStageChangeDenied: "You don't have permission to change this record's stage.",
     pathStageChangeFailed: 'The stage could not be changed.',
+    stageChangeStartsHeading: 'Saving this change starts these flows:',
+    stageChangeStartsApproval: 'starts an approval',
     inlineEditRecordChanged: 'This record was changed elsewhere while you were editing. Your unsaved changes are kept, and Save writes them over the latest version.',
     stageMenuTrigger: 'Stage: {{stage}}. Change stage',
     stageMenuCurrent: 'current stage',
@@ -1652,6 +1774,7 @@ const en = {
     deleteCommentConfirm: 'Are you sure you want to delete this comment?',
     commentEditFailed: 'Your edit was not saved. The comment keeps its previous text.',
     commentDeleteFailed: 'The comment was not deleted. Please try again.',
+    commentDeleted: 'Comment deleted',
     // objectstack#28218 — a comment write whose answer names mentioned users the
     // server will not notify (`withheldMentions`): one sentence naming them, no reason.
     mentionsWithheld: '{{names}} will not be notified of this comment.',
@@ -1786,7 +1909,8 @@ const en = {
     relatedHiddenCount_other: '{{count}} hidden',
     relatedShowHidden: 'Show',
     recordTabs: 'Record tabs',
-    recordTabOverview: 'Overview',
+    recordTabOverview: 'Details',
+    detailsColumnResize: 'Resize details column',
     // objectstack#35783 — a related tab's menu: one place before / after it in the row.
     recordTabMoveBefore: 'Move left',
     recordTabMoveAfter: 'Move right',
@@ -1797,7 +1921,9 @@ const en = {
     recordTabsMoreTrigger: 'More {{count}}',
     recordTabsMoreTrigger_one: 'More {{count}}',
     recordTabsMoreTrigger_other: 'More {{count}}',
-    // objectstack#35596 — the 概览 tab's summary rail.
+    // objectstack#35596 — the 概览 tab's summary rail. objectstack#35890 retired the rail;
+    // these keys (and relatedColumn, relatedHiddenCount, relatedShowHidden,
+    // shortcuts.toggleRelated) stay published, unread, until a separate change retires them.
     summaryApprovalDone: 'Approved',
     summaryApprovalMine: 'Awaiting you',
     summaryApprovalWaitingOn: 'Waiting on {{name}}',
@@ -1807,7 +1933,7 @@ const en = {
     recordTabsHidden: 'Hidden',
     bodyTableTotals: 'Totals (this page)',
     streamAll: 'All',
-    streamActivity: 'Activity',
+    streamActivity: 'Events',
     streamDiscussion: 'Discussion',
     streamChanges: 'Changes',
     viewAllEntries: 'View all {{count}} →',
@@ -1820,6 +1946,12 @@ const en = {
     deleteRow: 'Delete',
     deleteRowConfirmation: 'Are you sure you want to delete "{{name}}"?',
     deleteRowTitle: 'Delete record',
+    // objectstack#35892 — the related tab: a filter that matches nothing, and its bulk delete.
+    relatedNoMatches: 'No records match the filter',
+    deleteRowsTitle: 'Delete selected records',
+    deleteRowsConfirmation: '{{count}} records will be deleted. This cannot be undone.',
+    deleteRowsConfirmation_one: '{{count}} record will be deleted. This cannot be undone.',
+    deleteRowsConfirmation_other: '{{count}} records will be deleted. This cannot be undone.',
     actions: 'Actions',
     previousPage: 'Previous',
     nextPage: 'Next',
@@ -1834,6 +1966,25 @@ const en = {
     addCommentPlaceholder: 'Add a comment… (Ctrl+Enter to submit)',
     noMatchingComments: 'No matching comments',
     noCommentsYet: 'No comments yet',
+    closeComments: 'Close comments',
+    collapseReplies: 'Collapse replies',
+    commentActions: 'Comment actions',
+    commentsEmptyHint: 'Write the first one below. Use @ to mention a colleague.',
+    resolveThread: 'Mark resolved',
+    reopenThread: "Reopen",
+    threadResolved: "Resolved",
+    threadResolvedBy: "Resolved by {{name}}",
+    filterComments: "Filter comments",
+    addReactionEmoji: "React with {{emoji}}",
+    commentThread: "Thread",
+    formatBold: "Bold",
+    formatItalic: "Italic",
+    showResolvedComments: "Show resolved",
+    commentsInvolvingMe: "Only threads I'm in",
+    noUnresolvedComments: "No unresolved comments",
+    noCommentsInvolvingMe: "No comments you're part of",
+    showAllComments: "Show all comments",
+    commentResolveFailed: "The thread was not updated. Please try again.",
     pinned: 'Pinned',
     pin: 'Pin',
     unpin: 'Unpin',
@@ -1858,6 +2009,13 @@ const en = {
     updatedBy: 'Updated by',
     created: 'Created',
     updated: 'Updated',
+    // Record page field list (objectstack#36147).
+    systemInfo: 'System information',
+    createdTime: 'Created on',
+    updatedTime: 'Updated on',
+    recordNumber: 'Record ID',
+    clickToEdit: 'Click to edit',
+    setField: 'Set {{field}}',
     // Attachments
     dropFilesToUpload: 'Drop files here or click to upload',
     attachmentCount: '{{count}} attachment',
@@ -1873,6 +2031,10 @@ const en = {
     deleteAttachment: 'Delete attachment',
     deleteAttachmentConfirm: 'Are you sure you want to delete the attachment "{{name}}"?',
     attachmentDeleteDenied: 'Only the uploader or someone who can edit this record may delete this attachment.',
+    renameAttachment: 'Rename',
+    renameAttachmentTitle: 'Rename attachment',
+    attachmentNameLabel: 'File name',
+    attachmentRenameDenied: 'Only the uploader or someone who can edit this record may rename this attachment.',
     attachmentParentAccessDenied: "You don't have access to attach files to this record.",
     attachmentDownloadDenied: "You don't have access to download this attachment.",
     attachmentAuthRequired: 'Please sign in to download this attachment.',
@@ -1949,6 +2111,18 @@ const en = {
     foldedMoreFields_other: '{{count}} more',
     expandFolded: 'Show each update',
     collapseFolded: 'Hide updates',
+    // objectstack#36290 — one line per changed field under an activity entry:
+    // the field's label before its values, the word for an empty side, and
+    // the control that shows a long value in full and clamps it again.
+    fieldChangeLabel: '{{field}}:',
+    fieldChangeEmpty: 'Empty',
+    fieldChangeExpand: 'Show all',
+    fieldChangeCollapse: 'Show less',
+    // objectstack#36290 — one field's change-history card: its entry point's
+    // name and what it says for a field never changed.
+    fieldHistory: 'Change history',
+    fieldHistoryNone: 'No changes recorded',
+    fieldHistoryNoneRecent: 'No changes in the recent activity',
     // Replies
     replyCount: '{{count}} reply',
     replyCount_one: '{{count}} reply',
@@ -2033,6 +2207,7 @@ const en = {
     dateRange: {
       from: 'From',
       to: 'To',
+      comparePrevious: 'Compare with previous period',
       datasetUnreadable: 'This report’s date range names no dimension, and the “{{dataset}}” dataset could not be read to find its date dimension ({{reason}}).',
       noSingleDateDimension: 'This report’s date range names no dimension, and the “{{dataset}}” dataset declares {{total}} date dimensions ({{found}}) where it needs exactly one. Name the date dimension in the report’s dateRange.dimension.',
     },
@@ -2062,11 +2237,81 @@ const en = {
       // any retired key that returns.
       panelTitle: 'Edit report',
     },
+    // objectstack#36374 — the report builder's 「Computed values」 fold under the chart.
+    computedValues: 'Computed values',
+    // objectstack#36374 — the report builder (`ReportBuilder`, `ReportNewPage`).
+    builder: {
+      close: 'Close',
+      name: 'Report name',
+      namePlaceholder: 'Untitled report',
+      description: 'Description',
+      descriptionPlaceholder: 'Add a description',
+      discard: 'Discard',
+      save: 'Save',
+      settings: 'Report settings',
+      pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
+      nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
+      // objectstack#36906 — a report made from Studio's report list that could not be saved in the app's package.
+      savedOutsideApp: 'This report was saved outside the app’s package, because the app’s customization package cannot be used here, so the Studio list does not show it.',
+      adminOnlyTitle: 'Only workspace admins can build reports',
+      adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
+      designModeOnTitle: 'Finish designing the layout first',
+      designModeOn: 'A report is built outside the design mode. Save or cancel the layout, and the builder opens here.',
+      type: {
+        label: 'Report type',
+        snapshot: 'Current state',
+      },
+      source: {
+        label: 'Data source',
+        placeholder: 'Choose a data source',
+        loading: 'Loading data sources…',
+        none: 'No data sources yet',
+        addFilter: 'Filter',
+        filterAdvanced: 'This filter cannot be changed here. It is kept as saved.',
+        filterLoading: 'Loading fields…',
+        filterNoFields: 'This data source has no fields to filter on.',
+      },
+      measure: {
+        label: 'Measure',
+        placeholder: 'Choose a measure',
+      },
+      grouping: {
+        label: 'Group by',
+        none: 'No grouping',
+        placeholder: 'Choose a field',
+        addLayer: 'Add another layer',
+        removeLayer: 'Remove this layer',
+      },
+      chart: {
+        label: 'Chart',
+        bar: 'Bar',
+        line: 'Line',
+        donut: 'Donut',
+        metric: 'Number',
+        table: 'Table',
+        showValues: 'Show values',
+        targetLine: 'Target line',
+        targetLabel: 'Target',
+        secondLayerTableOnly: 'This chart draws the first grouping; the second is in the computed values.',
+      },
+      missing: {
+        source: 'Choose a data source',
+        noMeasures: 'This data source has no measures',
+        measure: 'Choose a measure',
+        grouping: 'Choose a field to group by',
+      },
+    },
   },
   designer: {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
+  },
+  // objectstack#36906 — the × of an app page opened from a Studio list.
+  studioReturn: {
+    close: 'Back to Studio',
+    closeLabel: 'Close and go back to the Studio list',
+    leaveConfirm: 'Leave without saving? Your unsaved changes will be lost.',
   },
   dashboard: {
     total: 'Total',
@@ -2096,6 +2341,10 @@ const en = {
     widgetForbiddenTitle: 'You don’t have access',
     widgetForbiddenMessage: 'You don’t have permission to view the data behind this widget.',
     allWidgetsForbiddenMessage: 'You don’t have permission to view the data behind this dashboard.',
+    noCards: {
+      title: 'No cards yet',
+      message: 'This dashboard has no cards yet.',
+    },
     details: 'Details',
     openInList: 'Open in list',
     config: {
@@ -2207,6 +2456,26 @@ const en = {
       vsThisMonth: 'vs this month',
       vsThisQuarter: 'vs this quarter',
     },
+    inPageEdit: {
+      edit: 'Edit',
+      editLabel: 'Edit this dashboard',
+      editing: 'Editing',
+      hint: 'Saved changes apply to everyone at once',
+      addCard: 'Add card',
+      discard: 'Discard',
+      save: 'Save',
+      saving: 'Saving…',
+      saved: 'Dashboard saved',
+      saveFailed: 'The dashboard could not be saved',
+      loading: 'Opening the dashboard for editing…',
+      loadFailed: 'The dashboard could not be opened for editing',
+      pendingDraft: 'This dashboard has unpublished changes in Studio. Publish or discard them there, then edit it here.',
+      noPackage: 'This dashboard cannot be saved here: its app has no package this account can customize.',
+      walled: "On this deployment, only the platform operator can customize an installed app's dashboard.",
+      noVersion: 'The package list does not say which version of this app is installed, so its dashboard cannot be customized here.',
+      resizeCard: 'Resize card',
+      panelTitle: 'Properties',
+    },
     filters: {
       label: 'Dashboard filters',
       dateRange: 'Date range',
@@ -2214,6 +2483,8 @@ const en = {
       custom: 'Custom…',
       all: 'All',
       reset: 'Reset',
+      notApplied: 'Not filtered by {{filters}}',
+      addFilter: 'Add filter',
       range: {
         today: 'Today',
         yesterday: 'Yesterday',
@@ -2372,7 +2643,10 @@ const en = {
       unique: 'Unique',
       readOnly: 'Read Only',
       hidden: 'Hidden',
-      trackHistory: 'Track History',
+      fieldHistory: 'Field Change Values',
+      fieldHistoryDefault: 'Default ({{state}})',
+      fieldHistoryOn: 'On',
+      fieldHistoryOff: 'Off',
       defaultValue: 'Default Value',
       placeholder: 'Placeholder',
       referenceTo: 'Reference To',
@@ -2398,9 +2672,10 @@ const en = {
   console: {
     // The fixed crumb `AppHeader`'s `studio` variant draws on the Studio front
     // door (objectui#11863), as `organizations.title` is the `orgs` variant's.
-    // A product name, which every pack writes as is.
+    // A product name (ADR-0084): App Studio, which a Chinese pack writes as
+    // 应用搭建 and every other pack writes as is.
     studio: {
-      title: 'Studio',
+      title: 'App Studio',
       // What a principal without `studio.access` reads at the Studio URL they
       // opened (objectui#12035), in place of the silent redirect home.
       accessRequired: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
@@ -2451,7 +2726,8 @@ const en = {
       copyLink: 'Copy link',
       linkCopied: 'Link copied to clipboard',
       linkCopyFailed: 'Failed to copy link',
-      design: 'Design',
+      // objectstack#36487 — an object entry's Studio door, in this menu and first in a list's ⋮.
+      objectSettings: 'Object settings',
     },
     settingsHub: {
       title: 'Settings',
@@ -2562,6 +2838,9 @@ const en = {
       savedCleared: 'Saved value cleared',
       deprecatedBadge: 'Deprecated',
       deprecatedBadgeReplacedBy: 'Deprecated → {{replacedBy}}',
+      // `selectValueRetired` names a stored select value the setting no longer offers
+      // (an option removed in a later release); `{{value}}` is the stored code.
+      selectValueRetired: '{{value}} (no longer available)',
       unsupportedSpecifierType: 'Unsupported specifier type: {{type}}',
       // The `map` control (objectstack#31391): keyed rows over the keys the server
       // serves. `mapAddRow` is the picker that adds a row by its key, `{{key}}` in
@@ -2614,37 +2893,33 @@ const en = {
       description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'Hide on this device',
       showDone: 'Show completed ({{done}})',
-      showDoneSplit: 'Show completed ({{required}} required · {{optional}} optional)',
       hideDone: 'Hide completed',
       optional: 'Optional',
       set: 'Set',
       change: 'Change',
       view: 'View',
-      confirm: 'Confirm',
       cancel: 'Cancel',
       // The folded card's way back in, on a phone (objectstack#34596).
       continue: 'Continue',
-      prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
-      organizationName: {
-        title: 'Name your organization',
-        todo: 'It still has the name it was created with, "{{name}}".',
-        action: 'Rename',
+      showList: 'Show list',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: 'Organization basics',
+        todo: 'Name, default language and country, time zone and currency, saved in one go.',
+        name: 'Organization name',
+        nameRequired: 'Enter a name for your organization.',
+        prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you press Save.',
+        save: 'Save',
+        saved: 'Organization basics saved',
       },
-      languageCountry: {
-        title: 'Default language and country',
-        todo: 'Currently {{language}} and {{country}}. Confirm them or choose others.',
-        saved: 'Default language and country saved',
-      },
-      timezone: {
-        title: 'System timezone',
-        todo: 'Still the platform default, {{current}}. It decides what "today" means in formulas and how reports group dates.',
-        saved: 'System timezone set to {{zone}}',
-      },
-      currency: {
-        title: 'Default currency',
-        todo: 'Not set yet, so amounts are shown without a currency symbol.',
-        saved: 'Default currency set to {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: 'Get started',
+        count: '{{done}}/{{total}}',
+        aria: 'Get started: {{done}} of {{total}} done',
       },
       mail: {
         title: 'Email delivery',
@@ -2717,6 +2992,7 @@ const en = {
     },
     reportIndex: {
       title: 'Reports',
+      newReport: 'New report',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
       otherApps: 'Reports in your other apps:',
@@ -2751,24 +3027,19 @@ const en = {
       systemTheme: 'System Theme',
       actions: 'Actions',
       openFullSearch: 'Open Full Search Page',
+      create: 'Create',
+      createAs: 'Create "{{query}}" as {{object}}',
+      previewEmpty: 'Select a record to see its details.',
+      enterOpenRecord: 'Open record',
+      enterCreate: 'Create',
+      enterSwitchApp: 'Switch app',
+      enterApplyTheme: 'Apply theme',
+      enterOpen: 'Open',
+      currentPage: 'Current page',
     },
     ai: {
       pendingDrafts: {
-        // objectstack#34610 — the line points to the shell's draft bar and shows a publish receipt.
-        publishFromBar: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
-        publishFromBar_one: '{{count}} unpublished change. Publish it from the draft bar at the top.',
-        publishFromBar_other: '{{count}} unpublished changes. Publish them from the draft bar at the top.',
-        showDraftToPublish: '{{count}} unpublished changes. Show the draft to review and publish them.',
-        showDraftToPublish_one: '{{count}} unpublished change. Show the draft to review and publish it.',
-        showDraftToPublish_other: '{{count}} unpublished changes. Show the draft to review and publish them.',
-        showDraft: 'Show draft',
-        receipt: 'Published. Your changes are live.',
-        dismissReceipt: 'Dismiss',
         count: '{{count}} change(s) are not published yet — users cannot see them.',
-        publish: 'Publish',
-        published: 'All pending changes are live.',
-        failed: 'Publish failed.',
-        publishedWithFindings: 'Published, but the runtime probes reported problems: {{detail}}',
       },
       usage: {
         title: 'AI usage',
@@ -2803,44 +3074,18 @@ const en = {
       share: 'Share',
       shareTitle: 'Share this conversation',
       shareDisabledTitle: 'Start chatting to enable sharing',
-      // The build conversation's Build Doctor button (its accessible name,
-      // and its tooltip enabled / before the first message) and the drawer
-      // title it opens (objectui#10900).
-      buildDoctor: 'Build Doctor',
-      buildDoctorTitle: 'Build Doctor — what actually landed?',
-      buildDoctorDisabledTitle: 'Send a message first',
-      // The Build Doctor drawer's body (objectui#10969): its description, the
-      // loading and not-found states, the summary line, the verdict, and each
-      // section's title and hint. What the report itself carries (tool, artifact
-      // and status names, timeline text) is data and stays verbatim.
-      buildDoctorDrawer: {
-        description: 'What the agent claimed vs what is actually live. Read-only diagnostic.',
-        reconciling: 'Reconciling…',
-        notAvailable: 'Not available — the conversation was not found or you are not authorized.',
-        untitled: '(untitled)',
-        summary: '{{turns}} turn(s) · {{messages}} msgs · {{tokens}} tok · {{seconds}}s LLM',
-        allLive: 'All {{count}} attempted change(s) are live — nothing evaporated.',
-        discrepancies: "{{count}} discrepancy(ies) — what the chat said doesn't match what's live.",
-        orphanedTitle: 'Proposed but never applied',
-        orphanedHint: 'A confirm card the agent proposed but no later turn applied — the change silently evaporated.',
-        missingTitle: 'Claimed but missing',
-        missingHint: "A tool result said it was applied, but the artifact isn't live in sys_metadata.",
-        toolErrorsTitle: 'Tool errors',
-        toolErrorsHint: 'Tool calls that returned an error during the build.',
-        verifyTitle: 'Build check (verify_build)',
-        yourApp: 'Your app:',
-        noIssues: '0 issues',
-        issueCount: '{{count}} issue(s)',
-        platformNoise: '{{count}} platform sys_* finding(s) hidden',
-        pendingActions: 'Pending actions',
-        timeline: 'Timeline ({{count}})',
-      },
       newChat: 'New',
       searchChats: 'Search chats…',
       noChatsYet: 'No chats yet',
       noChatsDescription: 'Start a new conversation to see it here.',
       noMatchingChats: 'No matching chats.',
       newConversation: 'New conversation',
+      // ui ADR-0057 Amendment A4 — the app's AI inquiry page: its static scope badge.
+      askPage: {
+        scopeBadge: 'Answers prefer this app',
+        recentTitle: 'Recent conversations',
+        recentEmpty: 'Questions you ask here will appear here.',
+      },
       renameConversation: 'Rename conversation',
       deleteConversation: 'Delete conversation',
       saveRename: 'Save rename',
@@ -2858,54 +3103,15 @@ const en = {
       liveCanvasLive: 'Live app — {{app}}',
       loadingAgents: 'Loading agents…',
       askAnything: 'Ask anything…',
-      askOrChangeApp: 'Ask about your data, or ask me to change this app…',
-      describeAppToBuild: 'Describe the app you want to build, or what to change…',
       emptyTitle: 'Start a conversation',
       emptyDescription: 'Ask anything — the assistant has access to your current app context.',
       switchAssistant: 'Switch assistant',
       chooseAgent: 'Choose assistant…',
-      // objectui#8329 — the maker's empty-state prose, and the FIRST sentence a
-      // new user reads on the build surface (it sits above the start chips).
-      // Same ADR-0112 v1 boundary the chips answer to (cloud#1984 /
-      // objectui#7709 for the starters, cloud#2022 for the model's own closing
-      // suggestions): these two descriptions are the product PROMISING, so they
-      // may only name what v1 BUILDS — objects, fields, views, pages,
-      // dashboards, sample data, apps and navigation. `build.description` used
-      // to offer "an app or workflow … objects, screens and automations" and
-      // `editApp.description` "… view or automation"; v1 has no flows, actions
-      // or schedules, so a user who took either at its word was refused
-      // outright — the worst possible answer to the first line on the page.
-      //
-      // NOT the same thing as the platform's manual automation surfaces, which
-      // are real and stay as they are: `home.build.subtitle` (that card opens
-      // Studio, which does author flows), `engine.studio.landing.description`,
-      // `packagedAutomation.*` and the
-      // marketplace `automation` category. The boundary is v1 AI AUTHORING, not
-      // the word "automation".
-      //
-      // REVERT both sentences when ADR-0112 v2 re-adds flows and actions — same
-      // line of the version roadmap as the chips. Every pack's wording is
-      // guarded, in its own script, by
-      // `packages/i18n/src/__tests__/makerEmptyState-v1-scope-8329.test.ts`.
       empty: {
-        build: {
-          title: 'Build with AI',
-          description:
-            'Describe an app in plain language — I draft the objects, screens and sample data, then you review and publish.',
-        },
         ask: {
           title: 'Ask your data',
           description:
             'Ask questions about your records — counts, lists, and summaries across the data you can access.',
-        },
-        editApp: {
-          title: 'Editing “{{app}}”',
-          titleGeneric: 'Edit this app',
-          description:
-            'What would you like to change? I’ll modify this app in place — add a field, object, view or dashboard, or adjust what’s already there.',
-          // objectstack#34608 — the builder's empty state names both halves: data questions and changes.
-          askOrChangeDescription:
-            'Ask about this app’s data — counts, lists and summaries — or tell me what to change, and I’ll modify the app in place: a field, an object, a view or a dashboard.',
         },
       },
       clearConversation: 'Clear',
@@ -2922,9 +3128,6 @@ const en = {
       // "Open in Builder" handoff card. The card's Approve / Reject buttons
       // borrow `aiApprovals.approveAndExecute` / `aiApprovals.reject`.
       toolDenyReason: 'Operator rejected from chat',
-      builderHandoffTitle: 'Build this in the Builder',
-      builderHandoffOpen: 'Open in Builder →',
-      builderHandoffSuperseded: 'A newer request is available',
       // cloud#3565 — the record-write card: ONE record the chat proposes and the user confirms (确认 / 打开完整表单 / 取消).
       recordWriteCreateTitle: 'New {{object}}',
       recordWriteUpdateTitle: 'Change {{object}}',
@@ -2972,55 +3175,19 @@ const en = {
       stopResponse: 'Stop response',
       trace: 'trace',
       viewTrace: 'View trace',
-      // Build-flow draft + "Proposed plan" confirm-gate card (AiChatPage /ai/build).
-      // Mirror the ConsoleFloatingChatbot locale object so both AI surfaces match.
-      nextSteps: "What's next",
-      publishDrafts: 'Publish',
-      publishOk: 'Published — objects are now live.',
-      seedWarn: 'Published, but some sample data failed to load.',
-      openBuiltApp: 'Open app',
-      viewBuiltAppInStudio: 'View in Studio',
-      previewDraft: 'Preview',
       previewApp: 'Preview app',
       resizeSplit: 'Resize chat and preview',
       hideChats: 'Hide chats',
       showChats: 'Show chats',
-      planTitle: 'Proposed plan',
-      planQuestions: 'Confirm before building',
-      planAssumptions: 'Assumptions',
-      planApproveHint: 'Reply to approve or adjust this plan.',
-      planApprove: 'Build it',
-      planAdjust: 'Adjust',
-      planApproveMessage: 'Looks good — build it as proposed.',
-      planApproveDefaultsMessage:
-        'Build it with your best assumptions; use sensible defaults for the open questions.',
-      planAnswerMessage: 'For "{{question}}", go with: {{option}}.',
-      planExtendExistingMessage: 'Keep improving "{{app}}" instead of building a new app.',
-      planBuildNewAppMessage: 'Build a separate, new app.',
-      changesTitle: 'Confirm changes',
-      changesConfirmed: 'Confirmed',
-      changesConfirm: 'Confirm',
-      changesConfirmHint: 'Reply to confirm or adjust this change.',
-      changesApplying: 'Applying…',
-      changesApplied: 'Applied',
-      changesDrafted: 'Saved as draft',
-      changesFailed: 'Not applied',
       discussing: 'Viewing: {{target}}',
-      // Wording is load-bearing: this is SENT to the agent and must satisfy the
-      // cloud confirm gate's English clause `apply (this|the) change`
-      // (service-ai-studio confirm-gate.ts APPROVAL_RE). "apply what you just
-      // proposed" did NOT match, so the button was inert. Singular "the change"
-      // so it still matches if the gate ever adds a word boundary.
-      changesConfirmMessage: 'Confirm — apply the change you just proposed.',
-      changeVerb: {
-        createObject: 'Create object',
-        addField: 'Add field',
-        modifyField: 'Modify field',
-        deleteField: 'Delete field',
-        createMetadata: 'Create',
-        updateMetadata: 'Modify',
-        createSeed: 'Generate sample data',
-        createPackage: 'Create app package',
+      // objectstack#36999 — the conversation focus: the record the chat is pinned to.
+      focus: {
+        pin: 'Keep asking about this record',
+        pinned: 'Asking about: {{target}}',
+        remove: 'Stop asking about this record',
+        switchPrompt: 'Ask about "{{target}}" instead?',
+        switchAccept: 'Switch',
+        switchDecline: 'Keep',
       },
       justNow: 'just now',
       minutesAgo: '{{count}}m ago',
@@ -3028,10 +3195,8 @@ const en = {
       daysAgo: '{{count}}d ago',
       agentLabels: {
         ask: 'Ask',
-        build: 'Build',
         // Legacy keys kept for back-compat with any external overrides.
         dataChat: 'Assistant',
-        metadataAssistant: 'Metadata Assistant',
       },
       suggestions: {
         dataChat: {
@@ -3039,77 +3204,47 @@ const en = {
           recentRecords: 'List the 5 most recently created records.',
           recordCounts: 'Count records for each object.',
         },
-        // cloud#1984 — these five chips are the maker's own recommendations, so
-        // they may only ask for what ADR-0112 v1 BUILDS: objects, fields, views
-        // (grid/kanban/calendar/gallery), pages, dashboards and sample data. No
-        // wording that promises autonomous behaviour (alert / remind / notify /
-        // automate / status workflow) — v1 has no flows, actions or schedules, and
-        // the model silently degrades such a request into a board or a filtered
-        // view, so the chip would promise an alert and deliver a page. REVERT to
-        // the automation wording when ADR-0112 v2 re-adds flows and actions.
-        metadataAssistant: {
-          buildCrm: 'Build a sales CRM — customers, contacts, and deals with a stage field, plus a dashboard that totals deal value by stage.',
-          buildApp: 'Create a project tracker — projects, tasks with owners and due dates, a board grouped by status, and a calendar of due dates.',
-          buildFlow: 'Design a support desk — tickets with priority and status fields, a board grouped by status, and links to customers.',
-          buildInventory: 'Build an inventory app — products, stock levels, suppliers, and a view that filters the items below their reorder point.',
-          buildRecruiting: 'Make an applicant tracker — candidates, open roles, an interview-stage field, and a board grouped by stage.',
-        },
         generic: {
           help: 'What can you help me with?',
           availableObjects: 'List the available data objects.',
           recentActivity: 'Summarize my recent activity.',
         },
-        // objectui#7709 — the edit-mode starters, shown when the maker is bound
-        // to an EXISTING app (`?package=`). Same rule as the five above: they
-        // may only ask for what ADR-0112 v1 BUILDS. The fourth chip used to be
-        // `addAutomation` ("an approval, a status flow, or a notification") and
-        // every capability it named is refused by v1 (cloud#1956 / PR #1970), so
-        // it now asks for sample data — `seed` IS on v1's whitelist, and having
-        // no data is what an existing app most often lacks. REVERT: when
-        // ADR-0112 v2 re-adds flows and actions, THIS chip's automation wording
-        // comes back as `addAutomation`; the retired string is pinned for every
-        // pack in `packages/i18n/src/__tests__/makerEditChips-v1-scope-7709.test.ts`.
-        editApp: {
-          addField: 'Add a field to one of the objects.',
-          addObject: 'Add a new object and relate it to an existing one.',
-          addDashboard: 'Add a dashboard for the key metrics.',
-          addSampleData: 'Fill the existing objects with realistic sample records so I can demo the app.',
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Summarize this record',
+            related: 'What is related to this record?',
+          },
+          list: {
+            summarize: 'Summarize the records in this list',
+            recent: 'Which records were added this week?',
+          },
+          dashboard: {
+            explain: 'What does this dashboard show?',
+            standOut: 'What stands out on this dashboard?',
+          },
+          report: {
+            summarize: 'Summarize this report',
+            takeaways: 'What are the key takeaways from this report?',
+          },
         },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Suggested questions',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
       // `console.ai.group.${key}` (ConversationsSidebar), enumerated from the
       // ConversationGroupKey union — all five members, no wildcard.
       collapseToDock: 'Collapse to side panel',
-      switchApp: 'Switch app',
-      switchAppLabel: 'Build conversations by app',
-      newApp: 'New app',
       connectionWaiting: 'Waiting for server…',
       connectionStalled: 'Still working…',
       connectionOffline: 'Connection lost — reconnecting…',
-      designingPlan: 'Designing your app…',
-      designingPlanHint: {
-        data: 'Mapping out the data you’ll track…',
-        objects: 'Shaping objects and their fields…',
-        relations: 'Connecting related records…',
-        lookups: 'Setting up relationships and lookups…',
-        views: 'Planning the screens and views…',
-        forms: 'Laying out forms and lists…',
-        defaults: 'Adding sensible defaults and validations…',
-        dashboard: 'Sketching a dashboard to track it…',
-        review: 'Double-checking the structure hangs together…',
-        finalize: 'Pulling the plan together…',
-      },
-      planBuilding: 'Building…',
-      planBuilt: 'Built',
-      planDeferred: 'Not yet built',
-      planReady: 'The plan is ready. Build it now, or tell me what to adjust.',
-      published: 'Published',
-      publishFailed: 'Publish failed',
       unavailableTitle: 'AI assistant unavailable',
       unavailableDescription: "This deployment doesn't have an AI assistant enabled. Everything else works as usual.",
       unavailableError: "Couldn't reach the AI service. It may be temporarily offline — try again, or head back home.",
+      unavailableErrorDesktop: "Couldn't reach the AI service. It may be temporarily offline — try again, or go back to the app start page.",
       unavailableRetry: 'Try again',
       unavailableHome: 'Back to home',
       dock: {
@@ -3124,8 +3259,8 @@ const en = {
         expand: 'Expand',
         restore: 'Restore side panel',
         open: 'Open assistant',
-        // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
-        planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        // objectui#11666 — the launchers' marker while a proposed write awaits approval.
+        planAwaitingApproval: 'An action is waiting for your approval',
         close: 'Close',
         more: 'More actions',
       },
@@ -3218,6 +3353,7 @@ const en = {
       summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Lists several people, so it cannot be handed over here.',
+      ownerKept: 'Not handed over: this object keeps the owner of each record (Change Owner is off for it).',
       truncated: 'Not every user field was counted; this person may hold more.',
       unreadable: 'Not counted, because you cannot read them: {{objects}}',
       handoverTo: 'Hand over to',
@@ -3229,6 +3365,41 @@ const en = {
       transferRefused: 'The hand-over was refused: {{message}}',
       report: 'Handed over {{updated}}, {{failed}} could not be moved, {{remaining}} still held.',
       failure: '{{object}} {{id}}: {{message}}',
+    },
+    // objectstack#35403 — the Change Owner action, its dialog and its bulk report.
+    changeOwner: {
+      title: 'Change Owner',
+      descriptionRecord: 'Hand this record to a new owner.',
+      descriptionBulk: 'Hand {{count}} records to a new owner.',
+      descriptionBulk_one: 'Hand {{count}} record to a new owner.',
+      descriptionBulk_other: 'Hand {{count}} records to a new owner.',
+      ownerFallback: 'Owner',
+      targetPerson: 'A person',
+      targetQueue: 'A queue',
+      queue: 'Queue',
+      queuePlaceholder: 'Pick a queue',
+      declaredQueues: 'Or a queue an installed app declares',
+      notify: 'Notify the new owner',
+      alreadyOwner: 'This person already owns this record.',
+      submit: 'Change Owner',
+      submitting: 'Changing owner…',
+      cancel: 'Cancel',
+      close: 'Close',
+      refused: 'The owner could not be changed: {{message}}',
+      changed: 'Owner changed.',
+      report: 'Moved {{moved}}, {{unchanged}} already had this owner, {{failed}} could not be moved.',
+      failure: '{{id}}: {{message}}',
+      skipped: '{{count}} selected records do not offer Change Owner and are left out.',
+      skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
+      skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
+      cascadeHeading: 'Also move related records',
+      cascadeHelp: 'Related records that point at this one and belong to its previous owner go to the new owner too.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'The related records that can move along could not be read: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): moved {{moved}}, {{failed}} could not be moved.',
+      cascadeRemaining: 'Left with the previous owner, past the 500-record limit of one change: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): the related records could not be read: {{message}}',
+      gridOnly: 'To change the owner of several records at once, switch to a grid view.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
@@ -3248,22 +3419,47 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
+      // The 「Personalized · Reset to view」 marker's words (objectstack#28950), no longer drawn
+      // since objectstack#35955: kept in every pack, so no published key goes away.
       resetView: 'Reset to view',
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
-      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
+      draft: {
+        discard: 'Reset',
+        discardTitle: 'Puts the list back as its view declares it: filters, sort, grouping, columns and layout. Column widths and row height stay.',
+        save: 'Update view',
+        heading: 'Unsaved changes',
+        partSeparator: ', ',
+        saveToView: 'Save to this view',
+        saveAsMyView: 'Save as my view',
+        copyName: '{{name}} copy',
+        saved: 'Saved',
+        saveToViewConfirmTitle: 'Save to this view?',
+        saveToViewConfirm: 'Everyone who uses “{{name}}” will see these changes.',
+        saveToViewConfirmButton: 'Save for everyone',
+        savedForEveryone: 'Saved, visible to everyone',
+        pendingDraft: 'This view has unpublished changes. Publish or discard them in the view settings first.',
+      },
+      linkFilterRefused: 'This link’s filter was not applied. It names a field you can’t filter on here, so the list shows the view without it.',
       personalizedParts: {
+        kanban: "Board settings",
         filters: 'Filters',
         search: 'Search',
         sort: 'Sort',
         grouping: 'Grouping',
         columns: 'Column layout',
         hiddenFields: 'Hidden fields',
+        summaries: 'Calculations',
         density: 'Density',
         layout: 'Layout',
         rowColor: 'Row color',
         inlineEdit: 'Inline editing',
+      },
+      saveRefused: {
+        packaged: 'This view comes with an app package and can’t be changed directly. You can save it as your own view.',
       },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
@@ -3272,6 +3468,9 @@ const en = {
       new: 'New',
       import: 'Import',
       importTitle: 'Import from CSV',
+      newObject: 'New {{object}}',
+      importExport: 'Import / Export',
+      select: 'Select',
       importedToast: 'Imported {{count}} row(s).',
       importedToast_one: 'Imported {{count}} row.',
       importedToast_other: 'Imported {{count}} rows.',
@@ -3293,6 +3492,10 @@ const en = {
       delete: 'Delete',
       deleteViewTitle: 'Delete view',
       deleteViewConfirm: 'Are you sure you want to delete the view "{{name}}"? This cannot be undone.',
+      restoreFactory: 'Restore',
+      restoreFactoryTitle: 'Restore factory version',
+      restoreFactoryConfirm: 'Restore the view "{{name}}" to the version its package ships? Everyone who uses this view will see the factory version again, and the name, pin and default changed here are removed.',
+      restoreFactoryDone: 'Restored the factory version of "{{name}}"',
       bulkDeleteConfirm: 'Delete {{count}} selected records? This cannot be undone.',
       bulkDeleteConfirm_one: 'Delete {{count}} selected record? This cannot be undone.',
       bulkDeleteConfirm_other: 'Delete {{count}} selected records? This cannot be undone.',
@@ -3584,6 +3787,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
@@ -3912,7 +4119,7 @@ const en = {
     },
     language: {
       title: 'Language',
-      description: 'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+      description: 'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
       label: 'Preferred language',
       systemDefault: 'Use the deployment default',
       save: 'Save',
@@ -4012,7 +4219,9 @@ const en = {
     diagram: 'Diagram',
     about: 'About',
     aboutTitle: 'About this console',
-    aboutDescription: 'The build this console was compiled from.',
+    aboutDescription: 'The ObjectStack version this console runs on, and the build it was compiled from.',
+    aboutVersion: 'ObjectStack version',
+    aboutVersionUnknown: 'Unknown version (the server did not report one)',
     aboutBuild: 'Console build',
     aboutBuildUnknown: 'Unknown build (no version was set when this console was built)',
   },
@@ -4029,14 +4238,130 @@ const en = {
     recent: 'Recent',
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
+    conversationUnavailable: 'This conversation is no longer available',
     allReports: 'All reports',
-    keepOpen: 'Keep sidebar open',
+    collapse: 'Collapse sidebar',
+    expand: 'Expand sidebar',
+    resize: 'Resize sidebar',
+  },
+  designMode: {
+    title: 'Design layout',
+    leaveUnsaved: 'Leave Design layout? Your unsaved changes will be lost.',
+    saveFailed: 'Some changes were not saved: {{reason}}',
+    editorOpen: 'Save or cancel your dashboard or report changes before designing the layout.',
+    menu: {
+      title: 'Menu',
+      addItem: 'Add menu item',
+      placeholder: 'Choose a menu item…',
+      actions: 'Actions for {{name}}',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      moveToGroup: 'Move to group',
+      topLevel: 'Top level',
+      addBefore: 'Add an item before',
+      addAfter: 'Add an item after',
+      rename: 'Rename and icon',
+      renameTranslation: 'The new name is shown in {{language}}. The app\'s other languages keep their names.',
+      remove: 'Remove from menu',
+      contributed: 'Another package adds this item. It is moved, renamed or removed there.',
+      pickerTitle: 'Add menu item',
+      search: 'Search…',
+      kind: {
+        object: 'Objects',
+        view: 'Views',
+        dashboard: 'Dashboards',
+        report: 'Reports',
+        page: 'Pages',
+        url: 'Link',
+        aiChat: 'AI inquiry',
+      },
+      linkLabel: 'Label',
+      linkUrl: 'URL',
+      add: 'Add',
+      name: 'Name',
+      icon: 'Icon',
+      iconHint: 'A Lucide icon name, such as "briefcase".',
+      done: 'Done',
+      none: 'Nothing to add here',
+      loading: 'Loading…',
+      notListed: 'This app\'s package is not listed, so its menu cannot be saved.',
+      pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
+      noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
+      notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
+      storedUnread: 'This app\'s saved menu could not be read, so nothing was saved.',
+      publishedMoved: 'Someone published this app\'s menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.',
+      translationPendingDraft: 'This app\'s menu names in this language have unpublished changes in Studio. Publish or discard them there, then save again.',
+      keyboardHint: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
+      newDashboard: 'New dashboard…',
+      newDashboardTitle: 'New dashboard',
+      newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
+      create: 'Create',
+      creating: 'Creating…',
+      newItemPendingDraft: 'A draft with this name is already pending. Try again.',
+      newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      aiChatName: 'Ask AI',
+      aiChatDefaults: 'Leave a field empty to show the page\'s default.',
+      aiChatTitle: 'Heading',
+      aiChatSubtitle: 'Subtitle',
+      aiChatPlaceholder: 'Question box hint',
+      aiChatSuggestions: 'Suggested questions',
+      aiChatSuggestionsHint: 'One per line, at most 4.',
+      aiChatTooLong: 'At most {{max}} characters.',
+      aiChatTooMany: 'At most {{max}} questions.',
+      aiChatEdit: 'Edit inquiry page',
+      setAsHome: 'Set as home',
+    },
+    pins: {
+      button: 'Header buttons',
+      pinned: 'Pinned to header',
+      other: 'Other',
+      nonePinned: 'No button is pinned: every action is in More.',
+      noneOther: 'Every action is pinned.',
+      pin: 'Pin {{name}} to the header',
+      unpin: 'Move {{name}} to More',
+      drag: 'Drag {{name}} to reorder',
+      full: 'At most {{cap}} buttons are pinned to the header. Unpin one first.',
+      notListed: 'This object\'s package is not listed, so its header buttons cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its header buttons cannot be saved.',
+      unknown: '"{{name}}" is no longer an action of this object. Unpin it, then save again.',
+      notPlaced: '"{{name}}" is no longer offered on this page. Unpin it, then save again.',
+      stale: 'No longer offered here, left out when you save: {{names}}',
+    },
+    recordTabs: {
+      entry: 'Configure tabs',
+      title: 'Configure tabs',
+      leaveUnsaved: 'Leave without saving? Your tab changes will be lost.',
+      saveFailed: 'The tabs were not saved: {{reason}}',
+      notListed: 'This object\'s package is not listed, so its tabs cannot be saved.',
+      pendingDraft: 'This object has unpublished changes in Studio. Publish or discard them there, then save again.',
+      notWritable: 'This object\'s package cannot be written, so its tabs cannot be saved here.',
+      name: 'Tab name',
+      rename: 'Rename {{name}}',
+      drag: 'Move {{name}}',
+      hide: 'Hide {{name}}',
+      show: 'Show {{name}}',
+      shown: 'Tabs',
+      hidden: 'Hidden',
+      noneHidden: 'None',
+      contributed: 'Another package adds this tab. It is placed there.',
+      renameSourceOnly: 'Tab names are changed in the app\'s source language',
+      builtinFixed: 'The platform draws this tab last, under its own name.',
+      adjustFieldGroups: 'Adjust field groups',
+      pairNotWritable: 'This app\'s customization package cannot be written, so its tabs cannot be saved.',
+      builtinMoves: 'A built-in tab can be moved, not hidden or renamed.',
+      sourceBase: 'Original package',
+      sourcePackage: 'From {{name}}',
+      sourceEnvironment: 'This environment',
+    },
   },
   topbar: {
     aiAssistant: 'AI Assistant',
-    designInStudio: 'Design in Studio',
+    designInStudio: 'Design in App Studio',
+    designLayout: 'Design layout',
     editApp: 'Edit app',
-    openAppInStudio: 'Open {{app}} in Studio',
+    openAppInStudio: 'Open {{app}} in App Studio',
+    viewInStudio: 'View in App Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4101,9 +4426,8 @@ const en = {
     // `appTileOpenedLine-12601.test.ts` (app-shell).
     appOpened: '{{time}}',
     build: {
-      title: 'Build an app',
       noCapability: 'Building apps isn\'t available in this system — it requires the “Manage Metadata” permission, which your account doesn\'t have.',
-      inStudio: 'New in Studio',
+      inStudio: 'New blank app',
     },
     template: {
       title: 'Start with a template',
@@ -4112,12 +4436,11 @@ const en = {
     open: 'Open',
     loading: 'Loading…',
     welcome: 'Build your business system with AI',
-    welcomeAdminDescription: 'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.',
     welcomeAdminDescriptionNoBuild: 'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
     welcomeAdminDescriptionNoAi: 'Set up your first application from the Administration menu on the left.',
     noAppsTitle: 'No applications yet',
     noAppsDescription: 'The system is being set up — apps your admin shares with you will show up here.',
-    buildWithAI: 'Build with AI',
+    noAppsAddDescription: 'Build your first app, or start from a template or the app marketplace.',
     askAI: 'Ask AI',
     recoveryReminder: {
       message: 'Set a recovery password so you can still sign in if single sign-on is ever unavailable.',
@@ -4198,11 +4521,12 @@ const en = {
       backToAppHome: 'Back to the app menu',
       appsAvailable: '{{count}} apps available',
       allApps: 'All apps',
-      editAppInStudio: 'Edit {{app}} in Studio',
-      openAppInStudio: 'Open {{app}} in Studio',
-      backToHome: 'Back to home',
+      editAppInStudio: 'Edit {{app}} in App Studio',
+      openAppInStudio: 'Open {{app}} in App Studio',
+      backToHome: 'Back to app start page',
       settings: 'Settings',
       productHome: '{{product}} home',
+      addApp: 'Add app',
     },
     systemNav: {
       systemSettings: 'System Settings',
@@ -4245,8 +4569,8 @@ const en = {
   search: {
     title: 'Search',
     back: 'Back',
-    placeholder: 'Search objects, dashboards, pages, reports…',
-    inputAriaLabel: 'Search objects, dashboards, pages, reports',
+    placeholder: 'Search objects, dashboards, pages, reports, components, docs…',
+    inputAriaLabel: 'Search objects, dashboards, pages, reports, components, docs',
     resultsCount: '{{count}} result for "{{query}}"',
     resultsCount_one: '{{count}} result for "{{query}}"',
     resultsCount_other: '{{count}} results for "{{query}}"',
@@ -4259,10 +4583,16 @@ const en = {
     typeDashboards: 'Dashboards',
     typePages: 'Pages',
     typeReports: 'Reports',
+    typeComponents: 'Components',
+    typeDocs: 'Docs',
+    typeUrls: 'Links',
     badgeObject: 'object',
     badgeDashboard: 'dashboard',
     badgePage: 'page',
     badgeReport: 'report',
+    badgeComponent: 'component',
+    badgeDoc: 'doc',
+    badgeUrl: 'link',
   },
   empty: {
     objectNotFound: 'Object Not Found',
@@ -4305,6 +4635,10 @@ const en = {
     // objectstack-ai/objectstack#29771 — the app root when every entry it shows is a `url` or `action` link (`AppNoAccessEmptyState`, reason `menu-only`).
     appOpensFromMenu: '{{app}} opens from its menu',
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
+    // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
+    appMenuEmpty: "{{app}} has nothing in its menu yet",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in Design layout.",
+    openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
     systemSettings: 'System Settings',
@@ -4465,6 +4799,15 @@ const en = {
         skill: '{{count}} AI skills',
         skill_one: '{{count}} AI skill',
         skill_other: '{{count}} AI skills',
+        ai_context: '{{count}} AI context packs',
+        ai_context_one: '{{count}} AI context pack',
+        ai_context_other: '{{count}} AI context packs',
+        form: '{{count}} forms',
+        form_one: '{{count}} form',
+        form_other: '{{count}} forms',
+        knowledge_source: '{{count}} knowledge sources',
+        knowledge_source_one: '{{count}} knowledge source',
+        knowledge_source_other: '{{count}} knowledge sources',
         datasource: '{{count}} datasources',
         datasource_one: '{{count}} datasource',
         datasource_other: '{{count}} datasources',
@@ -4648,10 +4991,13 @@ const en = {
     bulkDeleteSuccess_one: 'Deleted {{count}} {{label}} record',
     bulkDeleteSuccess_other: 'Deleted {{count}} {{label}} records',
     bulkDeletePartial: '{{succeeded}} deleted, {{failed}} failed',
+    bulkDeleteRefusedNamed: '{{names}}: {{reason}}',
+    bulkDeleteMoreReasons: 'And {{more}} more',
   },
   objectViewActions: {
     renameFailed: 'Failed to rename view',
     deleteFailed: 'Failed to delete view',
+    restoreFactoryFailed: 'Failed to restore the factory version',
   },
   dashboardActions: {
     printDialogOpening: 'Opening your browser’s print dialog (not a PDF export)',
@@ -4703,10 +5049,12 @@ const en = {
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
       organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
+      unpaidOrganizationLimitReached: 'You already own as many free organizations as one account may. To create another, upgrade one of them to a paid plan or contact support. Organizations you were invited to do not count.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',
     },
+    viewPlans: 'View plans and upgrade',
     backToList: 'Back to organizations',
     notFound: 'Organization not found',
     notFoundDescription: 'This organization does not exist or you do not have access.',
@@ -4896,6 +5244,23 @@ const en = {
     desktopBlocked: 'Blocked. Allow notifications for this site in your browser settings.',
     desktopUnsupported: 'This browser does not support desktop notifications.',
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'Back to the list',
+    openFullRecord: 'Open full record',
+    occurrences: 'Each time it was sent',
+    moreApprovals: 'See the rest in the Approvals inbox',
+    goApprove: 'Review ›',
+    loadEarlier: 'Load earlier notifications',
+    loadEarlierFailed: 'Could not load. Try again',
+    pickApproval: 'Pick a request to review it here.',
+    pickItem: 'Pick an item to see it here.',
+    openRequest: 'Open request',
+    nextHint: 'Moves to the next once decided · J / K to move',
+    openLink: 'Open',
+    unreadOnly: 'Unread only',
+    allApprovals: 'All approvals',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: 'Share {{label}}',
@@ -4986,18 +5351,6 @@ const en = {
       derivedPlatformAdmin: 'Configured platform administrator',
       derivedAiAccess: 'AI access turned on',
     },
-  },
-  excelImport: {
-    noImportableFields: 'That object has no importable fields.',
-    schemaReadFailed: 'Could not read the object schema.',
-    imported: 'Imported {{count}} row(s) into {{object}}.',
-    imported_one: 'Imported {{count}} row into {{object}}.',
-    imported_other: 'Imported {{count}} rows into {{object}}.',
-    importFrom: 'Import the real rows from',
-    into: 'into',
-    opening: 'Opening…',
-    importAction: 'Import',
-    dismiss: 'Dismiss',
   },
   // `cloud:workspace-timezone-notice` — the Cloud welcome page's line naming the
   // timezone a workspace was seeded with at creation (objectui#11930). `{{zone}}`
@@ -5187,9 +5540,45 @@ const en = {
       metrics: 'Metrics',
       noAddedFilter: 'No filter added to the dataset definition',
     },
+    recordCitations: {
+      title: 'Cited from records',
+    },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'Drafts saved in this turn',
+      hint: 'Nothing is published yet. Review the drafts and publish them in Studio.',
+      package: 'Package {{name}}',
+      reviewAndPublish: 'Review and publish',
+      reviewAndPublishAria: 'Review and publish the drafts of package {{name}} in Studio',
+      review: 'Review',
+      reviewAria: 'Review the draft {{name}} in Studio',
+      willPublish: 'Will publish',
+      verdictWithheld: 'Verdict withheld',
+      checkedAtSave: 'checked when saved',
+      problems: '{{count}} problems',
+      problems_one: '{{count}} problem',
+      problems_other: '{{count}} problems',
+      more: '+{{count}} more',
+      more_one: '+{{count}} more',
+      more_other: '+{{count}} more',
+    },
+    // The question card the AI asks a clarifying question on, in the composer's place.
+    questionCard: {
+      aiAsks: 'AI asks:',
+      progress: 'Question {{current}} of {{total}}',
+      typeYourOwn: 'Type something else…',
+      recommended: 'Recommended',
+      skip: 'Skip',
+      back: 'Back',
+      next: 'Next',
+      send: 'Send',
+      pending: 'A question is waiting for your answer',
+      answerLine: '{{header}}: {{answer}}',
+    },
     tool: {
       aggregate_data: 'Aggregate the data',
       get_record: 'Read the record',
+      get_record_context: 'Read the record context',
       list_datasets: 'Check the available metrics',
       query_data: 'Query the data',
       query_dataset: 'Query by a metric',
@@ -5201,6 +5590,7 @@ const en = {
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',
       apply_edit: 'Apply the change',
+      ask_which: 'Clarify the question',
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',
@@ -5246,122 +5636,17 @@ const en = {
       failed: 'Failed',
     },
     phase: {
-      build: 'Build',
-      design: 'Design the plan',
       stepCount: '{{count}} steps',
       stepCount_one: '{{count}} step',
       stepCount_other: '{{count}} steps',
       expand: 'Show steps',
       collapse: 'Hide steps',
     },
-    plan: {
-      countObjects: '{{count}} objects',
-      countObjects_one: '{{count}} object',
-      countObjects_other: '{{count}} objects',
-      countViews: '{{count}} views',
-      countViews_one: '{{count}} view',
-      countViews_other: '{{count}} views',
-      countDashboards: '{{count}} dashboards',
-      countDashboards_one: '{{count}} dashboard',
-      countDashboards_other: '{{count}} dashboards',
-      countSeedData: 'sample data',
-      extendTarget: 'Adding to existing app: {{app}}',
-      awaitingConfirm: 'Awaiting confirmation',
-      // objectstack#32984 — the plan card's build states.
-      confirmed: 'Confirmed',
-      buildFailed: 'Not built — nothing was created',
-      iterateOrNew: {
-        question: 'This overlaps "{{app}}", an app you already have. Keep improving it, or build a separate app?',
-        questionUnnamed: 'This overlaps an app you already have. Keep improving that app, or build a separate one?',
-        extend: 'Keep improving "{{app}}"',
-        buildNew: 'Build a separate app',
-        replyHint: 'Reply to say which.',
-      },
-      objectsAndFields: 'Objects and fields',
-      views: 'Views',
-      suggestedField: 'suggested',
-      suggestedFieldLegend: 'Fields marked “{{mark}}” were added by the AI; you didn’t ask for them.',
-      nameField: 'Name: {{field}}',
-    },
     build: {
-      building: 'Building {{app}}…',
-      built: 'Built {{app}}',
-      builtAndLive: 'Built and live · {{app}}',
-      appFallback: 'your app',
-      addingSampleData: 'adding sample data',
-      group: {
-        object: 'Objects',
-        view: 'Views',
-        dashboard: 'Dashboards',
-        app: 'App',
-        seed: 'Sample data',
-        dataset: 'Datasets',
-        permission: 'Permissions',
-        other: 'Other',
-      },
-      moreArtifacts: '+{{n}} more',
-      verifying: 'Checking the change…',
-      verifyStep: 'step {{n}}',
-      verified: 'Checked the change',
-      // objectstack#32984 — the build card's issues line, in the customer's words.
-      issuesCount: '{{count}} to fix',
       issuesSummary: 'Some parts of this build need fixing before it is ready. Reply "fix the problems" and the assistant will repair them.',
-      warningsSummary: 'The build is ready, with a few things worth checking. Ask the assistant what they are if you want to improve them.',
-      issuesDetails: 'Technical details',
-      // objectstack#32984 — the published draft badge's failed-item count, which was English in every locale.
-      needsAttention: '{{count}} need attention',
-      needsAttention_one: '{{count}} needs attention',
-      needsAttention_other: '{{count}} need attention',
       // objectstack#32984 — the publish-health line under a Published badge, which was English in every locale.
       health: {
-        sampleRowsLive: '{{count}} sample rows live',
-        sampleRowsLive_one: '{{count}} sample row live',
-        sampleRowsLive_other: '{{count}} sample rows live',
-        views: '{{count}} views',
-        views_one: '{{count}} view',
-        views_other: '{{count}} views',
-        widgets: '{{count}} widgets',
-        widgets_one: '{{count}} widget',
-        widgets_other: '{{count}} widgets',
-        seeds: '{{count}} sample data sets',
-        seeds_one: '{{count}} sample data set',
-        seeds_other: '{{count}} sample data sets',
-        verified: '{{checks}} verified',
         seedFailed: 'Sample data failed to load.',
-      },
-      unknownPhase: 'Unknown build phase',
-      nextStepsLead: 'Next, you can say: {{steps}}',
-      nextStepQuote: '“{{step}}”',
-      draftPosture: 'Later changes are saved as drafts; click Publish here in the chat to make them live.',
-      checksPassed: 'Checks passed {{passed}}/{{total}}',
-    },
-    changes: {
-      planTitle: 'Change plan · {{count}} changes',
-      planTitle_one: 'Change plan · {{count}} change',
-      planTitle_other: 'Change plan · {{count}} changes',
-      saveDraft: 'Save as draft',
-      reviewAndPublish: 'Review changes and publish',
-      undo: 'Undo',
-      undoWithOthers: 'Undo (and {{count}} other drafts)',
-      undoWithOthers_one: 'Undo (and {{count}} other draft)',
-      undoWithOthers_other: 'Undo (and {{count}} other drafts)',
-      undoConfirm: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that are not part of this change.',
-      undoConfirm_one: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that is not part of this change.',
-      undoConfirm_other: 'Undo discards all {{total}} unpublished drafts of this package, including {{count}} that are not part of this change.',
-      undoConfirmUnknown: 'Undo discards every unpublished draft of this package, not only this change.',
-      undoConfirmAction: 'Undo all',
-      undoCancel: 'Cancel',
-      undoing: 'Undoing…',
-      undone: 'Undone',
-      undoFailed: 'Undo failed',
-      kind: {
-        field: 'Field',
-        object: 'Object',
-        view: 'View',
-        dashboard: 'Dashboard',
-        app: 'App',
-        seed: 'Sample data',
-        package: 'App package',
       },
     },
   },
@@ -5374,6 +5659,7 @@ const en = {
   },
   chatbotQuota: {
     title: 'Upgrade needed',
+    limitTitle: 'AI limit reached',
     fallbackMessage: 'You have reached your AI quota.',
     buyCredits: 'Buy a credit pack',
     upgradePlan: 'Upgrade plan',
@@ -5508,6 +5794,10 @@ const en = {
     actComment: 'Commented',
     actSystemNote: 'System note',
     stepProgress: 'Approval steps',
+    outcomeWaiting: 'Went on to {{step}}, waiting for a decision',
+    outcomeNow: 'Went on to {{step}}: {{decision}}',
+    outcomeEndedAt: 'Went on to {{step}}, then ended: {{decision}}',
+    outcomeEndedHere: 'The approval ended here',
     prevRequest: 'Previous',
     nextRequest: 'Next',
     positionOf: 'Request {{index}} of {{total}}',
@@ -5663,7 +5953,12 @@ const en = {
     bulkRejected: 'Rejected {{count}} requests',
     bulkRejected_one: 'Rejected {{count}} request',
     bulkRejected_other: 'Rejected {{count}} requests',
-    bulkPartial: '{{ok}} succeeded, {{fail}} failed: {{which}}',
+    bulkPartialSummary: '{{ok}} succeeded, {{fail}} failed',
+    bulkFailureLine: '{{title}}: {{reason}}',
+    bulkFailuresShowAll: 'Show all ({{n}})',
+    bulkFailuresTitle: 'Not decided: {{n}}',
+    bulkFailuresBody: 'These requests were left as they were. Each one says why.',
+    close: 'Close',
     rejectOneTitle: 'Reject "{{title}}"?',
     rejectOneBody: 'This rejects the request and notifies the submitter.',
     rejectTitle: 'Reject this request?',
@@ -5747,6 +6042,24 @@ const en = {
     },
   },
   listConditions: {
+    phone: {
+      toolbar: 'List tools',
+      sortCount: 'Sort, {{count}} levels',
+      sortCount_one: 'Sort, {{count}} level',
+      sortCount_other: 'Sort, {{count}} levels',
+      filterCount: 'Filter, {{count}} in use',
+      filterCount_one: 'Filter, {{count}} in use',
+      filterCount_other: 'Filter, {{count}} in use',
+      back: 'Back',
+      discard: 'Discard changes',
+      close: 'Close',
+      apply: 'Apply',
+      advancedNotice: 'This view uses an advanced filter. Change it on a computer.',
+      filterEmpty: 'No filter yet. Add one to show only the records that match.',
+      itemOptions: 'Options for {{label}}',
+      edit: 'Edit',
+      remove: 'Remove',
+    },
     fieldList: {
       search: 'Search fields',
       shown: 'In this view',
@@ -5811,11 +6124,14 @@ const en = {
       sortedBy: 'Sorted by {{field}}',
       reset: 'Reset',
       resetHint: 'Back to the view as saved',
+      discard: 'Discard',
+      discardHint: 'Back to the default sort and filter',
       remove: 'Remove {{label}}',
       toggleSort: 'Reverse {{label}}',
       dragSort: 'Drag to change the sort priority',
       viewOwn: 'Part of this view; it cannot be removed here',
       viewFilter: 'View filter',
+      relationPath: '{{lookup}} › {{field}}',
     },
   },
   sortBuilder: {
@@ -5829,6 +6145,8 @@ const en = {
     addSort: 'Add sort',
     removeSort: 'Remove sort',
     reorder: 'Drag to reorder',
+    levelOptions: 'Options for {{label}}',
+    changeField: 'Change field',
   },
   // `@object-ui/collaboration` — the comment thread's copy (objectstack#5506,
   // objectui#3424). The package used to carry every one of these as an English
@@ -5961,6 +6279,18 @@ const en = {
     // Terminal success, used only when the flow declares no `successMessage`
     // of its own.
     completed: 'Flow "{{flow}}" completed',
+    // A resume whose answer was lost had already gone through: the dialog now
+    // shows the step the run waits on (objectstack#36831).
+    alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
+    // ...or the run waits on no screen any more, so Submit is withdrawn.
+    noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
+    // The engine refused this step's values (objectstack#37526): the banner,
+    // beside a message under each field it names. The engine's own sentence
+    // names API field names and is never shown.
+    invalidScreenInput: "Some values on this step weren't accepted. Check them and try again.",
+    // Under a field the engine refused for a reason other than `required` or a
+    // declared bound (a wrong value type, a value the field takes none of).
+    fieldNotAccepted: "{{field}}: this value isn't accepted",
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.
@@ -6025,6 +6355,7 @@ const en = {
       toggleFailed: 'Failed to toggle app status: {{reason}}',
       setDefaultDone: '{{name}} set as default',
       setDefaultFailed: 'Failed to set default app: {{reason}}',
+      restoreDefaultFailed: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
       appDeleted: '{{name}} deleted',
       deleteFailed: 'Failed to delete app: {{reason}}',
       // A `reset: false` answer: no customization row existed, so nothing was
@@ -6343,6 +6674,12 @@ const en = {
       object: 'Object',
       unknownType: 'Unknown metadata view type. Expected {{a}}, {{b}} or {{c}}.',
       unknownTypeNamed: 'Unknown metadata view type “{{type}}”. Expected {{a}}, {{b}} or {{c}}.',
+      condition: 'condition',
+      otherwise: 'otherwise',
+      conditionAnd: 'and',
+      conditionOr: 'or',
+      conditionMore: 'other conditions',
+      runsWhen: 'Runs when {{condition}}',
     },
   },
   // `kind:'react'` page renderer's notices (`react-page.tsx`, #25916). A
@@ -6387,9 +6724,7 @@ const en = {
     digestNone: "No digest",
     digestDaily: "Daily",
     digestWeekly: "Weekly",
-    digestNoOff: "\"No digest\" is not offered: saving it does not turn off a digest your organization sets, so it might not take effect.",
     quietHours: "Quiet hours",
-    quietHoursNoClear: "An empty window cannot be saved: it does not turn off quiet hours your organization sets, so it might not take effect. Set a start and an end time instead.",
     save: "Save",
     matrix: "Topics and channels",
     topic: "Topic",
@@ -6401,6 +6736,8 @@ const en = {
     sourceDefault: "Organization default",
     sourceBuiltin: "Default",
     sourceMandatory: "Required",
+    followOrganization: "Follow organization setting",
+    followOrganizationFor: "Follow organization setting for {{setting}}",
   },
   slackLink: {
     title: "Slack direct messages",
@@ -6418,6 +6755,43 @@ const en = {
     linked: "Connected to {{workspace}} as {{slackUser}}.",
     linkedAt: "Connected {{at}}",
     disconnect: "Disconnect",
+  },
+  publicFormsSetup: {
+    title: "Public forms",
+    subtitle: "Forms anyone can fill in without signing in, such as a contact form on your website. Each submission becomes a record.",
+    notAllowed: "Only system administrators can manage public forms.",
+    designHint: "Switch a form off to stop taking submissions; its address then opens nothing. Forms are designed in Studio.",
+    refresh: "Refresh",
+    emptyTitle: "No public forms yet",
+    emptyBody: "Public forms are designed in Studio. Once an app has one, it is listed here.",
+    loadFailed: "Couldn't load the public forms. Refresh to try again.",
+    columnName: "Name",
+    columnObject: "Creates a record of",
+    columnAddress: "Address",
+    columnStatus: "Status",
+    columnActions: "Actions",
+    on: "On",
+    off: "Off",
+    switchOnLabel: "Switch {{name}} on",
+    switchOffLabel: "Switch {{name}} off",
+    copy: "Copy address",
+    copied: "Address copied",
+    clipboardUnavailable: "Clipboard unavailable",
+    open: "Open in a new tab",
+    switchedOn: "{{name}} is on: visitors can fill it in.",
+    switchedOff: "{{name}} is off: its address no longer opens.",
+    pendingDraft: "{{name}} has unpublished changes in Studio. Publish or discard them there first.",
+    switchFailed: "Couldn't switch {{name}}: {{message}}",
+    refusalNoPackage: "the app this form belongs to could not be found.",
+    refusalNoVersion: "the app this form belongs to declares no version, so its customization cannot be saved.",
+    refusalLoadFailed: "the form could not be read.",
+    refusalShippedOff: "its app ships it switched off, so it cannot be switched on here.",
+    refusalForbidden: "you don't have permission to change app configuration.",
+    refusalServer: "the server refused the change. Try again, or ask an administrator.",
+    switchedOnEarlierVersion: "{{name}} is on. It stays on the app's earlier version {{version}}, which this environment customized; to take the app's current form, restore the original in Studio.",
+    noSwitchPermission: "Switching forms on or off needs permission to change app configuration, which you don't have.",
+    shippedOff: "Off (switched off by its app)",
+    statusUnknown: "Unknown (couldn't read its app's version of this form)",
   },
   slackSetup: {
     title: "Slack direct messages",

@@ -770,7 +770,7 @@ export interface BulkActionDef {
    * Presence of this key changes what `operation: 'custom'` means: instead of
    * a per-row no-op, the executor dispatches THIS action through the action
    * runner once per selected record, with the row attached as `_rowRecord` so
-   * `recordIdParam` injection works exactly as it does for a `list_item` row
+   * `recordIdParam` injection works exactly as it does for a `record_row` row
    * action — or once for the whole selection under `execution: 'aggregate'`.
    * Params and confirmation are collected once by the BulkActionDialog
    * and handed to the runner as values, so it never re-prompts per record.
@@ -1326,16 +1326,24 @@ export interface ObjectGridSchema extends BaseSchema {
   editable?: boolean;
 
   /**
-   * Enable single-click editing mode
-   * When true with editable, clicking a cell enters edit mode (instead of double-click)
+   * RETIRED (objectstack#36270, ADR-0049) — the switch between opening a cell
+   * editor on a single click and on a double click. A grid that renders
+   * editable (`editable` set and the viewer allowed to edit) now selects a cell
+   * first: a click selects it, and double-click, Enter, F2 or typing opens its
+   * editor, each committed cell saved on its own. That model has no
+   * single-click entry, so `ObjectGrid` no longer reads the key, and
+   * `@objectstack/spec` refuses it by name on `object-grid`.
    *
-   * `ObjectGrid` reads it as `schema.singleClickEdit ?? true`, so an absent key
-   * means single-click editing, as the spec's `object-grid` row says ("default true
-   * when editable"). This comment read `@default false` until objectui#6152 round 6,
-   * which mirrored the key and measured the default through the real registry.
-   * @default true
+   * `?: never`, not a deletion — this package's tombstone convention (see
+   * `resizableColumns` above). Lockstep with the Zod twin
+   * (`zod/objectql.zod.ts`, `retirementTombstone()`). `DataTableSchema`'s own
+   * `singleClickEdit`, a flag a host set in code, left with the staged model
+   * (objectstack#35827).
+   *
+   * @deprecated RETIRED (objectstack#36270) — delete the key; `editable` decides
+   * whether the grid edits.
    */
-  singleClickEdit?: boolean;
+  singleClickEdit?: never;
   
   /**
    * Grouping Configuration (Airtable-style)
@@ -1377,9 +1385,12 @@ export interface ObjectGridSchema extends BaseSchema {
    *
    * `ObjectGrid` reads it as `schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict on
-   * the object — the one value the grid's inline editing itself obeys. So a grid
-   * that renders editable has it on, a grid that renders read-only keeps its Tab
-   * behaviour unless this is `true`, and `false` turns it off on an editable grid.
+   * the object — the one value the grid's inline editing itself obeys. A grid
+   * that renders read-only keeps its Tab behaviour unless this is `true`. A grid
+   * that renders editable is select-first (objectstack#36270, and with no
+   * staged model left to opt back into since objectstack#35827), and the
+   * select-first model always keeps navigation on, so `false` has no effect
+   * there.
    * @default true when the grid renders editable
    */
   keyboardNavigation?: boolean;
@@ -1432,11 +1443,11 @@ export interface ObjectGridSchema extends BaseSchema {
    * key. Writing it into a stored document does nothing at all.
    *
    * Programmatic callers should prefer `ObjectGridComponentProps`
-   * (`@object-ui/plugin-grid`), which declares ten callbacks: this one, as a
+   * (`@object-ui/plugin-grid`), which declares nine callbacks: this one, as a
    * prop since objectui#9547 — and the prop wins when both are supplied — and
-   * the nine siblings `onRowClick`, `onRowSelect`, `onCellChange`,
-   * `onRowSave`, `onBatchSave`, `onEdit`, `onDelete`, `onBulkDelete`,
-   * `onAddRecord`, which live and only live there, for exactly this reason.
+   * the eight siblings `onRowClick`, `onRowSelect`, `onCellChange`,
+   * `onRowSave`, `onEdit`, `onDelete`, `onBulkDelete`, `onAddRecord`, which
+   * live and only live there, for exactly this reason.
    *
    * The declaration is kept rather than removed: with the key explicitly
    * published, removing it is a breaking public type change plus a deprecation
@@ -2934,11 +2945,13 @@ export interface NamedListView {
   showDensity?: never;
 
   /**
-   * Collapse the toolbar's settings into the single "Display" popover: the
-   * bar keeps Filter, Sort, Display and Search, and Display carries the
-   * layout switcher, Group, Color, Hide fields, Density, Row numbers, Edit
-   * inline, Refresh and Export. On unless a view writes `false`, which keeps
-   * one toolbar button per control (objectui#12423).
+   * Collapse the toolbar's settings into the single "View settings" popover
+   * (objectstack#35878): the view's name, its columns (reorder, hide, add)
+   * and, where the host offers them, Layout, Group, Row height and Row color,
+   * with Save, Restore defaults and Export in its footer. The compact
+   * toolbar draws no Refresh button: Refresh is a wide-toolbar button only, so
+   * `userActions.refresh` changes nothing here. On unless a view writes
+   * `false`, which keeps one toolbar button per control (objectui#12423).
    * @default true
    */
   compactToolbar?: boolean;

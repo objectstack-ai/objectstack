@@ -73,8 +73,8 @@
  *     before the write (`SUB_ISSUE_FENCES` in `ops.mjs`). Both spend
  *     `issues: write`, so they ride any stroke with the other issue ops;
  *   - a stroke carrying `advisory_report`, `advisory_create`,
- *     `advisory_collaborators_add`, `advisory_versions` or `advisory_state`
- *     carries exactly that one action (each row's `alone`) — so a publish
+ *     `advisory_collaborators_add`, `advisory_versions`, `advisory_state` or
+ *     `advisory_severity` carries exactly that one action (each row's `alone`) — so a publish
  *     carries one advisory alone: its token carries
  *     `repository-advisories: write`. A report is `summary` and
  *     `description`, byte-capped, with an optional `severity` from GitHub's
@@ -85,16 +85,22 @@
  *     `collaborators`, a capped list of logins; `versions`, a capped list of
  *     closed entries, each exactly an npm `package`, a
  *     `vulnerable_version_range` and its `patched_versions` in the one
- *     spelling `advisoryVersionEntryFailure` admits; or `advisory_state`,
+ *     spelling `advisoryVersionEntryFailure` admits — a range bound a release
+ *     version or a pre-release of one — with an optional `drop`, a capped list
+ *     of npm names the action removes, none also set by `versions` (the row's
+ *     `disjointPackages`, refused by position, ⛔ never by name); or `advisory_state`,
  *     exactly `draft`, `closed` or `published` — `published` a value since the
  *     maintainer's ruling that the relay publishes, its move the executor's to
- *     fence. ⛔ A refusal names the key and the byte count and never echoes the
+ *     fence; `advisory_severity` names `ghsa_id` and `severity`, the report's
+ *     own enum of GitHub's four (`ops.mjs`, the row's section). ⛔ A refusal
+ *     names the key and the byte count and never echoes the
  *     value: a payload's text reaches a public run log, and a value in the
  *     wrong key may be an advisory's prose (`FIELDS`' `quiet`). Any other key —
  *     a `vulnerabilities`, a `state`, a `credits`, a `collaborating_users`, a
  *     `summary` beside the versions — is refused by name. The fences on the
  *     ADVISORY — readable, the one named, a state the action may act in, a
- *     list the versions may replace, versions set before a publish — are
+ *     list the versions may replace, each `drop` a package it lists, versions
+ *     set before a publish — are
  *     facts this file cannot see: the executor judges them on its own read
  *     before the PATCH (`ADVISORY_FENCES` in `ops.mjs`);
  *   - a stroke carrying `advisory_read` carries exactly that one action too,
@@ -104,7 +110,10 @@
  *     its one spelling, a key a secret can be derived with
  *     (`advisoryReadKeyFailure` in `ops.mjs`), refused here before any
  *     request; a refusal names the key, the byte count and what the value
- *     failed to be, ⛔ never the value. Any other key — a `summary`, a
+ *     failed to be, ⛔ never the value. It may name `page` (1 to
+ *     `ADVISORY_READ_MAX_PAGES`, a quiet integer: a refusal never echoes it),
+ *     the one page of the answer its stroke seals (`ops.mjs`, "One page a
+ *     stroke"). Any other key — a `summary`, a
  *     `private_key`, a `state` — is refused by name. The fences on the READ —
  *     readable, the one named, a sender the gate admits — are the executor's,
  *     on its own GET (`ADVISORY_READ_FENCES` in `ops.mjs`);
@@ -136,9 +145,10 @@
  * them and empty for every other — and `permission_repository_advisories=read`
  * for an `advisory_read` or `advisory_list` stroke, the two rows whose `grant`
  * is lower than `PERMISSIONS` holds. One more line marks an `advisory_note`
- * stroke, `advisory_note=yes`, and is empty for every other: the execute step
- * reads it to carry the relay's note key for that stroke alone (`ops.mjs`,
- * "The one row that APPENDS to an advisory"). The
+ * or `advisory_rewrite` stroke — the two rows sealed to the relay's note key —
+ * `advisory_note=yes`, and is empty for every other: the execute step reads it
+ * to carry the relay's note key for that stroke alone (`ops.mjs`, "The one row
+ * that APPENDS to an advisory" and "The one row that REPLACES"). The
  * workflow reads those outputs and never the payload, and `--self-test` pins
  * the list to ONE name for every other op, two for a transfer, the grant to
  * those two rows alone, and the workflow lines that read both.
@@ -226,7 +236,11 @@ import {
   advisoryVersionsOf,
   advisoryVersionsOnTheWire,
   advisoryVersionsReadBack,
-  compareReleaseVersions,
+  ADVISORY_BOUND_VERSION_SHAPE,
+  ADVISORY_VERSION_SHAPE,
+  advisoryDropOverlap,
+  compareAdvisoryVersions,
+  dropPositionsText,
   inAdvisoryRange,
   advisoryRangeComparators,
   CWE_ID_SHAPE,
@@ -271,12 +285,14 @@ import {
   advisoryListCall,
   advisoryListDisplay,
   advisoryListFieldSentence,
+  advisoryListLinkShape,
   advisoryListNextCursor,
   advisoryListPadded,
   advisoryListPageFailure,
   advisoryListPagePath,
   advisoryListPlaintext,
   advisoryListProjection,
+  advisoryListRepoIdOf,
   advisorySealAad,
   advisoryReadAad,
   ADVISORY_DESCRIPTION_MAX_CHARS,
@@ -289,6 +305,21 @@ import {
   ADVISORY_NOTE_RELAY_PUBLIC_KEY,
   ADVISORY_NOTE_SEPARATOR,
   ADVISORY_NOTE_STATES,
+  ADVISORY_REWRITE_FIELDS,
+  ADVISORY_REWRITE_STATES,
+  ADVISORY_SEVERITY_FENCES,
+  ADVISORY_SEVERITY_STATES,
+  advisoryCvssVectorOf,
+  advisorySeverityFenceFailures,
+  advisorySeverityLandedText,
+  advisorySeverityReadBack,
+  ADVISORY_SUMMARY_MAX_CHARS,
+  advisoryRewriteFailure,
+  advisoryRewriteFenceFailures,
+  advisoryRewriteLandedText,
+  advisoryRewriteReadBack,
+  advisoryRewriteStoredDigest,
+  advisoryRewriteText,
   MAX_ADVISORY_NOTE_BYTES,
   advisoryNoteDescription,
   advisoryNoteDigest,
@@ -303,8 +334,19 @@ import {
   advisoryReadFenceFailures,
   advisoryReadFenceText,
   advisoryReadKeyFailure,
-  advisoryReadLandedText,
-  advisoryReadOverCapText,
+  ADVISORY_READ_LANDED,
+  ADVISORY_READ_MAX_PAGES,
+  ADVISORY_READ_OVER_CAP,
+  ADVISORY_READ_PAGE_BYTES,
+  ADVISORY_READ_PAGE_CHUNK_BYTES,
+  ADVISORY_READ_PAGE_HEADER_BYTES,
+  ADVISORY_READ_PAGES_DISAGREE,
+  ADVISORY_READ_PAGES_MISSING,
+  ADVISORY_READ_PAGES_TORN,
+  advisoryReadAssemble,
+  advisoryReadPage,
+  advisoryReadPageOf,
+  advisoryReadPageSpans,
   advisoryReadParts,
   advisoryReadPlaintext,
   openAdvisoryRead,
@@ -313,6 +355,7 @@ import {
   advisoryCreateLandedText,
   advisoryCreateReadBack,
   advisoryFenceFailures,
+  advisoryNoteSectionCount,
   advisoryFenceText,
   advisoryLandedText,
   advisoryPlatformText,
@@ -396,7 +439,10 @@ export function readEventPayload(env = process.env, read = (p) => readFileSync(p
 export function validateField(name, value, spec, where) {
   const at = `${where}.${name}`;
   if (spec.kind === 'int') {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${quote(value)}`;
+    // ⛔ A quiet int never echoes the value (`FIELDS`): it is described by its type and size. `max` caps it (a read's page).
+    const got = spec.quiet ? `${describeQuietly(value)} — not echoed` : quote(value);
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${got}`;
+    if (spec.max !== undefined && value > spec.max) return `${at} must be at most ${spec.max}, got ${got}`;
     return null;
   }
   if (spec.kind === 'str') {
@@ -524,6 +570,13 @@ export function validateAction(action, index, repo) {
     if (a in action && b in action && !refusedKeys.has(a) && !refusedKeys.has(b) && action[a] === action[b]) {
       errors.push(`${where}.${b} is ${quote(action[b])}, the same as ${a} — \`${op}\` links two different issues, and an issue is never its own sub-issue`);
     }
+  }
+  // A package the row drops is never one it sets (`disjointPackages`, ops.mjs): judged only on values the field kinds
+  // admitted, and named by its position in the list, ⛔ never by its name — a refusal reaches the public run log.
+  if (spec.disjointPackages) {
+    const [a, b] = spec.disjointPackages;
+    const both = a in action && b in action && !refusedKeys.has(a) && !refusedKeys.has(b) ? advisoryDropOverlap(action[a], action[b]) : [];
+    if (both.length) errors.push(`${where}.${a}: ${dropPositionsText(both)} name${both.length === 1 ? 's' : ''} a package ${b} also sets — a package is either dropped or set, never both; not echoed`);
   }
   return errors;
 }
@@ -767,15 +820,20 @@ export function readPayloadSource(opts, { env = process.env, read = (p) => readF
  * single-line by construction of the validator. One `permission_<name>=` line
  * per stroke-scoped grant: its level when this stroke spends it, EMPTY
  * otherwise — the mint action skips an empty `permission-*` input. Then
- * `advisory_note=yes` for a note's stroke and `advisory_note=` for every other:
- * the one output the execute step's env reads, to carry the relay's note key.
+ * `advisory_note=yes` for a note's or a rewrite's stroke (`SEALED_TO_RELAY_OPS`)
+ * and `advisory_note=` for every other: the one output the execute step's env
+ * reads, to carry the relay's note key.
  */
+/** The rows whose stroke carries a seal to the relay's note key — derived from the table: those requiring a `sealed_note`. */
+export const SEALED_TO_RELAY_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].required.includes('sealed_note')));
+
 export function githubOutputLines(payload) {
   const repositories = tokenRepositoriesOf(payload).map((r) => r.split('/')[1]).join(',');
   const grants = tokenPermissionsOf(payload);
   const scoped = STROKE_SCOPED_PERMISSIONS.map((name) => `permission_${name.replace(/-/g, '_')}=${grants[name] ?? ''}`);
-  // The note's stroke alone is marked, so the workflow hands the relay's note key to that execute step and no other (header).
-  const note = `${ADVISORY_NOTE_OUTPUT}=${payload.actions.some((a) => a.op === 'advisory_note') ? 'yes' : ''}`;
+  // A stroke sealed to the relay's note key alone is marked — a note's or a rewrite's, the rows that require a
+  // `sealed_note` — so the workflow hands that key to that execute step and no other (header).
+  const note = `${ADVISORY_NOTE_OUTPUT}=${payload.actions.some((a) => SEALED_TO_RELAY_OPS.includes(a.op)) ? 'yes' : ''}`;
   return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped, note].join('\n') + '\n';
 }
 
@@ -1123,17 +1181,22 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the pr_dequeue row: pull, expected_head_sha, a cause from the closed three and a bounded reason, and nothing that widens them; ONE dequeuePullRequest mutation behind the pull's node id; a stroke of exactly that one action; merge-queues write minted for that stroke, EMPTY for every other; contents and issues its literal alsoSpends; the fences on the pull, its queue and the cause named and left to the executor": 11,
   "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
   "the event file: the workflow carries client_payload in no step's env, and the payload is read from GITHUB_EVENT_PATH": 6,
-  "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 77,
+  "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 90,
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
-  "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 21,
+  "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 28,
   "advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text": 22,
+  "advisory_rewrite: ghsa_id and sealed_note alone — the note's field, seal, key and mark, so the workflow hands it the relay's note key unchanged; ONE PATCH of one advisory whose fields are the executor's; alone; a payload carrying no plaintext and no file key; the rewrite's own associated data, so a note never opens as a rewrite; the fences refusing a published or withdrawn advisory; the text judged, an empty description refused; the read-back and the round-trip keyed digest over the stored text, printing no byte of either field": 14,
+  "advisory_severity: ghsa_id and severity alone — severity the report's own quiet enum of GitHub's four, one copy; a missing or malformed id, a missing severity, a value outside the four and any other key each refused before any request, naming the key and echoing no value; ONE PATCH of one advisory whose body is exactly { severity }; alone; repository-advisories write minted for its stroke; the fences refusing a published or withdrawn advisory and one carrying a CVSS vector; the read-back landing only on the severity sent, and no sentence carrying the severity word": 17,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
 // 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
-// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's.
-const SELF_TEST_BATTERY_FLOOR = 22;
+// table's repository key; 20 → 21 with advisory_note's; 21 → 22 with pr_dequeue's; 22 → 23 with advisory_rewrite's;
+// 23 → 24 with advisory_severity's.
+const SELF_TEST_BATTERY_FLOOR = 24;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
+const SEVERITY_BATTERY = "advisory_severity: ghsa_id and severity alone — severity the report's own quiet enum of GitHub's four, one copy; a missing or malformed id, a missing severity, a value outside the four and any other key each refused before any request, naming the key and echoing no value; ONE PATCH of one advisory whose body is exactly { severity }; alone; repository-advisories write minted for its stroke; the fences refusing a published or withdrawn advisory and one carrying a CVSS vector; the read-back landing only on the severity sent, and no sentence carrying the severity word";
+const REWRITE_BATTERY = "advisory_rewrite: ghsa_id and sealed_note alone — the note's field, seal, key and mark, so the workflow hands it the relay's note key unchanged; ONE PATCH of one advisory whose fields are the executor's; alone; a payload carrying no plaintext and no file key; the rewrite's own associated data, so a note never opens as a rewrite; the fences refusing a published or withdrawn advisory; the text judged, an empty description refused; the read-back and the round-trip keyed digest over the stored text, printing no byte of either field";
 
 const batteryCases = new Map();
 let openBattery = null;
@@ -1191,6 +1254,9 @@ export async function selfTest() {
   const RELAY = keyPair();
   const NOTE_TEXT = 'NOTE MARKER: a synthetic analysis line, never to be logged';
   const NOTE_SEALED = sealAdvisoryNote({ section: NOTE_TEXT, digestKey: Buffer.alloc(32, 7), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA }) });
+  /** One rewrite sealed to the same synthetic relay key, through the note's own sealing path, under the rewrite's associated data. */
+  const REWRITE_TEXT = advisoryRewriteText({ summary: 'REWRITE MARKER: a synthetic public summary', description: 'REWRITE MARKER: a synthetic public description,\nnever to be logged' });
+  const REWRITE_SEALED = sealAdvisoryNote({ section: REWRITE_TEXT, digestKey: Buffer.alloc(32, 5), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_rewrite', ghsaId: GHSA }) });
   /** One `$GITHUB_OUTPUT` line of a judged payload, by its name — the scoped grants are two lines, so none is read by position. */
   const outputLine = (payload, name) => githubOutputLines(payload).split('\n').find((l) => l.startsWith(`${name}=`)) ?? null;
 
@@ -1299,6 +1365,8 @@ export async function selfTest() {
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
       advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
+      advisory_rewrite: { ghsa_id: GHSA, sealed_note: REWRITE_SEALED },
+      advisory_severity: { ghsa_id: GHSA, severity: 'high' },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -1493,6 +1561,8 @@ export async function selfTest() {
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
       advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
+      advisory_rewrite: { ghsa_id: GHSA, sealed_note: REWRITE_SEALED },
+      advisory_severity: { ghsa_id: GHSA, severity: 'high' },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1535,7 +1605,7 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: pr_enqueue_front, pr_dequeue, workflow_dispatch, run_rerun_failed and the eight advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'pr_dequeue', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'], ['transfer']]);
+    t('the only rows that travel alone or widen the token: pr_enqueue_front, pr_dequeue, workflow_dispatch, run_rerun_failed and the ten advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'pr_dequeue', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note', 'advisory_rewrite', 'advisory_severity'], ['transfer']]);
     t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
@@ -1700,6 +1770,8 @@ export async function selfTest() {
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
       advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
+      advisory_rewrite: { ghsa_id: GHSA, sealed_note: REWRITE_SEALED },
+      advisory_severity: { ghsa_id: GHSA, severity: 'high' },
     };
     const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
     t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
@@ -1923,8 +1995,8 @@ export async function selfTest() {
   battery("the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts");
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
-    // The seven rows spending repository-advisories: the five that write, then the two that read (their own batteries below).
-    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'];
+    // The ten rows spending repository-advisories: the five that write here, the two that read, the two sealed to the relay's note key and the severity (their own batteries below).
+    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note', 'advisory_rewrite', 'advisory_severity'];
     const report = (extra = {}) => ({ op: 'advisory_report', summary: 'A short summary.', description: 'What, where, how to reproduce.', ...extra });
     const draft = (extra = {}) => ({ op: 'advisory_create', summary: 'A short summary.', description: 'What, where, how to reproduce.', packages: ['@objectstack/rest'], ...extra });
     const add = (extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'], ...extra });
@@ -1937,7 +2009,7 @@ export async function selfTest() {
     /** A second release line of the same package — a package may take one entry per line it was fixed on. */
     const LINE_17 = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' });
     // The rows and their requests.
-    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions or advisory_state, the read ghsa_id with public_key, the listing public_key alone, and the note ghsa_id with sealed_note; all eight spend repository-advisories alone — the six that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null]]);
+    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions — optionally drop — or advisory_state, the read ghsa_id with public_key — optionally page — the listing public_key alone, the note and the rewrite ghsa_id with sealed_note, and the severity ghsa_id with severity; all ten spend repository-advisories alone — the eight that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], ['drop'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], ['page'], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'severity'], [], 'repository-advisories', null, null, true, null, null]]);
     t('the fields: summary and description byte-capped strings — 1024 and the body cap; severity GitHub\'s four, quiet; cwe_ids a quiet capped list of CWE ids; ghsa_id its own kind; collaborators a quiet login list capped like assignees; advisory_state a quiet enum of draft, closed and published — by the maintainer\'s ruling no state is refused by name any more', [FIELDS.summary, FIELDS.description.max === FIELDS.body.max, [...FIELDS.severity.values], FIELDS.severity.quiet, [FIELDS.cwe_ids.kind, FIELDS.cwe_ids.max, FIELDS.cwe_ids.shape === CWE_ID_SHAPE, FIELDS.cwe_ids.quiet], FIELDS.ghsa_id, [FIELDS.collaborators.max === FIELDS.assignees.max, FIELDS.collaborators.itemMax === FIELDS.assignees.itemMax, FIELDS.collaborators.shape === LOGIN_SHAPE, FIELDS.collaborators.quiet], [[...FIELDS.advisory_state.values], FIELDS.advisory_state.quiet, Object.keys(FIELDS.advisory_state.named)]], [{ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }, true, ['critical', 'high', 'medium', 'low'], true, ['list', 10, true, true], { kind: 'ghsa' }, [true, true, true, true], [['draft', 'closed', 'published'], true, []]]);
     const filed = OPS.advisory_report.requests(report(), REPO);
     const filedFull = OPS.advisory_report.requests(report({ severity: 'high', cwe_ids: ['CWE-79', 'CWE-352'] }), REPO);
@@ -1951,29 +2023,39 @@ export async function selfTest() {
     const moved = OPS.advisory_state.requests(move('closed'), REPO);
     t("the two id rows are ONE PATCH of one advisory's path each, carrying NO body of the payload's — the executor sends { collaborating_users } or { state } after its own GET — and the id with the logins or the state asked for", [patched.length, patched[0].verb, patched[0].path, 'body' in patched[0], patched[0].advisoryCollaborators, moved.length, moved[0].verb, moved[0].path, 'body' in moved[0], moved[0].advisoryState], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, add: ['a', 'B'] }, 1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, to: 'closed' }]);
     t('the versions field: its own kind, quiet, at most ten entries — a package may take one per release line — each exactly package, vulnerable_version_range and patched_versions, a patched list of at most five', [FIELDS.versions, MAX_ADVISORY_VERSION_ENTRIES, [...ADVISORY_VERSION_KEYS], MAX_ADVISORY_PATCHED_VERSIONS], [{ kind: 'versions', max: 10, quiet: true }, 10, ['package', 'vulnerable_version_range', 'patched_versions'], 5]);
+    t('the drop field: a quiet list of npm package names capped like a draft\'s packages, shaped by NPM_PACKAGE_SHAPE; the versions row alone takes it, and holds it disjoint from the packages its versions set; no other row declares disjointPackages', [FIELDS.drop.kind, FIELDS.drop.max === MAX_ADVISORY_PACKAGES, FIELDS.drop.itemMax === MAX_NPM_PACKAGE_CHARS, FIELDS.drop.shape === NPM_PACKAGE_SHAPE, FIELDS.drop.quiet, OP_NAMES.filter((op) => OPS[op].optional.includes('drop') || OPS[op].required.includes('drop')), OP_NAMES.filter((op) => OPS[op].disjointPackages).map((op) => [op, [...OPS[op].disjointPackages]])], ['list', true, true, true, true, ['advisory_versions'], [['advisory_versions', ['drop', 'versions']]]]);
+    const dropping = OPS.advisory_versions.requests(setv({ versions: [VERSION], drop: ['hotcrm', '@objectstack/client'] }), REPO);
+    t("⭐ a drop NEVER reaches the body: the PATCH is still { vulnerabilities } of the entries alone, and the drop rides the descriptor, a copy, for the executor's fence and read-back", [dropping.length, Object.keys(dropping[0].body), dropping[0].body.vulnerabilities.length, JSON.stringify(dropping[0].body).includes('hotcrm'), dropping[0].advisoryVersions], [1, ['vulnerabilities'], 1, false, { ghsaId: GHSA, versions: [VERSION], drop: ['hotcrm', '@objectstack/client'] }]);
     const versioned = OPS.advisory_versions.requests(setv({ versions: [VERSION, LINE_17] }), REPO);
     t("⭐ advisory_versions is ONE PATCH of one advisory's path whose body is { vulnerabilities } and NOTHING else — per entry the npm ecosystem, the name, the range and the patched versions, no vulnerable function, no state, no summary or description — and the id with the entries for the executor's fences and read-back", [versioned.length, versioned[0].verb, versioned[0].path, Object.keys(versioned[0].body), versioned[0].body.vulnerabilities, versioned[0].body.vulnerabilities.map((v) => [Object.keys(v), Object.keys(v.package)]), versioned[0].advisoryVersions, REFUSED_PATH_FAMILIES.filter((re) => re.test(versioned[0].path)).length], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, ['vulnerabilities'], [{ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0' }, { package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' }], [0, 1].map(() => [['package', 'vulnerable_version_range', 'patched_versions'], ['ecosystem', 'name']]), { ghsaId: GHSA, versions: [VERSION, LINE_17] }, 0]);
     t("…and the publish is advisory_state's ONE PATCH, its body left to the executor like every state's: the descriptor names the id and published", OPS.advisory_state.requests(move('published'), REPO).map((r) => [r.verb, r.path, 'body' in r, r.advisoryState]), [['PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, to: 'published' }]]);
     // Accepted.
-    const acceptedActions = [report(), report({ severity: 'low', cwe_ids: ['CWE-79'] }), draft(), draft({ packages: ['@objectstack/rest', 'hotcrm', 'create-objectstack'], severity: 'critical', cwe_ids: ['CWE-863'] }), add(), setv(), setv({ versions: [VERSION, LINE_17, { package: 'hotcrm', vulnerable_version_range: '< 2.1.0', patched_versions: '2.1.0' }] }), move('draft'), move('closed'), move('published')];
+    const acceptedActions = [report(), report({ severity: 'low', cwe_ids: ['CWE-79'] }), draft(), draft({ packages: ['@objectstack/rest', 'hotcrm', 'create-objectstack'], severity: 'critical', cwe_ids: ['CWE-863'] }), add(), setv(), setv({ versions: [VERSION, LINE_17, { package: 'hotcrm', vulnerable_version_range: '< 2.1.0', patched_versions: '2.1.0' }] }), setv({ drop: ['hotcrm'] }), setv({ versions: [VERSION, { package: 'hotcrm', vulnerable_version_range: '>= 17.0.0-rc.6, < 18.6.0', patched_versions: '18.6.0' }], drop: ['@objectstack/client', 'create-objectstack'] }), move('draft'), move('closed'), move('published')];
     const accepted = acceptedActions.map((a) => validatePayload(one(a)));
-    t('accepted: a report and a draft with and without their optional keys, the collaborators, versions for one entry and for two lines of one package beside another package, and each of the three states — each normalised to exactly what was sent', accepted.map((v) => [v.ok, v.payload?.actions[0]]), acceptedActions.map((a) => [true, a]), accepted.flatMap((v) => v.errors).join(' | '));
+    t('accepted: a report and a draft with and without their optional keys, the collaborators, versions for one entry and for two lines of one package beside another package, versions with a drop of one package and of two beside a pre-release bound, and each of the three states — each normalised to exactly what was sent', accepted.map((v) => [v.ok, v.payload?.actions[0]]), acceptedActions.map((a) => [true, a]), accepted.flatMap((v) => v.errors).join(' | '));
     const sentEntry = { ...VERSION };
     const normalised = validatePayload(one(setv({ versions: [sentEntry] }))).payload;
     t('…and a normalised entry is a copy: the payload that travels shares no object with the action it judged', [normalised?.actions[0].versions[0] === sentEntry, normalised?.actions[0].versions[0]], [false, VERSION]);
     // The versions entries, judged by value — each refusal naming the entry and the key, ⛔ never the value.
     const spelled = (range, patched) => validatePayload(one(setv({ versions: [{ package: '@objectstack/rest', vulnerable_version_range: range, patched_versions: patched }] }))).ok;
-    const goodSpellings = [['< 1.0.1', '1.0.1'], ['<= 18.2.0', '18.3.0'], ['= 1.0.0', '1.0.1'], ['> 2.0.0', '1.9.9'], ['>= 3.0.0', '2.9.0'], ['>= 1.0.0, < 1.0.1', '1.0.1'], ['> 0.9.0, <= 1.0.0', '1.0.1, 2.0.0'], ['>= 1.0.0, < 999999.0.0', '0.9.0, 999999.0.0']];
-    t("⭐ accepted spellings: one comparator of each operator, a lower bound then an upper bound — GitHub's own example spelling among them — and one or more patched versions outside the range", goodSpellings.filter(([r, p]) => !spelled(r, p)), []);
-    const badRanges = ['>=1.0.0', '>=  1.0.0', 'v1.0.0', '< v1.0.0', '1.0.0', '^1.0.0', '~1.0.0', '< 1.0', '< 1.0.0-beta.1', '< 1.0.0+build', '< 01.0.0', '< 1.0.0 ', ' < 1.0.0', '<= 1.0.0, >= 0.5.0', '>= 1.0.0,< 2.0.0', '>= 1.0.0 < 2.0.0', '>= 1.0.0, < 2.0.0, < 3.0.0', '= 1.0.0, < 2.0.0', '< 1.0.0 || > 2.0.0', '< 1234567.0.0', '', 7, null, ['< 1.0.0']];
-    t('⛔ ranges refused, naming vulnerable_version_range: no space or two, a v prefix, a bare version, a caret or tilde, two parts, a pre-release or build tag, a leading zero, stray spaces, an upper bound first, a missing space or comma, three comparators, an equality in a pair, an or-range, a seven-digit part, empty, a number, null and an array', badRanges.filter((range) => !refuses(one(setv({ versions: [{ ...VERSION, vulnerable_version_range: range }] })), 'actions[0].versions[0].vulnerable_version_range must be one comparator')).map(String), []);
-    t('⛔ …and a pair whose bounds do not rise — equal, or falling — is refused naming it', [['>= 2.0.0, < 1.0.0', '2.1.0'], ['>= 1.0.0, <= 1.0.0', '1.0.1']].map(([r, p]) => errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: r, patched_versions: p }] }))), [0, 1].map(() => ['actions[0].versions[0].vulnerable_version_range has a lower bound that is not below its upper bound']));
+    const goodSpellings = [['< 1.0.1', '1.0.1'], ['<= 18.2.0', '18.3.0'], ['= 1.0.0', '1.0.1'], ['> 2.0.0', '1.9.9'], ['>= 3.0.0', '2.9.0'], ['>= 1.0.0, < 1.0.1', '1.0.1'], ['> 0.9.0, <= 1.0.0', '1.0.1, 2.0.0'], ['>= 1.0.0, < 999999.0.0', '0.9.0, 999999.0.0'], ['>= 17.0.0-rc.6, < 18.6.0', '18.6.0'], ['>= 3.4.0-rc.0, <= 3.4.9', '3.4.10'], ['< 19.0.0-next.1', '19.0.0'], ['= 16.0.0-rc-1', '16.0.0'], ['>= 1.0.0-alpha, < 1.0.0', '1.0.0'], ['>= 1.0.0-rc.2, < 1.0.0-rc.10', '1.0.0'], ['> 2.0.0-beta.1.x-y.0, <= 2.0.0-beta.2', '2.0.0']];
+    t("⭐ accepted spellings: one comparator of each operator, a lower bound then an upper bound — GitHub's own example spelling among them — and one or more patched versions outside the range; a pre-release as either bound or as one comparator — rc, next, a hyphenated rc-1, a bare word, a numeric run compared as a number (rc.2 below rc.10), four identifiers — GitHub's own guide's example among them", goodSpellings.filter(([r, p]) => !spelled(r, p)), []);
+    const badRanges = ['>=1.0.0', '>=  1.0.0', 'v1.0.0', '< v1.0.0', '1.0.0', '^1.0.0', '~1.0.0', '< 1.0', '< 1.0.0+build', '< 1.0.0-rc.1+build', '< 1.0.0-', '< 1.0.0-rc.', '< 1.0.0-rc..1', '< 1.0.0-01', '< 1.0.0-rc.01', '< 1.0.0-rc_1', '< 1.0.0-rc 1', '< 1.0.0-a.b.c.d.e', `< 1.0.0-${'a'.repeat(21)}`, '< 1.0.0-rc.1234567', '< 01.0.0', '< 1.0.0 ', ' < 1.0.0', '<= 1.0.0, >= 0.5.0', '>= 1.0.0,< 2.0.0', '>= 1.0.0 < 2.0.0', '>= 1.0.0, < 2.0.0, < 3.0.0', '= 1.0.0, < 2.0.0', '< 1.0.0 || > 2.0.0', '< 1234567.0.0', '', 7, null, ['< 1.0.0']];
+    t('⛔ ranges refused, naming vulnerable_version_range: no space or two, a v prefix, a bare version, a caret or tilde, two parts, a build tag on a release or a pre-release, a pre-release that is empty, ends on a dot, has an empty identifier, a leading zero in a numeric identifier, an underscore or a space, five identifiers, a 21-character identifier or a seven-digit number, a leading zero, stray spaces, an upper bound first, a missing space or comma, three comparators, an equality in a pair, an or-range, a seven-digit part, empty, a number, null and an array', badRanges.filter((range) => !refuses(one(setv({ versions: [{ ...VERSION, vulnerable_version_range: range }] })), 'actions[0].versions[0].vulnerable_version_range must be one comparator')).map(String), []);
+    t('⛔ …and a pair whose bounds do not rise — equal, or falling — is refused naming it, by semver precedence: a release above its own pre-release, rc.10 above rc.2 as numbers, equal pre-releases, and rc above beta as words', [['>= 2.0.0, < 1.0.0', '2.1.0'], ['>= 1.0.0, <= 1.0.0', '1.0.1'], ['>= 18.0.0, < 18.0.0-rc.1', '18.0.1'], ['>= 1.0.0-rc.10, < 1.0.0-rc.2', '1.0.0'], ['>= 1.0.0-rc.1, < 1.0.0-rc.1', '1.0.0'], ['>= 1.0.0-rc, < 1.0.0-beta', '1.0.0']].map(([r, p]) => errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: r, patched_versions: p }] }))), [0, 1, 2, 3, 4, 5].map(() => ['actions[0].versions[0].vulnerable_version_range has a lower bound that is not below its upper bound']));
     const badPatched = ['>= 18.3.0', '18.3', 'v18.3.0', '18.3.0,18.4.0', '18.3.0 , 18.4.0', '18.3.0-rc.1', '18.3.0, 18.4.0, 18.5.0, 18.6.0, 18.7.0, 18.8.0', '', 18, null];
     t('⛔ patched versions refused, naming patched_versions: an operator, two parts, a v prefix, a missing space or a stray one, a pre-release, six versions, empty, a number and null', badPatched.filter((patched) => !refuses(one(setv({ versions: [{ ...VERSION, patched_versions: patched }] })), 'actions[0].versions[0].patched_versions must be one to 5 release versions')).map(String), []);
+    t('⛔ …a pre-release patched version is refused saying so by name — a pre-release is a range bound only — and a release patched version inside a range with a pre-release lower bound is refused as inside it, by precedence, while one at its exclusive upper bound passes', [errorsOf(setv({ versions: [{ ...VERSION, patched_versions: '18.3.0-rc.1' }] }))[0]?.includes('a pre-release is a range bound only, never a patched version'), errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: '>= 17.0.0-rc.6, < 18.6.0', patched_versions: '17.0.0' }] })), errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: '>= 17.0.0-rc.6, < 17.0.0', patched_versions: '17.0.0' }] }))], [true, ["actions[0].versions[0].patched_versions names 1 version(s) inside the entry's own vulnerable_version_range — a patched version is never a vulnerable one"], []]);
     t('⛔ …a version named twice, and a patched version INSIDE its own range — the classic swap — refused naming it, the version never', [errorsOf(setv({ versions: [{ ...VERSION, patched_versions: '18.3.0, 18.3.0' }] })), errorsOf(setv({ versions: [{ ...VERSION, patched_versions: '18.2.0' }] })), errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: '>= 18.0.0, < 18.3.0', patched_versions: '17.9.4, 18.3.0, 18.2.9' }] }))], [['actions[0].versions[0].patched_versions names a version twice'], ["actions[0].versions[0].patched_versions names 1 version(s) inside the entry's own vulnerable_version_range — a patched version is never a vulnerable one"], ["actions[0].versions[0].patched_versions names 1 version(s) inside the entry's own vulnerable_version_range — a patched version is never a vulnerable one"]]);
     t('⛔ entries refused: none, eleven, one twice, an entry that is a string, an array or null, one missing each key, one carrying vulnerable_functions, an ecosystem or a state, and a package that is no npm name — a name with a version after it, an uppercase name, a URL', [[], Array.from({ length: 11 }, (_, i) => ({ ...VERSION, vulnerable_version_range: `< ${i + 1}.0.0`, patched_versions: `${i + 1}.0.0` })), [VERSION, { ...VERSION }], ['x'], [[VERSION]], [null], [{ package: VERSION.package, patched_versions: '18.3.0' }], [{ package: VERSION.package, vulnerable_version_range: '<= 18.2.0' }], [{ vulnerable_version_range: '<= 18.2.0', patched_versions: '18.3.0' }], [{ ...VERSION, vulnerable_functions: ['f'] }], [{ ...VERSION, ecosystem: 'npm' }], [{ ...VERSION, state: 'published' }], [{ ...VERSION, package: 'hotcrm@1.0.0' }], [{ ...VERSION, package: 'React' }], [{ ...VERSION, package: 'https://npmjs.com/hotcrm' }]].filter((versions) => !refuses(one(setv({ versions })), 'actions[0].versions')).length, 0);
     t('…each refusal names WHAT is wrong in its own words: the cap, the duplicate, an entry that is no object, a missing key, a key no entry takes, a package that is no npm name', [errorsOf(setv({ versions: Array.from({ length: 11 }, () => VERSION) })), errorsOf(setv({ versions: [VERSION, { ...VERSION }] })), errorsOf(setv({ versions: ['x'] })), errorsOf(setv({ versions: [{ package: VERSION.package, patched_versions: '18.3.0' }] })), errorsOf(setv({ versions: [{ ...VERSION, vulnerable_functions: ['f'] }] })), errorsOf(setv({ versions: [{ ...VERSION, package: 'React' }] }))], [['actions[0].versions names 11 entries, over its cap of 10'], ['actions[0].versions names an entry twice'], ['actions[0].versions[0] must be an object of package, vulnerable_version_range, patched_versions, got a string of 1 byte(s)'], ['actions[0].versions[0] has no vulnerable_version_range — an entry carries all three'], ['actions[0].versions[0] carries vulnerable_functions — an entry is exactly package, vulnerable_version_range, patched_versions'], ['actions[0].versions[0].package must be an npm package name, got a string of 5 byte(s) that is not one — not echoed']]);
-    t('the release versions compare by number, part by part, and a range holds a version only when every comparator does', [compareReleaseVersions('18.10.0', '18.9.9') > 0, compareReleaseVersions('1.0.0', '1.0.0'), compareReleaseVersions('0.9.9', '1.0.0') < 0, advisoryRangeComparators('>= 17.0.0, < 17.9.4'), ['16.9.9', '17.0.0', '17.9.3', '17.9.4'].map((v) => inAdvisoryRange(v, advisoryRangeComparators('>= 17.0.0, < 17.9.4'))), advisoryRangeComparators('>=17.0.0'), advisoryRangeComparators(null)], [true, 0, true, [{ op: '>=', version: '17.0.0' }, { op: '<', version: '17.9.4' }], [false, true, true, false], null, null]);
+    t('the release versions compare by number, part by part, and a range holds a version only when every comparator does', [compareAdvisoryVersions('18.10.0', '18.9.9') > 0, compareAdvisoryVersions('1.0.0', '1.0.0'), compareAdvisoryVersions('0.9.9', '1.0.0') < 0, advisoryRangeComparators('>= 17.0.0, < 17.9.4'), ['16.9.9', '17.0.0', '17.9.3', '17.9.4'].map((v) => inAdvisoryRange(v, advisoryRangeComparators('>= 17.0.0, < 17.9.4'))), advisoryRangeComparators('>=17.0.0'), advisoryRangeComparators(null)], [true, 0, true, [{ op: '>=', version: '17.0.0' }, { op: '<', version: '17.9.4' }], [false, true, true, false], null, null]);
+    const ladder = ['1.0.0-alpha', '1.0.0-alpha.1', '1.0.0-alpha.beta', '1.0.0-beta', '1.0.0-beta.2', '1.0.0-beta.11', '1.0.0-rc.1', '1.0.0', '1.0.1-0', '1.0.1'];
+    t("⭐ pre-releases compare by semver precedence — the specification's own ladder, each strictly below the next, a pre-release below its release — and a pre-release lower bound holds its rc, the release after it and nothing before it", [ladder.slice(1).map((v, i) => compareAdvisoryVersions(ladder[i], v) < 0 && compareAdvisoryVersions(v, ladder[i]) > 0), compareAdvisoryVersions('17.0.0-rc-1', '17.0.0-rc-1'), ['17.0.0-rc.5', '17.0.0-rc.6', '17.0.0-rc.10', '17.0.0', '18.5.9', '18.6.0-rc.1', '18.6.0'].map((v) => inAdvisoryRange(v, advisoryRangeComparators('>= 17.0.0-rc.6, < 18.6.0'))), [ADVISORY_BOUND_VERSION_SHAPE.test('17.0.0-rc.6'), ADVISORY_BOUND_VERSION_SHAPE.test('17.0.0+b'), ADVISORY_VERSION_SHAPE.test('17.0.0-rc.6')]], [ladder.slice(1).map(() => true), 0, [false, true, true, true, true, true, false], [true, false, false]]);
+    // The drop, judged by value — one refusal per bad input, each naming the key and a position, ⛔ never a name.
+    t('⛔ drop refused, one refusal each in its own words: an entry that is no npm name, a name the versions also set, an empty list, a name twice, eleven names, a string and an entry that is an object', [errorsOf(setv({ drop: ['React'] })), errorsOf(setv({ versions: [VERSION, { ...VERSION, package: 'hotcrm', vulnerable_version_range: '< 2.1.0', patched_versions: '2.1.0' }], drop: ['create-objectstack', '@objectstack/rest', 'hotcrm'] })), errorsOf(setv({ drop: [] })), errorsOf(setv({ drop: ['hotcrm', 'hotcrm'] })), errorsOf(setv({ drop: Array.from({ length: 11 }, (_, i) => `p${i}`) })), errorsOf(setv({ drop: 'hotcrm' })), errorsOf(setv({ drop: [{ name: 'hotcrm' }] }))], [['actions[0].drop[0] must be an npm package name, got a string of 5 byte(s) that is not one — not echoed'], ['actions[0].drop: drop[1], drop[2] name a package versions also sets — a package is either dropped or set, never both; not echoed'], ['actions[0].drop must name at least one item'], ['actions[0].drop names an item twice'], ['actions[0].drop names 11 items, over its cap of 10'], ['actions[0].drop must be an array of strings, got string'], ['actions[0].drop[0] must be a non-empty string, got an object']]);
+    t('⛔ …the overlap names one position in the singular and NO package name, and is judged only once both keys are admitted — a refused versions list leaves it unjudged', [errorsOf(setv({ drop: ['@objectstack/rest'] })), errorsOf(setv({ drop: ['@objectstack/rest'] })).some((e) => e.includes('objectstack/rest')), errorsOf(setv({ versions: [{ ...VERSION, vulnerable_version_range: '<=18.2.0' }], drop: ['@objectstack/rest'] })).filter((e) => e.startsWith('actions[0].drop')), advisoryDropOverlap(['a', 'b', 'c'], [{ package: 'c' }, null, 'b'])], [['actions[0].drop: drop[0] names a package versions also sets — a package is either dropped or set, never both; not echoed'], false, [], [2]]);
+    t('⛔ a drop never empties the list: versions names at least one entry, so a drop beside an empty versions is refused there — the list the PATCH leaves is exactly the entries — and versions stays required beside a drop', [errorsOf(setv({ versions: [], drop: ['@objectstack/rest'] })), refuses(one({ op: 'advisory_versions', ghsa_id: GHSA, drop: ['hotcrm'] }), 'actions[0].versions is required')], [['actions[0].versions must name at least one entry'], true]);
     // Refused by value — and never echoed.
     const malformed = ['ghsa-abcd-2345-wxyz', 'GHSA-ABCD-2345-WXYZ', 'GHSA-abcd-2345', 'GHSA-abcd-2345-wxyz-mnop', 'GHSA-abcde-2345-wxyz', 'GHSA_abcd_2345_wxyz', 'CVE-2026-12345', `${GHSA}/cve`, `../${GHSA}`, ` ${GHSA}`, '', 17, null, [GHSA]];
     t('⛔ a malformed ghsa_id is refused before any request on all three id rows, naming the shape: a lowercase prefix, uppercase groups, too few or too many groups, a long group, another separator, a CVE id, a path suffix or prefix, a space, empty, a number, null and an array', [add, (x) => move('draft', x), setv].map((row) => malformed.filter((ghsa_id) => !refuses(one(row({ ghsa_id })), "actions[0].ghsa_id must be one repository advisory's id")).length), [0, 0, 0]);
@@ -2001,12 +2083,15 @@ export async function selfTest() {
       ['versions', setv({ versions: [{ ...VERSION, patched_versions: PROSE }] })],
       ['versions', setv({ versions: [{ ...VERSION, [PROSE]: 'x' }] })],
       ['vulnerabilities', setv({ vulnerabilities: [{ package: { ecosystem: 'npm', name: PROSE } }] })],
+      ['drop', setv({ drop: [PROSE] })],
+      ['drop', setv({ drop: [{ name: PROSE }] })],
+      ['drop', setv({ drop: PROSE })],
     ];
     const quiet = quietly.map(([key, action]) => {
       const errors = errorsOf(action);
       return [key, errors.length > 0, errors.some((e) => e.includes('ADVISORY PROSE')), errors.some((e) => e.includes(`actions[0].${key}`))];
     });
-    t('⛔ the marker in the wrong key — a state, a severity, a weakness id, a login, an id, a package, a summary or description that is not a string, an unknown vulnerabilities key, and a versions list, entry, package, range, patched list or entry key — on a report, a draft and the versions row, is refused naming the key, and NO refusal line carries it', quiet, quietly.map(([key]) => [key, true, false, true]));
+    t('⛔ the marker in the wrong key — a state, a severity, a weakness id, a login, an id, a package, a summary or description that is not a string, an unknown vulnerabilities key, and a versions list, entry, package, range, patched list or entry key, and a drop list or entry — on a report, a draft and the versions row, is refused naming the key, and NO refusal line carries it', quiet, quietly.map(([key]) => [key, true, false, true]));
     const long = 'é'.repeat(513);
     t('⛔ an over-cap summary or description is refused naming the key and the byte count — the text itself never', [errorsOf(report({ summary: long })), errorsOf(report({ description: `${PROSE} ${'x'.repeat(60_000)}` })).some((e) => e.includes('ADVISORY PROSE')), refuses(one(report({ description: `${PROSE} ${'x'.repeat(60_000)}` })), 'actions[0].description is 60040 bytes, over its cap of 60000')], [['actions[0].summary is 1026 bytes, over its cap of 1024'], false, true]);
     t('⛔ cwe_ids: CWE-0, a lowercase cwe-79, a six-digit id, a CVE id, an empty list, eleven ids and one twice are refused; CWE-79 and CWE-352 pass', [[['CWE-0'], ['cwe-79'], ['CWE-123456'], ['CVE-2026-1'], [], Array.from({ length: 11 }, (_, i) => `CWE-${i + 1}`), ['CWE-79', 'CWE-79']].filter((cwe_ids) => !refuses(one(report({ cwe_ids })), 'actions[0].cwe_ids')).length, validatePayload(one(report({ cwe_ids: ['CWE-79', 'CWE-352'] }))).ok], [0, true]);
@@ -2052,7 +2137,7 @@ export async function selfTest() {
       return v.ok ? [outputLine(v.payload, 'permission_repository_advisories'), tokenPermissionsOf(v.payload)['repository-advisories'] ?? null] : `refused: ${v.errors.join(' | ')}`;
     };
     t('⛔ fence grant, refused side: every other op — each alone in its stroke, the actions strokes among them, and the stroke of all that share one token — writes an EMPTY permission_repository_advisories and mints no such grant', [others.filter((op) => JSON.stringify(advisoryLine([{ op, ...minimalOf[op] }])) !== JSON.stringify(['permission_repository_advisories=', null])), advisoryLine(others.filter((op) => !OPS[op].secondRepo && !OPS[op].alone).map((op) => ({ op, ...minimalOf[op] })))], [[], ['permission_repository_advisories=', null]]);
-    t('repository-advisories is spent by the eight rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
+    t('repository-advisories is spent by the ten rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-repository-advisories:\s*\$\{\{\s*steps\.validate\.outputs\.permission_repository_advisories\s*\}\}\s*$/gm)].length;
@@ -2071,7 +2156,7 @@ export async function selfTest() {
       }
       return OPS[op].requests(a, REPO).map((r) => ({ op, ...r }));
     });
-    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the four PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`, `advisory_note PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
+    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the six PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`, `advisory_note PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_rewrite PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_severity PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
     // ⛔ published: reachable by no row — not as a value, not through any body.
     const everyValue = OP_NAMES.flatMap((op) =>
       [...OPS[op].required, ...OPS[op].optional]
@@ -2096,7 +2181,7 @@ export async function selfTest() {
     const fenced = (a, ctx = {}) => advisoryFenceFailures({ ghsaId: GHSA, answer: a, ...ctx }).map((f) => f.fence);
     // An entry as the platform answers one: the npm package, the two strings, and vulnerable_functions, empty.
     const onWire = (...entries) => advisoryVersionsOnTheWire(entries).map((v) => ({ ...v, vulnerable_functions: [] }));
-    t('the open states are exactly triage and draft, frozen, and the fences are read, advisory, state and versions', [[...ADVISORY_OPEN_STATES], Object.isFrozen(ADVISORY_OPEN_STATES), ADVISORY_FENCES.map((f) => f.fence)], [['triage', 'draft'], true, ['read', 'advisory', 'state', 'versions']]);
+    t('the open states are exactly triage and draft, frozen, and the fences are read, advisory, state, versions and notes', [[...ADVISORY_OPEN_STATES], Object.isFrozen(ADVISORY_OPEN_STATES), ADVISORY_FENCES.map((f) => f.fence)], [['triage', 'draft'], true, ['read', 'advisory', 'state', 'versions', 'notes']]);
     t('accepted: a draft and a triage advisory answering as the id the action names pass all three fences', [fenced(answer(advisory())), fenced(answer(advisory({ state: 'triage' })))], [[], []]);
     t('⛔ fence state, refused for the collaborators: published, closed, withdrawn, no state and an unknown one — each naming the state fence alone', ['published', 'closed', 'withdrawn', undefined, 'archived'].map((state) => fenced(answer(advisory({ state })))), [['state'], ['state'], ['state'], ['state'], ['state']]);
     // Versions in the row's spelling, so the publish's versions fence holds and the state fence alone decides.
@@ -2110,14 +2195,52 @@ export async function selfTest() {
     t('⭐ fence versions, accepted for the versions row: a draft listing nothing (a report accepted), listing only names (a draft as created), listing the package already set, or two packages the action names both', [forVersions([]), forVersions(null), forVersions([{ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: null, patched_versions: null, vulnerable_functions: [] }]), forVersions(onWire(VERSION)), forVersions(onWire(VERSION, { ...VERSION, package: 'hotcrm' }), [VERSION, { ...VERSION, package: 'hotcrm' }])], [[], [], [], [], []]);
     t('⛔ fence versions, refused for the versions row: a listed package the action does not name (the PATCH would drop it), an entry of another ecosystem or naming none, an entry carrying vulnerable_functions — and a closed or published advisory at the state fence', [forVersions(onWire(VERSION, { ...VERSION, package: 'hotcrm' })), forVersions([{ package: { ecosystem: 'pip', name: 'x' } }]), forVersions([{ package: { ecosystem: 'npm', name: null } }]), forVersions([{ ...onWire(VERSION)[0], vulnerable_functions: [PROSE] }]), forVersions(onWire(VERSION), [VERSION], 'closed'), forVersions(onWire(VERSION), [VERSION], 'published')], [['versions'], ['versions'], ['versions'], ['versions'], ['state'], ['state']]);
     const dropText = advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: [...onWire({ ...VERSION, package: PROSE.toLowerCase().replace(/[^a-z]/g, '') }), { package: { ecosystem: 'pip', name: PROSE }, vulnerable_functions: [PROSE] }] })), from: ADVISORY_VERSIONS_STATES, versions: [VERSION] }));
-    t('…and its sentence is counts alone: what the advisory lists and why the PATCH would lose it — never a package name, a version or a function', [dropText, dropText.includes('ADVISORY'), dropText.includes('advisoryprosemarker')], ['fence `versions`: the advisory lists 2 entries: 1 entry of another ecosystem or naming no package; 1 entry carrying vulnerable_functions; 1 listed package(s) the action does not name, and the relay writes only to a list the action may replace whole — every package the advisory lists named by the action, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop', false, false]);
+    t('…and its sentence is counts alone: what the advisory lists and why the PATCH would lose it — never a package name, a version or a function', [dropText, dropText.includes('ADVISORY'), dropText.includes('advisoryprosemarker')], ['fence `versions`: the advisory lists 2 entries: 1 entry of another ecosystem or naming no package; 1 entry carrying vulnerable_functions; 1 listed package(s) the action does not name, and the relay writes only to a list the action may replace whole — every package the advisory lists named by the action, set by versions or removed by drop, every drop a package the advisory lists, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop', false, false]);
+    // The drop at the fence: a listed package removed by name; an unnamed one still refused; a drop naming none refused.
+    const HOTCRM = Object.freeze({ package: 'hotcrm', vulnerable_version_range: '< 2.1.0', patched_versions: '2.1.0' });
+    const CLIENT = Object.freeze({ package: '@objectstack/client', vulnerable_version_range: '< 18.3.0', patched_versions: '18.3.0' });
+    const withDrop = (vulnerabilities, versions, drop) => fenced(answer(advisory({ vulnerabilities })), { from: ADVISORY_VERSIONS_STATES, versions, drop });
+    t('⭐ fence versions, accepted with a drop: a listed package the action drops by name — a drop alone, a drop beside a package the action adds, two drops, and a drop of a package listed only by name (a draft as created)', [withDrop(onWire(VERSION, HOTCRM), [VERSION], ['hotcrm']), withDrop(onWire(VERSION, HOTCRM), [VERSION, CLIENT], ['hotcrm']), withDrop(onWire(VERSION, HOTCRM, CLIENT), [VERSION], ['hotcrm', '@objectstack/client']), withDrop([...onWire(VERSION), { package: { ecosystem: 'npm', name: 'hotcrm' }, vulnerable_version_range: null, patched_versions: null, vulnerable_functions: [] }], [VERSION], ['hotcrm'])], [[], [], [], []]);
+    const unlistedText = advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: onWire(VERSION, HOTCRM) })), from: ADVISORY_VERSIONS_STATES, versions: [VERSION], drop: ['hotcrm', '@objectstack/client', 'create-objectstack'] }));
+    t('⛔ fence versions, refused with a drop — nothing sent: a drop naming a package the advisory does not list, named by its position and never its name; and a listed package the action neither sets nor drops, still refused beside a drop of another — the silent drop stays impossible', [withDrop(onWire(VERSION), [VERSION], ['hotcrm']), withDrop(onWire(VERSION, HOTCRM, CLIENT), [VERSION], ['hotcrm']), unlistedText.includes('drop[1], drop[2] not a package it lists — a drop removes a listed package by name'), /hotcrm|objectstack\/client|create-objectstack/.test(unlistedText.split(', and the relay')[0]), advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: onWire(VERSION, HOTCRM, CLIENT) })), from: ADVISORY_VERSIONS_STATES, versions: [VERSION], drop: ['hotcrm'] })).split(', and the relay')[0]], [['versions'], ['versions'], true, false, 'fence `versions`: the advisory lists 3 entries: 1 listed package(s) the action does not name']);
     const forPublish = (vulnerabilities) => fenced(answer(advisory({ vulnerabilities })), { from: ADVISORY_TRANSITIONS.published, to: 'published' });
     t('⭐ fence versions, for a publish: accepted when every listed entry is in the row\'s spelling — one entry, or two lines of one package beside another — functions or not', [forPublish(onWire(VERSION)), forPublish(onWire(VERSION, LINE_17, { package: 'hotcrm', vulnerable_version_range: '< 2.1.0', patched_versions: '2.1.0' })), forPublish([{ ...onWire(VERSION)[0], vulnerable_functions: ['f'] }])], [[], [], []]);
     t('⛔ …refused — the versions set FIRST — when the advisory lists none, an entry has no range or patched versions (a draft as created), one is spelled otherwise, one is inside its own range, or one is another ecosystem\'s', [forPublish([]), forPublish(null), forPublish([{ package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: null, patched_versions: null, vulnerable_functions: [] }]), forPublish([{ ...onWire(VERSION)[0], vulnerable_version_range: '<=18.2.0' }]), forPublish([{ ...onWire(VERSION)[0], patched_versions: '18.1.0' }]), forPublish([...onWire(VERSION), { package: { ecosystem: 'pip', name: 'x' }, vulnerable_version_range: '< 1.0.0', patched_versions: '1.0.0' }])], [['versions'], ['versions'], ['versions'], ['versions'], ['versions'], ['versions']]);
     t('…its sentences: none listed, or how many of how many are not in the spelling — never a value', [advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: [] })), from: ['draft'], to: 'published' })), advisoryFenceText(advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ vulnerabilities: [...onWire(VERSION), { package: { ecosystem: 'npm', name: '@objectstack/rest' }, vulnerable_version_range: PROSE, patched_versions: PROSE }] })), from: ['draft'], to: 'published' })).includes(PROSE)], ["fence `versions`: the advisory lists no vulnerabilities entry, and the relay writes only to versions set first — at least one vulnerabilities entry, every one an npm package with a vulnerable_version_range and patched_versions in the versions row's spelling", false]);
     t('…and every other action passes the versions fence untouched — the collaborators, the accept, the reopen and the close, whatever the list reads', [fenced(answer(advisory())), fenced(answer(advisory({ state: 'triage' })), { from: ADVISORY_TRANSITIONS.draft, to: 'draft' }), fenced(answer(advisory({ state: 'closed' })), { from: ADVISORY_TRANSITIONS.draft, to: 'draft' }), fenced(answer(advisory()), { from: ADVISORY_TRANSITIONS.closed, to: 'closed' })], [[], [], [], []]);
     t('⛔ fence advisory, refused: an answer naming another advisory, or none', [fenced(answer(advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd' }))), fenced(answer(advisory({ ghsa_id: undefined })))], [['advisory'], ['advisory']]);
-    t('⛔ fence read, refused: a 404, a 403, an array and null — never read as an advisory, the other fences failing as not judged; for the versions row and a publish the versions fence too', [...[answer({ message: 'Not Found' }, 404), answer({ message: 'Forbidden' }, 403), answer([advisory()]), answer(null)].map((a) => fenced(a)), fenced(answer(null, 404), { from: ADVISORY_VERSIONS_STATES, versions: [VERSION] }), fenced(answer(null, 404), { from: ADVISORY_TRANSITIONS.published, to: 'published' })], [...[0, 1, 2, 3].map(() => ['read', 'advisory', 'state']), ['read', 'advisory', 'state', 'versions'], ['read', 'advisory', 'state', 'versions']]);
+    // The notes fence: a publish refused while the description still carries a seat signature line, the head of a seat note.
+    const SIG = 'domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ';
+    const SECTION = (n = 1) => `${SIG}\n2026-11-12T04:0${n}:00Z\n\nNOTES MARKER: a seat's analysis ${n}`;
+    const counted = [
+      [`NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`, 1],
+      [SECTION(1), 1],
+      [`NOTES MARKER: text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}${ADVISORY_NOTE_SEPARATOR}${SECTION(2)}`, 2],
+      [`NOTES MARKER: public text\r\n\r\n---\r\n\r\n${SIG}\r\n2026-11-12T04:00:00Z\r\n\r\nNOTES MARKER: a note saved with CRLF`, 1],
+      [`NOTES MARKER: public text\n  ${SIG}\t\n 2026-11-12T04:00:00Z \n\nNOTES MARKER: a padded head`, 1],
+      [`NOTES MARKER: public text\n${SIG}\nNOTES MARKER: the stamp and the blank line deleted\nmore`, 1],
+      [`${SIG}\n2026-11-12T04:00Z\n\nNOTES MARKER: a minute-grain stamp`, 1],
+      [`${SIG}\n2026-11-12T04:00:00Z\nNOTES MARKER: no blank line under the stamp`, 1],
+      [`NOTES MARKER: public text\n\n${SIG}`, 1],
+      [`NOTES MARKER: public text\n\n\n${SIG}\n2026-11-12T04:00:00Z\n\nNOTES MARKER: a blank line put above the signature`, 1],
+      ['oldlane#3 · os-dev-a · session_01ABCDEFGH\n2026-11-12T04:00:00Z\n\nNOTES MARKER: a lane retired from the live list', 1],
+    ];
+    const clear = [
+      'NOTES MARKER: the public text, no note in it',
+      'NOTES MARKER: public text quoting a stamp-shaped line\n\n---\n\n2026-11-12T04:00:00Z\n\nmore public text',
+      'NOTES MARKER: a hash and dots · not a signature #3 · session',
+      'see issue#12 · build · release',
+      '',
+      null,
+    ];
+    t("the seat-signature count — on the signature line alone, each line trimmed: a note after the separator, alone, two of them, saved with CRLF, its head padded, its stamp or blank line edited away, its stamp at minute grain, its body deleted, and one signed in a lane retired from the live list are each counted; public text, a stamp-shaped line with no signature, signature-like punctuation and an empty or absent description are not", [counted.map(([d]) => advisoryNoteSectionCount(d)), clear.map(advisoryNoteSectionCount)], [counted.map(([, n]) => n), clear.map(() => 0)]);
+    const { SEAT_SIGNATURE_LINE } = await import('../check-half-states.mjs');
+    const LIVE = ['domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ', 'triage#1 · sunhaolin · session_01ABCDEF', 'epic:#36662#3 · os-x · session_ABCDEFG', 'l2-review#12 · a-b-c · session_0123456789', 'repo:hotcrm#2 · x · session_abcdef'];
+    t('the shape is a SUPERSET of the live signature check: every line SEAT_SIGNATURE_LINE accepts is counted — so retiring a lane word from that list never lets a note signed under it through', [LIVE.map((l) => SEAT_SIGNATURE_LINE.test(l)), LIVE.map((l) => advisoryNoteSectionCount(`public text\n${l}`))], [LIVE.map(() => true), LIVE.map(() => 1)]);
+    const publishFence = (description, to = 'published') => advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ state: to === 'published' ? 'draft' : 'closed', description, vulnerabilities: onWire(VERSION) })), from: ADVISORY_TRANSITIONS[to], to });
+    const noted = publishFence(`NOTES MARKER: the finder's text${ADVISORY_NOTE_SEPARATOR}${SECTION(1)}`);
+    t("⛔ fence notes, judged for a publish alone: a draft whose description still carries a seat signature line is refused by the notes fence, naming the count and no byte of the text; a description that is neither text nor none is refused too; the same draft rewritten passes; a reopen to draft with a note in it is not judged by it", [noted.map((f) => f.fence), advisoryFenceText(noted).includes('still carries 1 seat signature line(s)'), advisoryFenceText(noted).includes('MARKER'), publishFence(['NOTES MARKER']).map((f) => f.fence), advisoryFenceText(publishFence({ text: 'NOTES MARKER' })).includes('is object, so it cannot be judged free of seat notes'), publishFence('NOTES MARKER: the public text').map((f) => f.fence), publishFence(null).map((f) => f.fence), publishFence(SECTION(1), 'draft').map((f) => f.fence)], [['notes'], true, false, ['notes'], true, [], [], []]);
+    t('⛔ fence read, refused: a 404, a 403, an array and null — never read as an advisory, the other fences failing as not judged; for the versions row and a publish the versions fence too, and for a publish the notes fence', [...[answer({ message: 'Not Found' }, 404), answer({ message: 'Forbidden' }, 403), answer([advisory()]), answer(null)].map((a) => fenced(a)), fenced(answer(null, 404), { from: ADVISORY_VERSIONS_STATES, versions: [VERSION] }), fenced(answer(null, 404), { from: ADVISORY_TRANSITIONS.published, to: 'published' })], [...[0, 1, 2, 3].map(() => ['read', 'advisory', 'state']), ['read', 'advisory', 'state', 'versions'], ['read', 'advisory', 'state', 'versions', 'notes']]);
     const leaky = advisoryFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ ghsa_id: PROSE, state: PROSE })) });
     t('⛔ a fence sentence prints the answer\'s id and state only in their own shapes — prose in either reaches it as a placeholder, never as itself', [leaky.map((f) => f.fence), advisoryFenceText(leaky).includes(PROSE), advisoryFenceText(leaky).includes('(not an advisory id)') && advisoryFenceText(leaky).includes('(not an advisory state)')], [['advisory', 'state'], false, true]);
     // The merge: what the collaborators PATCH sends.
@@ -2137,6 +2260,7 @@ export async function selfTest() {
     const asSet = (vulnerabilities, extra = {}) => answer(advisory({ vulnerabilities, ...extra }));
     t('⭐ versions land when the PATCH answer, still draft and naming the advisory, lists exactly the entries sent — in any order — with the count for the row', [advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION, LINE_17], answer: asSet(onWire(LINE_17, VERSION)) }), advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet(onWire(VERSION)) }).ok], [{ ok: true, why: '', entries: 2 }, true]);
     t('⛔ …and nothing else lands: an entry missing, one answered in another spelling, one extra, a foreign one, another state, another id, a refusal or no advisory — each in counts, the id and the state alone', [advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION, LINE_17], answer: asSet(onWire(VERSION)) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet(onWire({ ...VERSION, vulnerable_version_range: '< 18.3.0' })) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet(onWire(VERSION, LINE_17)) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet([...onWire(VERSION), { package: { ecosystem: 'pip', name: PROSE } }]) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet(onWire(VERSION), { state: 'published' }) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: asSet(onWire(VERSION), { ghsa_id: 'GHSA-wxyz-2345-abcd' }) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: answer({ message: 'Validation Failed' }, 422) }).why, advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], answer: answer([], 200) }).ok], ['HTTP 200, but the answer lists 1 entry — 1 of the 2 entries sent missing or answered in another spelling, 0 other', 'HTTP 200, but the answer lists 1 entry — 1 of the 1 entry sent missing or answered in another spelling, 1 other', 'HTTP 200, but the answer lists 2 entries — 0 of the 1 entry sent missing or answered in another spelling, 1 other', 'HTTP 200, but the answer lists 2 entries — 0 of the 1 entry sent missing or answered in another spelling, 1 other', 'HTTP 200, but the answer reads state published, not draft', 'HTTP 200, but the answer names GHSA-wxyz-2345-abcd', 'HTTP 422', false]);
+    t('⭐ versions with a drop land when the answer lists exactly the entries sent and no dropped package, the row counting the drop; ⛔ an answer still listing a dropped package is not a landing, naming the drop by its position alone', [advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], drop: ['hotcrm'], answer: asSet(onWire(VERSION)) }), advisoryVersionsReadBack({ ghsaId: GHSA, sent: [VERSION], drop: ['@objectstack/client', 'hotcrm'], answer: asSet(onWire(VERSION, HOTCRM)) }).why, advisoryVersionsLandedText({ ghsaId: GHSA, state: 'draft', versions: [VERSION], drop: ['hotcrm'] }), advisoryVersionsLandedText({ ghsaId: GHSA, state: 'draft', versions: [VERSION], drop: ['hotcrm', 'x'] })], [{ ok: true, why: '', entries: 1 }, 'HTTP 200, but the answer lists 2 entries — 0 of the 1 entry sent missing or answered in another spelling, 1 other; drop[1] still listed — a package the action dropped', `${GHSA} · state draft · versions set: 1 entry across 1 package · dropped 1 package`, `${GHSA} · state draft · versions set: 1 entry across 1 package · dropped 2 packages`]);
     t('the wire and the reading are one spelling: what the PATCH sends reads back as the entries sent, and the multiset diff counts the misses and the extras', [advisoryVersionsOf({ vulnerabilities: onWire(VERSION, LINE_17) }), advisoryVersionsOf({ vulnerabilities: [{ package: { ecosystem: 'pip', name: 'x' } }, { package: { ecosystem: 'npm', name: 'y' }, vulnerable_functions: ['f'] }] }), advisoryVersionsDiff([VERSION, VERSION], [VERSION]), advisoryVersionsDiff([VERSION], [LINE_17, VERSION])], [{ total: 2, entries: [VERSION, LINE_17], foreign: 0, functions: 0 }, { total: 2, entries: [{ package: 'y', vulnerable_version_range: null, patched_versions: null }], foreign: 1, functions: 1 }, { same: false, missing: 1, extra: 0 }, { same: false, missing: 0, extra: 1 }]);
     t('⭐ a report lands on a 2xx carrying an advisory id; a 2xx without one is UNCONFIRMED and never re-sent; a refusal is its status; an id that is prose is no id', [advisoryReportReadBack(answer(advisory({ state: 'triage' }), 201)), advisoryReportReadBack(answer({ state: 'triage' }, 201)).why, advisoryReportReadBack(answer({ message: 'Validation Failed', errors: [PROSE] }, 422)).why, advisoryReportReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).ok, advisoryReportReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).why.includes(PROSE)], [{ ok: true, ghsaId: GHSA, state: 'triage', why: '' }, "HTTP 201, but the answer carries no advisory id — UNCONFIRMED: a report may have been filed; ⛔ do not re-send, ask the maintainer to read the repository's reports", 'HTTP 422', false, false]);
     t('⭐ a draft lands on a 2xx carrying an advisory id that reads state draft — the one state the endpoint creates in; a 2xx without an id is UNCONFIRMED and never re-sent; one in another state is not a landing, named in the id and the state alone; a refusal is its status; prose in the id or the state never reaches the sentence', [ADVISORY_CREATED_STATE, advisoryCreateReadBack(answer(advisory(), 201)), advisoryCreateReadBack(answer({ state: 'draft' }, 201)).why, advisoryCreateReadBack(answer(advisory({ state: 'triage' }), 201)).why, advisoryCreateReadBack(answer(advisory({ state: 'published' }), 201)).ok, advisoryCreateReadBack(answer({ message: 'Validation Failed', errors: [PROSE] }, 422)).why, advisoryCreateReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).ok, [advisoryCreateReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).why, advisoryCreateReadBack(answer(advisory({ state: PROSE }), 201)).why].some((why) => why.includes(PROSE))], ['draft', { ok: true, ghsaId: GHSA, state: 'draft', why: '' }, "HTTP 201, but the answer carries no advisory id — UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send, ask the maintainer to read the repository's draft advisories", `HTTP 201, but ${GHSA} reads state triage, not draft — ⛔ do not re-send, put the id to the maintainer`, false, 'HTTP 422', false, false]);
@@ -2160,10 +2284,13 @@ export async function selfTest() {
     const derOf = (raw) => Buffer.concat([Buffer.from('302a300506032b656e032100', 'hex'), raw]).toString('base64');
     const PREFIX = 'MCowBQYDK2VuAyEA';
     // The row, its fields and its one request.
-    t('the row: ghsa_id and public_key, nothing optional; it spends repository-advisories at READ (its grant), travels alone, widens nothing else; public_key is its own kind and ghsa_id the existing one', [OPS.advisory_read.required, OPS.advisory_read.optional, OPS.advisory_read.permission, OPS.advisory_read.grant, OPS.advisory_read.alone, OPS.advisory_read.alsoSpends ?? null, OPS.advisory_read.secondRepo ?? null, FIELDS.public_key, FIELDS.ghsa_id], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', true, null, null, { kind: 'x25519' }, { kind: 'ghsa' }]);
+    t('the row: ghsa_id and public_key, and page alone optional; it spends repository-advisories at READ (its grant), travels alone, widens nothing else; public_key is its own kind, ghsa_id the existing one, and page a quiet integer capped at the page count', [OPS.advisory_read.required, OPS.advisory_read.optional, OPS.advisory_read.permission, OPS.advisory_read.grant, OPS.advisory_read.alone, OPS.advisory_read.alsoSpends ?? null, OPS.advisory_read.secondRepo ?? null, FIELDS.public_key, FIELDS.ghsa_id, FIELDS.page], [['ghsa_id', 'public_key'], ['page'], 'repository-advisories', 'read', true, null, null, { kind: 'x25519' }, { kind: 'ghsa' }, { kind: 'int', max: ADVISORY_READ_MAX_PAGES, quiet: true }]);
     t("⚖ the sender gate, by the maintainer's ruling: ONE setting, target-write — write, maintain or admin on the target, the gate every other row keeps — on advisory_read and advisory_list, the two rows carrying one, whose grant stays read", [Object.keys(ADVISORY_READ_SENDER_GATES), OPS.advisory_read.senderGate, OP_NAMES.filter((op) => OPS[op].senderGate !== undefined), OPS.advisory_read.grant], [['target-write'], 'target-write', ['advisory_read', 'advisory_list'], 'read']);
     const asked = OPS.advisory_read.requests(read(), REPO);
-    t("its one request is a GET of one advisory's path — no body, no write — carrying the id and the key to the executor, and reaching no refused family", [asked.length, asked[0].verb, asked[0].path, 'body' in asked[0], asked[0].advisoryRead, ADVISORY_PATH_SHAPE.test(asked[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(asked[0].path)).length], [1, 'GET', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, publicKey: READER.spki }, true, 0]);
+    t("its one request is a GET of one advisory's path — no body, no write — carrying the id and the key to the executor, and reaching no refused family", [asked.length, asked[0].verb, asked[0].path, 'body' in asked[0], asked[0].advisoryRead, ADVISORY_PATH_SHAPE.test(asked[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(asked[0].path)).length, OPS.advisory_read.requests(read({ page: 3 }), REPO)[0].advisoryRead.page], [1, 'GET', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, publicKey: READER.spki, page: 1 }, true, 0, 3]);
+    // The page: a quiet integer, 1..ADVISORY_READ_MAX_PAGES — judged before any request, ⛔ never echoed.
+    const pageRefusals = [0, -1, 1.5, ADVISORY_READ_MAX_PAGES + 1, '2', null, [2], PROSE].map((page) => errorsOf(read({ page })));
+    t('⛔ a page that is not 1..ADVISORY_READ_MAX_PAGES is refused before any request — zero, negative, a fraction, one past the cap, a string, null, an array and prose — and NO refusal echoes the value; 1, 2 and the cap itself are accepted', [pageRefusals.map((e) => e.length === 1 && e[0].startsWith('actions[0].page must be')), pageRefusals.flat().filter((e) => e.includes(PROSE) || e.includes(`${ADVISORY_READ_MAX_PAGES + 1}`) || e.includes('1.5')), [1, 2, ADVISORY_READ_MAX_PAGES].map((page) => validatePayload(one(read({ page }))).ok)], [pageRefusals.map(() => true), [], [true, true, true]]);
     // The key: its one spelling, judged before any request.
     t('the key: X25519, 60 base64 characters of SPKI DER in one shape — and twenty fresh key pairs, as the seat makes them, each pass the whole judgment', [ADVISORY_READ_KEY_TYPE, ADVISORY_READ_PUBLIC_KEY_CHARS, READER.spki.length, ADVISORY_READ_PUBLIC_KEY_SHAPE.test(READER.spki), READER.spki.startsWith(PREFIX), Array.from({ length: 20 }, () => advisoryReadKeyFailure(keyPair().spki)).filter((why) => why !== null)], ['x25519', 60, 60, true, true, []]);
     const accepted = validatePayload(one(read()));
@@ -2184,7 +2311,7 @@ export async function selfTest() {
     t('⛔ …and NO refusal echoes the value, in whole or in part — it is described by its type and byte count, and what it failed to be', [echoes.length, errorsOf(read({ public_key: PROSE })), errorsOf(read({ public_key: 17 }))], [0, [`${KEY_REFUSAL}, base64 SPKI DER of exactly 60 characters — got a string of ${Buffer.byteLength(PROSE)} byte(s) that is not 60 characters long; it is refused here, before any request, and never echoed`], [`${KEY_REFUSAL}, base64 SPKI DER of exactly 60 characters — got number that is not a string; it is refused here, before any request, and never echoed`]]);
     const malformedIds = ['ghsa-abcd-2345-wxyz', 'GHSA-ABCD-2345-WXYZ', 'GHSA-abcd-2345', `${GHSA}/cve`, `../${GHSA}`, '', 17, null, PROSE];
     t("⛔ a malformed ghsa_id beside a valid key is refused before any request, naming the shape, and never echoed", [malformedIds.filter((ghsa_id) => !refuses(one(read({ ghsa_id })), "actions[0].ghsa_id must be one repository advisory's id")).length, errorsOf(read({ ghsa_id: PROSE })).some((e) => e.includes('ADVISORY PROSE'))], [0, false]);
-    const takes = `is not a key \`advisory_read\` takes (it takes ghsa_id, public_key)`;
+    const takes = `is not a key \`advisory_read\` takes (it takes ghsa_id, public_key, page)`;
     t('⛔ refused BY NAME beside a read: a private key, a key, the fields it would read, the keys of the other advisory rows, a state, a body and an issue — an id and a key, and nothing else', ['private_key', 'key', 'fields', 'summary', 'description', 'vulnerabilities', 'collaborators', 'advisory_state', 'state', 'body', 'issue', 'reveal'].filter((key) => !refuses(one(read({ [key]: key === 'issue' ? 7 : 'x' })), `actions[0].${key} ${takes}`)), []);
     t('⛔ refused: either required key missing — a key is never defaulted, nor an id', [refuses(one({ op: 'advisory_read', ghsa_id: GHSA }), 'actions[0].public_key is required'), refuses(one({ op: 'advisory_read', public_key: READER.spki }), 'actions[0].ghsa_id is required')], [true, true]);
     // Alone in its stroke, and the grant.
@@ -2247,7 +2374,34 @@ export async function selfTest() {
     const leaky = advisoryReadFenceFailures({ ghsaId: GHSA, answer: answer(advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd', state: PROSE })), gate: PROSE });
     const leakyText = advisoryReadFenceText(leaky);
     t("⛔ a read's fence sentence names no advisory id — neither the one asked for nor the one answered — no state and no prose: another advisory is said to be one, and a gate that is prose is said to be unknown, never echoed", [leaky.map((f) => f.fence), [GHSA, 'GHSA-wxyz-2345-abcd', 'ADVISORY PROSE', 'draft'].filter((needle) => leakyText.includes(needle)), leakyText], [['advisory', 'sender'], [], 'fence `advisory`: the answer names another advisory, and the relay seals only for the advisory the action names, by its ghsa_id; fence `sender`: the row names no sender gate the table knows, so no read is sealed, and the relay seals only for a sender gate the table names']);
-    t("⛔ the call, the landed row and the over-cap sentence print counts and the id's placeholder — never an id", [advisoryReadCall(REPO), advisoryReadLandedText({ plaintextBytes: 812, sealedChars: 1164, parts: 1 }), advisoryReadOverCapText({ plaintextBytes: 31000, sealedChars: 41415 })], [`GET /repos/${REPO}/security-advisories/{ghsa_id}`, "sealed 812 byte(s) of the answer to the seat's one-time key — 1164 character(s) in 1 notice part(s), which only that seat's process opens", "the sealed answer is 41415 character(s) (31000 byte(s) of the answer), over the 40000 the run's notices carry (10 of 4000) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer"]);
+    t("⛔ the call, the landed row and the over-cap sentence: the id's placeholder, and ONE sentence each — no count of the answer, no page number, never an id", [advisoryReadCall(REPO), ADVISORY_READ_LANDED, ADVISORY_READ_OVER_CAP, /\d/.test(ADVISORY_READ_LANDED.replace(`${ADVISORY_READ_MAX_SEALED_CHARS}`, '').replace(`${ADVISORY_READ_MAX_PARTS}`, '')), typeof ADVISORY_READ_LANDED, typeof ADVISORY_READ_OVER_CAP], [`GET /repos/${REPO}/security-advisories/{ghsa_id}`, "sealed one page of the answer to the seat's one-time key — 40000 character(s) in 10 notice part(s), which only that seat's process opens", `the answer needs more than the 64 pages a read is cut into (${ADVISORY_READ_PAGE_CHUNK_BYTES} bytes of it a page) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer`, false, 'string', 'string']);
+    // ── One page a stroke: the page, the one length class, the join ──
+    const answerOf = (n) => JSON.stringify({ ghsa_id: GHSA, description: `${PROSE} 漢字🎉 ${'é—x'.repeat(n)}` });
+    const sizes = [answerOf(1), answerOf(9_000), answerOf(30_000), answerOf(200_000)];
+    const pageSets = sizes.map((text) => {
+      const spans = advisoryReadPageSpans(text);
+      return spans.map((_, k) => advisoryReadPage(text, k + 1));
+    });
+    t('the page: exactly the listing\'s 29,939 bytes — one header of fixed width, then its span, then spaces — and the chunk is what is left of it', [ADVISORY_READ_PAGE_BYTES, ADVISORY_READ_PAGE_BYTES === ADVISORY_LIST_PADDED_BYTES, ADVISORY_READ_PAGE_HEADER_BYTES, ADVISORY_READ_PAGE_CHUNK_BYTES, ADVISORY_READ_MAX_PAGES], [29939, true, 157, 29782, 64]);
+    t('⭐ ONE sealed length class: every page of an answer of any size — 1, 2, 7 and 41 pages — and a page past the last are each exactly 29,939 bytes and seal to exactly 40,000 characters in ten parts', [pageSets.map((set) => set.length), [...pageSets.flat(), advisoryReadPage(sizes[0], 2)].every((page) => Buffer.byteLength(page, 'utf8') === ADVISORY_READ_PAGE_BYTES && advisoryReadParts(sealAdvisoryRead({ plaintext: page, publicKey: READER.spki, aad }))?.length === ADVISORY_READ_MAX_PARTS)], [[1, 2, 7, 41], true]);
+    const spanned = sizes.map((text) => advisoryReadPageSpans(text));
+    t('the spans: contiguous from 0 to the end, none over the chunk, and none splitting a character — so every page is UTF-8 on its own', [spanned.every((spans, i) => spans[0].offset === 0 && spans.every((x, k) => k === 0 || x.offset === spans[k - 1].offset + spans[k - 1].length) && spans.at(-1).offset + spans.at(-1).length === Buffer.byteLength(sizes[i], 'utf8') && spans.every((x) => x.length > 0 && x.length <= ADVISORY_READ_PAGE_CHUNK_BYTES)), spanned[2].some((x) => x.length < ADVISORY_READ_PAGE_CHUNK_BYTES - 0 && x !== spanned[2].at(-1))], [true, true]);
+    const rejoined = pageSets.map((set) => advisoryReadAssemble(set.map(advisoryReadPageOf)).plaintext);
+    t('⭐ the join: each answer\'s pages, read back and joined, are the answer BYTE FOR BYTE — the 41-page one, CJK and an emoji among it, included — and in any order', [rejoined.map((x, i) => x === sizes[i]), advisoryReadAssemble([...pageSets[2]].reverse().map(advisoryReadPageOf)).plaintext === sizes[2]], [[true, true, true, true], true]);
+    const past = advisoryReadPageOf(advisoryReadPage(sizes[1], 5));
+    t('a page past the last is the header and the pad alone — length 0 at the end of the answer — and lands like any other', [past?.page, past?.pages, past?.length, past?.offset === Buffer.byteLength(sizes[1], 'utf8'), past?.chunk.length], [5, 2, 0, true, 0]);
+    const p2 = pageSets[1].map(advisoryReadPageOf);
+    const other = advisoryReadPageOf(advisoryReadPage(answerOf(9_001), 2));
+    t('⛔ the join refuses what is not one answer: a page missing, a page twice, a page of another answer (the advisory changed between strokes), and an empty set', [advisoryReadAssemble([p2[0]]).why, advisoryReadAssemble([p2[0], p2[0]]).why, advisoryReadAssemble([p2[0], other]).why, advisoryReadAssemble([]).why], [ADVISORY_READ_PAGES_MISSING, ADVISORY_READ_PAGES_MISSING, ADVISORY_READ_PAGES_DISAGREE, ADVISORY_READ_PAGES_MISSING]);
+    const page1 = pageSets[1][0];
+    const forge = (text) => advisoryReadPageOf(text);
+    t('⛔ a page is one shape: a byte short, a byte long, a pad that is not spaces, a header out of shape, a page past the cap and a span past the answer are each no page', [forge(page1.slice(0, -1)), forge(`${page1} `), forge(`${page1.slice(0, -1)}x`), forge(page1.replace('fleet-write advisory_read page=', 'fleet-write advisory_read page:')), forge(page1.replace('page=001/002', 'page=065/065')), forge(page1.replace(/bytes=\d{9}/, 'bytes=000000001'))], [null, null, null, null, null, null]);
+    const opsHeader = readFileSync(new URL('./ops.mjs', import.meta.url), 'utf8');
+    const headerEnd = opsHeader.indexOf('\n */\n');
+    t("⛔ the ONE place the length class does not hold is stated in the row's header and pinned here: each page is its own run, so the run list counts an answer's pages — and the header names the measured caps it chose pages by, with their sources", ['⛔ The length class holds on every LINE, not on the run list', 'a reader\n * of the run list can count an answer\'s pages', '`_maxCountPerIssueType = 10`', '`docs/problem-matchers.md`: 50 annotations a job', 'the platform\'s largest advisory answer is UNVERIFIED'].map((needle) => { const at = opsHeader.indexOf(needle); return at > 0 && at < headerEnd; }), [true, true, true, true, true]);
+    const huge = JSON.stringify({ description: 'x'.repeat(ADVISORY_READ_MAX_PAGES * ADVISORY_READ_PAGE_CHUNK_BYTES) });
+    const edge = 'x'.repeat(ADVISORY_READ_MAX_PAGES * ADVISORY_READ_PAGE_CHUNK_BYTES);
+    t('⛔ the over-cap edge: an answer of exactly 64 full pages is read; one byte over, and every page of it is refused — no page is cut from an answer over the limit', [advisoryReadPageSpans(edge).length, advisoryReadPage(edge, ADVISORY_READ_MAX_PAGES) !== null, advisoryReadPage(`${edge}x`, 1), advisoryReadPage(huge, 1), advisoryReadPage(huge, ADVISORY_READ_MAX_PAGES), advisoryReadPage(sizes[0], 0), advisoryReadPage(sizes[0], ADVISORY_READ_MAX_PAGES + 1)], [64, true, null, null, null, null, null]);
     // Positive control for the key refusals: the public half of a real pair parses back to the same key.
     t('…positive control: the key a seat sends is the public half of its pair, byte for byte', createPublicKey({ key: Buffer.from(READER.spki, 'base64'), format: 'der', type: 'spki' }).export({ format: 'der', type: 'spki' }).toString('base64'), READER.spki);
   }
@@ -2280,13 +2434,22 @@ export async function selfTest() {
     // The cursor.
     const nextOf = (url) => `<${url}>; rel="next", <${API}/repos/${REPO}/security-advisories?state=draft&per_page=100>; rel="first"`;
     const own = (after, state = 'draft') => `${API}/repos/${REPO}/security-advisories?state=${state}&per_page=100&after=${encodeURIComponent(after)}`;
-    const ctx = { api: API, repo: REPO, state: 'draft' };
+    // A made-up repository id: the walk reads the repository's own and compares; ⛔ never one taken from the link.
+    const REPO_ID = '4242';
+    const ctx = { api: API, repo: REPO, state: 'draft', repoId: REPO_ID };
     t('⭐ the next cursor: from the one rel="next" link on this API\'s collection and this state, decoded — and no rel="next", an empty header or none at all ends the walk', [advisoryListNextCursor(nextOf(own('Y3Vy+c29y/OnYy==')), ctx), advisoryListNextCursor(`<${own('abc')}>; rel="prev"`, ctx), advisoryListNextCursor('', ctx), advisoryListNextCursor(null, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="next last"`, ctx)], [{ after: 'Y3Vy+c29y/OnYy==' }, { after: null }, { after: null }, { after: null }, { after: 'abc' }]);
     t('a relation compares case-insensitively (RFC 8288 §3.3): REL="NEXT", rel="Next" and a mixed-case relation list each name the next page', [advisoryListNextCursor(`<${own('abc')}>; REL="NEXT"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="Next"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="Last NEXT"`, ctx), advisoryListNextCursor(`<${own('abc')}>; rel="next", <${own('def')}>; rel="NEXT"`, ctx)], [{ after: 'abc' }, { after: 'abc' }, { after: 'abc' }, { fail: ADVISORY_LIST_CURSOR_REFUSED }]);
     const refusedLinks = [
       `<${own('abc').replace('https://api.github.com', 'https://evil.test')}>; rel="next"`,
       `<${own('abc').replace('https://', 'http://')}>; rel="next"`,
       `<https://api.github.com/repositories/1/security-advisories?state=draft&per_page=100&after=abc>; rel="next"`,
+      `<https://api.github.com/repositories/${REPO_ID}/security-advisories/?state=draft&per_page=100&after=abc>; rel="next"`,
+      `<https://api.github.com/repositories/${REPO_ID}/issues?state=draft&per_page=100&after=abc>; rel="next"`,
+      `<https://api.github.com/repositories/0${REPO_ID}/security-advisories?state=draft&per_page=100&after=abc>; rel="next"`,
+      `<https://evil.test/repositories/${REPO_ID}/security-advisories?state=draft&per_page=100&after=abc>; rel="next"`,
+      `<https://api.github.com/repositories/${REPO_ID}/security-advisories?state=closed&per_page=100&after=abc>; rel="next"`,
+      `<https://api.github.com/repositories/${REPO_ID}/security-advisories?state=draft&per_page=100&page=2>; rel="next"`,
+      `<https://api.github.com/repositories/${REPO_ID}/security-advisories?state=draft&per_page=100&after=${'a'.repeat(ADVISORY_LIST_CURSOR_MAX_CHARS + 1)}>; rel="next"`,
       `<${own('abc').replace(`/repos/${REPO}/`, `/repos/${TARGET_OWNER}/objectui/`)}>; rel="next"`,
       `<${own('abc').replace('security-advisories?', 'security-advisories/?')}>; rel="next"`,
       `<${own('abc', 'published')}>; rel="next"`,
@@ -2299,8 +2462,24 @@ export async function selfTest() {
       `<${own('abc')}>; rel="next", <${own('def')}>; rel="next"`,
       `<not a url>; rel="next"`,
     ];
-    t('⛔ every other next link is FAILED, with the one sentence: another host, plain http, the numeric repository path, another repository, a trailing slash, another state, no state, two states, no cursor, two cursors, an over-long cursor, a cursor outside its shape, two next links, an unparsable URL and a header that is no string', [...refusedLinks, 17].map((link) => advisoryListNextCursor(link, ctx)), [...refusedLinks, 17].map(() => ({ fail: ADVISORY_LIST_CURSOR_REFUSED })));
+    t('⛔ every other next link is FAILED, with the one sentence: another host, plain http, the numeric path of ANOTHER repository id, this id with a trailing slash, on another collection, with a leading zero, on another host, in another state, paged with no cursor, and with an over-long cursor, another repository, a trailing slash, another state, no state, two states, no cursor, two cursors, an over-long cursor, a cursor outside its shape, two next links, an unparsable URL and a header that is no string', [...refusedLinks, 17].map((link) => advisoryListNextCursor(link, ctx)), [...refusedLinks, 17].map(() => ({ fail: ADVISORY_LIST_CURSOR_REFUSED })));
     t('⛔ the cursor\'s shape: base64 and base64url characters and a pad, one to 256 — never empty, a space, a percent sign, an ampersand or one character more; and the refusal names no link, no cursor and no marker', [ADVISORY_LIST_CURSOR_MAX_CHARS, ['Y3Vy+c29y/OnYy==', 'abc_DEF-123', 'a'.repeat(256)].every((c) => ADVISORY_LIST_CURSOR_SHAPE.test(c)), ['', 'a b', 'a%2B', 'a&b', 'a'.repeat(257)].some((c) => ADVISORY_LIST_CURSOR_SHAPE.test(c)), [MARKER, 'evil.test', 'after='].some((needle) => ADVISORY_LIST_CURSOR_REFUSED.includes(needle))], [256, true, false, false]);
+    // ⭐ The real next-link shape: GitHub's Link header names the collection by the repository's NUMERIC id
+    // (`/repositories/{id}/…`, as its pagination guide shows for a request to `/repos/{owner}/{name}/…`), carries the
+    // request's filters and, beside a cursor, a `page` — the shape measured on this repository's cursor-paged issues.
+    const CURSOR_REAL = 'Y3Vyc29yOnYyOpK0+Zm9v/YmFy==';
+    const realNext = `<https://api.github.com/repositories/${REPO_ID}/security-advisories?per_page=100&state=draft&after=${encodeURIComponent(CURSOR_REAL)}&page=2>; rel="next"`;
+    const noId = { api: API, repo: REPO, state: 'draft' };
+    t('⭐ the REAL next-link shape — the collection by numeric id, per_page, state, an encoded cursor and a page — is followed on its decoded cursor when the id is the repository\'s own; with no id read the rule asks for it, and never takes the link\'s', [advisoryListNextCursor(realNext, ctx), advisoryListNextCursor(realNext, noId), advisoryListNextCursor(realNext, { ...noId, repoId: null }), advisoryListNextCursor(realNext, { ...ctx, repoId: '4243' }), advisoryListNextCursor(realNext.replace('&page=2', '&page=2&before='), ctx)], [{ after: CURSOR_REAL }, { needsRepoId: true }, { needsRepoId: true }, { fail: ADVISORY_LIST_CURSOR_REFUSED }, { after: CURSOR_REAL }]);
+    t('…and the numeric form asks for the id only once its state and cursor already hold: off the state, with no cursor, or with an ill-shaped one it is refused outright, no read', [advisoryListNextCursor(realNext.replace('state=draft', 'state=closed'), noId), advisoryListNextCursor(realNext.replace(/&after=[^&]*/, ''), noId), advisoryListNextCursor(realNext.replace(/after=[^&]*/, 'after=a%20b'), noId)], [{ fail: ADVISORY_LIST_CURSOR_REFUSED }, { fail: ADVISORY_LIST_CURSOR_REFUSED }, { fail: ADVISORY_LIST_CURSOR_REFUSED }]);
+    t("the repository's own id is read from its 200 answer alone — a positive safe integer under its own full name, the name compared case-insensitively; anything else reads no id", [advisoryListRepoIdOf({ status: 200, json: { id: 4242, full_name: REPO } }, REPO), advisoryListRepoIdOf({ status: 200, json: { id: 4242, full_name: REPO.toUpperCase() } }, REPO), ...[{ status: 404, json: { id: 4242, full_name: REPO } }, { status: 200, json: { id: '4242', full_name: REPO } }, { status: 200, json: { id: 0, full_name: REPO } }, { status: 200, json: { id: -1, full_name: REPO } }, { status: 200, json: { id: 4.5, full_name: REPO } }, { status: 200, json: { id: 4242, full_name: 'someone/else' } }, { status: 200, json: { id: 4242 } }, { status: 200, json: null }, { status: 200, json: [4242] }, null].map((a) => advisoryListRepoIdOf(a, REPO))], ['4242', '4242', ...Array.from({ length: 10 }, () => null)]);
+    // ⛔ The diagnostic a refusal prints: the link's shape, never one of its values.
+    const shapeLinks = [...refusedLinks, `<https://api.github.com/repos/${REPO.toUpperCase()}/security-advisories?state=draft&after=${encodeURIComponent(CURSOR_REAL)}>; rel="next"`, realNext.replace(/after=[^&]*/, `after=${encodeURIComponent(`${MARKER} ${CURSOR_REAL}`)}`), realNext.replace('&page=2', `&${encodeURIComponent(MARKER)}=1`), 17, '', null];
+    const shapes = shapeLinks.map((link) => advisoryListLinkShape(link, ctx));
+    const [owner, name] = REPO.split('/');
+    const valueLeaks = shapes.filter((text) => [CURSOR_REAL, encodeURIComponent(CURSOR_REAL), 'abc', 'def', REPO_ID, '1/', owner, name, 'objectui', 'evil.test', 'api.github.com', 'closed', 'published', MARKER, 'aaaa'].some((v) => text.includes(v)));
+    t('⛔ the refusal diagnostic prints the SHAPE alone — for every refused link, a numeric one, one in another letter case, a cursor and a parameter name carrying the marker — no cursor, id, owner, name, host, state or marker: a value never reaches the job log', [shapes.length, valueLeaks], [shapeLinks.length, []], valueLeaks.join(' | '));
+    t('⭐ the diagnostic pinned on the real shape: the next-link count, the origin, the path with ID in place of the id and whether it is the repository\'s, the query NAMES in order, and of state and after only how they stand', [advisoryListLinkShape(realNext, { ...ctx, repoId: '4243' }), advisoryListLinkShape(realNext, noId), advisoryListLinkShape(`<https://api.github.com/repos/${REPO}/security-advisories/?state=closed&after=${'a'.repeat(300)}>; rel="next"`, ctx), advisoryListLinkShape(`<${own('abc')}>; rel="next", <${own('def')}>; rel="next"`, ctx), advisoryListLinkShape(17, ctx), advisoryListLinkShape('<not a url>; rel="next"', ctx)], ["link shape: 1 rel=\"next\" link(s); on the relay's API origin; path /repositories/ID/security-advisories (ID another repository's); query names [per_page,state,after,page]; state the walk's; after in its shape", "link shape: 1 rel=\"next\" link(s); on the relay's API origin; path /repositories/ID/security-advisories (ID not compared: the repository id was not read); query names [per_page,state,after,page]; state the walk's; after in its shape", "link shape: 1 rel=\"next\" link(s); on the relay's API origin; path /repos/OWNER/NAME/security-advisories/ (OWNER/NAME this repository); query names [state,after]; state not the walk's; after over its length cap", "link shape: 2 rel=\"next\" link(s); on the relay's API origin; path /repos/OWNER/NAME/security-advisories (OWNER/NAME this repository); query names [state,per_page,after]; state the walk's; after in its shape", 'link shape: the Link header is no string', 'link shape: 1 rel="next" link(s); the first is no absolute URL']);
     // A page's fences.
     const item = (extra = {}) => ({ ghsa_id: GHSA, state: 'draft', severity: 'high', created_at: '2026-11-01T00:00:00Z', updated_at: '2026-11-02T00:00:00Z', summary: MARKER, description: MARKER, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }], credits: [{ login: MARKER }], html_url: `https://github.test/${MARKER}`, ...extra });
     const page = (json, status = 200) => ({ status, json });
@@ -2451,6 +2630,128 @@ export async function selfTest() {
     t('⛔ the landed row: the id, the state, three byte counts and the keyed digest — no byte of the note or the description', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · appended a 90-byte note to a 30-byte description — 127 bytes stored, read back byte for byte · keyed digest ${digest}`, false]);
   }
 
+  // ── advisory_rewrite: the one row that replaces an advisory's text, sealed through the note's path ─────────────
+  battery(REWRITE_BATTERY);
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const MARKER = 'REWRITE MARKER';
+    const rewrite = (extra = {}) => ({ op: 'advisory_rewrite', ghsa_id: GHSA, sealed_note: REWRITE_SEALED, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const aad = (over = {}) => advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_rewrite', ghsaId: GHSA, ...over });
+    const opens = (sealed, aadOf = aad()) => {
+      try {
+        return openAdvisoryNote({ sealed, privateKey: RELAY.privateKey, aad: aadOf }).section;
+      } catch (e) {
+        return e.message === ADVISORY_NOTE_OPEN_FAILED ? 'refused' : `threw: ${e.message}`;
+      }
+    };
+    // The row and the field: the note's.
+    t("the row: ghsa_id and sealed_note — the note's own field, kind sealed — nothing optional; repository-advisories at write, alone, the stroke's target-write gate, no second repository; and it is one of the two rows sealed to the relay's note key", [OPS.advisory_rewrite.required, OPS.advisory_rewrite.optional, OPS.advisory_rewrite.permission, OPS.advisory_rewrite.grant ?? null, OPS.advisory_rewrite.alone, OPS.advisory_rewrite.senderGate ?? null, OPS.advisory_rewrite.secondRepo ?? null, OPS.advisory_rewrite.alsoSpends ?? null, SEALED_TO_RELAY_OPS], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, true, null, null, null, ['advisory_note', 'advisory_rewrite']]);
+    const req = OPS.advisory_rewrite.requests(rewrite(), REPO);
+    t("its ONE request is a PATCH of that one advisory carrying the id and the ciphertext to the executor — and NO body: the fields are the executor's, sent after its reads", [req.length, req[0].verb, req[0].path, req[0].advisoryRewrite, 'body' in req[0], 'advisoryNote' in req[0]], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, { ghsaId: GHSA, sealedNote: REWRITE_SEALED }, false, false]);
+    // ⭐ The payload carries no plaintext.
+    const accepted = validatePayload(one(rewrite()));
+    const wire = JSON.stringify(accepted.payload ?? {});
+    t('⭐ a payload carrying NO plaintext: the id and the seal pass, unchanged, and neither the summary nor the description is in the payload — as characters, or in the decoded seal — while the opened seal holds both (the positive control)', [accepted.ok, accepted.payload?.actions?.[0], wire.includes(MARKER), Buffer.from(REWRITE_SEALED, 'base64url').includes(Buffer.from(MARKER)), opens(REWRITE_SEALED) === REWRITE_TEXT, REWRITE_TEXT.includes(MARKER)], [true, rewrite(), false, false, true, true]);
+    t("⛔ the actions file's own keys and the plaintext never reach the payload: summary_file, description_file, note_file, summary, description and body are each refused as keys the row does not take", ['summary_file', 'description_file', 'note_file', 'summary', 'description', 'body'].map((k) => validatePayload(one(rewrite({ [k]: `${MARKER} x` }))).errors.some((e) => e.includes(`actions[0].${k} is not a key \`advisory_rewrite\` takes`) && !e.includes(MARKER))), [true, true, true, true, true, true]);
+    t('⛔ alone: a rewrite beside a comment, beside a note, and two rewrites, are each refused — one rewrite per stroke', [refuses(fixturePayload({ actions: [rewrite(), { op: 'comment', issue: 1, body: 'x' }] }), 'a stroke carries exactly ONE `advisory_rewrite` and nothing else'), refuses(fixturePayload({ actions: [rewrite(), { op: 'advisory_note', ghsa_id: GHSA, sealed_note: NOTE_SEALED }] }), 'and nothing else'), refuses(fixturePayload({ actions: [rewrite(), rewrite()] }), 'a stroke carries exactly ONE `advisory_rewrite` and nothing else')], [true, true, true]);
+    t("⭐ the grant and the mark: its stroke mints repository-advisories WRITE for ONE repository and is marked advisory_note=yes, so the workflow's existing line hands it the relay's note key — no workflow change", [tokenPermissionsOf(accepted.payload)['repository-advisories'], tokenRepositoriesOf(accepted.payload), outputLine(accepted.payload, 'permission_repository_advisories'), outputLine(accepted.payload, ADVISORY_NOTE_OUTPUT)], ['write', [REPO], 'permission_repository_advisories=write', 'advisory_note=yes']);
+    // The seal: the note's path, the rewrite's associated data.
+    t("the associated data: the rewrite's own prefix, the request, the action, the op and the id", [aad().toString('utf8')], [`fleet-write:advisory_rewrite:v1 request=fw-test-1 action=1 op=advisory_rewrite ghsa_id=${GHSA}`]);
+    const noteAad = advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA });
+    t("⛔ the two directions of the one key never cross: a note's seal does not open as a rewrite, a rewrite's does not open as a note, and a rewrite opens for ITS request, action and advisory alone", [opens(NOTE_SEALED), opens(REWRITE_SEALED, noteAad), opens(REWRITE_SEALED, aad({ requestId: 'fw-test-2' })), opens(REWRITE_SEALED, aad({ action: 2 })), opens(REWRITE_SEALED, aad({ ghsaId: 'GHSA-wxyz-2345-abcd' }))], ['refused', 'refused', 'refused', 'refused', 'refused']);
+    // The fences.
+    const answer = (json, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', summary: `${MARKER} the working summary`, description: `${MARKER} the working text`, ...json } });
+    const fence = (a) => advisoryRewriteFenceFailures({ ghsaId: GHSA, answer: a, from: ADVISORY_REWRITE_STATES }).map((f) => f.fence);
+    t('⛔ the fences: triage, draft and closed pass, a null summary and description too; a PUBLISHED advisory and a withdrawn one fail the state fence, another advisory the advisory fence, a 404 every fence after the read, a summary that is not text its own', [ADVISORY_REWRITE_STATES, ['triage', 'draft', 'closed'].map((state) => fence(answer({ state }))), fence(answer({ summary: null, description: null })), fence(answer({ state: 'published' })), fence(answer({ state: 'withdrawn' })), fence(answer({ ghsa_id: 'GHSA-wxyz-2345-abcd' })), fence({ status: 404, json: { message: 'Not Found' } }), fence(answer({ summary: ['x'] }))], [['triage', 'draft', 'closed'], [[], [], []], [], ['state'], ['state'], ['advisory'], ['read', 'advisory', 'state', 'description', 'summary'], ['summary']]);
+    const publishedText = advisoryFenceText(advisoryRewriteFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }), from: ADVISORY_REWRITE_STATES }));
+    t('…the refusal of a published advisory names the fence and the state, and no byte of its text', [publishedText, publishedText.includes(MARKER)], ['fence `state`: the advisory reads state published, and the relay writes only to an unpublished advisory — state triage or draft or closed; never published or withdrawn', false]);
+    // The text.
+    const judged = [
+      advisoryRewriteText({ summary: 'S', description: 'D' }),
+      advisoryRewriteText({ description: 'D' }),
+      advisoryRewriteText({ summary: 'S' }),
+      advisoryRewriteText({ summary: 'S', description: '' }),
+      advisoryRewriteText({ description: '  \n\t' }),
+      advisoryRewriteText({ summary: '' }),
+      advisoryRewriteText({}),
+      advisoryRewriteText({ summary: `${MARKER} one\nline two` }),
+      advisoryRewriteText({ summary: ` ${MARKER}` }),
+      advisoryRewriteText({ description: `${MARKER} ends in a space ` }),
+      advisoryRewriteText({ description: `${MARKER}\r\nCRLF` }),
+      advisoryRewriteText({ summary: 'x'.repeat(ADVISORY_SUMMARY_MAX_CHARS + 1) }),
+      advisoryRewriteText({ description: 'x'.repeat(MAX_ADVISORY_NOTE_BYTES) }),
+      JSON.stringify({ description: 'D', summary: 'S' }),
+      JSON.stringify({ summary: 'S', credits: [] }),
+      `${MARKER} not JSON`,
+    ].map(advisoryRewriteFailure);
+    t('the text judged: a summary and a description, either alone, pass; an EMPTY description, a blank one, an empty summary, no field, a summary of two lines or with surrounding whitespace, a description ending in whitespace or carrying a carriage return, a summary over 1024 characters, the whole over 30,000 bytes, another spelling, another field and prose are each refused — and no reason carries a byte of the text', [judged.map((w) => w === null), judged[3], judged.some((w) => w && w.includes(MARKER))], [[true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false], 'the description is empty', false]);
+    // The read-back and its keyed digest.
+    const SENT = { summary: `${MARKER} the public summary`, description: `${MARKER} the public text` };
+    const BEFORE = answer({}).json;
+    const back = (json, status = 200, sent = SENT) => advisoryRewriteReadBack({ ghsaId: GHSA, sent, before: BEFORE, answer: { status, json: { ghsa_id: GHSA, state: 'draft', ...json } } });
+    const backs = [back(SENT), back({ ...SENT, description: `${SENT.description} ` }), back({ ...SENT, summary: 'x' }), back({ summary: BEFORE.summary, description: SENT.description }, 200, { description: SENT.description }), back({ summary: 'raced', description: SENT.description }, 200, { description: SENT.description }), back(SENT, 422), back({ ...SENT, ghsa_id: 'GHSA-wxyz-2345-abcd' })];
+    t('the read-back: exactly the fields sent land; a byte more in the description, another summary, a refusal or another advisory is no read-back; a description alone lands with the summary as read, and a summary changed under it is a raced write — no reason carries a byte of any text', [backs.map((b) => b.ok), backs[1].why.includes('-byte description that is not the'), backs[4].why.includes('another write raced this one'), backs.some((b) => b.why.includes(MARKER))], [[true, false, false, true, false, false, false], true, true, false]);
+    const KEY = Buffer.alloc(32, 5);
+    const sealedDigest = advisoryNoteDigest({ digestKey: KEY, section: advisoryRewriteText(SENT) });
+    t("⭐ the round-trip digest: the keyed digest of the text the advisory STORES equals the seat's digest of the text it sealed when they match byte for byte, and differs for one byte more, for the other field's text, and under another key", [advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT }, fields: ['summary', 'description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT, description: `${SENT.description}.` }, fields: ['summary', 'description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: KEY, json: { ...BEFORE, ...SENT }, fields: ['description'] }) === sealedDigest, advisoryRewriteStoredDigest({ digestKey: Buffer.alloc(32, 6), json: { ...BEFORE, ...SENT }, fields: ['summary', 'description'] }) === sealedDigest, ADVISORY_REWRITE_FIELDS], [true, false, false, false, ['summary', 'description']]);
+    const landed = advisoryRewriteLandedText({ ghsaId: GHSA, state: 'draft', fields: [{ key: 'summary', beforeBytes: 40, afterBytes: 30 }, { key: 'description', beforeBytes: 900, afterBytes: 600 }], digest: sealedDigest });
+    t('⛔ the landed row: the id, the state, each field\'s byte counts and the keyed digest — no byte of any text', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · replaced the summary (40 → 30 bytes) and the description (900 → 600 bytes), read back byte for byte · keyed digest ${sealedDigest}`, false]);
+  }
+
+  // ── advisory_severity: the one row that sets an advisory's severity — no prose, so nothing sealed ─────────────────
+  battery(SEVERITY_BATTERY);
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    // Spaces and punctuation: prose, never a severity's, an id's or a state's shape.
+    const MARKER = 'ADVISORY SEVERITY MARKER, in the wrong key';
+    const grade = (extra = {}) => ({ op: 'advisory_severity', ghsa_id: GHSA, severity: 'high', ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const errorsOf = (action) => validatePayload(one(action)).errors;
+    const WORD = /\b(?:critical|high|medium|low)\b/;
+    // The op table's closed shape.
+    t("the row: ghsa_id and severity, nothing optional; repository-advisories at write (no grant of its own), alone, the stroke's target-write gate, no second repository, no alsoSpends, no closed inputs, no disjoint packages", [OPS.advisory_severity.required, OPS.advisory_severity.optional, OPS.advisory_severity.permission, OPS.advisory_severity.grant ?? null, OPS.advisory_severity.alone, OPS.advisory_severity.senderGate ?? null, OPS.advisory_severity.secondRepo ?? null, OPS.advisory_severity.alsoSpends ?? null, OPS.advisory_severity.closedInputs ?? null, OPS.advisory_severity.disjointPackages ?? null], [['ghsa_id', 'severity'], [], 'repository-advisories', null, true, null, null, null, null, null]);
+    t("⭐ the severity field is the report's and the draft's own — ONE copy of GitHub's four (ADVISORY_SEVERITIES, the enum itself), a quiet closed enum; the three rows taking it are the report, the draft and this row", [FIELDS.severity.kind, FIELDS.severity.values === ADVISORY_SEVERITIES, [...ADVISORY_SEVERITIES], FIELDS.severity.quiet, OP_NAMES.filter((op) => [...OPS[op].required, ...OPS[op].optional].includes('severity'))], ['enum', true, ['critical', 'high', 'medium', 'low'], true, ['advisory_report', 'advisory_create', 'advisory_severity']]);
+    const reqs = ADVISORY_SEVERITIES.map((severity) => OPS.advisory_severity.requests(grade({ severity }), REPO));
+    t("⭐ ONE PATCH of one advisory's path per action, whose body is exactly { severity } — the value sent and nothing else, no state, no vector, no prose — and the id with the severity for the executor's fences and read-back; no refused family reaches it", reqs.map((r) => [r.length, r[0].verb, r[0].path, Object.keys(r[0].body), r[0].body.severity, r[0].advisorySeverity, REFUSED_PATH_FAMILIES.filter((re) => re.test(r[0].path)).length]), ADVISORY_SEVERITIES.map((severity) => [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, ['severity'], severity, { ghsaId: GHSA, severity }, 0]));
+    const accepted = ADVISORY_SEVERITIES.map((severity) => validatePayload(one(grade({ severity }))));
+    t('accepted: each of the four severities, normalised to exactly what was sent', accepted.map((v) => [v.ok, v.payload?.actions[0]]), ADVISORY_SEVERITIES.map((severity) => [true, grade({ severity })]), accepted.flatMap((v) => v.errors).join(' | '));
+    // One refusal per bad input, each naming the key — ⛔ never the value.
+    t('⛔ refused: a missing ghsa_id and a missing severity, each by name — never defaulted', [errorsOf({ op: 'advisory_severity', severity: 'high' }), errorsOf({ op: 'advisory_severity', ghsa_id: GHSA })], [['actions[0].ghsa_id is required by `advisory_severity`'], ['actions[0].severity is required by `advisory_severity`']]);
+    const malformed = ['ghsa-abcd-2345-wxyz', 'GHSA-ABCD-2345-WXYZ', 'GHSA-abcd-2345', `${GHSA}/cve`, `../${GHSA}`, 'CVE-2026-12345', '', 17, null, [GHSA]];
+    t("⛔ a malformed ghsa_id is refused before any request, naming the id's shape", malformed.filter((ghsa_id) => !refuses(one(grade({ ghsa_id })), "actions[0].ghsa_id must be one repository advisory's id")).map(String), []);
+    const outside = [MARKER, 'HIGH', 'Critical', 'moderate', 'none', 'informational', ' high', '', 7, null, ['high'], { level: 'high' }];
+    const outsideErrors = outside.map((severity) => errorsOf(grade({ severity })));
+    t("⛔ a value outside the four is refused BY THE KEY'S NAME, listing the four and echoing nothing of the value: prose carrying the marker, an upper-case or capitalised word, words of other severity scales (moderate, none, informational), a padded word, empty, a number, null, a list and an object", [outsideErrors.map((e) => e.length === 1 && e[0].startsWith('actions[0].severity must be one of "critical", "high", "medium", "low", got ') && e[0].endsWith('— not echoed')), outsideErrors.flat().some((e) => /SEVERITY MARKER|HIGH|Critical|moderate|informational/.test(e))], [outside.map(() => true), false]);
+    const takes = 'is not a key `advisory_severity` takes (it takes ghsa_id, severity)';
+    const extras = ['cvss_vector_string', 'cvss', 'cvss_severities', 'state', 'advisory_state', 'summary', 'description', 'vulnerabilities', 'cwe_ids', 'credits', 'collaborators', 'sealed_note', 'public_key', 'body', 'issue'];
+    t('⛔ any other key is refused BY NAME, the value never echoed: a CVSS vector, cvss, cvss_severities, a state, advisory_state, a summary, a description, vulnerabilities, cwe_ids, credits, collaborators, a sealed note, a public key, a body and an issue — an id and a severity, and nothing that carries prose, a vector or a move', [extras.filter((key) => !refuses(one(grade({ [key]: MARKER })), `actions[0].${key} ${takes}`)), extras.some((key) => errorsOf(grade({ [key]: MARKER })).some((e) => e.includes('SEVERITY MARKER')))], [[], false]);
+    // Alone, and its grant.
+    t('⛔ fence alone, refused: beside a comment, beside another advisory row, and two severities — each naming the action that does not belong; accepted alone', [refuses(fixturePayload({ actions: [grade(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `advisory_severity`'), refuses(fixturePayload({ actions: [grade(), { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' }] }), 'in a stroke that carries a `advisory_severity`'), refuses(fixturePayload({ actions: [grade(), grade({ severity: 'low' })] }), 'a stroke carries exactly ONE `advisory_severity` and nothing else'), strokeErrors(REPO, [grade()])], [true, true, true, []]);
+    const stroke = accepted[1].payload;
+    t('⭐ fence grant: its stroke mints the five literal grants plus repository-advisories WRITE for ONE repository — never actions, never the note key', stroke ? [tokenPermissionsOf(stroke), tokenRepositoriesOf(stroke), outputLine(stroke, 'permission_repository_advisories'), outputLine(stroke, 'permission_actions'), outputLine(stroke, 'advisory_note')] : 'refused', [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'repository-advisories': 'write' }, [REPO], 'permission_repository_advisories=write', 'permission_actions=', 'advisory_note=']);
+    // The fences, judged on the executor's own GET — pure here.
+    const answer = (json, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', severity: 'low', summary: MARKER, description: MARKER, cvss: null, cvss_severities: null, ...json } });
+    const fence = (a) => advisorySeverityFenceFailures({ ghsaId: GHSA, answer: a, from: ADVISORY_SEVERITY_STATES }).map((f) => f.fence);
+    t('the states are triage, draft and closed, frozen; the fences are ADVISORY_FENCES then cvss', [[...ADVISORY_SEVERITY_STATES], Object.isFrozen(ADVISORY_SEVERITY_STATES), ADVISORY_SEVERITY_FENCES.map((f) => f.fence)], [['triage', 'draft', 'closed'], true, [...ADVISORY_FENCES.map((f) => f.fence), 'cvss']]);
+    const noVector = [{}, { cvss: undefined, cvss_severities: undefined }, { cvss: { vector_string: null, score: null } }, { cvss_severities: { cvss_v3: null, cvss_v4: null } }, { cvss_severities: { cvss_v3: { vector_string: null, score: null }, cvss_v4: { vector_string: null, score: null } } }];
+    t('⭐ accepted: a triage, a draft and a closed advisory carrying no vector — none answered, null, or a slot whose vector_string is null — pass every fence', [['triage', 'draft', 'closed'].map((state) => fence(answer({ state }))), noVector.map((extra) => fence(answer(extra)))], [[[], [], []], noVector.map(() => [])]);
+    t('⛔ fence state: a PUBLISHED advisory, a withdrawn one, none and an unknown state are refused there alone; another advisory at the advisory fence; a 404 at the read and every fence after it', [['published', 'withdrawn', undefined, 'archived'].map((state) => fence(answer({ state }))), fence(answer({ ghsa_id: 'GHSA-wxyz-2345-abcd' })), fence(answer({}, 404))], [[['state'], ['state'], ['state'], ['state']], ['advisory'], ['read', 'advisory', 'state', 'cvss']]);
+    const VECTOR = `CVSS:3.1/AV:N/AC:L/${MARKER}`;
+    const vectored = [{ cvss: { vector_string: VECTOR, score: 9.8 } }, { cvss_severities: { cvss_v3: { vector_string: VECTOR, score: 9.8 }, cvss_v4: null } }, { cvss_severities: { cvss_v3: null, cvss_v4: { vector_string: VECTOR, score: 9.3 } } }, { cvss: { vector_string: '', score: null } }];
+    const odd = [{ cvss: VECTOR }, { cvss: [VECTOR] }, { cvss: { vector_string: 9.8 } }, { cvss_severities: VECTOR }, { cvss_severities: { cvss_v3: 'x', cvss_v4: null } }];
+    t('⛔ fence cvss: a vector at cvss, at cvss_severities.cvss_v3 or at .cvss_v4 — a blank one too, failing closed — and a cvss or cvss_severities of a shape the platform does not declare each refuse at the cvss fence alone', [vectored.map((extra) => [fence(answer(extra)), advisoryCvssVectorOf(answer(extra).json)]), odd.map((extra) => [fence(answer(extra)), advisoryCvssVectorOf(answer(extra).json)])], [vectored.map(() => [['cvss'], 'set']), odd.map(() => [['cvss'], 'unreadable'])]);
+    const cvssText = advisoryFenceText(advisorySeverityFenceFailures({ ghsaId: GHSA, answer: answer(vectored[0]), from: ADVISORY_SEVERITY_STATES }));
+    const publishedText = advisoryFenceText(advisorySeverityFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }), from: ADVISORY_SEVERITY_STATES }));
+    t('…each refusal names the fence and what it read — the state, or that a vector is set — and no byte of the vector, the text or the severity', [publishedText, cvssText, [publishedText, cvssText].some((x) => x.includes('MARKER') || x.includes('CVSS:3.1') || WORD.test(x))], ['fence `state`: the advisory reads state published, and the relay writes only to an unpublished advisory — state triage or draft or closed; never published or withdrawn', "fence `cvss`: the advisory carries a CVSS vector, which calculates its severity, and the relay writes only to an advisory carrying no CVSS vector — the platform refuses a severity while one is set, and the severity of such an advisory stays the maintainer's to set", false]);
+    // The read-back, from the PATCH answer.
+    const back = (json, status = 200, sent = 'critical') => advisorySeverityReadBack({ ghsaId: GHSA, sent, answer: { status, json: { ghsa_id: GHSA, state: 'draft', severity: 'critical', ...json } } });
+    const backs = [back({}), back({ state: 'closed' }), back({ state: 'triage' }), back({ severity: 'high' }), back({ severity: null }), back({ severity: 'Critical' }), back({ state: 'published' }), back({ ghsa_id: 'GHSA-wxyz-2345-abcd' }), back({}, 422), advisorySeverityReadBack({ ghsaId: GHSA, sent: 'critical', answer: { status: 200, json: [MARKER] } })];
+    t('⭐ the read-back: the severity sent stored lands, in triage, draft and closed; another of the four, none, one of no declared shape, a published answer, another advisory, a refusal and an answer that is no advisory are each NO landing, saying which', backs.map((b) => [b.ok, b.why]), [[true, ''], [true, ''], [true, ''], [false, 'HTTP 200, but the answer stores another severity than the one sent'], [false, 'HTTP 200, but the answer stores no severity'], [false, 'HTTP 200, but the answer stores a severity of no declared shape'], [false, 'HTTP 200, but the answer reads state published, not triage, draft or closed'], [false, 'HTTP 200, but the answer names GHSA-wxyz-2345-abcd'], [false, 'HTTP 422'], [false, 'HTTP 200, but the answer is not an advisory, so its severity cannot be read back']]);
+    const landed = advisorySeverityLandedText({ ghsaId: GHSA, state: 'draft' });
+    t('⛔ the landed row and every read-back sentence carry the id, the state and statuses — never the severity word, which advisory_list seals', [landed, [landed, ...backs.map((b) => b.why)].filter((x) => WORD.test(x) || x.includes('MARKER'))], [`${GHSA} · state draft · severity set: the answer stores the one sent`, []]);
+  }
+
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -2492,7 +2793,9 @@ export async function selfTest() {
       'and never echoed, its answer sealed to that key and opening for that read alone; and one that lists — advisory_list, public_key alone, ' +
       'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way; ' +
       'and one that appends — advisory_note, its note sealed to the relay\'s own key, judged by shape and never opened or echoed here, ' +
-      'the key reaching the execute step for that stroke alone.',
+      'the key reaching the execute step for that stroke alone; and one that replaces — advisory_rewrite, an unpublished ' +
+      "advisory's summary and description sealed through the note's own path and mark, never opened or echoed here; " +
+      "and one that grades — advisory_severity, an unpublished advisory's severity from GitHub's four alone, refused while a CVSS vector is set, the word printed nowhere.",
   );
   selfTestReachedVerdict = true;
   return 0;

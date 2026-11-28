@@ -58,6 +58,9 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 }));
 
 import { PagePreview } from './PagePreview';
+// The source under test reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 
 /** Each object's sample records; one keyed by `_id`, one by `name` alone. */
 const RECORDS: Record<string, unknown[]> = {
@@ -73,7 +76,7 @@ const RECORDS: Record<string, unknown[]> = {
   ],
 };
 
-const answer = (body: unknown) => ({ json: async () => body }) as unknown as Response;
+const answer = (body: unknown) => ({ headers: new Headers(), json: async () => body }) as unknown as Response;
 
 function stubFetch(): void {
   vi.stubGlobal(

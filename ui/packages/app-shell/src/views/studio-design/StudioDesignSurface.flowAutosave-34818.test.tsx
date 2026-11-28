@@ -5,13 +5,10 @@
  * REAL `AutomationsPillar` with the REAL registered `FlowPreview` and
  * `FlowInspector` (the harness of `StudioDesignSurface.autosaveInFlight-11204`).
  *
- * Item 8 — a landed flow autosave settles the header's 正在保存 spinner into
- * an 已保存 badge instead of raising a "Draft saved" toast. Seat ruling
- * 6954475081 on #34818 holds the badge to ruling 6545938831 ② on #28345 (write
- * feedback names the item): the badge sits in the flow header's own title row,
- * beside the flow's title, and its accessible text names the flow. A refused
- * save keeps its strip and raises one error toast. Controls: a second edit
- * clears the badge, and an Interfaces page (a leaf) autosave still toasts.
+ * Item 8 — an Interfaces page (a leaf) autosave toasts by its label. The
+ * flow header's 已保存 badge retired with the flow's autosave
+ * (objectstack#36511): a flow is sent by the top bar's Save, whose toast names
+ * it (`AutomationsPillar.saveCancel-36511.test.tsx`).
  *
  * Item 6 — the Debug section takes the Configuration aside's place; leaving
  * Debug brings the aside back with the selection kept. Control: Canvas keeps it.
@@ -120,7 +117,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { toast } from 'sonner';
-import { AutomationsPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar } from './StudioDesignSurface';
 import { StudioRightSlotContext } from './studioRightSlotState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -131,7 +128,7 @@ import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { PagePreview } from '../metadata-admin/previews/PagePreview';
 import { PageBlockInspector } from '../metadata-admin/inspectors/PageBlockInspector';
 import { PageDefaultInspector } from '../metadata-admin/inspectors/PageDefaultInspector';
-import { t, tFormat } from '../metadata-admin/i18n';
+import { t } from '../metadata-admin/i18n';
 
 const dataSource = createEmptyDataSource();
 
@@ -167,15 +164,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function editText(el: HTMLElement, value: string): void {
-  fireEvent.change(el, { target: { value } });
-  fireEvent.blur(el);
-}
-
 async function renderOpenFlow(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+      <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
     </MemoryRouter>,
   );
   await screen.findByTestId('auto-tab-canvas', undefined, { timeout: 8000 });
@@ -186,65 +178,6 @@ async function selectStart(): Promise<HTMLElement> {
   fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
   return within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, { timeout: 8000 });
 }
-
-const flowToasts = () =>
-  vi.mocked(toast.success).mock.calls.filter(([text]) => String(text).includes(FLOW.label) || String(text).includes(FLOW.name));
-
-describe('a landed flow autosave says 已保存 in the header, not in a toast (#34818 item 8)', () => {
-  it('shows the badge in the flow header title row, naming the flow, and raises no toast', async () => {
-    await renderOpenFlow();
-    editText(await selectStart(), 'Kick-off');
-    const badge = await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    expect(server.saves.filter((s) => s.type === 'flow')).toHaveLength(1);
-
-    // Beside the flow's title: the header's own title row holds both.
-    const titleRow = screen.getByTestId('auto-flow-header').firstElementChild as HTMLElement;
-    expect(titleRow.contains(badge)).toBe(true);
-    expect(within(titleRow).getByRole('heading', { level: 1 })).toHaveTextContent(FLOW.label);
-    // Seen: "Saved". Heard: the sentence that names the flow.
-    expect(badge).toHaveAttribute('role', 'status');
-    expect(badge).toHaveTextContent(en('engine.studio.autoSaved'));
-    expect(within(badge).getByText(tFormat('engine.studio.flowSavedNamed', 'en', { item: FLOW.label }))).toHaveClass('sr-only');
-
-    expect(flowToasts(), 'no "Draft saved" toast for a flow').toEqual([]);
-    expect(toast.error).not.toHaveBeenCalled();
-  });
-
-  it('a second edit clears the badge until that edit lands', async () => {
-    await renderOpenFlow();
-    const label = await selectStart();
-    editText(label, 'Kick-off');
-    await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    editText(label, 'Kick-off two');
-    expect(screen.queryByTestId('auto-autosaved')).toBeNull();
-    await screen.findByTestId('auto-autosaved', undefined, { timeout: 8000 });
-    expect(server.saves.filter((s) => s.type === 'flow')).toHaveLength(2);
-  });
-
-  it('a refused save keeps its strip, raises one error toast and shows no badge', async () => {
-    server.refuse = 'Flow "notify_owner" is invalid: label too long.';
-    await renderOpenFlow();
-    editText(await selectStart(), 'Kick-off');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1), { timeout: 8000 });
-    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe(tFormat('engine.studio.flowSaveFailed', 'en', { item: FLOW.label }));
-    expect(await screen.findByText(/label too long/, undefined, { timeout: 8000 })).toBeInTheDocument();
-    expect(screen.queryByTestId('auto-autosaved')).toBeNull();
-    expect(flowToasts()).toEqual([]);
-  });
-
-  it('the control: an Interfaces page (a leaf) autosave still toasts by its label', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, { timeout: 8000 });
-    const label = await within(screen.getByRole('complementary')).findByLabelText(/^Label/, undefined, { timeout: 8000 });
-    editText(label, 'Welcome');
-    await waitFor(() => expect(toast.success).toHaveBeenCalled(), { timeout: 8000 });
-    expect(vi.mocked(toast.success).mock.calls[0][0]).toBe(tFormat('engine.studio.draftSaved', 'en', { item: 'Home menu' }));
-  });
-});
 
 describe('the Debug section takes the Configuration aside’s place (#34818 item 6)', () => {
   it('hides the aside in Debug and brings it back, selection kept, on leaving', async () => {
@@ -265,7 +198,7 @@ describe('the Debug section takes the Configuration aside’s place (#34818 item
     function SlotHost({ children }: { children: React.ReactNode }) {
       const [target, setTarget] = React.useState<HTMLElement | null>(null);
       const handle = React.useMemo(
-        () => ({ propsTarget: target, mode: 'props' as const, claimProps: () => () => {}, showProps }),
+        () => ({ propsTarget: target, claimProps: () => () => {}, showProps }),
         [target],
       );
       return (
@@ -276,9 +209,9 @@ describe('the Debug section takes the Configuration aside’s place (#34818 item
       );
     }
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
         <SlotHost>
-          <AutomationsPillar packageId={PKG} />
+          <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
         </SlotHost>
       </MemoryRouter>,
     );

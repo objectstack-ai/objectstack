@@ -353,11 +353,11 @@ describe('Set default sends each app’s own package (objectui#12300)', () => {
     expect(card('lanebapp_app').queryByText('Default')).toBeNull();
   });
 
-  it('re-reads after a failure too: a demotion that landed is shown, not hidden', async () => {
+  it('re-reads after a failure too: the restored default is what the list shows', async () => {
     const realSave = h.saveItem.getMockImplementation()!;
     h.saveItem
       .mockImplementationOnce(realSave)
-      .mockRejectedValueOnce(new Error('forbidden: manage_metadata required'));
+      .mockRejectedValueOnce(Object.assign(new Error('forbidden: manage_metadata required'), { httpStatus: 403 }));
     const user = userEvent.setup();
     renderPage();
 
@@ -366,8 +366,11 @@ describe('Set default sends each app’s own package (objectui#12300)', () => {
     await waitFor(() => expect(h.toastError).toHaveBeenCalled());
     expect(h.toastSuccess).not.toHaveBeenCalled();
     await waitFor(() => expect(h.refresh).toHaveBeenCalled());
-    // The demotion landed and the promotion did not: no app is the default.
-    await waitFor(() => expect(screen.queryByText('Default')).toBeNull());
+    // The demotion landed and the promotion did not, so the demotion was put
+    // back (objectstack#34860): the previous default is still the default.
+    expect(h.saveItem).toHaveBeenCalledTimes(3);
+    await waitFor(() => expect(card('lanebapp_app').getByText('Default')).toBeInTheDocument());
+    expect(card('showcase_app').queryByText('Default')).toBeNull();
   });
 });
 

@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { fieldForm } from './field.form';
+import { fieldForm } from './field.metadata-form';
 import { FieldSchema, FieldType } from './field.zod';
 
 type Predicate = string | { dialect?: string; source?: string } | undefined;

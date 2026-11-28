@@ -204,8 +204,13 @@ export const SysActivity = ObjectSchema.create({
      * change (with a changeset) plus a census redo in
      * `sys-activity-type-vocabulary.test.ts`, in the same PR.
      */
+    // `completed` declares the colour it rendered with when the renderer still
+    // derived colours from values; a select option is coloured only when its
+    // author declares one (objectstack#36882). The values still come from the
+    // published list, never a hand-copy.
     type: Field.select(
-      [...SYS_ACTIVITY_BUILTIN_TYPES],
+      SYS_ACTIVITY_BUILTIN_TYPES.map((value) =>
+        value === 'completed' ? { label: value, value, color: 'green' } : value),
       {
         label: 'Type',
         description:
@@ -430,6 +435,7 @@ export const SysActivity = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list'],

@@ -36,7 +36,7 @@
  *
  *   - `app-shell/src/views/ObjectView.tsx:1968` DERIVES the grid's
  *     `rowActionDefs` from `objectDef.actions` filtered by
- *     `locations: ['list_item']`, while passing `bulkActionDefs` straight
+ *     `locations: ['record_row']`, while passing `bulkActionDefs` straight
  *     through from the view author twenty lines below. Asymmetric by
  *     construction — one is computed, the other authored.
  *   - The spec's `ObjectGridPropsSchema` is a `strictObject` that accepts
@@ -46,7 +46,7 @@
  *     `rowActionDefs` — which is why the read is a cast at all.
  *
  * So the authored way to put an action on a row stays what it already was: the
- * object's own action with `locations: ['list_item']`, plus the declared legacy
+ * object's own action with `locations: ['record_row']`, plus the declared legacy
  * `rowActions` name list. `bulkActionDefs` keeps its job here as the DECLARED
  * CONTROL below — the one key of the pair that IS authoring surface, which is
  * what makes every "not published" assertion mean something.
@@ -178,7 +178,7 @@ const NON_AUTHOR_KEYS = [
     // key into the manifest as `bulkActionDefs`'s symmetric partner.
     ruled: '2026-08-19 (reversing 2026-08-18)',
     producer:
-      "app-shell ObjectView: the list schema's `rowActionDefs` — DERIVED from objectDef.actions filtered by locations:['list_item'], "
+      "app-shell ObjectView: the list schema's `rowActionDefs` — DERIVED from objectDef.actions filtered by locations:['record_row'], "
       + 'whereas bulkActionDefs beside it is passed through from the author',
     sample: [{ name: 'approve', label: 'Approve' }],
   },
@@ -673,9 +673,12 @@ const objectGridSchemaSpan = (): [number, number] => {
   return [start, end];
 };
 
-/** The nine sibling callbacks the type note and the README claim are props-only. */
-const NINE_SIBLINGS = [
-  'onRowClick', 'onRowSelect', 'onCellChange', 'onRowSave', 'onBatchSave',
+/**
+ * The eight sibling callbacks the type note and the README claim are
+ * props-only (`onBatchSave` was the ninth until objectstack#35827 retired it).
+ */
+const EIGHT_SIBLINGS = [
+  'onRowClick', 'onRowSelect', 'onCellChange', 'onRowSave',
   'onEdit', 'onDelete', 'onBulkDelete', 'onAddRecord',
 ] as const;
 
@@ -733,10 +736,10 @@ describe('`onNavigate` — the ledger premises (objectui#5234)', () => {
     ).toBe(1);
   });
 
-  it('…and does NOT declare the nine siblings, which is the contrast the note draws', () => {
-    // The type note and both docs pages say the nine live only on
+  it('…and does NOT declare the eight siblings, which is the contrast the note draws', () => {
+    // The type note and both docs pages say the eight live only on
     // `ObjectGridComponentProps`. Measured here so the claim cannot go stale
-    // under them: a tenth callback arriving on the schema would make the note
+    // under them: a ninth callback arriving on the schema would make the note
     // false while every other assertion in this file stayed green.
     const [start, end] = objectGridSchemaSpan();
     const declaredInSpan = new Set(
@@ -748,11 +751,11 @@ describe('`onNavigate` — the ledger premises (objectui#5234)', () => {
     // Non-vacuity: the scan found the interface's members at all.
     expect(declaredInSpan.size).toBeGreaterThan(20);
     expect(declaredInSpan.has('onNavigate')).toBe(true);
-    for (const sibling of NINE_SIBLINGS) {
+    for (const sibling of EIGHT_SIBLINGS) {
       expect(
         declaredInSpan.has(sibling),
         `\`${sibling}\` is now declared on ObjectGridSchema. The programmatic-only note on`
-          + ' `onNavigate` and the README both say the nine live ONLY on'
+          + ' `onNavigate` and the README both say the eight live ONLY on'
           + ' `ObjectGridComponentProps` — one of them is now wrong.',
       ).toBe(false);
     }

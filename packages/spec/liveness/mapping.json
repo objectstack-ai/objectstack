@@ -119,25 +119,23 @@
           }
         },
         "deletePolicy": {
-          "status": "planned",
-          "verifiedAt": "2026-11-10",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull marks no deleted row, whichever policy you set.",
-          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): what a pull does with a row the source no longer has — `'mark'` stamps `_sync_deleted_at` and clears it if the row comes back, `'ignore'` leaves the row. Declared with NO schema `.default()` so an authored value stays distinguishable from an absent one (absent reads as `'mark'`), which is what lets this row warn the author at all. READ BY NOTHING YET: the delete marking, its completeness rule and the incremental-`mark` refusal are the P2 engine card's (#32062), which flips this row to `live` and drops `authorWarn` / `authorHint`."
+          "status": "live",
+          "verifiedAt": "2026-11-24",
+          "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3): under `'mark'` (absent reads as `'mark'`, no schema default) a pull stamps `_sync_deleted_at` on a row the source deleted and clears it when a later pull reads the row again; `'ignore'` leaves every row. A FULL connector pull (no `watermark`) marks by absence only when one response is the whole set (`paging: { style: 'none' }`); with no `paging` it records `unjudged, no paging declared` and with a style whose loop is not built yet `unjudged, pages not followed`. An incremental source under `'mark'` with no `deletedField` is refused at parse (packages/spec/src/data/mapping.zod.ts#incrementalSourceDeleteRefusal) and again at run time (`delete_policy_unhonourable`). A `synced` target that withholds the provenance columns is refused under `'mark'`. Planned 2026-11-10 (P2 spec card #32061); `authorWarn` / `authorHint` dropped with the flip.",
+          "evidence": "packages/services/service-automation/src/connector-pull.ts#pullOnce (the pull behind packages/services/service-automation/src/connector-pull.ts#pullConnectorSource; reads `deletePolicy` through packages/services/service-automation/src/sync-delete-mark.ts#syncDeletePolicyOf and marks through `SyncDeleteMarker`: `deletedField` row by row, then the absence mark of a complete full pull)"
         },
         "deletedField": {
-          "status": "planned",
-          "verifiedAt": "2026-11-10",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull does not read this field, so a source soft-delete is not marked.",
-          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): the source soft-delete field an incremental pull reads to learn of a delete it cannot see as an absence. READ BY NOTHING YET: the P2 engine card (#32062) reads it with the delete marking and flips this row to `live`."
+          "status": "live",
+          "verifiedAt": "2026-11-24",
+          "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3): on any pull under `'mark'`, a read record whose value in this field is truthy has its copy marked `_sync_deleted_at`, and every other read record's copy is cleared. The only way an incremental pull learns of a delete. Planned 2026-11-10 (P2 spec card #32061); `authorWarn` / `authorHint` dropped with the flip.",
+          "evidence": "packages/services/service-automation/src/sync-delete-mark.ts#SyncDeleteMarker (`afterBatch` reads the source record's `deletedField` and marks or clears its copy by `_sync_external_id`), called from packages/services/service-automation/src/connector-pull.ts#pullOnce, the pull behind packages/services/service-automation/src/connector-pull.ts#pullConnectorSource"
         }
       }
     },
     "datasourceSource": {
       "status": "live",
       "verifiedAt": "2026-11-10",
-      "note": "LIVE since the P2 engine card's wiring slice (#32062, ADR-0153 D1/D2/D8): a job's `pull` reads the federated object this key names and copies its rows into the `synced` target. The build refusals of the P2 spec card (#32061) stay live in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors, and the pull judges the same rules again at run time for a stack the build never saw. Since the run-record slice (ADR-0153 D7) each run stores the read position it reaches at a window's end on `sys_sync_run`, and the next run of the same mapping (the package that holds it and its name, ADR-0150 D3) in the same organization starts there, when it reads the same source object and field into the same target. Children still `planned` carry their own `authorWarn`: `deletePolicy` and `deletedField` (delete marking, D3).",
+      "note": "LIVE since the P2 engine card's wiring slice (#32062, ADR-0153 D1/D2/D8): a job's `pull` reads the federated object this key names and copies its rows into the `synced` target. The build refusals of the P2 spec card (#32061) stay live in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors, and the pull judges the same rules again at run time for a stack the build never saw. Since the run-record slice (ADR-0153 D7) each run stores the read position it reaches at a window's end on `sys_sync_run`, and the next run of the same mapping (the package that holds it and its name, ADR-0150 D3) in the same organization starts there, when it reads the same source object and field into the same target. Since the D3 slice its `deletePolicy` and `deletedField` children are live too (delete marking).",
       "children": {
         "object": {
           "status": "live",
@@ -168,22 +166,20 @@
         "full": {
           "status": "live",
           "verifiedAt": "2026-11-10",
-          "note": "LIVE since the run-record slice (ADR-0153 D7): `full: true` makes every run read from `watermark.start`; omitted, a run reads on from the position the last committed run of the mapping stored on `sys_sync_run`. Delete marking by absence (D3), which only a full pull can do, lands with D3's own rows.",
+          "note": "LIVE since the run-record slice (ADR-0153 D7): `full: true` makes every run read from `watermark.start`; omitted, a run reads on from the position the last committed run of the mapping stored on `sys_sync_run`. Since the D3 slice a `full: true` run whose read was complete also marks by absence (see `deletePolicy`).",
           "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (`full: true` skips the read of the last committed position, so the run starts at `watermark.start`; otherwise the run starts from that position, read from `sys_sync_run`)"
         },
         "deletePolicy": {
-          "status": "planned",
-          "verifiedAt": "2026-11-10",
-          "note": "Planned under the live container `datasourceSource`, until delete marking (ADR-0153 D3), and the same key as `connectorSource.deletePolicy` (ADR-0153 D3, no schema default; absent reads as `'mark'`).",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: a datasource pull marks no deleted row until delete marking lands (ADR-0153 D3), so a row removed at the source stays as it was."
+          "status": "live",
+          "verifiedAt": "2026-11-24",
+          "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3), the same key as `connectorSource.deletePolicy`: a `full: true` run whose windows read to their end and which counts no NULL watermark (D2 invariant 11, under the organization predicate) marks every row of the mapping it did not read whose copied watermark is non-NULL and at or above `watermark.start`; a NULL count records `unjudged, null watermark`. An incremental source under `'mark'` with no `deletedField` is refused at parse and at run time (`delete_policy_unhonourable`). `authorWarn` / `authorHint` dropped with the flip.",
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (reads `deletePolicy` through packages/services/service-automation/src/sync-delete-mark.ts#syncDeletePolicyOf, counts the NULL watermarks after the read and calls `SyncDeleteMarker.markAbsent` with the copied watermark's range)"
         },
         "deletedField": {
-          "status": "planned",
-          "verifiedAt": "2026-11-10",
-          "note": "Planned under the live container `datasourceSource`, until delete marking (ADR-0153 D3), and the same key as `connectorSource.deletedField` (ADR-0153 D3).",
-          "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: a datasource pull marks no deleted row until delete marking lands (ADR-0153 D3), so a row removed at the source stays as it was."
+          "status": "live",
+          "verifiedAt": "2026-11-24",
+          "note": "LIVE since the D3 slice of the P2 engine card (#32062, ADR-0153 D3), the same key as `connectorSource.deletedField`: a field of the source object (refused `source_binding_invalid` otherwise); a read row whose value in it is truthy has its copy marked, every other read row's copy is cleared. `authorWarn` / `authorHint` dropped with the flip.",
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (judges `deletedField` against the source object's fields and hands every written batch to packages/services/service-automation/src/sync-delete-mark.ts#SyncDeleteMarker, whose `afterBatch` reads it)"
         }
       },
       "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (dispatched from packages/services/service-automation/src/connector-pull.ts#pullConnectorSource when the mapping carries `datasourceSource`, the contract method `IAutomationService.pullConnectorSource` a job's `pull` binds through: packages/runtime/src/app-artifact-handlers.ts#judgeJobPull binds either source). It judges the binding against the objects as the protocol serves them, reads the federated object in windows (packages/services/service-automation/src/datasource-window-read.ts#readSourceInWindows, both ADR-0153 D1 read paths) and writes through `@objectstack/core`'s `runImport`"

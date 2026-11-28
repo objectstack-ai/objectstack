@@ -52,6 +52,7 @@ function incrementalMapping(input: Record<string, unknown>) {
         connectorSource: {
             connector: 'crm_api', action: 'list_contacts', input,
             watermark: { field: 'updated_at', param: 'since' },
+            deletePolicy: 'ignore',
         },
     };
 }

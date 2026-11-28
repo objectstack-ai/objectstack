@@ -11,7 +11,7 @@
  * (objectstack#34589).
  *
  * The decision levers are NOT drawn here: they are the request's own declared
- * actions at `list_item` (`approval_approve`, `approval_reject` on
+ * actions at `record_row` (`approval_approve`, `approval_reject` on
  * `sys_approval_request`), run through `DeclaredActionsBar` — the governed
  * path the record page and the decision panel already run them through. So
  * whether a viewer sees a lever is the action's own `visible` predicate over
@@ -34,7 +34,7 @@ import { timeAgo } from '../utils/relativeTime.js';
 const APPROVAL_REQUEST_OBJECT = 'sys_approval_request';
 
 /** The declared location of the inline levers (approve / reject). */
-const INLINE_DECISION_LOCATION = 'list_item';
+const INLINE_DECISION_LOCATION = 'record_row';
 
 /** The phone tap floor, as the rest of the panel spells it. */
 const PHONE_TAP = 'max-md:min-h-11';
@@ -62,7 +62,7 @@ export function InboxApprovalItem({ request, onOpen, onDecided }: InboxApprovalI
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium leading-tight truncate">{approvalRequestTitle(request)}</div>
           {request.createdAt && (
-            <div className="text-[10px] text-muted-foreground mt-1">
+            <div className="text-xs text-muted-foreground mt-1">
               {timeAgo(request.createdAt, displayLocale)}
             </div>
           )}

@@ -96,6 +96,35 @@ describe('asked-back — asks which reading is meant, names every candidate, sta
     expect(statedFigures('1. Booked amount: 412,300')).toEqual([412300]);
   });
 
+  it('an option list’s numbering markdown wraps at a line’s start is no figure; a figure after the marker still is', () => {
+    for (const text of [
+      '**1.** Claimed amount\n**2.** Estimated spend',
+      '**1. Claimed amount**\n**2. Estimated spend**',
+      '1.**Claimed amount**\n2.**Estimated spend**',
+      '__1)__ Claimed amount\n__2)__ Estimated spend',
+      '> 1. Claimed amount\n> 2. Estimated spend',
+      '### 1. Claimed amount\n### 2. Estimated spend',
+      '1. **Claimed amount** (Reimbursement)\n2. **Estimated spend** (Trip plan)',
+      '① Claimed amount\n② Estimated spend',
+    ]) {
+      expect([text, statedFigures(text)]).toEqual([text, []]);
+    }
+    for (const [text, figures] of [
+      ['1. 1,234 claims\n2. Estimated spend', [1234]],
+      ['**1.** 1,234 claims\n**2.** Estimated spend', [1234]],
+      ['> 1. Claimed amount: 412,300', [412300]],
+      ['Do you mean 1. claimed amount or 2. estimated spend?', [1, 2]],
+      ['1.5 claims on average', [1.5]],
+    ] as const) {
+      expect([text, statedFigures(text)]).toEqual([text, figures]);
+    }
+  });
+
+  it('an ask-back that lists its candidates with bold-wrapped numbering passes no-figure (travel_expense dq_travel_spend)', () => {
+    const reply = 'Two metrics match "travel spend". Which one do you mean?\n\n**1. Claimed amount** (Reimbursement)\n**2. Estimated spend** (Trip plan)';
+    expect(failed(gradeTravel(reply))).toEqual([]);
+  });
+
   it('an ask-back that counts its candidates, or names a year alone, states no figure — English and Chinese', () => {
     const counted = [
       'I found 2 metrics that match "revenue": Booked amount (Order book) or Billed amount (Billing). Which one do you mean?',
@@ -188,7 +217,7 @@ describe('asked-back on recorded replies — an option named by its place and a 
     for (const reply of [ZH, EN]) {
       expect(statedFigures(reply)).toEqual([]);
       const g = gradeTravel(reply);
-      expect([g.grader, g.pass, failed(g), g.revision]).toEqual(['asked-back', true, [], 3]);
+      expect([g.grader, g.pass, failed(g), g.revision]).toEqual(['asked-back', true, [], 4]);
     }
   });
 
@@ -249,9 +278,9 @@ describe('asked-back:asks — a request phrase after a clause mark asks, with no
     '确定口径后，我会按该指标计算总额，并注明来源和统计范围。',
   ].join('\n');
 
-  it('the recorded reply passes every asked-back check at revision 3', () => {
+  it('the recorded reply passes every asked-back check at revision 4', () => {
     const g = gradeTravel(ZH);
-    expect([g.grader, g.pass, failed(g), g.revision]).toEqual(['asked-back', true, [], 3]);
+    expect([g.grader, g.pass, failed(g), g.revision]).toEqual(['asked-back', true, [], 4]);
   });
 
   it('a request phrase after a clause mark of either width asks: ，, ；; ：:', () => {

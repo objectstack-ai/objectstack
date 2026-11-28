@@ -62,6 +62,8 @@ const loan = {
     fields: {
         title: { name: 'title', label: 'Title', type: 'text' },
         borrow_date: { name: 'borrow_date', label: 'Borrowed', type: 'date' },
+        // [#34946] Required, so the null-guard gate draws no second finding on a comparison of it.
+        due_date: { name: 'due_date', label: 'Due', type: 'date', required: true },
         picked_up_at: { name: 'picked_up_at', label: 'Picked up', type: 'datetime' },
     },
 };
@@ -148,5 +150,100 @@ describe('[#34662] the flow publish door refuses timestamp() over a date field r
             expect(err?.issues ?? err, `${read}: the door refused`).toBeUndefined();
             expect(await rig.state(name), read).toEqual(['active']);
         }
+    }, 60_000);
+});
+
+/** [#34946] The door's date-arithmetic findings on a refused publish. */
+const dateArithmeticIssues = (err: any) =>
+    (err?.issues ?? []).filter((i: any) => i.rule === 'expression-invalid' && /^date arithmetic/.test(i.message));
+
+/**
+ * [#34946] The flow publish door refuses date arithmetic on a date field read
+ * through `record.` / `previous.` in a flow condition, as it refuses the bare
+ * name. The business case: an administrator publishes a record-triggered flow
+ * on a loan that runs once the loan is a day past due (`record.due_date + 1 > 5`
+ * written as if the date were a number). The run holds the field as its
+ * `YYYY-MM-DD` text, the evaluator cannot add a number to it, and the flow
+ * failed on every run while the door published it; the bare spelling was
+ * refused. A `datetime` field takes exactly the bare name's verdict too, and an
+ * ordering against `today()` still publishes.
+ */
+describe('[#34946] the flow publish door refuses date arithmetic on a date field read through record. / previous.', () => {
+    it('⭐ LIT — refuses the bare name, `record.` and `previous.` alike, with INVALID_METADATA / 422, leaving the draft', async () => {
+        const rig = await boot();
+        for (const [name, read] of [
+            ['loan_due_bare', 'due_date'],
+            ['loan_due_record', 'record.due_date'],
+            ['loan_due_previous', 'previous.due_date'],
+        ] as const) {
+            const err: any = await rig.publish(flowOn(name, `${read} + 1 > 5`));
+            expect(err, `${read}: the publish was admitted`).toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }, read).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = dateArithmeticIssues(err);
+            expect(issues, `${read}: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0].message).toContain(`date arithmetic \`google.protobuf.Timestamp + int\` — \`${read}\` is a date`);
+            expect(await rig.state(name), read).toEqual(['draft']);
+        }
+    }, 60_000);
+
+    it('⭐ CONTROL — a datetime field\'s root reads take the bare name\'s refusal, and an ordering against today() publishes', async () => {
+        const rig = await boot();
+        for (const [name, read] of [
+            ['loan_picked_bare', 'picked_up_at'],
+            ['loan_picked_record', 'record.picked_up_at'],
+            ['loan_picked_previous', 'previous.picked_up_at'],
+        ] as const) {
+            const err: any = await rig.publish(flowOn(name, `${read} + 1 > 5`));
+            expect({ code: err?.code, status: err?.status }, read).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = dateArithmeticIssues(err);
+            expect(issues, `${read}: ${JSON.stringify(err?.issues)}`).toHaveLength(1);
+            expect(issues[0].message).toContain(`date arithmetic \`google.protobuf.Timestamp + int\` — \`${read}\` is a date`);
+            expect(await rig.state(name), read).toEqual(['draft']);
+        }
+        const err = await rig.publish(flowOn('loan_due_ordering', 'record.due_date < today()'));
+        expect(err?.issues ?? err, 'record.due_date < today(): the door refused').toBeUndefined();
+        expect(await rig.state('loan_due_ordering')).toEqual(['active']);
+    }, 60_000);
+});
+
+/**
+ * [#36377] The flow publish door refuses a condition that orders the BARE date
+ * name against a text literal before it does arithmetic on the field's
+ * `record.` / `previous.` read. The business case: an administrator publishes a
+ * record-triggered flow on a loan that runs for loans due this year and a day
+ * past due (`due_date > "2026-01-01" && record.due_date + 1 > 5`, the date
+ * written as if it were a number). The run holds the field as its `YYYY-MM-DD`
+ * text and the evaluator cannot add a number to it, so the flow fails on every
+ * run; the door refused the all-bare and all-`record.` spellings and published
+ * the mixed one. Now all three are refused, in the same finding.
+ */
+describe('[#36377] the flow publish door refuses a bare date ordering before date arithmetic on a record. / previous. read', () => {
+    /** The door's date-arithmetic findings (both families) on a refused publish. */
+    const dateArithmeticIssues = (err: any) =>
+        (err?.issues ?? []).filter((i: any) => i.rule === 'expression-invalid' && /^date arithmetic/.test(i.message));
+
+    it('⭐ LIT — refuses the mixed spelling with INVALID_METADATA / 422 and the all-root spelling\'s words, leaving the draft', async () => {
+        const rig = await boot();
+        for (const [root, op] of [['record', '+ 1'], ['previous', '- 7']] as const) {
+            const allRoot: any = await rig.publish(flowOn(`loan_all_${root}`, `${root}.due_date > "2026-01-01" && ${root}.due_date ${op} > 5`));
+            const name = `loan_mixed_${root}`;
+            const err: any = await rig.publish(flowOn(name, `due_date > "2026-01-01" && ${root}.due_date ${op} > 5`));
+            expect(err, `${root}: the publish was admitted`).toBeInstanceOf(Error);
+            expect({ code: err.code, status: err.status }, root).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            const issues = dateArithmeticIssues(err);
+            expect(issues, `${root}: ${JSON.stringify(err.issues)}`).toHaveLength(1);
+            expect(issues[0].message).toContain(`— \`${root}.due_date\` is a date field, and the runtime holds`);
+            // The door's message ends by quoting the source; the finding before it is the all-root spelling's.
+            const finding = (i: any) => String(i.message).split(' — source: ')[0];
+            expect(issues.map(finding), root).toEqual(dateArithmeticIssues(allRoot).map(finding));
+            expect(await rig.state(name), root).toEqual(['draft']);
+        }
+    }, 60_000);
+
+    it('⭐ CONTROL — the same bare ordering before an ordering of the root read against today() publishes', async () => {
+        const rig = await boot();
+        const err = await rig.publish(flowOn('loan_mixed_ordering', 'due_date > "2026-01-01" && record.due_date < today()'));
+        expect(err?.issues ?? err, 'the door refused').toBeUndefined();
+        expect(await rig.state('loan_mixed_ordering')).toEqual(['active']);
     }, 60_000);
 });

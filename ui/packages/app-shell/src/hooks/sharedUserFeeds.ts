@@ -101,12 +101,12 @@
  * @module
  */
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { errorCodeIs } from '@object-ui/types';
 // The refused-read verdict the record activity panel reads (objectui#11195),
 // so a refused `sys_activity` read means the same thing on Home (objectui#12843).
-import { isRefusedFeedRead } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // Re-exported from `@object-ui/react` — import it through the provider module
 // so a consumer that stubs the provider stubs this too.
 import { useAdapter } from '../providers/AdapterProvider.js';
@@ -121,6 +121,11 @@ import { __resetHiddenTabClock, isPollingSuspended } from './hiddenTabPollStop.j
 import type { ActivityItem } from '../layout/ActivityFeed.js';
 import { activityRowToActivityItem } from '../layout/activityItemType.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Approvals poll cadence. Polling is the FALLBACK of a push channel
@@ -912,7 +917,7 @@ function str(v: unknown): string | undefined {
  * spelling as an alias is what ADR-0090 D3 forbids, and `packages/auth/src/
  * types.ts` says so on the declaration itself.
  */
-function approverIdentities(user: unknown): string[] {
+export function approverIdentities(user: unknown): string[] {
   const u = user as { id?: string; email?: string; positions?: string[] } | null | undefined;
   const identities: string[] = [];
   if (u?.id) identities.push(u.id);
@@ -985,54 +990,79 @@ export function useSharedPendingApprovalRequests(): SharedFeedSnapshot<{
   const key = user?.id && identities.length > 0 ? identities.join(',') : null;
 
   return useSharedFeed(approvalsFeed, key, async ({ markUnavailable, markFailed }) => {
-    const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
-    const qs = new URLSearchParams({
-      status: 'pending',
-      approverId: identities.join(','),
-      limit: String(APPROVALS_PAGE_ROWS),
-    });
-    const res = await fetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
+    const answer = await fetchPendingApprovalPage(identities, APPROVALS_PAGE_ROWS);
+    if (answer.status === 'unavailable') {
+      markUnavailable();
+      return undefined;
+    }
+    if (answer.status === 'failed') {
+      markFailed();
+      return undefined;
+    }
+    return answer.page;
+  });
+}
+
+/** One read of the pending approvals: the page, or why there is none. */
+export type PendingApprovalPageAnswer =
+  | { status: 'ok'; page: PendingApprovalPage }
+  | { status: 'unavailable' }
+  | { status: 'failed' };
+
+/**
+ * One page of the requests waiting on `identities`, newest first, with the
+ * route's exact `total` — the read the shared feed polls with a page of
+ * `APPROVALS_PAGE_ROWS`, and the full-page inbox (objectstack#36741) with a
+ * page of its own size. `unavailable` is the approvals service missing (404),
+ * nothing waiting; `failed` is every other failure, and a page of rows with no
+ * count (how many are waiting is then unknown).
+ */
+export async function fetchPendingApprovalPage(
+  identities: readonly string[],
+  limit: number,
+): Promise<PendingApprovalPageAnswer> {
+  const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
+  const qs = new URLSearchParams({
+    status: 'pending',
+    approverId: identities.join(','),
+    limit: String(limit),
+  });
+  let res: Response;
+  try {
+    res = await authFetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
       credentials: 'include',
       // Bearer too — see utils/authToken (#2548 split-origin fix).
       headers: bearerAuthHeaders(),
     });
-    if (res.status === 404) {
-      markUnavailable();
-      return undefined;
-    }
-    if (!res.ok) {
-      markFailed();
-      return undefined;
-    }
-    const payload = await res.json().catch(() => null);
-    const rows = (Array.isArray(payload?.data) ? payload.data : []) as Record<string, unknown>[];
-    const served = payload?.total;
-    let total: number;
-    if (typeof served === 'number' && Number.isFinite(served) && served >= 0) total = served;
-    else if (rows.length === 0) total = 0; // the empty first page — an exact zero
-    else {
-      // A page of rows with no count: how many are waiting is unknown.
-      markFailed();
-      return undefined;
-    }
-    // One entry per request id on the page.
-    const seen = new Set<string>();
-    const requests: PendingApprovalRequest[] = [];
-    for (const row of rows) {
-      const id = String(row.id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      requests.push({
-        id,
-        processLabel: str(row.process_label),
-        recordTitle: str(row.record_title),
-        processName: str(row.process_name),
-        createdAt: str(row.created_at),
-        row,
-      });
-    }
-    return { requests, total };
-  });
+  } catch {
+    return { status: 'failed' };
+  }
+  if (res.status === 404) return { status: 'unavailable' };
+  if (!res.ok) return { status: 'failed' };
+  const payload = await res.json().catch(() => null);
+  const rows = (Array.isArray(payload?.data) ? payload.data : []) as Record<string, unknown>[];
+  const served = payload?.total;
+  let total: number;
+  if (typeof served === 'number' && Number.isFinite(served) && served >= 0) total = served;
+  else if (rows.length === 0) total = 0; // the empty first page — an exact zero
+  else return { status: 'failed' }; // a page of rows with no count
+  // One entry per request id on the page.
+  const seen = new Set<string>();
+  const requests: PendingApprovalRequest[] = [];
+  for (const row of rows) {
+    const id = String(row.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    requests.push({
+      id,
+      processLabel: str(row.process_label),
+      recordTitle: str(row.record_title),
+      processName: str(row.process_name),
+      createdAt: str(row.created_at),
+      row,
+    });
+  }
+  return { status: 'ok', page: { requests, total } };
 }
 
 // ── Recent activity ──────────────────────────────────────────────────────────
@@ -1638,6 +1668,58 @@ export function useSharedInboxFeed(): SharedFeedSnapshot<InboxNotification[]> {
       return undefined;
     }
   });
+}
+
+/**
+ * The signed-in user's inbox messages OLDER than the shared window: `top`
+ * messages after the first `skip`, newest first, joined with their receipts
+ * exactly as {@link useSharedInboxFeed} joins its window (one narrowed receipt
+ * read for the listed notification ids). The full-page inbox
+ * (objectstack#36741) pages its history with it, which the 20-row window the
+ * bell badges from does not hold. Throws what the reads throw: the caller
+ * owns the failure it draws.
+ */
+export async function readEarlierInboxMessages(
+  dataSource: { find: (object: string, query: Record<string, unknown>) => unknown } | null | undefined,
+  userId: string,
+  skip: number,
+  top: number,
+): Promise<InboxNotification[]> {
+  if (!dataSource) return [];
+  const res = (await Promise.resolve(
+    dataSource.find('sys_inbox_message', {
+      $filter: { user_id: userId },
+      $orderby: { created_at: 'desc' },
+      $skip: skip,
+      $top: top,
+    }),
+  )) as { data?: unknown[] } | null | undefined;
+  const rows = Array.isArray(res?.data) ? res.data : [];
+  const ids = listedNotificationIds(rows);
+  if (ids.length === 0) return mergeInboxRows(rows, []);
+  const receipts = await Promise.resolve(
+    dataSource.find('sys_notification_receipt', {
+      $filter: { user_id: userId, channel: 'inbox', notification_id: { $in: ids } },
+      $top: ids.length,
+    }) as Promise<{ data?: unknown[] }>,
+  ).then(
+    (r) => (Array.isArray(r?.data) ? r.data : []),
+    () => [] as unknown[],
+  );
+  return mergeInboxRows(rows, receipts);
+}
+
+/** How many messages the shared inbox window lists (the first page the inbox page shows). */
+export const SHARED_INBOX_WINDOW = INBOX_WINDOW;
+
+/**
+ * Read the inbox once, now: a read-state written in this tab changed it, so
+ * every bell cut from the feed drops the row without waiting for the next poll
+ * (objectstack#36741 — the full-page inbox and the sidebar's bell are two
+ * consumers). Same refresh {@link notifyUserFeedPushed} runs. Package-internal.
+ */
+export function refreshSharedInbox(): void {
+  inboxFeed.pushedChange();
 }
 
 // ── Push channel seam (objectstack#27626) ────────────────────────────────────

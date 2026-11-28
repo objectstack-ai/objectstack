@@ -58,6 +58,7 @@ export default defineConfig({
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(HERE, '../core/src/index.ts') },
       { find: /^@objectstack\/metadata$/, replacement: path.resolve(HERE, '../metadata/src/index.ts') },
+      { find: /^@objectstack\/plugin-audit$/, replacement: path.resolve(HERE, '../plugins/plugin-audit/src/index.ts') },
     ],
   },
   test: {

@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { esESObjects } from './es-ES.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Español (es-ES) — Setup App Translations
  */
 export const esES: TranslationData = {
   objects: esESObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('es-ES'),
   apps: {
     account: {
       label: 'Cuenta',
@@ -40,7 +43,7 @@ export const esES: TranslationData = {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
-        nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
+        nav_packages: { label: 'Paquetes' },
         nav_cloud_connection: { label: 'Conexión a la nube' },
         group_people_org: { label: 'Personas y Organización' },
         group_access_control: { label: 'Control de Acceso' },
@@ -76,6 +79,7 @@ export const esES: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'Credenciales SCIM' },
         nav_api_keys: { label: 'Claves API' },
+        nav_access_directory: { label: 'Puestos y permisos' },
 
         nav_approvals_inbox: { label: 'Centro de aprobaciones' },
         nav_approval_requests: { label: 'Solicitudes' },
@@ -86,6 +90,7 @@ export const esES: TranslationData = {
         nav_settings_localization: { label: 'Localización' },
         nav_exchange_rates: { label: 'Tipos de cambio' },
         nav_units_of_measure: { label: 'Unidades de medida' },
+        nav_standard_unit_settings: { label: 'Ajustes de unidades estándar' },
         nav_work_calendars: { label: 'Calendarios laborales' },
         nav_work_calendar_exceptions: { label: 'Excepciones de calendario' },
         nav_settings_company: { label: 'Empresa' },
@@ -99,6 +104,7 @@ export const esES: TranslationData = {
         nav_settings_knowledge: { label: 'Conocimiento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida de los datos' },
         nav_recycle_bin: { label: 'Papelera' },
+        nav_public_forms: { label: 'Formularios públicos' },
         nav_notification_preferences: { label: 'Preferencias de Notificación' },
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 
@@ -119,7 +125,7 @@ export const esES: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Banco de trabajo de metadatos para desarrolladores, analistas e implementadores',
       navigation: {
         group_overview: { label: 'Resumen' },

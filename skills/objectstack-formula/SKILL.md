@@ -8,10 +8,10 @@ description: >
   writing an `F`, `P` or `cel` literal. Not for ObjectQL query filters
   (objectstack-query), SQL fragments, or hook bodies (objectstack-data).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
+compatibility: Requires @objectstack/spec 19.x and @objectstack/formula 19.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.2"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---
@@ -82,14 +82,29 @@ transforms — see objectstack-data), not an expression dialect.
 | Key existence (NOT null-safety) | `has(record.foo)` |
 | Null check | `record.foo == null` or `isBlank(record.foo)` |
 
+**`==` / `!=` between a list field and a scalar literal is refused** (`list-equality`, "list compared
+with a scalar": one constant on every row) — `multiselect` / `checkboxes` / `tags`, or `select` /
+`radio` / `lookup` / `user` / `file` / `image` with `multiple: true`. Test membership, null-guarded
+(`in` faults on `null`) and parenthesised, per site — the `==` rewrite, then the `!=` one:
+
+```text
+record.tags == 'vip'   # REFUSED
+# evaluated as CEL; has() covers a sparse action row and a null `previous`
+(has(record.tags) && record.tags != null && 'vip' in record.tags)
+(!has(record.tags) || record.tags == null || !('vip' in record.tags))
+# bare name in a flow condition (has() takes no bare name)
+(tags != null && 'vip' in tags)
+(tags == null || !('vip' in tags))
+# SharingRule `condition`: compiled to a query filter, where has() and a literal-first `in` do not lower
+(record.tags != null && record.tags.contains('vip'))
+(record.tags == null || !record.tags.contains('vip'))
+```
+
 The org context is `{ id, tier }` — there is no `os.org.slug` or `os.org.name`.
 The evaluator also binds the current user as `current_user` (alias `user`) per
 ADR-0068 — spec field docs write predicates like `current_user.positions`.
 
 ### `has()` is NOT a null check
-
-`has(record.x)` is **true whenever the key exists**, even when its value is
-`null`.
 
 Every server-evaluated predicate — validation rules, `requiredWhen`, option
 `visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
@@ -121,7 +136,7 @@ does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
 is its use there — telling "absent from this PATCH" apart from "explicitly null".
 
 **The exception: action `visible` / `disabled` are client-side and sparse.**
-They bind the row the client already holds, and that row — a `list_item` row
+They bind the row the client already holds, and that row — a list row
 above all — lacks a key when the column is outside the view's projection, when
 field-level security refuses it, or when it was never written (the mongo and
 memory drivers).
@@ -140,8 +155,7 @@ has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approv
 
 ## ObjectStack CEL standard library
 
-Registered automatically by `@objectstack/formula`, which ships `dist` only —
-there is no `src/` to read in an installed app. Its exported
+Registered automatically by `@objectstack/formula`, which ships `dist` only. Its exported
 `CEL_STDLIB_FUNCTIONS` is the advertised bare-callable subset, pinned by two
 tests: every entry resolves at runtime, and this table documents them all.
 
@@ -164,17 +178,21 @@ tests: every entry resolves at runtime, and this table documents them all.
 > `isoDate(date(record.start_at))`, `date(record.start_date).getFullYear()`.
 > `+` with text and ordering against a text literal take the text as is.
 
-> **No date arithmetic.** The build refuses `date + n` and `end - start`: a
-> date or date-time mixed with a number, or minus another, reads `null`, and
-> `today()` / `now()` minus a date field reads `{}`. Use `daysBetween(a, b)` for whole days, two `datetime(…)` for hours (row below).
-
-| Want | Write — never bare `end - start`, `date + n`, `today() + 30` |
+| Want | The build refuses `end - start`, `date + n`, `today() + 30` (they read `null` / `{}`); write |
 |:---|:---|
 | Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
 | Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
 | Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
 | Hours between | `double((datetime(record.end_at) - datetime(record.start_at)).getMinutes()) / 60.0` |
-| Sub-day offset | `now() + duration("3h")` — the calendar helpers land on UTC midnight |
+| Sub-day offset | `now() + duration("3h")` |
+
+**Working days** (the organization's working calendar, holidays and make-up days included):
+`addWorkingDays(d, n[, code])` is the day `n` working days after `d` (`d` not counted);
+`workingDaysBetween(a, b[, code])` its inverse (`b` counted); `addWorkingHours(t, h[, code])` the
+instant `h` working hours after `t`. No `code`: the default calendar; a `code` is a quoted literal.
+Only in a formula or a stored field's `expression` (refused in rules, flows, defaults, seeds and
+filters): to filter, store the due time in a `datetime` field. No default calendar, or a count past
+its maintained span, reads null; a stored due time is then blank until the record's next write.
 
 **Numbers**
 
@@ -213,10 +231,8 @@ tests: every entry resolves at runtime, and this table documents them all.
 | `label(record.f)` | string | A select value's option label in the reader's locale: `'v' + string(record.version_no) + ' · ' + label(record.kind)` reads `v2 · 清稿` (zh-CN), `v2 · Clean` (en-US). Only `record.<field>`; `''` for null or an empty selection. A multi-select (`multiple: true`) reads each selected label in stored order, joined with `, `. A stored (non-formula) field stores the declared label. Formula fields only: in a predicate (validation, visibility, hook) it faults, so compare the stored value |
 
 Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
-`double(x)`, `timestamp(s)`, `duration(s)`. `timestamp()` parses only a full
-ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
-(`date-text-call`), `+ duration(…)` included; shift a date with
-`isoDate(addDays(record.d, n))`.
+`double(x)`, `timestamp(s)` (a full ISO instant only; over a `date` field write
+`isoDate(addDays(record.d, n))`, never `+ duration(…)`), `duration(s)`.
 
 > Receiver methods (`s.split(',')`,
 > `list.map(...)`) are called on a value, never bare, and are not in this table;
@@ -224,8 +240,7 @@ ISO instant, so over a `date` field (`YYYY-MM-DD`) the build refuses it
 > from the catalogue by an authoring decision — don't reach for them. An UNKNOWN
 > function — `PRIOR()`, a legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails
 > `os build`** with a "no matching overload" type error, rather than silently
-> no-op'ing the predicate at run time. Use `previous.x` (not `PRIOR()`),
-> `isBlank()` (not `ISBLANK()`).
+> no-op'ing the predicate at run time. Use `previous.x`, not `PRIOR()`; more in the table below.
 
 ---
 
@@ -277,15 +292,7 @@ P`!isBlank(record.po_number)`;
 ```
 
 Conditional requiredness: [objectstack-data](../objectstack-data/SKILL.md#conditional-field-rules).
-
-❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
-located message, and the flow engine throws if it ever reaches runtime:
-
-```ts
-"status = 'qualified'"
-"amount > 10000 AND region IN ('us', 'eu')"
-"NOT(ISBLANK(po_number))"
-```
+Salesforce-flavor (`AND`, `IN (…)`, `NOT(ISBLANK(x))`) fails CEL compile: see the translation table.
 
 ### 4. Dynamic seed value — use `cel\`\`` not `new Date()`
 
@@ -321,8 +328,7 @@ P`previous.status != 'escalated' && record.status == 'escalated'`
 `record` is the record's **state**, not this write's diff: stored row ⊕
 payload, so `record.status == 'escalated'` is true on *every* update of an
 already-escalated record. Comparing against `previous` is the only way to say
-"just became". Hook `condition`s and validation predicates bind the same two
-roots — one scope, one meaning, whichever surface reads it.
+"just became".
 
 **Where `previous` is bound, and where it is not:**
 
@@ -336,7 +342,7 @@ roots — one scope, one meaning, whichever surface reads it.
 | `before*` hook `condition` on a predicate (`multi: true`) write | **that row's pre-write row** — `beforeUpdate` / `beforeDelete` dispatch once PER MATCHED ROW too, each on a single-record-shaped context whose `input.id` names the row (ADR-0058 Addendum II, D1/D2); `record` is that row's state, stored ⊕ payload, as on any update. Only the *payload* stays batch-scoped — see below the table |
 
 ⚠️ **An unevaluable condition ABORTS the operation.** A column read off
-`previous` on an insert (`previous.status`, where `previous` is `null`) — like
+`previous` on an insert — like
 a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
 overload for — does **not** degrade to "the hook did not fire": it **fails the
 write**, with an error naming the hook and the key — `before*` and `after*`
@@ -345,19 +351,12 @@ the condition is evaluated before any handler runs).
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
-whether the write carries an id or a predicate:
-
-<!-- os:check -->
-```ts
-import { P } from '@objectstack/spec';
-P`previous.status != 'done' && record.status == 'done'`
-```
+whether the write carries an id or a predicate.
 
 A predicate (`multi: true`) write is N record changes, so every record-scoped
 declaration on it is evaluated **per row** — `previous` is that row's own
 pre-write state, `record` its real state, not the bare payload (ADR-0058,
-bulk-write Addenda I and II). Record-change flow triggers ride the same
-dispatch. `before*` is no exception to the *condition*; the asymmetry is what a
+bulk-write Addenda I and II). `before*` is no exception to the *condition*; the asymmetry is what a
 `before*` handler WRITES: one `updateMany` takes one SET clause, so every row's
 dispatch carries the one payload and a rewrite made on any row applies to every
 matched row (D3). A rewrite *decided* per row must assign the same key set on
@@ -369,8 +368,7 @@ batch whole, before any write, when two rows disagree
 Above 10 000 matched rows the platform refuses a predicate write on an object
 with per-row hooks in either phase — one ceiling for `before*` and `after*`,
 checked before the first dispatch (ADR-0058 Addendum II, D6) — rather than fan
-out that many handler runs inside one write; paginate the write. It is a
-refusal, never a silent downgrade to one hook call.
+out that many handler runs inside one write; paginate the write.
 
 ---
 
@@ -388,7 +386,6 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `AND` | `&&` |
 | `OR` | `\|\|` |
 | `NOT(x)` | `!x` |
-| `"abc"` | `'abc'` |
 | `IF(c, a, b)` | `c ? a : b` |
 | `ISBLANK(x)` | `isBlank(record.x)` |
 | `CONCAT(a, b)` | `coalesce(a, '') + coalesce(b, '')` |
@@ -396,10 +393,6 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `IN (a, b, c)` | `in [a, b, c]` |
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
-
-> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which is `null` on an
-> insert event and **fails the write** there unless guarded by `previous != null
-> &&` (§5).
 
 > ⚠️ **Flow conditions are the exception to row 1.** The engine spreads the
 > trigger record's fields, nulls included, to top level wherever no flow variable
@@ -445,8 +438,9 @@ and `autonumber` have real columns and need no such care.
 is CLIENT-SIDE only, and an unbound root falls back to `true`, so the control
 renders for everyone — never use one as access control; that is permission-set
 field-level security. Everywhere else on this table the opposite holds: an
-unevaluable `Hook` / `SharingRule` `condition` or validation predicate **aborts
-the write** (§5).
+unevaluable `Hook` `condition` or validation predicate **aborts the write**
+(§5); a `SharingRule` `condition` that does not lower to a filter fails the
+build, and at runtime the rule is skipped and grants nothing (one WARN).
 
 View list filters are **not** a CEL surface — they are structured JSON filter
 rules (`ViewFilterRuleSchema`), so do not emit CEL there. For "last 30 days"
@@ -455,7 +449,7 @@ objectstack-query `rules/filters.md` has the token list.
 
 ### Cron and template surfaces
 
-Two more dialects ride the same envelope. Neither is CEL; both take
+Neither dialect is CEL; both take
 a bare string (auto-wrapped) or their helper, and read the same variable scope.
 
 | Dialect | Helper | Grammar | Carriers |

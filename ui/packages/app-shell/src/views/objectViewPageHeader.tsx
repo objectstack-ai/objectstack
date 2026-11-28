@@ -1,16 +1,19 @@
 /**
  * The page bar of the Console `ObjectView` (`./ObjectView.tsx`), 44px tall
- * (objectstack#35548, `PageHeader`'s list posture): the object's icon in one
- * colour and its plural name with the managed-by badge on the left; on the
- * right the schema-driven toolbar, the ⋮ menu and the create button, or their
- * folded face. The view switcher is not here: it leads the list's view bar.
- * The ⋮ menu holds what is not used every time: the object's description,
- * Import and the favorites entry (objectui#12427).
+ * (objectstack#35548, `PageHeader`'s list posture): the object's icon tile
+ * (objectstack#35985) and its plural name with the managed-by badge on the left.
+ * Above a list it is the page's first row and carries no acts of its own
+ * (objectstack#36113): the shell's button group ends it, as it ends every
+ * console page, and the page's acts end the list's view bar under it
+ * (`ObjectViewBarTrailing`). Where no view bar draws them it carries them on
+ * the right — the schema-driven toolbar, the ⋮ menu and the create button,
+ * or their folded face. The view switcher is not here: it leads the view bar.
  * Moved out of `ObjectViewInner`'s JSX (objectstack#25992, slice 10). Every
  * value is passed in as a prop.
  */
 
-import { createContext, createElement, useCallback, useContext, useLayoutEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   Button,
@@ -21,16 +24,25 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
-import { Upload, MoreVertical } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Download, Loader2, Upload, MoreVertical } from 'lucide-react';
+import type { ListExportDoor } from '@object-ui/plugin-list';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { FavoriteMenuItem } from '../layout/SidebarItemMenu.js';
+import {
+  FavoriteMenuItem,
+  ObjectSettingsMenuItem,
+  useObjectSettingsGate,
+  useObjectSettingsPath,
+} from '../layout/SidebarItemMenu.js';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
-import { getIcon } from '../utils/getIcon.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { ManagedByBadge } from '../components/ManagedByBadge.js';
 import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js';
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
+import { arrangedHeaderActions, readActionLayoutArm, type ActionBarSchema, type ActionLayoutArm } from '@object-ui/types';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import type { PinCandidate } from '../layout/designModeHeaderPinsModel.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
@@ -67,11 +79,26 @@ export interface ObjectViewPageBarProps {
 }
 
 /**
+ * objectstack#36113 — how the page's acts sit at the view bar's end: the
+ * list's export door (`ListView`'s `toolbarTrailing` state), and whether the
+ * bar is too narrow for 「Import / Export」, which then folds into ⋮ More.
+ */
+export interface ObjectViewBarEnd {
+    exportDoor?: ListExportDoor;
+    folded: boolean;
+}
+
+/**
  * objectstack#35878 — the page's own acts, after the list's search at the
  * right end of the view bar (or of the page bar where no view bar draws them):
  * the schema-driven toolbar, the create button, then ⋮ More, last at the right
- * edge (objectstack#35678). The ⋮ menu holds what is not used every time: the
- * object's description, Import and the favorites entry (objectui#12427).
+ * edge (objectstack#35678). The ⋮ menu holds what is not used every time:
+ * Object settings first, for an admin (objectstack#36487), then the object's
+ * description and the favorites entry (objectui#12427).
+ *
+ * objectstack#36113 — at the view bar's end (`barEnd`), Import and the list's
+ * export are one 「Import / Export」 menu before the rest, folded into ⋮ More
+ * on a narrow bar; on the page bar Import stays in ⋮ More.
  */
 export function ObjectViewPageBarActions({
     objectDef,
@@ -87,22 +114,98 @@ export function ObjectViewPageBarActions({
     environmentEntitlements,
     toolbarBar,
     listFavorite,
-}: ObjectViewPageBarProps) {
+    barEnd,
+}: ObjectViewPageBarProps & { barEnd?: ObjectViewBarEnd }) {
     const description = objectDef.description ? objectDesc(objectDef) : undefined;
-    // The ⋮ menu: the description (no longer a resident subtitle), Import and
-    // the favorites entry — the page's once-in-a-while acts.
-    const moreShown = !!description || importShown || !!listFavorite;
+    // objectstack#36487 — Object settings: this object in Studio, for the
+    // principal the app bar's Studio entry is drawn for. The app is the one
+    // the list's route names, as for the page's favorite.
+    const { appName } = useParams();
+    const objectSettingsPath = useObjectSettingsGate(
+        useObjectSettingsPath({ appSegment: appName, objectName: objectDef?.name }),
+    );
+    // objectstack#36366 — the object's list scope arrangement
+    // (`actionLayout.list`): `pinned` is the header's buttons, in order, the
+    // page's Import and Export among them (`$import`, `$export`), and `more`
+    // orders the toolbar's ⋯. Absent: the header's own choice, as before.
+    // Under the design mode the arrangement staged there is drawn (`useObjectPins`).
+    const objectPins = useObjectPins(objectDef);
+    const listArm = isEnvironmentList ? undefined : readActionLayoutArm(objectPins.list);
+    const importPinned = !!listArm?.pinned.includes('$import') && importShown;
+    const exportPinned = !!listArm?.pinned.includes('$export') && !!barEnd?.exportDoor;
+    // A pinned Import or Export is a button of its own, out of the menus.
+    const importInMenus = importShown && !importPinned;
+    const exportDoor = exportPinned ? undefined : barEnd?.exportDoor;
+    // 「Import / Export」 is drawn at the view bar's end while it fits; folded,
+    // and on the page bar, its entries are ⋮ More's.
+    const ioAtEnd = !!barEnd && !barEnd.folded && (importInMenus || !!exportDoor);
+    const ioInMore = !ioAtEnd;
+    // The ⋮ menu: Object settings, the description (no longer a resident
+    // subtitle), Import and the favorites entry — the page's once-in-a-while
+    // acts.
+    const moreShown = !!objectSettingsPath || !!description || !!listFavorite || (ioInMore && (importInMenus || !!exportDoor));
+    const drawsToolbar = !!listActions?.some((a: any) => a.locations?.includes('list'));
     return (
         <>
-            {/* Schema-driven toolbar actions */}
-            {listActions?.some((a: any) => a.locations?.includes('list_toolbar')) && (
-              isEnvironmentList ? (
-                <EnvironmentListToolbar
-                  actions={headerToolbarActions}
-                  entitlements={environmentEntitlements}
-                />
-              ) : (
-              <ListHeaderActionBar schema={toolbarBar} />
+            {ioAtEnd && (
+              <ObjectViewImportExportMenu
+                importShown={importInMenus}
+                setShowImport={setShowImport}
+                importDisabled={importDisabled}
+                exportDoor={exportDoor}
+                t={t}
+              />
+            )}
+
+            {listArm ? (
+              <PinnedListHeaderActions
+                arm={listArm}
+                toolbarBar={drawsToolbar ? toolbarBar : undefined}
+                importButton={importPinned ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
+                    onClick={() => setShowImport(true)}
+                    disabled={importDisabled}
+                    title={t('console.objectView.importTitle')}
+                    data-testid="object-view-import-pinned"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    <span>{t('console.objectView.import')}</span>
+                  </Button>
+                ) : null}
+                exportButton={exportPinned && barEnd?.exportDoor ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
+                        data-testid="object-view-export-pinned"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>{t('list.export', { defaultValue: 'Export' })}</span>
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <ExportMenuItems exportDoor={barEnd.exportDoor} t={t} />
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+              />
+            ) : (
+              /* Schema-driven toolbar actions */
+              drawsToolbar && (
+                isEnvironmentList ? (
+                  <EnvironmentListToolbar
+                    actions={headerToolbarActions}
+                    entitlements={environmentEntitlements}
+                  />
+                ) : (
+                <ListHeaderActionBar schema={toolbarBar} />
+                )
               )
             )}
 
@@ -110,12 +213,140 @@ export function ObjectViewPageBarActions({
             {createButton}
 
             {moreShown && (
+              <ObjectViewMoreMenu
+                objectSettingsPath={objectSettingsPath}
+                description={description}
+                importShown={ioInMore && importInMenus}
+                setShowImport={setShowImport}
+                importDisabled={importDisabled}
+                exportDoor={ioInMore ? exportDoor : undefined}
+                listFavorite={listFavorite}
+                t={t}
+              />
+            )}
+
+            {/* objectstack#36366 — the design mode's 「Header buttons」, last. */}
+            {!isEnvironmentList && (
+              <DesignModeHeaderPins
+                objectDef={objectDef}
+                page="list"
+                actions={(headerToolbarActions ?? []) as Record<string, unknown>[]}
+                builtins={listPinBuiltins(importShown, !!barEnd?.exportDoor, t)}
+              />
+            )}
+        </>
+    );
+}
+
+/** The list page's built-ins this reader is offered to pin: its Import and its Export, where the page draws them. */
+function listPinBuiltins(importShown: boolean, exportShown: boolean, t: ObjectViewPageBarProps['t']): PinCandidate[] {
+    return [
+        ...(importShown ? [{ id: '$import', label: String(t('console.objectView.import')) }] : []),
+        ...(exportShown ? [{ id: '$export', label: String(t('list.export', { defaultValue: 'Export' })) }] : []),
+    ];
+}
+
+/**
+ * objectstack#36366 — the list header's pinned buttons, in `pinned` order:
+ * each pinned action of the toolbar (`arrangedHeaderActions`), and the page's
+ * pinned Import and Export where they are offered. Every other toolbar action
+ * is in the toolbar's own ⋯ menu, drawn after them, the ones `more` names
+ * first, in that order. A `$import` / `$export` is only ever pinned (the
+ * schema refuses one in `more`); not pinned, it stays in the page's Import /
+ * Export entries. A name naming nothing this reader is offered draws nothing.
+ */
+function PinnedListHeaderActions({
+    arm,
+    toolbarBar,
+    importButton,
+    exportButton,
+}: {
+    arm: ActionLayoutArm;
+    toolbarBar?: ActionBarSchema;
+    importButton: ReactNode;
+    exportButton: ReactNode;
+}) {
+    const arranged = arrangedHeaderActions<any>((toolbarBar?.actions ?? []) as any[], arm, 'list');
+    const byName = new Map<string, any>();
+    for (const action of arranged) {
+        if (action?.component !== 'action:menu' && typeof action?.name === 'string') byName.set(action.name, action);
+    }
+    const rest = arranged.filter((action) => action?.component === 'action:menu');
+    // Runs of adjacent pinned actions share one bar, so a built-in pinned
+    // between two actions sits between their buttons.
+    const parts: ReactNode[] = [];
+    let run: any[] = [];
+    const flush = () => {
+        if (run.length === 0 || !toolbarBar) return;
+        parts.push(
+            <ListHeaderActionBar
+                key={`run-${parts.length}`}
+                schema={{ ...toolbarBar, actions: run, maxVisible: run.length, mobileMaxVisible: run.length }}
+            />,
+        );
+        run = [];
+    };
+    for (const pin of arm.pinned) {
+        if (pin === '$import' || pin === '$export') {
+            flush();
+            const button = pin === '$import' ? importButton : exportButton;
+            if (button) parts.push(<span key={pin} className="contents">{button}</span>);
+            continue;
+        }
+        const action = byName.get(pin);
+        if (action) run.push(action);
+    }
+    flush();
+    if (rest.length > 0 && toolbarBar) {
+        parts.push(<ListHeaderActionBar key="rest" schema={{ ...toolbarBar, actions: rest }} />);
+    }
+    return <>{parts}</>;
+}
+
+export interface ObjectViewMoreMenuProps extends Pick<ObjectViewPageBarProps, 'importShown' | 'setShowImport' | 'importDisabled' | 'listFavorite' | 't'> {
+    /**
+     * objectstack#36487 — where Object settings goes, already passed by the
+     * gate (`useObjectSettingsGate`): the menu's first entry. Absent ⇒ none.
+     */
+    objectSettingsPath?: string | null;
+    /** The object's description, the first line after Object settings; absent ⇒ none. */
+    description?: string;
+    /** The list's export door, after Import (objectstack#36113: a narrow view bar); absent ⇒ none. */
+    exportDoor?: ListExportDoor;
+    /** Items before the rest (the phone's 「Select」, objectstack#35883). */
+    leading?: ReactNode;
+    /** The trigger's class: the page bar's 28 px, or the phone top row's 44 px. */
+    triggerClassName?: string;
+}
+
+/**
+ * The page's ⋮ More: Object settings (objectstack#36487), the object's
+ * description, Import and the favorites entry (objectui#12427), at the right edge of the view bar from `sm` up and of
+ * the phone's top row below it (objectstack#35883), where 「Select」 leads it.
+ * From `sm` up Import, with the list's export after it, is here only while the
+ * view bar is too narrow for 「Import / Export」 (objectstack#36113).
+ */
+export function ObjectViewMoreMenu({
+    objectSettingsPath,
+    description,
+    importShown,
+    setShowImport,
+    importDisabled,
+    exportDoor,
+    listFavorite,
+    leading,
+    triggerClassName = 'shadow-none h-7 w-7 px-0',
+    t,
+}: ObjectViewMoreMenuProps) {
+    const afterSettings = !!description || importShown || !!exportDoor || !!listFavorite;
+    const rest = !!objectSettingsPath || afterSettings;
+    return (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="shadow-none h-7 w-7 px-0"
+                    className={triggerClassName}
                     aria-label={t('detail.moreActions', { defaultValue: 'More actions' })}
                     data-testid="object-view-more-actions"
                   >
@@ -123,15 +354,25 @@ export function ObjectViewPageBarActions({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
+                  {leading}
+                  {leading && rest && <DropdownMenuSeparator />}
+                  {/* objectstack#36487 — first: the object's own settings
+                      lead the menu of the page that lists it. */}
+                  {objectSettingsPath && (
+                    <>
+                      <ObjectSettingsMenuItem path={objectSettingsPath} testId="object-view-object-settings" />
+                      {afterSettings && <DropdownMenuSeparator />}
+                    </>
+                  )}
                   {description && (
                     <>
                       <DropdownMenuLabel
-                        className="text-[13px] font-normal leading-5 text-muted-foreground whitespace-normal"
+                        className="text-xs font-normal leading-5 text-muted-foreground whitespace-normal"
                         data-testid="object-view-description"
                       >
                         {description}
                       </DropdownMenuLabel>
-                      {(importShown || listFavorite) && <DropdownMenuSeparator />}
+                      {(importShown || exportDoor || listFavorite) && <DropdownMenuSeparator />}
                     </>
                   )}
                   {/* [#5142] `objectCanImport && importVisible` — the object-level
@@ -148,6 +389,7 @@ export function ObjectViewPageBarActions({
                       <span>{t('console.objectView.import')}</span>
                     </DropdownMenuItem>
                   )}
+                  {exportDoor && <ExportMenuItems exportDoor={exportDoor} t={t} />}
                   {listFavorite && (
                     <FavoriteMenuItem
                       isFavorite={listFavorite.isFavorite}
@@ -157,13 +399,100 @@ export function ObjectViewPageBarActions({
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
-            )}
+    );
+}
 
+/**
+ * The list's export entries, one per format, then the last export's failure —
+ * what the 视图设置 footer offers too, through the same door
+ * (`ListExportDoor`).
+ */
+function ExportMenuItems({ exportDoor, t }: { exportDoor: ListExportDoor; t: ObjectViewPageBarProps['t'] }) {
+    return (
+        <>
+            {exportDoor.formats.map((format) => (
+                <DropdownMenuItem
+                    key={format}
+                    disabled={exportDoor.busy}
+                    onSelect={() => exportDoor.run(format)}
+                    data-testid={`object-view-export-${format}`}
+                >
+                    {exportDoor.busy
+                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                        : <Download className="h-4 w-4" />}
+                    <span>{t('list.exportAs', { format: format.toUpperCase(), defaultValue: 'Export as {{format}}' })}</span>
+                </DropdownMenuItem>
+            ))}
+            {exportDoor.error && (
+                <DropdownMenuLabel role="alert" className="text-xs font-normal text-destructive whitespace-normal" data-testid="object-view-export-error">
+                    {exportDoor.error}
+                </DropdownMenuLabel>
+            )}
         </>
     );
 }
 
-export function ObjectViewPageHeader(props: ObjectViewPageBarProps) {
+/**
+ * objectstack#36113 — 「Import / Export」 at the view bar's end: Import, then
+ * one entry per export format. Named for what it holds: only 「Import」 or only
+ * 「Export」 when the reader is offered one of the two.
+ */
+export function ObjectViewImportExportMenu({
+    importShown,
+    setShowImport,
+    importDisabled,
+    exportDoor,
+    t,
+}: Pick<ObjectViewMoreMenuProps, 'importShown' | 'setShowImport' | 'importDisabled' | 'exportDoor' | 't'>) {
+    const label = importShown && exportDoor
+        ? t('console.objectView.importExport', { defaultValue: 'Import / Export' })
+        : importShown
+            ? t('console.objectView.import', { defaultValue: 'Import' })
+            : t('list.export', { defaultValue: 'Export' });
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button
+                    size="sm"
+                    variant="outline"
+                    // 28px and 14px, like every control of the list's bars
+                    // (objectstack#35548).
+                    className="shadow-none h-7 gap-1 px-2 text-sm font-normal"
+                    data-testid="object-view-import-export"
+                >
+                    <ArrowUpDown className="h-3.5 w-3.5" />
+                    <span>{label}</span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+                {/* [#5142] the same verdict pair as the page bar's Import. */}
+                {importShown && (
+                    <DropdownMenuItem
+                        onSelect={() => setShowImport(true)}
+                        disabled={importDisabled}
+                        title={t('console.objectView.importTitle')}
+                        data-testid="object-view-import-button"
+                    >
+                        <Upload className="h-4 w-4" />
+                        <span>{t('console.objectView.import')}</span>
+                    </DropdownMenuItem>
+                )}
+                {importShown && exportDoor && <DropdownMenuSeparator />}
+                {exportDoor && <ExportMenuItems exportDoor={exportDoor} t={t} />}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
+export function ObjectViewPageHeader({ hosted = false, ...props }: ObjectViewPageBarProps & {
+    /**
+     * objectstack#36113 — the list's view bar carries the page's acts
+     * (`ListViewBarHostContext`): this bar is the page's first row, the
+     * object's icon and name, and draws none of them.
+     */
+    hosted?: boolean;
+}) {
     const { objectDef, objectPluralLabel, foldedHeaderActions } = props;
     const actionProps = props;
     const pluralLabel = objectPluralLabel(objectDef);
@@ -186,35 +515,28 @@ export function ObjectViewPageHeader(props: ObjectViewPageBarProps) {
                  // The kind chip, in the header's own slot after the title
                  // (objectui#12606).
                  badge={<ManagedByBadge managedBy={(objectDef as any)?.managedBy} />}
-                 // `createElement`, not a JSX tag: the looked-up icon is a value,
-                 // which react-hooks/static-components refuses in tag position
-                 // (the convention ObjectDataPage set).
-                 icon={createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
-                 actions={<ObjectViewPageBarActions {...actionProps} />}
-                 foldedActions={foldedHeaderActions}
-                 compactBelow={LIST_HEADER_COMPACT_WIDTH}
+                 // The object's tile, in the colour the menu draws it in
+                 // (objectstack#35985).
+                 iconTile={<ObjectIconTile icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />}
+                 actions={hosted ? undefined : <ObjectViewPageBarActions {...actionProps} />}
+                 foldedActions={hosted ? undefined : foldedHeaderActions}
+                 compactBelow={hosted ? undefined : LIST_HEADER_COMPACT_WIDTH}
              />
              </div>
     );
 }
 
 /**
- * objectstack#35878 — told when the list's view bar draws the page's name and
- * acts (`ObjectViewBarTrailing` is mounted): the page then draws no page bar
- * of its own, so the list has two rows above it, not three. Provided by the
- * page column; absent ⇒ nothing listens and the page bar stays.
+ * objectstack#35878 — told when the list's view bar draws the page's acts
+ * (`ObjectViewBarTrailing` is mounted): the page bar then draws none of its
+ * own, only the object's icon and name (objectstack#36113: the object's row,
+ * then the view bar, then the condition row). Provided by the page column;
+ * absent ⇒ nothing listens and the page bar keeps its acts.
  */
 export const ListViewBarHostContext = createContext<((hosted: boolean) => void) | null>(null);
 
 /** The page column's marker: the scope a view bar's selection slot speaks for. */
 export const OBJECT_VIEW_PAGE_COLUMN_ATTR = 'data-object-view-page-column';
-
-/**
- * The view bar's object name. `pl-1.5` matches the switcher's own 6px padding,
- * so the object's icon starts on the list page's 16px line (objectstack#35663):
- * the bar's left padding is 10px from `sm` up.
- */
-export const VIEW_BAR_OBJECT_NAME = 'hidden min-w-0 shrink items-center gap-1.5 sm:flex sm:pl-1.5';
 
 /**
  * The view bar's right end, added in both faces: the bar ends 8px in, and the
@@ -224,27 +546,32 @@ export const VIEW_BAR_OBJECT_NAME = 'hidden min-w-0 shrink items-center gap-1.5 
 export const VIEW_BAR_END_INSET = 'sm:pr-0.5';
 
 /**
- * objectstack#35878 — the start of the view bar: the object's icon and plural
- * name, then 「/」, then the view switcher. Clicking the name does nothing: it
- * names the page. From `sm` up only; a phone names the object in its top bar.
+ * objectstack#36113 — the list's width under which 「Import / Export」 folds
+ * into ⋮ More: `56rem`, where the 视图设置 trigger drops its label too
+ * (`ListView`'s `@[56rem]/list`).
  */
-export function ObjectViewBarObjectName({
-    objectDef,
-    objectPluralLabel,
-}: Pick<ObjectViewPageBarProps, 'objectDef' | 'objectPluralLabel'>) {
-    return (
-        <span className={VIEW_BAR_OBJECT_NAME} data-testid="list-view-bar-object">
-            <span className="flex shrink-0 items-center text-muted-foreground" aria-hidden="true">
-                {createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
-            </span>
-            {/* The page's heading: the page bar that held the `h1` is not drawn. */}
-            <h1 className="min-w-0 truncate text-[13px] font-medium leading-5 text-muted-foreground" data-testid="list-view-bar-object-name">
-                {objectPluralLabel(objectDef)}
-            </h1>
-            <ManagedByBadge managedBy={(objectDef as any)?.managedBy} />
-            <span aria-hidden="true" className="shrink-0 text-muted-foreground/60">/</span>
-        </span>
-    );
+export const VIEW_BAR_IO_FOLD_WIDTH = 896;
+
+/** The list's own box: `ListView`'s root, the `list` query container. */
+const LIST_CONTAINER_SELECTOR = '[class~="@container/list"]';
+
+/** Is `el` narrower than `width`? `false` until it is laid out. */
+function useNarrowerThan(el: HTMLElement | null, width: number): boolean {
+    const [narrow, setNarrow] = useState(false);
+    useLayoutEffect(() => {
+        if (!el) return undefined;
+        // A box not laid out (zero wide) is not narrow: nothing is measured.
+        const read = () => {
+            const measured = el.getBoundingClientRect().width;
+            setNarrow(measured > 0 && measured < width);
+        };
+        read();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        const observer = new ResizeObserver(read);
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [el, width]);
+    return narrow;
 }
 
 /**
@@ -255,8 +582,14 @@ export function ObjectViewBarObjectName({
  * page column is registered as a list page's scope (`useListPageScope`), so
  * its list draws no row-end controls. The page's acts are drawn from `sm` up;
  * a phone keeps its floating create button.
+ *
+ * objectstack#36113 — the bar is the page's second row: the object's row above
+ * it ends with the shell's button group (`PageHeader`). Its end reads
+ * 「search · Import / Export · New Account · ⋮」; while the list is narrower
+ * than `VIEW_BAR_IO_FOLD_WIDTH`, 「Import / Export」 folds into ⋮ More (the
+ * search's keyword hides first below `48rem`, in `ListView`'s own bar).
  */
-export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProps & { tools: ReactNode }) {
+export function ObjectViewBarTrailing({ tools, exportDoor, ...props }: ObjectViewPageBarProps & { tools: ReactNode; exportDoor?: ListExportDoor }) {
     const setHosted = useContext(ListViewBarHostContext);
     useLayoutEffect(() => {
         if (!setHosted) return undefined;
@@ -264,10 +597,15 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
         return () => setHosted(false);
     }, [setHosted]);
     const [pageColumn, setPageColumn] = useState<HTMLElement | null>(null);
+    const [list, setList] = useState<HTMLElement | null>(null);
     const rootRef = useCallback((el: HTMLDivElement | null) => {
         setPageColumn(el?.closest<HTMLElement>(`[${OBJECT_VIEW_PAGE_COLUMN_ATTR}]`) ?? null);
+        // The list's own box, the `@container/list` its bar's container
+        // queries read, so this fold and theirs read one width.
+        setList(el?.closest<HTMLElement>(LIST_CONTAINER_SELECTOR) ?? null);
     }, []);
     useListPageScope(pageColumn);
+    const folded = useNarrowerThan(list, VIEW_BAR_IO_FOLD_WIDTH);
     return (
         <div
             ref={rootRef}
@@ -277,7 +615,7 @@ export function ObjectViewBarTrailing({ tools, ...props }: ObjectViewPageBarProp
             <div className="flex items-center gap-0.5" data-testid="list-view-bar-tools">
                 {tools}
                 <span className="hidden items-center gap-1 pl-1 sm:flex" data-testid="list-view-bar-actions">
-                    <ObjectViewPageBarActions {...props} />
+                    <ObjectViewPageBarActions {...props} barEnd={{ exportDoor, folded }} />
                 </span>
             </div>
         </div>

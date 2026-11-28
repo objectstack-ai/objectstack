@@ -11,6 +11,7 @@
  * is read from the `/meta/diagnostics` envelope exactly as the page reads it.
  */
 
+import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -31,6 +32,7 @@ vi.mock('./useMetadata', async (importActual) => {
 });
 
 import { MetadataDiagnosticsPage } from './DiagnosticsPage';
+import { StudioTitleRowProvider } from '../studio-design/studioTitleRow';
 
 afterEach(cleanup);
 
@@ -103,5 +105,53 @@ describe('MetadataDiagnosticsPage header tone (objectui#12721)', () => {
     await screen.findByText(/Failed to load diagnostics/);
     expect(screen.queryByTestId('diagnostics-summary-badge')).toBeNull();
     expect(screen.getByTestId('diagnostics-header-icon').getAttribute('class')).toMatch(/text-destructive/);
+  });
+});
+
+// objectstack#37455 put the page's Save and the AI assistant at the end of the
+// diagnostics title row under Studio; objectstack#37520 (S2) pins them there,
+// after the severity switch and Refresh, behind a hairline. Stubs stand in for
+// the surface's controls.
+describe('MetadataDiagnosticsPage under Studio: the page controls end its title row (objectstack#37520)', () => {
+  const ASSISTANT = (
+    <button type="button" data-testid="topbar-ai-assistant">
+      AI
+    </button>
+  );
+
+  const titleRow = () => screen.getByRole('heading', { level: 1 }).parentElement as HTMLElement;
+
+  it('the assistant is the row\'s last control, after Refresh, behind a hairline', async () => {
+    answer = () => envelope([]);
+    render(
+      <MemoryRouter>
+        <StudioTitleRowProvider save={null} assistant={ASSISTANT}>
+          <MetadataDiagnosticsPage />
+        </StudioTitleRowProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('diagnostics-summary-badge');
+    const row = titleRow();
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(row).toContainElement(ai);
+    expect(row).toContainElement(screen.getByRole('button', { name: 'Refresh' }));
+    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    // The row end is the row's last child: nothing comes after the assistant.
+    const end = row.lastElementChild as HTMLElement;
+    expect(end).toHaveAttribute('data-slot', 'studio-title-row-end');
+    expect(end.lastElementChild).toBe(ai);
+    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
+  });
+
+  it('CONTROL: outside Studio the row ends with Refresh', async () => {
+    answer = () => envelope([]);
+    render(
+      <MemoryRouter>
+        <MetadataDiagnosticsPage />
+      </MemoryRouter>,
+    );
+    await screen.findByTestId('diagnostics-summary-badge');
+    expect(titleRow().lastElementChild).toBe(screen.getByRole('button', { name: 'Refresh' }));
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
   });
 });

@@ -30,7 +30,8 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  createAuthenticatedFetch: () => vi.fn(),
+  // The wire is the global `fetch` this file stubs; the authenticated fetch hands its requests to it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 }));
 
 vi.mock('sonner', () => ({

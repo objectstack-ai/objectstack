@@ -572,7 +572,7 @@ describe('FormSectionNav is a jump bar: hidden when the sections fit, a click ma
       renderModal();
       await waitFor(() => expect(nav()).not.toBeNull());
       // With the bar drawn, the bar is the separator under the header.
-      expect(header().classList.contains('border-b')).toBe(false);
+      await waitFor(() => expect(header().classList.contains('border-b')).toBe(false));
 
       sizeScroller(600, 420);
       resized();

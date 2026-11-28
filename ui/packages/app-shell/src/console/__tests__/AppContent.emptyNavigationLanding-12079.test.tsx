@@ -25,11 +25,37 @@
  * are stubbed, as in `AppContent.inaccessibleAppStrand.test.tsx`.
  */
 
+// The chrome's lint helpers load `@objectstack/lint` lazily: pay that load
+// during collection, not inside a case's clocked window
+// (scripts/check-test-source-alias.mjs).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 
 // AGENTS.md §测试纪律 — the lazy page modules are stubbed so no unbounded
 // `import()` races a bounded `findBy` window.
@@ -79,11 +105,16 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 /** The viewer under test: a `member` by default, a workspace admin where stated. */
 let isWorkspaceAdmin = false;
+// One function for every render, as `AuthProvider`'s `useCallback` gives:
+// `AppContent` re-reads the deployment flags whenever it changes, and since
+// objectstack#35981 its chrome waits for that answer, so a fresh function per
+// render would re-ask on every render and starve the landing's redirects.
+const getAuthConfig = vi.hoisted(() => async () => ({ features: {} }));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({
     user: { id: 'u_1', name: 'Dev Admin', email: 'admin@objectos.ai', role: 'member' },
-    getAuthConfig: async () => ({ features: {} }),
+    getAuthConfig,
     activeOrganization: { id: 'org_1', name: 'Org' },
   }),
   useWorkspaceAdminStatus: () => ({ isAdmin: isWorkspaceAdmin, isResolved: true }),
@@ -182,6 +213,18 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
   it('links a caller who can grant access to Setup, at the URL the /setup deep link resolves', async () => {
     isWorkspaceAdmin = true;
     metadataApps = [CLM_EMPTY, SETUP];
+    // objectstack#36748 — for a caller who can grant, the screen reads the
+    // app's STORED menu first. HotCLM's holds entries (every group gated
+    // away from this caller), so the access answer stands.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({ effective: { name: 'clm', navigation: [{ id: 'g', type: 'group', requiredPermissions: ['clm.admin'], children: [] }] } }),
+          { status: 200 },
+        ),
+      ),
+    );
     renderConsoleAt('/apps/clm');
 
     const emptyState = await screen.findByTestId('app-no-access-empty-state');
@@ -190,6 +233,7 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     expect(link).toHaveTextContent('Open Setup');
     // `resolveSetupAppPath` — the Setup app's canonical `/apps/PACKAGE_ID` URL.
     expect(link).toHaveAttribute('href', '/apps/com.objectstack.setup');
+    vi.unstubAllGlobals();
   });
 
   it('reads the admin verdict, not whether Setup is in the app list', async () => {
@@ -247,10 +291,12 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     renderConsoleAt('/apps/studio');
 
     // `metadata:directory` resolves to the app's `metadata` route, which since
-    // objectstack ADR-0146 D1 (N-28) opens Studio's "All metadata" area: the
-    // landing reached the entry, not the empty state.
-    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
-    expect(screen.getByTestId('pathname').textContent).toBe('/studio/~all/metadata');
+    // objectstack ADR-0146 D1 (N-28) opened Studio's "All metadata" area and
+    // since objectstack#37565 opens Setup → Access Control → Positions and
+    // Permissions: the landing reached the entry, not the empty state.
+    await waitFor(() =>
+      expect(screen.getByTestId('pathname').textContent).toBe('/apps/setup/component/security/access-directory'),
+    );
     expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
   });
 });

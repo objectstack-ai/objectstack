@@ -55,7 +55,7 @@ describe('metadata create seeds validate against their spec schemas', () => {
     const KNOWN_UNSEEDED = new Set([
       'report',        // canvas-create: dataset/measures picked interactively
       'app', 'seed', 'job', 'datasource', 'doc', 'book',
-      'permission', 'position', 'agent', 'tool', 'skill', 'email_template',
+      'permission', 'position', 'agent', 'tool', 'skill', 'ai_context', 'email_template',
       // [#7893] `field` is code-only by declaration as of 2026-08-12
       // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`, ADR-0049
       // remove side): a standalone `field` write minted a row no read path
@@ -91,6 +91,21 @@ describe('metadata create seeds validate against their spec schemas', () => {
       // (merge question 11). Same category as `sharing_rule`.
       'queue',
       'assignment_rule',
+      // [ADR-0159 card ②] `form` is runtime-creatable (a `/meta/form` save) but
+      // Studio has no form designer for it yet: the console keeps reading forms
+      // from `view` until card ③ (#37087), which brings the designer and its
+      // seed. Deferred work, named here so it is not a silent gap.
+      'form',
+      // [ADR-0161 K4, K5] `knowledge_source` is runtime-creatable, and its
+      // create seed is deferred work with a name: it lands with the Studio
+      // form (row 5 of #37000). The type's object binding and its content list
+      // sit inside `source`, and K5 makes `content` non-empty, so a seed that
+      // passes the schema carries a placeholder object AND a placeholder field
+      // there. The Studio create flow takes placeholder identity out only at
+      // the top level (objectui#12810), so it would save both into a new
+      // source. Until the form builds `source` from the author's input, a
+      // source is created by a `/meta` or MCP save, or shipped in a package.
+      'knowledge_source',
     ]);
     const seeded = new Set(listMetadataCreateSeedTypes());
     const missing = listMetadataTypeSchemaTypes().filter((t) => !seeded.has(t) && !KNOWN_UNSEEDED.has(t));

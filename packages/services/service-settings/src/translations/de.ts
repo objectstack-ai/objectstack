@@ -490,12 +490,12 @@ export const de: PlatformTranslationData = {
     },
     ai: {
       title: 'KI und Embedder',
-      description: 'LLM-Anbieter, Modell, Anmeldedaten und Embedder-Konfiguration für die KI- und Wissensdienste der Plattform.',
+      description: 'LLM-Anbieter, Modell und Anmeldedaten für den KI-Dienst der Plattform.',
       groups: {
-        provider: {
-          title: 'Anbieter',
-          description: 'Wählen Sie das LLM-Backend.',
-        },
+        provider: { title: 'Anbieter',
+          description: 'Schalten Sie jeden Anbieter ein, dessen Modelle verwendet werden dürfen. Der Standardanbieter ist immer eingeschaltet.' },
+        structured_output: { title: 'Strukturierte Ausgabe',
+          description: 'Das Modell für Aufrufe, die in einer festen Datenform antworten müssen. Leer lassen, um das Standardmodell zu verwenden.' },
         gateway: {
           title: 'Vercel AI Gateway',
           description: 'Router für mehrere Anbieter. Das Modell wird als provider/model geschrieben, z. B. openai/gpt-4o.',
@@ -539,7 +539,8 @@ export const de: PlatformTranslationData = {
       },
       keys: {
         provider: {
-          label: 'Anbieter',
+          label: 'Standardanbieter',
+          help: 'Bedient jede Anfrage, die kein Modell nennt.',
           options: {
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
@@ -631,8 +632,30 @@ export const de: PlatformTranslationData = {
           label: 'Vollständige Prompts protokollieren',
           help: 'Nimmt die gerenderten Prompts (nicht nur Metadaten) in die Trace-Zeilen auf.',
         },
+        default_model: { label: 'Standardmodell', help: 'Eines der Modelle des Standardanbieters. Leer lassen, um sein erstes Modell zu verwenden.' },
+        gateway_enabled: { label: 'Vercel AI Gateway' },
+        openai_enabled: { label: 'OpenAI' },
+        anthropic_enabled: { label: 'Anthropic' },
+        google_enabled: { label: 'Google Generative AI' },
+        deepseek_enabled: { label: 'DeepSeek' },
+        dashscope_enabled: { label: '阿里通义 DashScope' },
+        cloudflare_enabled: { label: 'Cloudflare AI Gateway' },
+        siliconflow_enabled: { label: '硅基流动 SiliconFlow' },
+        openrouter_enabled: { label: 'OpenRouter' },
+        gateway_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        openai_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        anthropic_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        google_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        deepseek_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        dashscope_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        cloudflare_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        siliconflow_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        openrouter_models: { label: 'Weitere Modelle', help: 'Weitere Modell-IDs dieses Anbieters, eine pro Zeile. Das Modell darüber steht an erster Stelle.' },
+        structured_output_provider: { label: 'Anbieter', help: 'Ein eingeschalteter Anbieter. Leer lassen, um den Standardanbieter zu verwenden.' },
+        structured_output_model: { label: 'Modell', help: 'Eines der Modelle dieses Anbieters. Leer lassen, um sein erstes Modell zu verwenden.' },
         embedder_provider: {
           label: 'Anbieter',
+          help: 'Wird beim Serverstart gelesen: Eine gespeicherte Änderung an einer Embedder-Einstellung wirkt nach dem nächsten Neustart.',
           options: {
             none: 'Deaktiviert (keine Embeddings)',
             openai: 'OpenAI',
@@ -669,6 +692,15 @@ export const de: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'Verbindung testen' },
+        test_gateway: { label: 'Verbindung testen' },
+        test_openai: { label: 'Verbindung testen' },
+        test_anthropic: { label: 'Verbindung testen' },
+        test_google: { label: 'Verbindung testen' },
+        test_deepseek: { label: 'Verbindung testen' },
+        test_dashscope: { label: 'Verbindung testen' },
+        test_cloudflare: { label: 'Verbindung testen' },
+        test_siliconflow: { label: 'Verbindung testen' },
+        test_openrouter: { label: 'Verbindung testen' },
         test_embedder: { label: 'Embedder testen' },
         reset: { label: 'Auf Umgebungsstandards zurücksetzen' },
       },
@@ -683,73 +715,19 @@ export const de: PlatformTranslationData = {
       title: 'Wissen',
       description: 'Vektorspeicher-Backend für RAG und Wissensquellen.',
       groups: {
-        adapter: {
-          title: 'Backend',
-          description: 'Legen Sie fest, wo Dokument-Chunks und ihre Vektoren gespeichert werden.',
-        },
-        turso: {
-          title: 'Turso / libSQL',
-          description: 'Funktioniert mit verwaltetem Turso, lokaler Datei oder im Arbeitsspeicher.',
-        },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Externe RAGFlow-Bereitstellung. Anleitung zum Selbsthosten unter https://ragflow.io.',
-        },
         indexing: {
           title: 'Standardwerte für die Indexierung',
           description: 'Ein an der Wissensquelle selbst gesetzter Wert hat Vorrang vor diesen Standardwerten.',
         },
-        permissions: { title: 'Berechtigungen' },
       },
       keys: {
-        adapter: {
-          label: 'Adapter',
-          options: {
-            memory: 'Im Arbeitsspeicher (nur Entwicklung / Test)',
-            turso: 'Turso / libSQL (Cloud oder lokal)',
-            ragflow: 'RAGFlow (extern)',
-          },
-        },
-        turso_url: {
-          label: 'Verbindungs-URL',
-          help: 'Beispiele: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: 'Auth-Token', help: 'Nur für verwaltete Turso-URLs erforderlich.' },
-        ragflow_base_url: { label: 'Base URL', help: 'Beispiel: http://localhost:9380' },
-        ragflow_api_key: { label: 'API-Schlüssel' },
-        ragflow_default_dataset: {
-          label: 'Standard-Dataset-ID',
-          help: 'Wird verwendet, wenn eine Wissensquelle kein eigenes RAGFlow-Dataset nennt.',
-        },
         chunk_target: {
           label: 'Ziel-Chunkgröße (Zeichen)',
-          help: 'Weiche Obergrenze der Chunkgröße, bevor die tokenbasierte Aufteilung greift.',
-        },
-        chunk_overlap: {
-          label: 'Chunk-Überlappung (Zeichen)',
-          help: 'Aus dem vorigen Chunk übernommene Zeichen, damit der Kontext über die Grenze erhalten bleibt.',
-        },
-        over_fetch: {
-          label: 'Over-Fetch-Faktor',
-          help: 'Die Suche holt das Vielfache der angeforderten Ergebnisanzahl, damit nach dem Filtern nach Dokumentdetails genug zum Zurückgeben bleiben.',
-        },
-        enforce_rls: {
-          label: 'RLS bei der Suche erzwingen',
-          help: 'Prüft jeden Treffer erneut gegen die Berechtigungen des Aufrufers auf Datensatzebene.',
+          help: 'Längste Passage in Zeichen, wenn der Wissensdienst ein Dokument aufteilt. Eine an der Wissensquelle selbst gesetzte Größe hat Vorrang; das Eingabelimit des Embedding-Modells kann den Wert senken.',
         },
       },
       actions: {
         test: { label: 'Verbindung testen' },
-      },
-      banners: {
-        adapter_switch_warning: {
-          title: 'Vorhandene Indizes werden nicht migriert',
-          text: 'Ein Adapterwechsel migriert vorhandene Indizes NICHT — mit dem bisherigen Adapter indexierte Dokumente sind bis zur Neuindexierung nicht erreichbar.',
-        },
-        enforce_rls_warning: {
-          title: 'RLS in der Produktion eingeschaltet lassen',
-          text: 'Das Abschalten umgeht den plattformeigenen Schutz vor Datenabfluss aus dem Vektorspeicher — in der Produktion eingeschaltet lassen.',
-        },
       },
     },
     lifecycle: {

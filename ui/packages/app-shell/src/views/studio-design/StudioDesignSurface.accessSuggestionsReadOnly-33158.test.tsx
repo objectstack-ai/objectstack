@@ -1,21 +1,22 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#33158 (ADR-0090 D5/D9) — the Access pillar's suggested-bindings
- * strip on a READ-ONLY package. A marketplace-installed package is read-only in
+ * objectstack#33158 (ADR-0090 D5/D9) — Studio's suggested-bindings strip on a
+ * READ-ONLY package, drawn since objectstack#36905 on the permission set's
+ * full-screen page (`StudioPermissionSetPage`), as the Access pillar drew it. A marketplace-installed package is read-only in
  * Studio, and it is the package that ships an `isDefault` set; accepting or
  * dismissing that suggestion is a deployment decision about the package, not
  * an edit of it, so the strip is drawn whatever `readOnly` says.
  *
- * The REAL `AccessPillar` and `SuggestedBindingsPanel`, over a metadata client
+ * The REAL `StudioPermissionSetPage` and `SuggestedBindingsPanel`, over a metadata client
  * double and a stub of the suggestion door's client.
  *
  * Pinned:
  *  - on a read-only package a pending suggestion renders the strip with Accept
  *    and Dismiss, listed for this package;
  *  - CONTROL: a writable package renders the same strip;
- *  - CONTROL: on the read-only package the pillar's authoring affordance (the
- *    rail's "+ New") stays absent, while the writable package offers it;
+ *  - CONTROL: on the read-only package the page still says nothing is saved
+ *    (its header's read-only link), while the writable package draws none;
  *  - a list refused `403` (a caller without `manage_metadata`) renders no
  *    strip and no error.
  */
@@ -44,10 +45,12 @@ vi.mock('../../services/suggestedBindingsApi', () => ({
   reopenSuggestedBinding: api.reopen,
 }));
 
+/** The label the package's set list serves for `crm_user` (a case may serve none). */
+let setLabel = 'CRM user';
 const client = {
   withPreviewDrafts() { return this; },
   list: vi.fn(async (type: string) =>
-    type === 'permission' ? [{ name: 'crm_user', label: 'CRM user', isDefault: true }] : [],
+    type === 'permission' ? [{ name: 'crm_user', label: setLabel, isDefault: true }] : [],
   ),
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: null, code: null, overlay: null, overlayScope: null })),
@@ -71,11 +74,10 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 });
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { toast } from 'sonner';
 import { t, tFormat } from '../metadata-admin/i18n';
-import { AccessPillar } from './StudioDesignSurface';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -105,12 +107,13 @@ function refused(status: number, code: string, message: string): Error {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  setLabel = 'CRM user';
 });
 
 function renderAccess(readOnly: boolean) {
   render(
     <MemoryRouter>
-      <AccessPillar packageId={PKG} readOnly={readOnly} />
+      <StudioPermissionSetPage packageId={PKG} name="crm_user" readOnly={readOnly} />
     </MemoryRouter>,
   );
 }
@@ -137,17 +140,17 @@ describe('objectstack#33158 — the suggested-bindings strip on a read-only pack
     expect(api.list).toHaveBeenCalledWith({ packageId: PKG });
   });
 
-  it('CONTROL: the read-only package keeps its authoring affordance absent; the writable one offers it', async () => {
+  it('CONTROL: the read-only package still says nothing is saved; the writable one does not', async () => {
     api.list.mockResolvedValue([PENDING]);
     renderAccess(true);
     await screen.findByTestId('suggested-bindings-panel', undefined, { timeout: 8000 });
-    await screen.findByTestId('studio-rail-access');
-    expect(screen.queryByTestId('studio-rail-add')).toBeNull();
+    expect(await screen.findByTestId('studio-readonly-link')).toBeInTheDocument();
     cleanup();
 
     renderAccess(false);
     await screen.findByTestId('suggested-bindings-panel', undefined, { timeout: 8000 });
-    expect(await screen.findByTestId('studio-rail-add')).toBeInTheDocument();
+    await screen.findByTestId('permission-detail-header');
+    expect(screen.queryByTestId('studio-readonly-link')).toBeNull();
   });
 
   it('a list refused 403 (no manage_metadata) renders no strip and no error', async () => {
@@ -155,7 +158,7 @@ describe('objectstack#33158 — the suggested-bindings strip on a read-only pack
       refused(403, 'PERMISSION_DENIED', 'listing audience-binding suggestions requires the `manage_metadata` capability.'),
     );
     renderAccess(true);
-    await screen.findByTestId('studio-rail-access', undefined, { timeout: 8000 });
+    await screen.findByTestId('permission-detail-header', undefined, { timeout: 8000 });
     await waitFor(() => expect(api.list).toHaveBeenCalledTimes(1));
     // Let the refused read settle before asserting its absence.
     await new Promise((r) => setTimeout(r, 0));
@@ -225,14 +228,12 @@ describe('objectstack#33864 — the suggested-bindings strip names its set by la
     );
   });
 
-  it('CONTROL: a set the rail holds no label for is named by its machine name', async () => {
-    client.list.mockImplementationOnce(async (type: string) =>
-      type === 'permission' ? [{ name: 'crm_user', label: '', isDefault: true }] : [],
-    );
+  it('CONTROL: a set the list holds no label for is named by its machine name', async () => {
+    setLabel = '';
     api.list.mockResolvedValue([PENDING]);
     renderAccess(false);
     const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
-    await screen.findByTestId('studio-rail-access');
+    await waitFor(() => expect(client.list).toHaveBeenCalledWith('permission', { packageId: PKG }));
     await waitFor(() =>
       expect(row).toHaveTextContent(fmt('engine.studio.access.suggestPromptEveryone', 'crm_user')),
     );
@@ -243,7 +244,7 @@ describe('objectstack#33864 — the suggested-bindings strip names its set by la
  * objectstack#33865 (`ux-conventions.write-feedback`) — Revoke on a granted
  * suggestion is a write, and it answers with a toast naming the set, as Grant
  * and Dismiss do. The Studio mount hands the strip its own `revokedToast`
- * sentence; this reads it through the REAL pillar: Grant, then Revoke on the
+ * sentence; this reads it through the REAL page: Grant, then Revoke on the
  * row the Grant left.
  *
  * Pinned:

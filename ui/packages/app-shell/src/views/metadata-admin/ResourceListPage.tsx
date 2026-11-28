@@ -5,20 +5,19 @@
  * (Phase 3c).
  *
  * Reads `/meta/:type`, applies registry-driven columns + search +
- * source/overlay filters, and renders an ObjectGrid-like table.
- * Each row links to its EditPage at `./:name?type=…`.
- *
- * No virtualisation in MVP — metadata lists are typically < 200 items
- * per type, well under the threshold where it'd matter.
+ * source/overlay filters, and draws the rows in the record list's
+ * `ObjectGrid` (objectstack#36897: every type's list is the same table,
+ * `metadataListGrid.ts`), a page at a time. Each row links to its EditPage
+ * at `./:name?type=…`.
  */
 
 import * as React from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Search, RefreshCw, AlertTriangle, Lock, Copy } from 'lucide-react';
 import {
   Button,
-  HorizontalOverflowBox,
-  PINNED_RIGHT_SEAM_SHADOW_CLASSES,
+  NeutralIconTile,
+  ObjectIconTile,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -58,6 +57,7 @@ import {
   resolveResourceConfig,
 } from './registry.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
+import { servedListColumns, valueAtPath, withExtraColumns, type ListColumns } from './servedListColumns.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
@@ -102,7 +102,44 @@ import { resolveAffordance, type SchemaLike } from '@object-ui/core';
 import { useAdapter, useMetadata } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { SharingRuleCloneDialog, type SharingRuleCloneDialogProps } from './SharingRuleCloneDialog.js';
+import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
+import { permissionSetCloneNoticeText } from './permission-set-clone.js';
+import { newSimilarOutcome } from '../studio-design/permissionNewSimilar.js';
+import { useStudioDashboardNew } from '../studio-design/StudioAreaAppOpen.js';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
+import {
+  applyListState,
+  DEFAULT_LIST_SORT,
+  decodeListSort,
+  decodeListState,
+  LIST_SORT_KEYS,
+  listContextQuery,
+  scopeListRows,
+  writeListState,
+  type ListRowReader,
+  type ListSortKey,
+  type MetadataListState,
+} from './metadataListState.js';
+import { useListScrollRestore } from './useListScrollRestore.js';
+import { LIST_CREATE_DIALOG_TYPES, MetadataListCreateDialog } from './MetadataListCreateDialog.js';
+import { ObjectGrid } from '@object-ui/plugin-grid';
+import {
+  LIST_PAGE_PARAM,
+  MetadataListSource,
+  gridSortOf,
+  listSortOfGrid,
+  metadataGridField,
+  metadataListGridSchema,
+  metadataListObjectSchema,
+  pageWindow,
+  type MetadataGridColumn,
+} from './metadataListGrid.js';
+import { formatChangedAt, useListChangedAt } from './listChangedAt.js';
+import { useListDraftMarks } from './listDraftMarks.js';
+import { ListChangedCell } from './ListChangedCell.js';
+import { StudioListHeader } from './StudioListHeader.js';
+import { STUDIO_MENU_TYPE_ICONS } from '../studio-design/StudioMenu.js';
+import { STUDIO_SOURCE_KEY, studioListSource, studioSourceKind, type StudioSourceKind } from './studioListSource.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -197,9 +234,40 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [query, setQuery] = React.useState('');
-  const [sourceFilter, setSourceFilter] = React.useState<string>('all');
   const [searchParams, setSearchParams] = useSearchParams();
+  // objectstack#36896 — the list's filters and sort live in its address
+  // (`metadataListState.ts`): a refresh keeps them, × / Back from a detail
+  // returns to them, and each row link carries them for the detail's ‹ ›.
+  // Every write replaces the history entry. The search box keeps its own
+  // draft, so a keystroke never waits on the router to echo the address back
+  // (the router commits a location in a transition): the draft follows the
+  // address only on a navigation this page did not write — a link to the list
+  // (PUSH) or Back / Forward (POP) — never on a REPLACE, which is this page's
+  // own write or the package repair below, both keeping the text.
+  const search = searchParams.toString();
+  const urlListState = React.useMemo(() => decodeListState(new URLSearchParams(search)), [search]);
+  const [queryDraft, setQueryDraft] = React.useState(urlListState.query);
+  const navigationType = useNavigationType();
+  const routeLocation = useLocation();
+  React.useEffect(() => {
+    if (navigationType !== 'REPLACE') setQueryDraft(urlListState.query);
+  }, [routeLocation.key, navigationType, urlListState.query]);
+  const listState: MetadataListState = { ...urlListState, query: queryDraft };
+  const updateListState = React.useCallback(
+    (patch: Partial<MetadataListState>) => {
+      // A changed filter or sort starts the table over at its first page.
+      setSearchParams(
+        (prev) => {
+          const next = writeListState(prev, { ...decodeListState(prev), ...patch });
+          next.delete(LIST_PAGE_PARAM);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const { query, source: sourceFilter, status: statusFilter, customizedOnly: onlyCustomized } = listState;
   const [refreshKey, setRefreshKey] = React.useState(0);
   // objectui#7611 — the ENVIRONMENT scope (`?scope=environment`): the Setup
   // catalog. The list is the registry's whole list for the type, not one
@@ -217,6 +285,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // package scope is the area's, never picked or repaired here, and a
   // read-only package offers no create.
   const host = useMetadataAreaHost();
+  // objectstack#37918 (decision 7 of epic objectstack#37424) — the App Studio
+  // area draws its own list: its header, toolbar, columns and Source words.
+  // The area's host outside Setup: Setup's access directory mounts a host too,
+  // and keeps Setup's list.
+  const studioList = !!host && !inSetup;
+  // objectstack#37918 — in the Studio list the type's icon is the one the
+  // Studio menu beside it draws for that type: the title row's icon, and the
+  // tile of a row that names no icon of its own. Setup keeps the registry's.
+  const studioTypeGlyph = studioList ? STUDIO_MENU_TYPE_ICONS[type] : undefined;
   // objectstack#29566 — the area's cross-package leg (`/studio/~all/metadata`)
   // outside the environment scope: the list of a type across packages. It
   // names no package and never repairs one into the URL (`?package=X` would
@@ -234,7 +311,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     const pair = customizationPackageId(host.packageId);
     return pair.ok ? pair.value : null;
   }, [host?.packageId]);
-  const [onlyCustomized, setOnlyCustomized] = React.useState(false);
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -246,7 +322,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // verdict has none, and the package door is refused the same way.
   const walled = useWalledCatalogReadOnly(type);
   const activation = envScope && hasCatalogActivation(type);
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
   // The activation ledger's answer for the switch column, with the names the
   // door refuses to switch (`catalog-activation.ts`). `null` while unread,
   // `'error'` when the read was refused or failed, with the server's words for
@@ -298,6 +373,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     }).allowed;
   const CloneDialog = authoredObject && canClone ? DECLARATION_CLONE_DIALOGS[type] : undefined;
   const [cloning, setCloning] = React.useState<Record<string, unknown> | null>(null);
+  // objectstack#36905 — "New similar" on a read-only base's permission sets in
+  // Studio's area, where the Access pillar's rail offered it before: the clone
+  // door picks the package, and the copy opens at its own address.
+  const [newSimilarFrom, setNewSimilarFrom] = React.useState<{ name: string; sourcePackage?: string } | null>(null);
 
   // Studio is scoped to a single *project* package at a time. Load the
   // installed packages and keep only project-scoped ones — anything not
@@ -413,7 +492,19 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // writable base exists, create into it (defaulting away from the Local/null
   // scope); when none exists yet, prompt to create a base first.
   const [showCreateBase, setShowCreateBase] = React.useState(false);
+  // objectstack#36897 — in the Studio area an object or a flow is created in
+  // the list's own dialog (`MetadataListCreateDialog`), and on a read-only
+  // base every create lands in the base's `.custom` pair (ADR-0146 D3) — where
+  // the area opens one there (`host.pairCreate`; none where the ensure door
+  // refuses this caller, as on the pillars).
+  const createInPair = !!host?.readOnly && host.pairCreate === true;
+  const createInDialog = !!host?.packageId && LIST_CREATE_DIALOG_TYPES.includes(type);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const handleCreate = React.useCallback(() => {
+    if (createInDialog) {
+      setCreateOpen(true);
+      return;
+    }
     // An environment-authored item belongs to no package (ADR-0131 D3).
     if (envScope) {
       navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
@@ -442,7 +533,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg]);
+  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -590,6 +681,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       cancelled = true;
     };
   }, [client, type, refreshKey, listInclude]);
+  // objectstack#36898 — each item's change time and its pending-draft mark.
+  const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, refreshKey);
+  const draftMarkOf = useListDraftMarks(client, type, refreshKey);
 
   const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
   // Structural scope — every row this package could ever show for this
@@ -598,26 +692,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // a package with zero items of a type reads as "暂无…条目", not "no match
   // for an (empty) query" just because *other* packages own rows of the
   // same type (server list() is not package-scoped; we scope client-side).
+  //
+  // The per-type hide hook (e.g. `view` drops the bare aggregated container
+  // the framework keeps for runtime dual-read) applies first. objectui#7611 —
+  // the environment scope is the whole registry list, and so is the area's
+  // cross-package leg (objectstack#29566). Otherwise the project-package scope
+  // is mandatory: nothing until a concrete package is active, then only rows
+  // tagged with it — under the area, with its pair's (ADR-0146 D3).
+  // `scopeListRows` is shared with the detail's ‹ › order.
   const scopedItems = React.useMemo(
-    () =>
-      items.filter((row) => {
-        // Per-type hide hook (e.g. `view` drops the bare aggregated
-        // container the framework keeps for runtime dual-read).
-        if (config.listFilter && !config.listFilter(row.item)) return false;
-        // objectui#7611 — the environment scope is the whole registry list,
-        // and so is the area's cross-package leg (objectstack#29566).
-        if (envScope || allLeg) return true;
-        // Mandatory project-package scope: show nothing until a concrete
-        // project package is active, then only rows tagged with it. The
-        // 'sys_metadata' sentinel and untagged rows never match.
-        if (!activePackage) return false;
-        const pkg = (row.item as any)?._packageId;
-        // Only rows tagged with the active writable base match. Untagged /
-        // `sys_metadata`-provenance legacy rows have no scope of their own
-        // (ADR-0070 D5 — the package-less "Local / Custom" scope is removed).
-        // Under the area a base's list also holds its pair's items (ADR-0146 D3).
-        return pkg === activePackage || (pairId !== null && pkg === pairId);
-      }),
+    () => scopeListRows(items, { listFilter: config.listFilter, unscoped: envScope || allLeg, activePackage, pairId }),
     [items, activePackage, config, envScope, allLeg, pairId],
   );
 
@@ -671,30 +755,56 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const showCustomizedFilter =
     customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
   const filteringCustomized = onlyCustomized && showCustomizedFilter;
+  // objectstack#37918 — what the Studio list's Source says of a row
+  // (`studioListSource.ts`): its mark first, then its provenance. Its source
+  // filter's "modified and new" and "system-shipped" are this, so "only
+  // customizations" is folded into it there and not offered beside it.
+  const studioKindOf = React.useCallback(
+    (row: ItemRow): StudioSourceKind => studioSourceKind(row.source, markOf(row)),
+    [markOf],
+  );
+  const sourceOf = React.useCallback(
+    (row: ItemRow): 'artifact' | 'runtime' => (studioList ? studioListSource(studioKindOf(row)) : row.source),
+    [studioList, studioKindOf],
+  );
 
-  // User-driven filters (search query + source provenance) on top of scope.
-  const filtered = scopedItems.filter((row) => {
-    if (!matchesQuery(row.item, query, searchableFields)) return false;
-    if (sourceFilter !== 'all' && row.source !== sourceFilter) return false;
-    if (filteringCustomized && markOf(row) === null) return false;
-    if (activation && statusFilter !== 'all') {
-      // Only a KNOWN state filters: while the ledger is unread or unreadable,
-      // no item is either active or inactive to this filter.
-      if (!ledger || ledger === 'error') return false;
-      const name = String(row.item.name ?? '');
-      if ((statusFilter === 'active') !== isCatalogHolderActive(ledger, name, holdingOfRow(row))) return false;
-    }
-    return true;
-  });
+  // User-driven filters and the sort on top of scope (objectstack#36896): the
+  // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
+  const rowReader: ListRowReader<ItemRow> = {
+    name: (row) => String(row.item[config.primaryKey ?? 'name'] ?? ''),
+    changedAt: (row) => changedAt?.[String(row.item[config.primaryKey ?? 'name'] ?? '')],
+    label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
+    matches: (row, q) => matchesQuery(row.item, q, searchableFields),
+    source: sourceOf,
+    ...(showCustomizedFilter && !studioList ? { customized: (row: ItemRow) => markOf(row) !== null } : {}),
+    // Only a KNOWN state filters: while the ledger is unread or unreadable, no
+    // item is either active or inactive to this filter.
+    ...(activation
+      ? {
+          active: (row: ItemRow) =>
+            !ledger || ledger === 'error'
+              ? null
+              : isCatalogHolderActive(ledger, String(row.item.name ?? ''), holdingOfRow(row)),
+        }
+      : {}),
+  };
+  const filtered = applyListState(scopedItems, listState, rowReader, locale);
+  // objectstack#36903 — a host that says what its empty list means (the
+  // package-less scope, whose list is its source filter's narrowing of the
+  // environment's rows) reads an unsearched, empty list as empty, not as a
+  // search with no match.
+  const hintedEmpty = !!host?.emptyListHint && !query.trim() && filtered.length === 0;
+  // The list context every row link carries to its detail (decision 10).
+  const listContext = listContextQuery(listState);
 
   // Compute source + invalid counts for filter / header stats.
   const sourceCounts = React.useMemo(() => {
     const c = { all: scopedItems.length, artifact: 0, runtime: 0 };
     for (const r of scopedItems) {
-      c[r.source]++;
+      c[sourceOf(r)]++;
     }
     return c;
-  }, [scopedItems]);
+  }, [scopedItems, sourceOf]);
 
   const invalidCount = React.useMemo(
     () => scopedItems.filter((r) => r.diagnostics && r.diagnostics.valid === false).length,
@@ -714,8 +824,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [scopedItems],
   );
 
+  // objectstack#36860 — the served list layout first, then the console's own
+  // columns, then the default (`servedListColumns.tsx` states the precedence).
   const columns = withBundleMemberColumn(
-    config.listColumns ?? defaultColumns(config.primaryKey ?? 'name'),
+    withExtraColumns(
+      servedListColumns(entry?.list, entry?.schema, config.listCells)
+        ?? config.listColumns
+        ?? defaultColumns(config.primaryKey ?? 'name'),
+      config.listExtraColumns,
+    ),
     config.bundleMemberField,
   );
   const typeLabel = translateMetadataType(type, locale, entry?.label ?? type);
@@ -723,9 +840,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     (inSetup && navEntryTitle(app, `/apps/${appName}`, location.pathname, location.search, navT, language)) || typeLabel;
   // objectstack#27356 — under Setup the label leads the identity cell, with the
   // API name beneath it, in place of a separate Label column.
+  // objectstack#37918 (decision 7) — the same in the Studio list, whose object
+  // list draws no plural label column either.
   const primaryKey = config.primaryKey ?? 'name';
-  const labelColumn = inSetup && columns[0]?.key === primaryKey ? columns.find((c) => c.key === 'label') : undefined;
-  const shownColumns = labelColumn ? columns.filter((c) => c !== labelColumn) : columns;
+  const listColumns = studioList && type === 'object' ? columns.filter((c) => c.key !== 'pluralLabel') : columns;
+  const labelColumn =
+    (inSetup || studioList) && listColumns[0]?.key === primaryKey ? listColumns.find((c) => c.key === 'label') : undefined;
+  const shownColumns = labelColumn ? listColumns.filter((c) => c !== labelColumn) : listColumns;
   // The type offers SOME runtime write channel (the editors' type tier), and —
   // in the environment scope — the caller holds the capability the metadata
   // door requires. The server refuses either way; this is the half that says
@@ -733,7 +854,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && !host?.readOnly;
+  const canCreateHere =
+    typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && (!host?.readOnly || createInPair);
+  // objectstack#36907 — in the Studio area a dashboard's New opens an app's
+  // design mode (its 「Add menu item」 picker, so the dashboard hangs in a
+  // menu): offered only where an app opens, never on a phone, and with no app
+  // the list says why instead.
+  const dashboardNew = useStudioDashboardNew(
+    canCreateHere && type === 'dashboard' && host?.packageId ? host.packageId : null,
+  );
+  const canCreate = canCreateHere && (dashboardNew === 'off' || dashboardNew === 'offered');
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
@@ -742,20 +872,67 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // area never wait on them.
   const packagesPending = !envScope && !host && projectPackages === null;
 
-  // Localise default column labels — registered columns keep their
-  // hand-authored labels (consumers may want bespoke wording).
-  const localizeColumnLabel = (col: { key: string; label: string }) => {
+  // Localise a console column's header through `engine.list.col.<key>`. A
+  // served header is already in the reader's locale and is shown as served.
+  const localizeColumnLabel = (col: { key: string; label: string; labelLocalized?: boolean }) => {
+    if (col.labelLocalized) return col.label;
     const tryKey = `engine.list.col.${col.key}`;
     const translated = t(tryKey, locale);
     return translated === tryKey ? col.label : translated;
   };
 
   const refresh = () => setRefreshKey((k) => k + 1);
-  const createButton = canCreate && (
+  // objectstack#36896 — × / Back from a detail lands where the list was: the
+  // position is kept per list address and restored once the rows are drawn.
+  const scrollAnchorRef = useListScrollRestore<HTMLDivElement>(
+    `${routeLocation.pathname}?${search}`,
+    !loading && filtered.length > 0,
+  );
+  // What an empty list says under its title. objectstack#36907 — a dashboard
+  // list whose New is withheld never falls through to the read-only hint: the
+  // package is writable. While its apps are read it says nothing yet; on a
+  // phone it says where a dashboard is made; with no app, why there is no New.
+  const emptyHint: string | null =
+    (scopedItems.length === 0 || hintedEmpty ? host?.emptyListHint : undefined) ??
+    config.emptyStateHint ??
+    (canCreate
+      ? tFormat('engine.list.createHint', locale, { type: typeLabel })
+      : dashboardNew === 'no-app'
+        ? t('engine.list.dashboardNewNoApp', locale)
+        : dashboardNew === 'phone'
+          ? t('engine.list.dashboardNewWiderScreen', locale)
+          : dashboardNew === 'pending'
+            ? null
+            : t('engine.list.readOnlyHint', locale));
+  // objectstack#37918 (decision 8 of epic objectstack#37424) — on a read-only
+  // base, New is offered because the item goes to the base's `.custom` pair
+  // (ADR-0146 D3), and its tooltip says so: the package is read-only, the new
+  // item lands in the pair. Not disabled, and no banner over the list.
+  const pairCreateHint =
+    createInPair && host?.packageId && pairId
+      ? tFormat('engine.list.createInPairHint', locale, {
+          package: customizations.status === 'read' && customizations.baseName ? customizations.baseName : host.packageId,
+          pair: pairId,
+          type: typeLabel,
+        })
+      : null;
+  const studioNewButton = (
+    <Button
+      size="sm"
+      onClick={handleCreate}
+      data-testid="metadata-list-create"
+      aria-describedby={pairCreateHint ? 'metadata-list-create-pair-hint' : undefined}
+    >
+      <Plus className="h-4 w-4 mr-1" />
+      {tFormat('engine.list.createNamed', locale, { type: typeLabel })}
+    </Button>
+  );
+  const newButton = !studioList ? (
     <Button
       size="sm"
       variant={config.createFields ? 'default' : 'outline'}
       onClick={handleCreate}
+      data-testid="metadata-list-create"
       title={
         config.createFields
           ? tFormat('engine.list.createHint', locale, { type: typeLabel })
@@ -765,13 +942,32 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       <Plus className="h-4 w-4 mr-1" />
       {t('engine.list.create', locale)}
     </Button>
+  ) : pairCreateHint ? (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{studioNewButton}</TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          {pairCreateHint}
+        </TooltipContent>
+      </Tooltip>
+      <span id="metadata-list-create-pair-hint" className="sr-only">
+        {pairCreateHint}
+      </span>
+    </TooltipProvider>
+  ) : (
+    studioNewButton
   );
+  const createButton = (canCreate && newButton) || (dashboardNew === 'no-app' && (
+    <span role="note" className="max-w-xs text-xs text-muted-foreground" data-testid="metadata-list-create-unavailable">
+      {t('engine.list.dashboardNewNoApp', locale)}
+    </span>
+  ));
   // Declarative type-level actions (GAP-1) scoped to the list toolbar.
-  // Per-row (`list_item`) actions are not surfaced here yet — they need the
+  // Per-row (`record_row`) actions are not surfaced here yet — they need the
   // row's recordId from the grid.
   const typeActions = (
     <>
-      <MetadataTypeActions entry={entry} location="list_toolbar" onAfter={refresh} />
+      <MetadataTypeActions entry={entry} location="list" onAfter={refresh} />
       {authoredObject && (
         <Button asChild size="sm" variant="outline" data-testid="catalog-authored-object-link">
           <Link to={`/apps/${encodeURIComponent(appName ?? 'setup')}/${authoredObject}`}>
@@ -782,25 +978,540 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     </>
   );
 
-  // objectui#13091 — the row's controls pinned to the table's right edge: the
-  // Clone column at `right-0`, at its fixed width, and the Active column just
-  // left of it. The first pinned column draws the seam shadow.
-  const pinned = activation || !!CloneDialog;
-  const cloneCellPin = CloneDialog
-    ? cn(PINNED_CELL_CLASSES, 'right-0 w-28 min-w-28', !activation && PINNED_SEAM_CLASSES)
-    : undefined;
-  const activeCellPin = activation
-    ? cn(PINNED_CELL_CLASSES, CloneDialog ? 'right-28' : 'right-0', PINNED_SEAM_CLASSES)
-    : undefined;
+  // objectstack#36897 — what each row of the table draws, by its row key:
+  // `ObjectGrid` keeps a row's key and its column values only, so the item,
+  // its package, lock and diagnostics are looked up here, never carried on
+  // the grid's row.
+  const rowInfos = new Map<string, MetadataRowInfo>();
+  const gridRowsAll = filtered.map((row, i) => {
+    const info = metadataRowInfo(row, i);
+    rowInfos.set(info.id, info);
+    const values: Record<string, unknown> = { id: info.id };
+    shownColumns.forEach((c, ci) => {
+      values[metadataGridField(ci)] = gridValue(valueAtPath(row.item, c.key));
+    });
+    return values;
+  });
+  const rowInfoOf = (rec: unknown): MetadataRowInfo | undefined =>
+    rowInfos.get(String((rec as { id?: unknown } | null)?.id ?? ''));
+  function metadataRowInfo(row: ItemRow, i: number): MetadataRowInfo {
+    const pk = config.primaryKey ?? 'name';
+    const name = String(row.item[pk] ?? `(unnamed-${i})`);
+    const holding = holdingOfRow(row);
+    // ADR-0048 — link to this row's OWNING package so the editor resolves the
+    // right item even in the unscoped "all" list where two packages may ship
+    // the same name. Falls back to the workspace suffix for runtime/overlay-only
+    // rows (no real package, or the `sys_metadata` rehydration sentinel). The
+    // environment scope keeps its own scope instead: the editor reads the name
+    // as a caller with no package does (ADR-0150 D5, `holdingOfRead`).
+    const rowPkg = (row.item as { _packageId?: string })._packageId;
+    const editSuffix = envScope
+      ? pkgSuffix
+      : rowPkg && rowPkg !== 'sys_metadata'
+        ? `?package=${encodeURIComponent(rowPkg)}`
+        : pkgSuffix;
+    // objectstack#26649 — two members of one name are two rows; each opens its
+    // OWN member. objectstack#36896 (decision 10) — and the list's filters and
+    // sort ride along, for the detail's ‹ ›.
+    const member = bundleMemberOf(row.item, config.bundleMemberField);
+    const href = `./${encodeURIComponent(name)}${withQueryParam(
+      withQueryParam(editSuffix, member ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(member)}` : ''),
+      listContext,
+    )}`;
+    const invalid = row.diagnostics?.valid === false;
+    const warnList = row.diagnostics?.warnings ?? [];
+    return {
+      id: `${i}:${name}`,
+      row,
+      name,
+      holding,
+      rowPkg,
+      member: member || undefined,
+      href,
+      invalid,
+      warnOnly: !invalid && warnList.length > 0,
+    };
+  }
+
+  // The table's columns: the list's own, then the source (with the lock),
+  // then the row's controls — the Active switch, Clone, or both in one cell —
+  // pinned at its right edge (objectui#13091). One column, because the grid
+  // holds one column at that edge.
+  // On the base's own rows only: a row its pair adds is writable where it opens.
+  const newSimilarRows = type === 'permission' && !!host?.packageId && host.readOnly === true && canAuthor && !walled;
+  // objectstack#37918 (decision 7) — in the Studio list, "Modified at" and
+  // "Source" are drawn only when the list's rows do not all say the same
+  // thing there, and a column of numbers is right-aligned. Read off the
+  // list's whole scope, before the search or the source filter, so a column
+  // does not come and go while the reader types.
+  const changedShownOf = (row: ItemRow): string => {
+    const name = String(row.item[primaryKey] ?? '');
+    const draft = draftMarkOf({
+      name,
+      packageId: (row.item as { _packageId?: string })._packageId,
+      member: bundleMemberOf(row.item, config.bundleMemberField) || undefined,
+    });
+    return `${formatChangedAt(changedAt?.[name], locale) ?? ''}|${draft ?? ''}`;
+  };
+  const showChangedColumn = !studioList || new Set(scopedItems.map(changedShownOf)).size > 1;
+  const showSourceColumn = !studioList || new Set(scopedItems.map(studioKindOf)).size > 1;
+  const servedCountKeys = new Set(
+    (entry?.list?.columns ?? []).filter((c) => c.type === 'count').map((c) => c.field),
+  );
+  const numericColumn = (key: string): boolean => {
+    if (servedCountKeys.has(key)) return true;
+    let seen = false;
+    for (const row of scopedItems) {
+      const value = valueAtPath(row.item, key);
+      if (value == null) continue;
+      if (typeof value !== 'number') return false;
+      seen = true;
+    }
+    return seen;
+  };
+  const gridColumns: MetadataGridColumn[] = [
+    ...shownColumns.map((c, ci) => ({
+      key: c.key,
+      // The Studio list heads its label-first column by the identity it
+      // sorts by: "Name", or the type's own identity key (an extension's
+      // "Object").
+      label:
+        studioList && ci === 0 && labelColumn
+          ? c.key === 'name'
+            ? t('engine.list.col.name', locale)
+            : localizeColumnLabel(c)
+          : localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
+      width: c.width,
+      ...(studioList && ci > 0 && numericColumn(c.key) ? { alignRight: true } : {}),
+    })),
+    // objectstack#36898 — the item's change time and its pending-draft mark.
+    ...(showChangedColumn ? [{ key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) }] : []),
+    ...(showSourceColumn ? [{ key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) }] : []),
+    ...(activation || CloneDialog || newSimilarRows
+      ? [
+          {
+            key: CONTROLS_COLUMN,
+            label: t(activation ? 'engine.catalog.col.active' : 'engine.list.col.actions', locale),
+            pinnedRight: true,
+          },
+        ]
+      : []),
+  ];
+  // A header sorts by what it reads: the first column drawn label-first is
+  // headed (and sorted by) the label, otherwise by the API name. The Studio
+  // list's Name column sorts by the API name, the list's default order, so an
+  // untouched list shows its arrow there (objectstack#37918).
+  const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
+    c.key === primaryKey
+      ? labelColumn && !studioList
+        ? 'label'
+        : 'name'
+      : c.key === 'label'
+        ? 'label'
+        : c.key === CHANGED_COLUMN
+          ? 'changed'
+          : undefined;
+  const typeEntryLabel = entry?.label ?? type;
+  const gridSchema = React.useMemo(
+    () => metadataListGridSchema(type, gridColumns, sortKeyOfColumn, LIST_PAGE_SIZE),
+    // Re-keyed on the columns' content, never on the array's identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [type, JSON.stringify(gridColumns), primaryKey, !!labelColumn, studioList],
+  );
+  const gridSource = React.useMemo(
+    () => new MetadataListSource(gridRowsAll, metadataListObjectSchema(type, typeEntryLabel, gridColumns)),
+    // The source answers the schema; the rows reach the grid as `data`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [type, JSON.stringify(gridColumns), typeEntryLabel],
+  );
+  const listPage = Number(searchParams.get(LIST_PAGE_PARAM) ?? '1');
+  const gridPage = pageWindow(gridRowsAll, listPage, LIST_PAGE_SIZE);
+  const setListPage = React.useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev);
+          if (next <= 1) out.delete(LIST_PAGE_PARAM);
+          else out.set(LIST_PAGE_PARAM, String(next));
+          return out;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const cellClass = inSetup || studioList ? 'align-middle' : 'align-top';
+  const provenanceDesc = (row: ItemRow): string =>
+    row.source === 'artifact'
+      ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${String(row.item._packageId)})` : ''}`
+      : t('engine.list.source.runtimeDesc', locale);
+  // The Studio list's Source badge says why, in the customization mark's words.
+  const studioSourceTitle = (row: ItemRow): string => {
+    const mark = markOf(row);
+    if (mark && customizations.status === 'read') {
+      return tFormat(`engine.customizationMark.${mark}Title`, locale, {
+        baseName: customizations.baseName ?? '',
+        pair: customizations.index.pairId,
+      });
+    }
+    return provenanceDesc(row);
+  };
+  const rowLock = (row: ItemRow): React.ReactNode => {
+    const lock = row.item._lock as string | undefined;
+    if (!lock || lock === 'none') return null;
+    return (
+      <span
+        className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
+        title={(row.item._lockReason as string | undefined) ?? `_lock=${String(lock)}`}
+        data-testid="metadata-row-lock"
+      >
+        <Lock className="h-3 w-3" />
+      </span>
+    );
+  };
+  const firstCell = (info: MetadataRowInfo, c: ListColumns[number]) => {
+    const { row } = info;
+    const value = valueAtPath(row.item, c.key);
+    const cell = c.render ? c.render(row.item[c.key], row.item) : defaultCell(value);
+    const errorList = row.diagnostics?.errors ?? [];
+    const warnList = row.diagnostics?.warnings ?? [];
+    const lines = (list: Array<{ path?: string; message: string }>) =>
+      list
+        .slice(0, 3)
+        .map((e) => `${e.path || '(root)'}: ${e.message}`)
+        .join('\n') + (list.length > 3 ? `\n+${list.length - 3} more` : '');
+    const labelValue = labelColumn ? row.item[labelColumn.key] : undefined;
+    const hasLabel = labelValue != null && labelValue !== '';
+    // ADR-0146 D3 — the row's customization mark: under a base, from its
+    // served read; in the cross-package leg, an item of a pair names its base.
+    // The Studio list says a row is modified or new in its Source column, so
+    // the mark is not drawn twice; a pair's row in the cross-package leg still
+    // names its base.
+    const mark = studioList ? null : markOf(row);
+    const pairBase = host && host.packageId === null ? customizationBaseOfRow(info.rowPkg) : null;
+    if (studioList) {
+      // objectstack#37918 (decision 7) — the item's own icon and colour (an
+      // object's `icon` and `color`, the palette tile every object is drawn
+      // with), the label as the primary line, the API name small and mono below.
+      const ownIcon = typeof row.item.icon === 'string' && row.item.icon ? row.item.icon : undefined;
+      const itemIcon = ownIcon ?? config.iconName;
+      return (
+        <span className={cn('inline-flex min-w-0 items-center gap-3', cellClass)} data-testid={`metadata-row-${info.name}`}>
+          {type === 'object' ? (
+            <ObjectIconTile icon={itemIcon} color={row.item.color as string | undefined} size="lg" />
+          ) : (
+            <NeutralIconTile icon={itemIcon} glyph={ownIcon ? undefined : studioTypeGlyph} size="lg" />
+          )}
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5">
+              <Link to={info.href} className="truncate font-medium text-foreground hover:underline">
+                {hasLabel
+                  ? labelColumn?.render
+                    ? labelColumn.render(labelValue, row.item)
+                    : defaultCell(labelValue)
+                  : cell}
+              </Link>
+              {info.invalid && (
+                <span
+                  className="inline-flex"
+                  aria-label={t('engine.list.invalidTitle', locale)}
+                  title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${lines(errorList)}`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+                </span>
+              )}
+              {info.warnOnly && (
+                <span
+                  className="inline-flex"
+                  aria-label={t('engine.list.warnTitle', locale)}
+                  title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${lines(warnList)}`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                </span>
+              )}
+              {rowLock(row)}
+              {pairBase && (
+                <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={info.rowPkg} locale={locale} />
+              )}
+            </span>
+            {hasLabel && (
+              <span className="block truncate font-mono text-xs text-muted-foreground" data-testid="metadata-row-api-name">
+                {cell}
+              </span>
+            )}
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span
+        className={cn('inline-flex items-center gap-1.5', cellClass)}
+        data-testid={`metadata-row-${info.name}`}
+      >
+        {info.invalid && (
+          <span
+            className="inline-flex"
+            aria-label={t('engine.list.invalidTitle', locale)}
+            title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${lines(errorList)}`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+          </span>
+        )}
+        {info.warnOnly && (
+          <span
+            className="inline-flex"
+            aria-label={t('engine.list.warnTitle', locale)}
+            title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${lines(warnList)}`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+          </span>
+        )}
+        {labelColumn && hasLabel ? (
+          <span className="min-w-0">
+            <Link to={info.href} className="text-primary hover:underline">
+              {labelColumn.render ? labelColumn.render(labelValue, row.item) : defaultCell(labelValue)}
+            </Link>
+            <span className="block font-mono text-xs text-muted-foreground" data-testid="metadata-row-api-name">
+              {cell}
+            </span>
+          </span>
+        ) : (
+          <Link to={info.href} className="text-primary hover:underline font-mono">
+            {cell}
+          </Link>
+        )}
+        {mark && customizations.status === 'read' ? (
+          <CustomizationMark
+            kind={mark}
+            baseName={customizations.baseName}
+            pairId={customizations.index.pairId}
+            locale={locale}
+          />
+        ) : pairBase ? (
+          <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={info.rowPkg} locale={locale} />
+        ) : null}
+      </span>
+    );
+  };
+  const cellDraws: Record<string, (value: unknown, rec: unknown) => React.ReactNode> = {};
+  shownColumns.forEach((c, ci) => {
+    cellDraws[metadataGridField(ci)] = (_value, rec) => {
+      const info = rowInfoOf(rec);
+      if (!info) return null;
+      if (ci === 0) return firstCell(info, c);
+      const value = info.row.item[c.key];
+      const cell = c.render ? c.render(value, info.row.item) : defaultCell(valueAtPath(info.row.item, c.key));
+      // objectstack#27356 — two lines at most, so a row stays a row on a
+      // phone; the whole text on hover. Not in the Studio list
+      // (objectstack#37918): its rows stay one line, and the grid's own
+      // one-line truncation ends a long description with an ellipsis, which
+      // a clamp inside that no-wrap cell would cut off mid-glyph.
+      return inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
+        <span className="line-clamp-2" title={value}>
+          {cell}
+        </span>
+      ) : (
+        cell
+      );
+    };
+  });
+  // The page's own columns are drawn under their place in `gridColumns`.
+  const pageField = (key: string) => metadataGridField(gridColumns.findIndex((c) => c.key === key));
+  if (showChangedColumn) cellDraws[pageField(CHANGED_COLUMN)] = (_value, rec) => {
+    const info = rowInfoOf(rec);
+    if (!info) return null;
+    return (
+      <ListChangedCell
+        changedAt={changedAt?.[info.name]}
+        draft={draftMarkOf({ name: info.name, packageId: info.rowPkg, member: info.member })}
+        locale={locale}
+      />
+    );
+  };
+  if (showSourceColumn) cellDraws[pageField(SOURCE_COLUMN)] = (_value, rec) => {
+    const info = rowInfoOf(rec);
+    if (!info) return null;
+    const { row } = info;
+    if (studioList) return <StudioSourceBadge kind={studioKindOf(row)} title={studioSourceTitle(row)} locale={locale} />;
+    const sourceDesc = provenanceDesc(row);
+    return (
+      <span className="inline-flex items-center">
+        {rowLock(row)}
+        {inSetup ? (
+          // Under Setup the source is plain text with its explanation in a
+          // tooltip, not a chip on every row (objectui#12606).
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-xs text-muted-foreground" data-testid="metadata-row-source">
+                  {t(`engine.list.source.${row.source}`, locale)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-xs text-xs">
+                {sourceDesc}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <Badge
+            variant="outline"
+            className={
+              'text-[10px] ' +
+              (row.source === 'artifact'
+                ? 'border-sky-500/50 text-sky-700 dark:text-sky-300'
+                : 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300')
+            }
+            title={sourceDesc}
+          >
+            {t(`engine.list.source.${row.source}`, locale)}
+          </Badge>
+        )}
+      </span>
+    );
+  };
+  if (activation || CloneDialog || newSimilarRows) {
+    cellDraws[pageField(CONTROLS_COLUMN)] = (_value, rec) => {
+      const info = rowInfoOf(rec);
+      if (!info) return null;
+      const newSimilar = newSimilarRows && (!info.rowPkg || info.rowPkg === host?.packageId);
+      return (
+        <span className="inline-flex items-center gap-2">
+          {newSimilar && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 max-w-[120px] px-2 text-xs"
+              onClick={() => setNewSimilarFrom({ name: info.name, sourcePackage: holdingPackage(info.holding) })}
+              title={t('perm.clone.hint', locale)}
+              data-testid={`list-new-similar-${info.name}`}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              <span className="truncate">{t('perm.clone.action', locale)}</span>
+            </Button>
+          )}
+          {activation && (
+            <CatalogActiveCell
+              itemName={info.name}
+              holding={info.holding}
+              ledger={ledger}
+              refusal={ledgerRefusal}
+              canSwitch={canAuthor && !walled}
+              busy={switching === switchKeyOf(info.name, info.holding)}
+              locale={locale}
+              onToggle={(itemName, enabled) => toggleActive(itemName, enabled, info.holding)}
+            />
+          )}
+          {CloneDialog && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 max-w-[88px] px-2 text-xs"
+              onClick={() => setCloning(info.row.item)}
+              title={t('engine.sharingRule.clone.action', locale)}
+              data-testid={`catalog-clone-${info.name}`}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
+            </Button>
+          )}
+        </span>
+      );
+    };
+  }
+
+  // The grid keeps the cells it was handed as table state, re-seeded a commit
+  // after they change; so the cells it holds are stable and draw through the
+  // latest render's drawers, and a ledger or mark that changes redraws at once.
+  const cellDrawsRef = React.useRef(cellDraws);
+  cellDrawsRef.current = cellDraws;
+  const cellKeys = Object.keys(cellDraws).join(',');
+  const hostCells = React.useMemo(
+    () =>
+      Object.fromEntries(
+        cellKeys.split(',').map((key) => [key, (value: unknown, rec: unknown) => cellDrawsRef.current[key]?.(value, rec) ?? null]),
+      ),
+    [cellKeys],
+  );
+
+  // objectstack#37918 (decision 7) — the Studio list's toolbar: the source
+  // dropdown (all / modified and new / system-shipped, each with its count)
+  // and the search box; the activation status beside them where the scope
+  // has one. No "only customizations" (the dropdown holds it) and no sort
+  // control (the column headers sort).
+  const studioToolbar = (
+    <div className="flex flex-wrap items-center gap-2" data-testid="studio-list-toolbar">
+      <Select value={sourceFilter} onValueChange={(v) => updateListState({ source: v as MetadataListState['source'] })}>
+        <SelectTrigger className="h-8 w-auto gap-1.5 text-sm" data-testid="metadata-source-filter">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">{tFormat('engine.list.sourceFilter.all', locale, { count: sourceCounts.all })}</SelectItem>
+          <SelectItem value="runtime">
+            {tFormat('engine.list.sourceFilter.changed', locale, { count: sourceCounts.runtime })}
+          </SelectItem>
+          <SelectItem value="artifact">
+            {tFormat('engine.list.sourceFilter.system', locale, { count: sourceCounts.artifact })}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="relative w-full max-w-xs">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          className="h-8 pl-8"
+          placeholder={t('engine.list.search', locale)}
+          aria-label={t('engine.list.search', locale)}
+          value={query}
+          onChange={(e) => {
+            setQueryDraft(e.target.value);
+            updateListState({ query: e.target.value });
+          }}
+          data-testid="metadata-list-search"
+        />
+      </div>
+      {activation && (
+        <Select value={statusFilter} onValueChange={(v) => updateListState({ status: v as typeof statusFilter })}>
+          <SelectTrigger className="h-8 w-auto gap-1.5 text-sm" data-testid="catalog-status-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('engine.catalog.status.all', locale)}</SelectItem>
+            <SelectItem value="active">{t('engine.catalog.status.active', locale)}</SelectItem>
+            <SelectItem value="inactive">{t('engine.catalog.status.inactive', locale)}</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
 
   const body = (
-      <div className="p-6 space-y-4">
+      <div className={studioList ? 'px-6 pb-6 space-y-4' : 'p-6 space-y-4'} ref={scrollAnchorRef}>
+        {createInDialog && host?.packageId && (
+          <MetadataListCreateDialog
+            type={type}
+            open={createOpen}
+            onOpenChange={setCreateOpen}
+            packageId={host.packageId}
+            inPair={createInPair}
+            locale={locale}
+            onOpenExisting={(path) => {
+              setCreateOpen(false);
+              navigate(path);
+            }}
+            onCreated={({ name, packageId }) => {
+              setCreateOpen(false);
+              refresh();
+              navigate(`./${encodeURIComponent(name)}?package=${encodeURIComponent(packageId)}`);
+            }}
+          />
+        )}
         <CreatePackageDialog
           open={showCreateBase}
           onOpenChange={setShowCreateBase}
           onCreated={(id) => navigate(`./new?package=${encodeURIComponent(id)}`)}
         />
         {/* Filter row */}
+        {!studioList && (
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-[200px] max-w-md">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -808,10 +1519,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               className={cn('pl-8', inSetup && 'h-8')}
               placeholder={t('engine.list.search', locale)}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQueryDraft(e.target.value);
+                updateListState({ query: e.target.value });
+              }}
+              data-testid="metadata-list-search"
             />
           </div>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+          <Select value={sourceFilter} onValueChange={(v) => updateListState({ source: v as MetadataListState['source'] })}>
             {/* Under Setup the source select is a filter chip (objectui#12606). */}
             <SelectTrigger
               className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
@@ -826,7 +1541,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </SelectContent>
           </Select>
           {activation && (
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <Select value={statusFilter} onValueChange={(v) => updateListState({ status: v as typeof statusFilter })}>
               <SelectTrigger
                 className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[150px]'}
                 data-testid="catalog-status-filter"
@@ -846,13 +1561,34 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               variant={filteringCustomized ? 'default' : 'outline'}
               className={inSetup ? 'h-8 rounded-full px-3 text-xs' : undefined}
               aria-pressed={filteringCustomized}
-              onClick={() => setOnlyCustomized((v) => !v)}
+              onClick={() => updateListState({ customizedOnly: !onlyCustomized })}
               data-testid="metadata-only-customizations"
             >
               {tFormat('engine.list.customizations.only', locale, { marked: markedCount })}
             </Button>
           )}
+          {/* objectstack#36896 — the sort; by API name, A to Z, by default. */}
+          <Select
+            value={encodeSortOption(listState.sort)}
+            onValueChange={(v) => updateListState({ sort: decodeListSort(v) })}
+          >
+            <SelectTrigger
+              className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
+              aria-label={t('engine.list.sort', locale)}
+              data-testid="metadata-list-sort"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {t(`engine.list.sort.${o.key}.${o.dir}`, locale)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+        )}
         {customizations.status === 'failed' && (
           <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
             {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
@@ -898,6 +1634,36 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>{t('engine.catalog.declaredOnly.switchReadOnly', locale)}</span>
           </div>
+        )}
+        {newSimilarFrom && (
+          <PermissionSetCloneDialog
+            source={newSimilarFrom.name}
+            sourcePackage={newSimilarFrom.sourcePackage}
+            locale={locale}
+            onClose={() => setNewSimilarFrom(null)}
+            onCloned={(copy) => {
+              setNewSimilarFrom(null);
+              const outcome = newSimilarOutcome(copy);
+              if ('open' in outcome) {
+                navigate(outcome.open.to, { state: outcome.open.state });
+                return;
+              }
+              // Nothing to open: said where the person is, in the strip's words.
+              toast.warning(
+                outcome.strip.kind === 'noPackage'
+                  ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: outcome.strip.name })
+                  : t('perm.clone.noName', locale),
+                outcome.strip.notice
+                  ? {
+                      description: permissionSetCloneNoticeText(
+                        { notice: outcome.strip.notice, noticeCode: outcome.strip.noticeCode, package: null },
+                        locale,
+                      ),
+                    }
+                  : undefined,
+              );
+            }}
+          />
         )}
         {cloning && CloneDialog && (
           <CloneDialog
@@ -955,297 +1721,55 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         {!loading && !error && !packagesPending && (envScope || !!host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
-              {scopedItems.length === 0
+              {scopedItems.length === 0 || hintedEmpty
                 ? tFormat('engine.list.emptyType', locale, { type: typeLabel })
                 : tFormat('engine.list.emptyQuery', locale, { query })}
             </EmptyTitle>
-            <EmptyDescription>
-              {config.emptyStateHint ??
-                (canCreate
-                  ? tFormat('engine.list.createHint', locale, { type: typeLabel })
-                  : t('engine.list.readOnlyHint', locale))}
-            </EmptyDescription>
+            {emptyHint !== null && <EmptyDescription data-testid="metadata-list-empty-hint">{emptyHint}</EmptyDescription>}
             {scopedItems.length === 0 && canCreate && (
               <div className="mt-4">
                 <Button onClick={handleCreate}>
                   <Plus className="h-4 w-4 mr-1" />
-                  {t('engine.list.create', locale)}
+                  {studioList ? tFormat('engine.list.createNamed', locale, { type: typeLabel }) : t('engine.list.create', locale)}
                 </Button>
               </div>
             )}
           </Empty>
         )}
         {!loading && filtered.length > 0 && (
-          // objectui#13091 — a table wider than its box says so (the shared
-          // overflow affordance, objectui#12708), and the row's controls (the
-          // Active switch, Clone) stay pinned at its right edge, the seam
-          // shadow on the first of them (objectui#12463).
-          <HorizontalOverflowBox
-            seam={pinned ? 'pinned' : 'edge'}
-            outerClassName="border rounded-lg overflow-hidden"
+          // objectstack#36897 — every type's list is the same table: the
+          // record list's `ObjectGrid`, fed the rows above in their order
+          // (`metadataListGrid.ts`), its cells drawn here by row key.
+          // objectstack#37918 (decision 7) — full-bleed in the Studio list, no outer frame.
+          <div
+            className={studioList ? '-mx-6 border-t' : 'border rounded-lg overflow-hidden'}
             data-testid="metadata-list-scroller"
           >
-            {/* Separated borders: Chrome paints a sticky cell of a collapsed-border
-                table without covering the text scrolling beneath its edge
-                (objectui#13091), so the row dividers are drawn on the cells. */}
-            <table className="w-full text-sm border-separate border-spacing-0">
-              {/* Under Setup the table reads as the console's record list
-                  (objectui#12606): sentence-case headers, the grid's 36px
-                  rows, middle-aligned cells. */}
-              <thead
-                className={
-                  inSetup
-                    ? 'bg-muted/30 text-xs text-muted-foreground'
-                    : 'bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground'
-                }
-              >
-                <tr className={HEAD_ROW_TINT}>
-                  {shownColumns.map((c, ci) => (
-                    <th
-                      key={c.key}
-                      className={cn('px-3 text-left font-medium', inSetup ? 'h-9 py-0' : 'py-2')}
-                      style={c.width ? { width: c.width } : undefined}
-                    >
-                      {localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c)}
-                    </th>
-                  ))}
-                  <th className={cn('px-3 text-right font-medium w-[80px]', inSetup ? 'h-9 py-0' : 'py-2')}>{t('engine.list.col.source', locale)}</th>
-                  {activation && (
-                    <th className={cn('px-3 text-left font-medium w-[90px]', inSetup ? 'h-9 py-0' : 'py-2', activeCellPin)}>
-                      {t('engine.catalog.col.active', locale)}
-                    </th>
-                  )}
-                  {CloneDialog && (
-                    <th className={cn('px-3', inSetup ? 'h-9 py-0' : 'py-2', cloneCellPin)}>
-                      <span className="sr-only">{t('engine.list.col.actions', locale)}</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="[&>tr+tr>td]:border-t">
-                {filtered.map((row, i) => {
-                  const pk = config.primaryKey ?? 'name';
-                  const name = String(row.item[pk] ?? `(unnamed-${i})`);
-                  const rowHolding = holdingOfRow(row);
-                  // ADR-0048 — link to this row's OWNING package so the editor
-                  // resolves the right item even in the unscoped "all" list
-                  // where two packages may ship the same name. Falls back to the
-                  // workspace suffix for runtime/overlay-only rows (no real
-                  // package, or the `sys_metadata` rehydration sentinel).
-                  const rowPkg = (row.item as any)._packageId as string | undefined;
-                  // The environment scope keeps its own scope instead: the
-                  // editor reads the name as a caller with no package does
-                  // (ADR-0150 D5, `holdingOfRead`) — the name's one holder, or
-                  // the environment's own set where it holds the name; a name
-                  // two packages hold is refused by name alone, and the editor
-                  // then draws no holder's sections (objectstack#32774).
-                  const rowEditSuffix = envScope
-                    ? pkgSuffix
-                    : rowPkg && rowPkg !== 'sys_metadata'
-                      ? `?package=${encodeURIComponent(rowPkg)}`
-                      : pkgSuffix;
-                  const invalid = row.diagnostics?.valid === false;
-                  const errorList = row.diagnostics?.errors ?? [];
-                  const warnList = (row.diagnostics as any)?.warnings ?? [];
-                  const warnOnly = !invalid && warnList.length > 0;
-                  const errorTitle = invalid
-                    ? errorList
-                        .slice(0, 3)
-                        .map((e) => `${e.path || '(root)'}: ${e.message}`)
-                        .join('\n') +
-                      (errorList.length > 3 ? `\n+${errorList.length - 3} more` : '')
-                    : warnOnly
-                      ? warnList
-                          .slice(0, 3)
-                          .map((w: any) => `${w.path || '(root)'}: ${w.message}`)
-                          .join('\n') +
-                        (warnList.length > 3 ? `\n+${warnList.length - 3} more` : '')
-                      : '';
-                  const cellClass = inSetup ? 'h-9 px-3 py-1.5 align-middle' : 'px-3 py-2 align-top';
-                  const sourceDesc =
-                    row.source === 'artifact'
-                      ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${row.item._packageId})` : ''}`
-                      : t('engine.list.source.runtimeDesc', locale);
-                  // objectstack#26649 — two members of one name are two rows;
-                  // each opens its OWN member. A row that declares none is the
-                  // canonical member, which the bare name already opens.
-                  const rowMember = bundleMemberOf(row.item, config.bundleMemberField);
-                  const rowHref = `./${encodeURIComponent(name)}${withQueryParam(
-                    rowEditSuffix,
-                    rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
-                  )}`;
-                  // ADR-0146 D3 — the row's customization mark: under a base,
-                  // from its served read; in the cross-package leg, an item of a
-                  // pair names its base.
-                  const mark = markOf(row);
-                  const pairBase = host && host.packageId === null ? customizationBaseOfRow(rowPkg) : null;
-                  const markNode =
-                    mark && customizations.status === 'read' ? (
-                      <CustomizationMark
-                        kind={mark}
-                        baseName={customizations.baseName}
-                        pairId={customizations.index.pairId}
-                        locale={locale}
-                      />
-                    ) : pairBase ? (
-                      <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={rowPkg} locale={locale} />
-                    ) : null;
-                  return (
-                    <tr
-                      key={name + i}
-                      data-testid={`metadata-row-${name}`}
-                      onClick={(e) => openRowFromClick(e, () => navigate(rowHref))}
-                      className={cn(
-                        'cursor-pointer hover:bg-accent/50',
-                        invalid ? 'bg-destructive/[0.04]' : warnOnly ? 'bg-amber-500/[0.05]' : '',
-                        // The same fills, for the pinned cells to layer over
-                        // their opaque background.
-                        invalid ? INVALID_ROW_TINT : warnOnly ? WARN_ROW_TINT : '',
-                        HOVER_ROW_TINT,
-                      )}
-                    >
-                      {shownColumns.map((c, ci) => {
-                        const value = row.item[c.key];
-                        const cell = c.render ? c.render(value, row.item) : defaultCell(value);
-                        const labelValue = labelColumn ? row.item[labelColumn.key] : undefined;
-                        const hasLabel = labelValue != null && labelValue !== '';
-                        return (
-                          <td key={c.key} className={cellClass}>
-                            {ci === 0 ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                {invalid && (
-                                  <span
-                                    className="inline-flex"
-                                    aria-label={t('engine.list.invalidTitle', locale)}
-                                    title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${errorTitle}`}
-                                  >
-                                    <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
-                                  </span>
-                                )}
-                                {warnOnly && (
-                                  <span
-                                    className="inline-flex"
-                                    aria-label={t('engine.list.warnTitle', locale)}
-                                    title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${errorTitle}`}
-                                  >
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                                  </span>
-                                )}
-                                {labelColumn && hasLabel ? (
-                                  <span className="min-w-0">
-                                    <Link to={rowHref} className="text-primary hover:underline">
-                                      {labelColumn.render ? labelColumn.render(labelValue, row.item) : defaultCell(labelValue)}
-                                    </Link>
-                                    <span
-                                      className="block font-mono text-xs text-muted-foreground"
-                                      data-testid="metadata-row-api-name"
-                                    >
-                                      {cell}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <Link
-                                    to={rowHref}
-                                    className="text-primary hover:underline font-mono"
-                                  >
-                                    {cell}
-                                  </Link>
-                                )}
-                                {markNode}
-                              </span>
-                            ) : inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
-                              // objectstack#27356 — two lines at most, so a row
-                              // stays a row on a phone; the whole text on hover.
-                              <span className="line-clamp-2" title={value}>
-                                {cell}
-                              </span>
-                            ) : (
-                              cell
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className={cn(cellClass, 'text-right')}>
-                        {(row.item._lock as string | undefined) && row.item._lock !== 'none' && (
-                          <span
-                            className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
-                            title={
-                              (row.item._lockReason as string | undefined)
-                              ?? `_lock=${String(row.item._lock)}`
-                            }
-                          >
-                            <Lock className="h-3 w-3" />
-                          </span>
-                        )}
-                        {inSetup ? (
-                          // Under Setup the source is plain text with its
-                          // explanation in a tooltip, not a chip on every row
-                          // (objectui#12606).
-                          <TooltipProvider delayDuration={200}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span
-                                  className="cursor-help text-xs text-muted-foreground"
-                                  data-testid="metadata-row-source"
-                                >
-                                  {t(`engine.list.source.${row.source}`, locale)}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="left" className="max-w-xs text-xs">
-                                {sourceDesc}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className={
-                              'text-[10px] ' +
-                              (row.source === 'artifact'
-                                ? 'border-sky-500/50 text-sky-700 dark:text-sky-300'
-                                : 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300')
-                            }
-                            title={sourceDesc}
-                          >
-                            {t(`engine.list.source.${row.source}`, locale)}
-                          </Badge>
-                        )}
-                      </td>
-                      {activation && (
-                        <td className={cn(cellClass, activeCellPin)}>
-                          <CatalogActiveCell
-                            itemName={name}
-                            holding={rowHolding}
-                            ledger={ledger}
-                            refusal={ledgerRefusal}
-                            canSwitch={canAuthor && !walled}
-                            busy={switching === switchKeyOf(name, rowHolding)}
-                            locale={locale}
-                            onToggle={(itemName, enabled) => toggleActive(itemName, enabled, rowHolding)}
-                          />
-                        </td>
-                      )}
-                      {CloneDialog && (
-                        <td className={cn(cellClass, 'text-right', cloneCellPin)}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 max-w-[88px] px-2 text-xs"
-                            onClick={() => setCloning(row.item)}
-                            title={t('engine.sharingRule.clone.action', locale)}
-                            data-testid={`catalog-clone-${name}`}
-                          >
-                            <Copy className="h-3.5 w-3.5 mr-1" />
-                            <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </HorizontalOverflowBox>
+            <ObjectGrid
+              schema={gridSchema}
+              dataSource={gridSource}
+              data={gridPage.rows}
+              manualPagination
+              rowCount={filtered.length}
+              page={gridPage.page}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setListPage}
+              sort={gridSortOf(listState.sort, gridColumns, sortKeyOfColumn)}
+              onSortChange={(next) => updateListState({ sort: listSortOfGrid(next, gridColumns, sortKeyOfColumn) ?? DEFAULT_LIST_SORT })}
+              search={query}
+              hostCells={hostCells}
+              rowTint={(rec) => {
+                const info = rowInfoOf(rec);
+                return info?.invalid ? 'red' : info?.warnOnly ? 'amber' : null;
+              }}
+              rowOpensRecord={false}
+              onRowClick={(rec, event) => {
+                const info = rowInfoOf(rec);
+                if (!info || (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey))) return;
+                navigate(info.href);
+              }}
+            />
+          </div>
         )}
       </div>
   );
@@ -1315,6 +1839,39 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     );
   }
 
+  if (studioList) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <StudioListHeader
+          icon={React.createElement(studioTypeGlyph ?? getIcon(config.iconName ?? 'layers'), {
+            className: 'h-4 w-4',
+            'data-studio-type-icon': type,
+          })}
+          title={typeLabel}
+          badge={
+            diagnosticStats.length > 0 ? (
+              <span className="inline-flex shrink-0 items-center gap-1.5">
+                {diagnosticStats.map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-xs" title={s.label}>
+                    {s.value}
+                  </span>
+                ))}
+              </span>
+            ) : undefined
+          }
+          actions={
+            <>
+              {typeActions}
+              {createButton}
+            </>
+          }
+          toolbar={studioToolbar}
+        />
+        <div className="flex-1 overflow-auto">{body}</div>
+      </div>
+    );
+  }
+
   return (
     <PageShell
       entry={entry ?? { type, label: type }}
@@ -1343,53 +1900,62 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   );
 }
 
-/**
- * objectui#13091 — a cell pinned to the right edge of the list's overflow box.
- * It paints an opaque background, because the other columns scroll beneath
- * it, and layers its row's fill (`--os-row-tint`, the convention `data-table`
- * keeps for its sticky cells) over it, so a pinned cell reads as part of its
- * row. The Clone column is the fixed `w-28` the Active column's `right-28`
- * offset counts on; its button truncates its label to stay inside it.
- *
- * Complete literals: Tailwind v4 builds only from scanned source text.
- */
-const PINNED_CELL_CLASSES =
-  'sticky z-10 bg-background bg-[image:linear-gradient(var(--os-row-tint,transparent),var(--os-row-tint,transparent))]';
-const PINNED_SEAM_CLASSES = `border-l border-border ${PINNED_RIGHT_SEAM_SHADOW_CLASSES}`;
-const HEAD_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-muted)_30%,transparent)]';
-const INVALID_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-destructive)_4%,transparent)]';
-const WARN_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-amber-500)_5%,transparent)]';
-const HOVER_ROW_TINT = 'hover:[--os-row-tint:color-mix(in_oklab,var(--color-accent)_50%,transparent)]';
+/** The page columns after the list's own (`metadataListGrid.ts` keys none of them as a field). */
+const CHANGED_COLUMN = '__changed';
+const SOURCE_COLUMN = '__source';
+const CONTROLS_COLUMN = '__controls';
 
-/**
- * The whole row opens its item (objectstack#25333), the way a record list's
- * row does. The first cell keeps its link, which is what a keyboard, a screen
- * reader and a modified click (new tab) use; this handler is the pointer's
- * larger target and stands aside for everything the row already does:
- *
- *  - a click on a control in the row (the link itself, the Active switch,
- *    Clone, a tooltip trigger) is that control's;
- *  - a click that reached the row through a React portal (a dialog a row
- *    control opened) did not happen on the row;
- *  - a modified or non-primary click, and a click that ends a text selection,
- *    are the browser's.
- */
-export function openRowFromClick(e: React.MouseEvent<HTMLElement>, open: () => void): void {
-  if (e.defaultPrevented || e.button !== 0) return;
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const target = e.target as Node | null;
-  if (!target || !e.currentTarget.contains(target)) return;
-  const el = target instanceof Element ? target : target.parentElement;
-  if (el?.closest(ROW_OWN_CONTROLS)) return;
-  const selection = typeof window !== 'undefined' ? window.getSelection?.() : null;
-  if (selection && !selection.isCollapsed && selection.toString().trim() !== '') return;
-  open();
+/** Rows per page of the list. */
+const LIST_PAGE_SIZE = 50;
+
+/** What one row of the table draws, looked up by its row key (objectstack#36897). */
+interface MetadataRowInfo {
+  id: string;
+  row: ItemRow;
+  name: string;
+  holding: PermissionSetHolding | undefined;
+  rowPkg: string | undefined;
+  /** The bundle member the row is (objectstack#26649), for its draft mark. */
+  member: string | undefined;
+  href: string;
+  invalid: boolean;
+  warnOnly: boolean;
 }
 
-const ROW_OWN_CONTROLS =
-  'a,button,input,select,textarea,label,summary,[role="button"],[role="switch"],[role="checkbox"],[role="menuitem"],[role="link"],[contenteditable="true"]';
+/**
+ * The Studio list's Source badge (objectstack#37918, decision 7): 系统自带 /
+ * 已修改 / 新建. A system-shipped row is quiet; a modified or new one is
+ * tinted, the two tints the customization marks already use.
+ */
+const STUDIO_SOURCE_TONE: Readonly<Record<StudioSourceKind, string>> = {
+  system: 'bg-muted text-muted-foreground',
+  modified: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  new: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+};
 
-type ListColumns = NonNullable<import('./registry.js').MetadataResourceConfig['listColumns']>;
+function StudioSourceBadge({ kind, title, locale }: { kind: StudioSourceKind; title: string; locale: string }) {
+  return (
+    <span
+      className={cn('inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', STUDIO_SOURCE_TONE[kind])}
+      title={title}
+      data-testid="metadata-row-source"
+      data-source-kind={kind}
+    >
+      {t(STUDIO_SOURCE_KEY[kind], locale)}
+    </span>
+  );
+}
+
+/** A column value as the grid's row keeps it: a scalar as is, anything else as its JSON. */
+function gridValue(value: unknown): string | number | boolean | null {
+  if (value == null) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
 /**
  * objectstack#26649 — the member column of a type whose identity is a pair,
@@ -1399,6 +1965,16 @@ type ListColumns = NonNullable<import('./registry.js').MetadataResourceConfig['l
 function withBundleMemberColumn(columns: ListColumns, field: string | undefined): ListColumns {
   if (!field || columns.some((c) => c.key === field)) return columns;
   return [...columns.slice(0, 1), { key: field, label: field }, ...columns.slice(1)];
+}
+
+/** The sort control's options: every sort key, each way (`metadataListState.ts`). */
+const SORT_OPTIONS: ReadonlyArray<{ value: string; key: ListSortKey; dir: 'asc' | 'desc' }> = LIST_SORT_KEYS.flatMap(
+  (key) => (['asc', 'desc'] as const).map((dir) => ({ value: `${dir === 'desc' ? '-' : ''}${key}`, key, dir })),
+);
+
+/** The sort control's value for a sort (`name`, `-label`). */
+function encodeSortOption(sort: MetadataListState['sort']): string {
+  return `${sort.dir === 'desc' ? '-' : ''}${sort.key}`;
 }
 
 /** `suffix` (`''` or `?a=b`) with one more `key=value` pair, when there is one. */

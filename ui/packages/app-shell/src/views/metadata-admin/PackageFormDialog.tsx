@@ -4,7 +4,7 @@
  * PackageFormDialog — ONE modal for creating, editing, and viewing a package,
  * rendered from the spec-derived manifest form (`package-schema`) through the
  * generic {@link SchemaForm}. It replaces the three hand-rolled package forms
- * (CreatePackageDialog / EditPackageDialog / the BuilderLanding inline form),
+ * (CreatePackageDialog / EditPackageDialog / the old Studio home's inline form),
  * each of which carried its own field list and id-validation regex — a package
  * created on one surface was rejected by another.
  *
@@ -34,17 +34,25 @@
  * itself whenever one of its rows is what keeps Create disabled, so a name
  * that derives no id never leaves the author at a disabled button with the
  * reason folded away.
+ *
+ * Create mode handed a `newApp` step offers 「同时创建应用」 / "Also create
+ * an app" (objectstack#37134), ticked by default. Ticked, the dialog runs the
+ * step the Studio home's 「新建应用」 door ran (objectstack#36748): a free app
+ * name is reserved before anything is written, and the package's app is
+ * created and made live right after the package. Unticked, it creates the
+ * package alone. See `studio-design/newAppDoor.ts`.
  */
 
 import * as React from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { ManifestSchema, deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
-import { useAuth } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import { NAMESPACE_RE, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
 import {
   Button,
+  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -64,6 +72,12 @@ import { getPackageSchema, getPackageForm } from './package-schema.js';
 import { PackageDependenciesEditor, type DependencyMap } from './PackageDependenciesEditor.js';
 import { romanizeHan, romanizerPending, useHanRomanizer } from './romanizeHan.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import type { NewAppStep } from '../studio-design/newAppDoor.js';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 const API = '/api/v1/packages';
 
@@ -277,6 +291,12 @@ export interface PackageSaveResult {
   mode: PackageFormMode;
   /** The server's package payload, when it returned one. */
   package?: { manifest: ManifestRecord } & Record<string, unknown>;
+  /**
+   * Create mode with 「同时创建应用」 ticked only (objectstack#37134): the app
+   * created with the package, or `null` when the package was created and its
+   * app was refused.
+   */
+  app?: string | null;
 }
 
 /**
@@ -320,7 +340,7 @@ function readEnvelopeUserMessage(payload: unknown): string {
 type ApiJsonError = Error & { status: number; userMessage: string };
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await authFetch(path, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
     ...init,
@@ -375,6 +395,7 @@ export function PackageFormDialog({
   onOpenChange,
   manifest,
   onSaved,
+  newApp,
 }: {
   mode: PackageFormMode;
   open: boolean;
@@ -382,6 +403,13 @@ export function PackageFormDialog({
   /** Existing manifest to seed edit/view. Ignored for create. */
   manifest?: ManifestRecord | null;
   onSaved?: (result: PackageSaveResult) => void;
+  /**
+   * Create mode only: the app step (`newAppStep`, objectstack#36748). The
+   * dialog offers 「同时创建应用」 (objectstack#37134), ticked by default;
+   * ticked, the package's app is created and made live right after the
+   * package.
+   */
+  newApp?: NewAppStep;
 }) {
   const locale = useMetadataLocale();
   const schema = React.useMemo(() => getPackageSchema(), []);
@@ -400,6 +428,7 @@ export function PackageFormDialog({
   // organization; `deriveCreatePackageId` then leaves the segment out.
   const orgSlug = useAuth().activeOrganization?.slug ?? null;
   const idInputId = React.useId();
+  const alsoAppId = React.useId();
 
   const createMode = mode === 'create';
   const readOnly = mode === 'view';
@@ -422,6 +451,10 @@ export function PackageFormDialog({
   // objectui#13278 — false while a dependencies row has an empty or duplicate
   // package name; the editor flags the row and save waits for it.
   const [dependenciesValid, setDependenciesValid] = React.useState(true);
+  // objectstack#37134 — 「同时创建应用」: ticked by default each time the
+  // dialog opens. Only offered in create mode with an app step.
+  const [alsoApp, setAlsoApp] = React.useState(true);
+  const offersApp = mode === 'create' && newApp !== undefined;
 
   React.useEffect(() => {
     if (!open) return;
@@ -441,6 +474,7 @@ export function PackageFormDialog({
     setBusy(false);
     setDependenciesValid(true);
     setAdvancedOpen(false);
+    setAlsoApp(true);
   }, [open, createMode, manifest]);
 
   const handleDependenciesChange = React.useCallback((dependencies: DependencyMap, valid: boolean) => {
@@ -604,22 +638,53 @@ export function PackageFormDialog({
           version: versionStr,
           type: draft.type ?? 'app',
         };
+        // objectstack#36748 — with 「同时创建应用」 ticked (objectstack#37134)
+        // the app's name is reserved before anything is written: a taken one
+        // refuses the whole confirm, and the namespace it is made from sits
+        // behind Advanced.
+        const appStep = offersApp && alsoApp ? newApp : undefined;
+        let appName: string | null = null;
+        if (appStep) {
+          const reserved = await appStep.reserve(String(draft.namespace ?? '').trim());
+          if ('taken' in reserved) {
+            setError(tFormat('engine.studio.newApp.nameTaken', locale, reserved.taken));
+            setAdvancedOpen(true);
+            return;
+          }
+          appName = reserved.name;
+        }
         const created = await apiJson<{ manifest: ManifestRecord } & Record<string, unknown>>(API, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ manifest: manifestBody }),
         });
         const id = String((created?.manifest?.id as string) ?? manifestBody.id);
+        const createdName = String((created?.manifest?.name as string) ?? manifestBody.name);
         result = { id, mode, package: created };
-        // `ux-conventions.write-feedback`: the create answers with a toast
-        // naming the new package by its display name — the dialog closes
-        // and the caller may navigate away, so nothing else on screen says
-        // the write landed. A refusal stays in the dialog's banner below.
-        toast.success(
-          tFormat('engine.packages.create.created', locale, {
-            name: String((created?.manifest?.name as string) ?? manifestBody.name),
-          }),
-        );
+        if (appStep && appName) {
+          // The package is there now, so a refused app does not keep the
+          // author in the dialog: the toast says so and the top bar's Create
+          // app is the way to try again.
+          try {
+            await appStep.create(id, appName, createdName);
+            result.app = appName;
+            toast.success(tFormat('engine.packages.create.createdWithApp', locale, { name: createdName }));
+          } catch (e) {
+            result.app = null;
+            toast.error(
+              tFormat('engine.studio.newApp.appFailed', locale, {
+                name: createdName,
+                reason: e instanceof Error && e.message ? e.message : String(e),
+              }),
+            );
+          }
+        } else {
+          // `ux-conventions.write-feedback`: the create answers with a toast
+          // naming the new package by its display name — the dialog closes
+          // and the caller may navigate away, so nothing else on screen says
+          // the write landed. A refusal stays in the dialog's banner below.
+          toast.success(tFormat('engine.packages.create.created', locale, { name: createdName }));
+        }
       } else {
         const id = String((manifest?.id as string) ?? draft.id ?? '');
         // The REST PATCH persists name / description / version / dependencies
@@ -692,7 +757,10 @@ export function PackageFormDialog({
         // transport reports one, the message when it does not.
         setError(marked ? msg : t('engine.packages.noCapability', locale));
       } else {
-        setError(msg || t(createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale));
+        setError(
+          msg ||
+            t(createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale),
+        );
       }
     } finally {
       setBusy(false);
@@ -776,6 +844,26 @@ export function PackageFormDialog({
                 <div className={FLUSH_SECTION}>
                   <SchemaForm {...formProps} form={createForms.tail} />
                 </div>
+                {offersApp && (
+                  <div className="flex items-start gap-2" data-testid="package-form-also-app">
+                    <Checkbox
+                      id={alsoAppId}
+                      checked={alsoApp}
+                      onCheckedChange={(v) => {
+                        setAlsoApp(v === true);
+                        setError(null);
+                      }}
+                      className="mt-0.5"
+                      data-testid="package-form-also-app-checkbox"
+                    />
+                    <div className="space-y-0.5">
+                      <Label htmlFor={alsoAppId} className="text-sm font-medium">
+                        {t('engine.packages.create.alsoApp', locale)}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">{t('engine.packages.create.alsoAppHint', locale)}</p>
+                    </div>
+                  </div>
+                )}
               </section>
               {/* objectstack#27833 — the technical rows. The content stays
                   mounted while closed (`forceMount` plus `hidden`) so the id

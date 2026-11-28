@@ -338,3 +338,65 @@ describe('ObjectGrid — a cell change that makes fields required asks for them 
     });
   });
 });
+
+/**
+ * objectstack#36025 — the pre-read is made only when the edited column can
+ * open the dialog. A commit to a column no askable `requiredWhen` reads leaves
+ * every verdict where it was, so it sends no `findOne`; a predicate operand,
+ * or a predicate that reads the clock or the acting user, still reads.
+ */
+describe('ObjectGrid — the fill-in pre-read is made only for a column that can open the dialog (objectstack#36025)', () => {
+  it('committing a column no predicate reads sends no findOne, and the change saves at once', async () => {
+    const ds = makePromptDataSource();
+    const { container } = renderPromptGrid(ds);
+    await screen.findByText('beta');
+    // The row lacks a key the judgment reads, so the read WOULD be due.
+    expect(ds.find.mock.calls[0][1].$select).not.toContain('win_reason');
+    pasteInto(container, dataCell(container, 0, 'alpha'), 'gamma');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update.mock.calls[0][2]).toEqual({ name: 'gamma' });
+    expect(ds.findOne).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  it('committing a predicate operand still reads once, and the dialog opens as before', async () => {
+    const ds = makePromptDataSource();
+    const { container } = renderPromptGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'New'), 'Won');
+    await screen.findByTestId('required-fields-dialog');
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+    expect(ds.findOne).toHaveBeenCalledWith(OBJECT, 'd1', { $select: ['win_reason'] });
+    expect(ds.update).not.toHaveBeenCalled();
+  });
+
+  it('a predicate that reads the clock keeps the read for every column', async () => {
+    const ds = makePromptDataSource({ type: 'text', requiredWhen: 'record.stage == "won" && today() > daysAgo(1)' });
+    const { container } = renderPromptGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'alpha'), 'gamma');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][2]).toEqual({ name: 'gamma' });
+    expect(screen.queryByTestId('required-fields-dialog')).toBeNull();
+  });
+
+  it('a predicate that reads the acting user keeps the read for every column', async () => {
+    const ds = makePromptDataSource({ type: 'text', requiredWhen: 'record.stage == "won" && current_user.id != ""' });
+    const { container } = renderPromptGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'alpha'), 'gamma');
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('a statically required field is asked for on any commit while it is empty, so that read stays', async () => {
+    const ds = makePromptDataSource({ type: 'text', required: true });
+    const { container } = renderPromptGrid(ds);
+    await screen.findByText('beta');
+    pasteInto(container, dataCell(container, 0, 'alpha'), 'gamma');
+    await screen.findByTestId('required-fields-dialog');
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+    expect(ds.update).not.toHaveBeenCalled();
+  });
+});

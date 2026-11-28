@@ -24,7 +24,7 @@ import type { Page } from '@objectstack/spec/ui';
  *    (`placedActions: true`, #29951). The object places none of its own (its
  *    decision actions are `record_section` ones, drawn by the panel below), so
  *    the header draws only what an installed package places on
- *    `sys_approval_request` at `record_header` / `record_more`.
+ *    `sys_approval_request` at `record` / `record_page`.
  *  - Then the highlight strip: the object's `highlightFields` WITHOUT
  *    `record_id`. `record_id` / `object_name` is a declared `referenceVia`
  *    pointer pair, and the page reaches the record it points at through the
@@ -85,8 +85,11 @@ export const SysApprovalRequestDetailPage: Page = {
       name: 'main',
       width: 'full',
       components: [
-        // ── The record header: the request's title, and every action placed
-        // on the object at `record_header` / `record_more`, read live, as the
+        // ── The record header: the request's title (the console names the
+        // request by the business record it is about, linked to it, wherever
+        // the approvals get serves that record's title, objectstack#35415;
+        // else by the flow's label, the object's `nameField`), and every action placed
+        // on the object at `record` / `record_page`, read live, as the
         // synthesized header drew them. The object places none of its own, so
         // only an action another package places there shows (a bare header
         // dropped it, #29951); the host appends its system actions.

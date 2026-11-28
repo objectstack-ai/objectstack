@@ -75,7 +75,7 @@ export function findFirstEditableField(root: ParentNode): HTMLElement | null {
  * with `display: none`) refuses focus in a browser, and the caller keeps
  * waiting instead of reading that as done.
  */
-function focusFirstEditableField(root: HTMLElement): boolean {
+export function focusFirstEditableField(root: HTMLElement): boolean {
   const control = findFirstEditableField(root);
   if (!control) return false;
   control.focus({ preventScroll: true });

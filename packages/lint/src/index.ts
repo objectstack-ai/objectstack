@@ -173,6 +173,15 @@ export {
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+  // #35143 — the second batch of publish-time flow checks.
+  validateFlowSubflowTargets,
+  FLOW_TRIGGER_OBJECT_MISSING,
+  FLOW_CONDITION_OPTION_LABEL,
+  FLOW_TIME_RELATIVE_SHADOWED,
+  FLOW_TIME_RELATIVE_KEY_MISPLACED,
+  FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+  FLOW_SCHEDULE_TIMEZONE_MISSING,
+  FLOW_SUBFLOW_UNKNOWN,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -272,6 +281,13 @@ export {
 export type { RecordTitleFinding, RecordTitleSeverity } from './validate-record-title.js';
 
 export {
+  validateRecordPageHeader,
+  RECORD_PAGE_HEADER_TITLE_DIFFERS,
+  RECORD_PAGE_HEADER_ACTIONS_DIFFER,
+} from './validate-record-page-header.js';
+export type { RecordPageHeaderFinding } from './validate-record-page-header.js';
+
+export {
   validateSemanticRoles,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
@@ -296,6 +312,26 @@ export {
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
+// #36425 — an app still declaring an internal create / edit form, which the
+// Console no longer loads. Advisory.
+export {
+  validateInternalFormViews,
+  FORM_VIEW_INTERNAL_NOT_LOADED,
+} from './validate-internal-form-views.js';
+export type { InternalFormViewFinding } from './validate-internal-form-views.js';
+// [ADR-0159 card ②] The `form` type's authoring rules: the public-address
+// refusal (gating), the consumer-less advisory and the object binding.
+export {
+  stackForms,
+  validateFormConsumers,
+  validateFormObjectBindings,
+  validateFormPublicAddresses,
+  FORM_CONSUMER_LESS,
+  FORM_OBJECT_OUTSIDE_CLOSURE,
+  FORM_OBJECT_UNKNOWN,
+  FORM_PUBLIC_ADDRESS_TAKEN,
+} from './validate-form-items.js';
+export type { FormItemFinding, FormObjectBindingOptions, StackForm } from './validate-form-items.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';
@@ -337,6 +373,11 @@ export {
   CAPABILITY_REFERENCE_UNKNOWN,
 } from './validate-capability-references.js';
 export type { CapabilityRefFinding, CapabilityRefSeverity } from './validate-capability-references.js';
+export {
+  validateBookAudienceClaims,
+  BOOK_GATED_CATCH_ALL_INCLUDE,
+} from './validate-book-audience-claims.js';
+export type { BookAudienceClaimFinding } from './validate-book-audience-claims.js';
 
 export {
   validateApprovalApprovers,
@@ -356,6 +397,27 @@ export {
 export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
+  validateAiContext,
+  AI_CONTEXT_OBJECT_UNKNOWN,
+  AI_CONTEXT_FIELD_UNKNOWN,
+  AI_CONTEXT_FIELD_UNPROVISIONED,
+  AI_CONTEXT_RELATED_LINK_UNKNOWN,
+  AI_CONTEXT_BODY_NOT_LONG_TEXT,
+  AI_CONTEXT_SORT_FIELD_UNSORTABLE,
+} from './validate-ai-context.js';
+export type { AiContextFinding, AiContextSeverity } from './validate-ai-context.js';
+
+export {
+  validateKnowledgeSource,
+  KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
+  KNOWLEDGE_SOURCE_FIELD_UNKNOWN,
+  KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE,
+  KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE,
+  KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED,
+} from './validate-knowledge-source.js';
+export type { KnowledgeSourceFinding, KnowledgeSourceSeverity } from './validate-knowledge-source.js';
+
+export {
   validateAssignmentRules,
   ASSIGNMENT_RULE_USER_TARGET,
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
@@ -367,6 +429,23 @@ export {
   SEED_VALUE_OUTSIDE_STATE_MACHINE,
 } from './validate-seed-state-machine.js';
 export type { SeedStateMachineFinding, SeedStateMachineSeverity } from './validate-seed-state-machine.js';
+
+// Seed records the seed load refuses — a record its own object's validation
+// rule refuses, and a keyed record with a blank key field — judged before the
+// load with the write path's evaluator, which the calling door injects.
+export {
+  judgeSeedRowRefusals,
+  seedRowPairsNotJudged,
+  SEED_ROW_REFUSED_BY_VALIDATION_RULE,
+  SEED_RECORD_KEY_FIELD_BLANK,
+} from './seed-row-refusals.js';
+export type {
+  SeedRowRefusal,
+  SeedRowJudgement,
+  SeedRowJudgeInput,
+  SeedRowNotJudgedReason,
+  SeedRuleObjectSchema,
+} from './seed-row-refusals.js';
 
 export {
   validateSecurityPosture,
@@ -388,7 +467,7 @@ export {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
@@ -494,6 +573,18 @@ export type {
   MembershipKeyFinding,
   MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
+
+// [ruling 7000907189 point 4 · ADR-0049] A `transferBehavior: 'cascade'` the
+// Change Owner action can never offer: a parent without Change Owner, an
+// extension's field on an object that cannot take a cascade, a child whose
+// declared exposure does not serve `update`.
+export {
+  validateTransferCascades,
+  TRANSFER_CASCADE_PARENT_WITHOUT_CHANGE_OWNER,
+  TRANSFER_CASCADE_EXTENSION_CHILD_INELIGIBLE,
+  TRANSFER_CASCADE_CHILD_UPDATE_UNEXPOSED,
+} from './validate-transfer-cascades.js';
+export type { TransferCascadeFinding } from './validate-transfer-cascades.js';
 
 export {
   validateDashboardActionRefs,
@@ -660,12 +751,31 @@ export type {
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
 // which runs no `defineStack`. [#27478] A field group's `relatedList` must
-// name body tables only (`related-list-group-not-body`).
+// name body tables only (`related-list-group-not-body`). [#35897 · #35899] A
+// `relatedLists` object entry's columns must be child fields
+// (`related-list-column-unknown`, error), and since #35901 an object
+// extension's list placement's columns too; a built-in tab entry that draws
+// nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
+  RELATED_LIST_COLUMN_UNKNOWN,
+  RELATED_LIST_ATTACHMENTS_OFF,
+  RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
+
+// [#35901] Where an object extension's `place` will not land as written:
+// the extended object declares no `relatedLists` / `fieldGroups`
+// (`extension-placement-not-applied`), or an anchor it does not have
+// (`extension-placement-anchor-missing`). Warnings; the boot log names the
+// same placements, and is the channel for a target in another package.
+export {
+  validateExtensionPlacement,
+  EXTENSION_PLACEMENT_NOT_APPLIED,
+  EXTENSION_PLACEMENT_ANCHOR_MISSING,
+} from './validate-extension-placement.js';
+export type { ExtensionPlacementFinding } from './validate-extension-placement.js';
 export type {
   RelatedListRefFinding,
   RelatedListRefOptions,
@@ -678,6 +788,12 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectActionLayout,
+  OBJECT_ACTION_LAYOUT_UNKNOWN,
+  OBJECT_ACTION_LAYOUT_NOT_PLACED,
+} from './validate-object-action-layout.js';
+export type { ObjectActionLayoutFinding } from './validate-object-action-layout.js';
 export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
 export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
 export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
@@ -967,6 +1083,8 @@ export type {
 export {
   validateAiToolReferences,
   AI_SKILL_TOOL_UNRESOLVED,
+  AI_SKILL_CONTEXT_UNKNOWN,
+  AI_SKILL_CONTEXT_OMITTED,
 } from './validate-ai-tool-references.js';
 export type {
   AiToolRefFinding,
@@ -1035,6 +1153,12 @@ export {
   judgeBodyCompile,
   ACTION_BODY_DOES_NOT_COMPILE,
 } from './validate-action-body-compiles.js';
+// [#35143] The Seeds and actions family's two new rule ids, exported so
+// `os explain` can carry an entry for each (the explanation table holds an
+// entry only for an id the barrel exports). The rules themselves run through
+// the registry and are not exported.
+export { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
+export { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
 export type {
   ActionBodyCompileFinding,
   HostCompileFailure,
@@ -1066,6 +1190,8 @@ export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+  FLOW_NODE_WRITE_UNKNOWN_OPTION,
+  FLOW_NODE_WRITE_DATE_HELPER_TEXT,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -1140,6 +1266,7 @@ export {
   FLOW_DECISION_INCLUSIVE_OVERLAP,
   FLOW_APPROVAL_DECISION_UNROUTED,
   FLOW_HTTP_TIMEOUT_MISSING,
+  FLOW_CREATE_UPDATE_PAIR,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,
@@ -1266,8 +1393,15 @@ export {
   FIELD_EMBEDDED_SUB_FIELDS,
   FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
+  // A select option `color` the option badge renders neutral (the families and
+  // the predicate are published so a renderer-side or AI-side check asks the
+  // same question as the save door).
+  FIELD_OPTION_COLOR_RENDERS_NEUTRAL,
+  OPTION_COLOR_FAMILIES,
+  isBadgePaintableOptionColor,
+  lintOptionColors,
 } from './data-model-rules.js';
-export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
+export type { LintIssue, LocatedLintIssue, OptionColorPicklist, Severity } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────
 //

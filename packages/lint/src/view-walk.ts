@@ -35,7 +35,7 @@
  *    down.
  *  - **A bare FORM VIEW** (`FormViewSchema`, `view.zod.ts:1599`), whose
  *    `sections` (`:1649`) and `groups` (`:1650`, the legacy alias) sit at the
- *    top. This is the `defineForm` shape the `*.form.ts` metadata-editing forms
+ *    top. This is the `defineMetadataForm` shape the `*.metadata-form.ts` metadata-editing forms
  *    use.
  *
  * | rung | `kind` | why it is walked |

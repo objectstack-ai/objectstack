@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 
 import { AUTHORING_COMMANDS, AUTHORING_RULES, runAuthoringRules, type AuthoringCommand } from './authoring-rules.js';
+import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor, runtimeGatedTypes } from './runtime-gate.js';
 import { explainRule } from './rule-explanations.js';
 import {
   SECURITY_ROLLUP_SOURCE_ROW_SCOPED,
@@ -265,20 +266,6 @@ describe('silent where the set cannot see the roll-up, or can see its source', (
     expect(viaRegistry(stackOf(set({ objects: {} })))).toEqual([]);
   });
 
-  it('Modify All on the child makes a hidden child field readable', () => {
-    for (const bit of ['modifyAllRecords']) {
-      const findings = viaRegistry(
-        stackOf(
-          set({
-            objects: { invoice: READ, invoice_line: { ...READ, [bit]: true } },
-            fields: { 'invoice_line.amount': { readable: false } },
-          }),
-        ),
-      );
-      expect(findings, bit).toEqual([]);
-    }
-  });
-
   it("a '*' read grant covers a public child", () => {
     expect(viaRegistry(stackOf(set({ objects: { invoice: READ, '*': READ } })))).toEqual([]);
   });
@@ -504,8 +491,8 @@ describe('the fields a roll-up filter tests are judged like the aggregated field
   });
 });
 
-describe('a Modify All parent makes the summary mask inert', () => {
-  it('is still reported, and the hint says Modify All must go first', () => {
+describe('[v19 #36055] Modify All casts no field vote', () => {
+  it('a Modify All parent\'s own summary mask binds, so the masked column is not judged', () => {
     const findings = viaRegistry(
       stackOf(
         set({
@@ -514,10 +501,19 @@ describe('a Modify All parent makes the summary mask inert', () => {
         }),
       ),
     );
-    expect(findings.map((f) => f.where)).toContain(W_TOTAL);
-    const f = findings.find((x) => x.where === W_TOTAL)!;
-    expect(f.hint).toContain('first remove Modify All on "invoice" from it');
-    expect(f.hint).toContain('does not hide a field from a set holding it');
+    expect(findings.map((f) => f.where)).not.toContain(W_TOTAL);
+  });
+
+  it('Modify All on the child leaves a hidden child field hidden, so the sum over it is reported', () => {
+    const findings = viaRegistry(
+      stackOf(
+        set({
+          objects: { invoice: READ, invoice_line: { ...READ, modifyAllRecords: true } },
+          fields: { 'invoice_line.amount': { readable: false } },
+        }),
+      ),
+    );
+    expect(pairs(findings)).toEqual([[UNREADABLE, W_TOTAL]]);
   });
 });
 
@@ -530,7 +526,7 @@ describe('the verdict text (the rule the author is told)', () => {
       [
         [
           ""invoice.total" summarizes "invoice_line.amount", which permission set "warehouse_staff" cannot read; a roll-up aggregates the whole child collection and follows only the parent field's own permissions",
-          "If its value should not be visible to this set, set fields["invoice.total"]: { readable: false } on it. That hides "invoice.total" from every holder of the set, and a co-held set with no entry for it does not restore it (View All or Modify All on "invoice" does); to keep it for some holders, declare fields["invoice.total"]: { readable: true } in the sets they hold",
+          "If its value should not be visible to this set, set fields["invoice.total"]: { readable: false } on it. That hides "invoice.total" from every holder of the set, and a co-held set with no entry for it does not restore it (viewAllFields on "invoice" does); to keep it for some holders, declare fields["invoice.total"]: { readable: true } in the sets they hold",
         ],
       ]
     `);
@@ -565,13 +561,6 @@ describe('the verdict text (the rule the author is told)', () => {
       ]
     `);
 
-    const modifyAllParent = validateRollupSourceVisibility(
-      stackOf(set({ objects: { invoice: { ...READ, modifyAllRecords: true } } })),
-    );
-    expect(modifyAllParent.map((f) => f.hint)[0]).toMatchInlineSnapshot(
-      `"If its value should not be visible to this set, first remove Modify All on "invoice" from it, since fields["invoice.total"]: { readable: false } does not hide a field from a set holding it, then set fields["invoice.total"]: { readable: false } on it. That hides "invoice.total" from every holder of the set, and a co-held set with no entry for it does not restore it (View All or Modify All on "invoice" does); to keep it for some holders, declare fields["invoice.total"]: { readable: true } in the sets they hold"`,
-    );
-
     const scoped = validateRollupSourceVisibility(
       stackOf(
         set({
@@ -603,10 +592,94 @@ describe('the verdict text (the rule the author is told)', () => {
     }
   });
 
-  it('the registry entry is advisory and declares why it is off the runtime door', () => {
+  it('the registry entry is advisory and runs at the runtime door on `permission` writes alone', () => {
     const entry = AUTHORING_RULES.find((r) => r.name === 'validateRollupSourceVisibility');
     expect(entry?.tier).toBe('advisory');
-    expect(entry?.surfaces).toEqual(['cli']);
-    expect((entry?.surfaceReason ?? '').length).toBeGreaterThan(0);
+    expect(entry?.surfaces).toEqual(['cli', 'runtime-publish']);
+    expect(entry?.runtimeTypes).toEqual(['permission']);
+    expect(entry?.surfaceReason).toBeUndefined();
+  });
+});
+
+// The runtime publish gate on `permission` writes: what an MCP, REST `/meta` or
+// Studio author is told when they save the set, without running `os lint`.
+describe('at the runtime publish gate, on a `permission` write', () => {
+  const RULE_NAME = 'validateRollupSourceVisibility';
+  /** The write: the set is the item, the two objects are the stored context. */
+  const write = (item: Rec, context: Rec = {}) =>
+    runRuntimeAuthoringRules({ type: 'permission', item, context: { objects: [invoice(), invoiceLine()], ...context } });
+  const rollupOnly = <F extends { rule: string }>(findings: readonly F[]): F[] =>
+    findings.filter((f) => f.rule === UNREADABLE || f.rule === ROW_SCOPED);
+  const W_PATH_TOTAL = 'permissions.warehouse_staff.fields["invoice.total"]';
+
+  it('the gate dispatches it on `permission` writes, and on no other type', () => {
+    expect(runtimeAuthoringRulesFor('permission').map((r) => r.name)).toContain(RULE_NAME);
+    for (const type of runtimeGatedTypes().filter((t) => t !== 'permission')) {
+      expect(runtimeAuthoringRulesFor(type).map((r) => r.name), `'${type}' writes`).not.toContain(RULE_NAME);
+    }
+  });
+
+  it('a set granting the roll-up over a withheld child is advised, in the CLI\'s words, and not refused', () => {
+    const item = set({ objects: { invoice: READ } });
+    const result = write(item);
+
+    expect(result.rulesRun).toContain(RULE_NAME);
+    expect(result.errors).toEqual([]);
+    const advised = rollupOnly(result.advisories);
+    expect(pairs(advised)).toEqual([[UNREADABLE, W_TOTAL], [UNREADABLE, W_COUNT]]);
+    expect(advised.map((f) => f.severity)).toEqual(['warning', 'warning']);
+    expect(advised[0]!.path).toBe(W_PATH_TOTAL);
+
+    // The same message and hint `os lint` prints for the same stack.
+    const cli = viaRegistry(stackOf(item));
+    expect(advised.map((f) => [f.message, f.hint])).toEqual(cli.map((f) => [f.message, f.hint]));
+  });
+
+  it('a hidden child field is advised on the sum alone', () => {
+    const result = write(set({ fields: { 'invoice_line.amount': { readable: false } } }));
+    expect(pairs(rollupOnly(result.advisories))).toEqual([[UNREADABLE, W_TOTAL]]);
+  });
+
+  it('a set withholding both the roll-up and its child is advised nothing', () => {
+    const withheldObject = write(set({ objects: {} }));
+    expect(withheldObject.rulesRun, 'the rule must have run').toContain(RULE_NAME);
+    expect(rollupOnly(withheldObject.advisories)).toEqual([]);
+
+    const maskedColumns = write(
+      set({
+        objects: { invoice: READ },
+        fields: { 'invoice.total': { readable: false }, 'invoice.line_count': { readable: false } },
+      }),
+    );
+    expect(rollupOnly(maskedColumns.advisories)).toEqual([]);
+  });
+
+  it('a stored sibling set\'s finding is not charged to this write', () => {
+    const sibling = { ...set({ objects: { invoice: READ } }), name: 'field_sales', label: 'Field Sales' };
+    const clean = write(set(), { permissions: [sibling] });
+    expect(rollupOnly(clean.advisories)).toEqual([]);
+
+    // Non-vacuous: the same sibling stored, the written set's own finding is still told.
+    const own = write(set({ objects: { invoice: READ } }), { permissions: [sibling] });
+    expect(pairs(rollupOnly(own.advisories))).toEqual([[UNREADABLE, W_TOTAL], [UNREADABLE, W_COUNT]]);
+  });
+
+  it('a child the snapshot does not carry is left unjudged: no finding is invented', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'permission',
+      item: set({ objects: { invoice: READ } }),
+      context: { objects: [invoice()] },
+    });
+    expect(rollupOnly(result.advisories)).toEqual([]);
+  });
+
+  it('the CLI commands are unchanged: positional paths, the same verdict', () => {
+    for (const command of AUTHORING_COMMANDS) {
+      const findings = viaRegistry(stackOf(set({ objects: { invoice: READ } })), command);
+      expect(findings.map((f) => f.path), `os ${command}`).toEqual([
+        'permissions[0].fields["invoice.total"]',
+        'permissions[0].fields["invoice.line_count"]',
+      ]);
+    }
   });
 });

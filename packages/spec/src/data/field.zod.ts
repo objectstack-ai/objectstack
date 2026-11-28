@@ -14,7 +14,7 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 // the author-time finding and the parse refusal. No cycle: that module
 // imports nothing at runtime.
 import { checkFieldCompleteness, FIELD_CHOICE_WITHOUT_OPTIONS } from '../kernel/functional-completeness';
-import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
+import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { FilterConditionSchema } from './filter.zod';
@@ -309,6 +309,29 @@ const DEADLINE_FIELD_TYPES: ReadonlySet<string> = new Set([
 export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
 
 /**
+ * The stored value of a select option: the system-identifier character rule
+ * (lowercase, starts with a letter, then letters, digits, `_` or `.`) with a
+ * floor of ONE character instead of two.
+ *
+ * An option value is a data value, not a machine name: grades `a` / `b` / `c`,
+ * sizes `s` / `m` / `l` are the natural spelling of a one-letter choice, and
+ * the two-character floor of `SystemIdentifierSchema` refused them at publish
+ * while the author's labels stayed `A` / `B` / `C`. Only this one surface is
+ * widened; object, field and every other machine name keep
+ * `SystemIdentifierSchema` / `SnakeCaseIdentifierSchema` and their floor.
+ * Every face that reuses `SelectOptionSchema.shape` (the form-view option, the
+ * picklist item and its extension, the field-level picklist override) takes
+ * this rule with it.
+ */
+const SelectOptionValueSchema = lazySchema(() => z
+  .string()
+  .min(1, { message: 'Option value must not be empty' })
+  .regex(/^[a-z][a-z0-9_.]*$/, {
+    message:
+      'Option value must be lowercase, starting with a letter, and may contain letters, numbers, underscores, or dots (e.g., "a", "in_progress")',
+  }));
+
+/**
  * Select Option Schema
  * 
  * Defines option values for select/picklist fields.
@@ -379,7 +402,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
   label: z.string().describe('Display label (human-readable, any case allowed)').meta({ title: 'Label' }),
-  value: SystemIdentifierSchema.describe('Stored value (lowercase machine identifier)').meta({ title: 'Value' }),
+  value: SelectOptionValueSchema.describe('Stored value (lowercase machine identifier, one character or more)').meta({ title: 'Value' }),
   /**
    * Optional secondary text for the option (objectui#6153, inheriting the
    * objectui#6140 ruling frame — maintainer 2026-08-25: a key that is
@@ -390,7 +413,7 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * produces the same key for fetched options — while this strict shape
    * refused it at publish, so the search behaviour was real for a key no
    * author could legally write. The object-definition authoring form
-   * (`object.form.ts` options repeater) has offered a `description` input all
+   * (`object.metadata-form.ts` options repeater) has offered a `description` input all
    * along; this declaration is what makes that offer honest. Per the same
    * inherited ruling this option shape declares `description` and no cascade
    * key of its own — `field-rows-option-description.test.ts` pins that
@@ -1364,7 +1387,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
 }, {
   name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
   label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  // #36043 — `user` (people), `multiselect`, `tags`, `boolean` (check) and
+  // `rating` joined the nine. Each member is spelled as its namesake field
+  // type, which the renderer's derivation maps to that same column type.
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file', 'user', 'multiselect', 'tags', 'boolean', 'rating']).optional().describe("Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
   width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
   required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
@@ -1374,7 +1400,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
+  })).optional().describe("Options of a `select` or `multiselect` cell, and the words a `boolean` cell reads as (values `true` / `false`); derived from the child field's options when the column declares no `type`. A `tags` cell reads none: it holds free-form tags.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
@@ -1384,7 +1410,8 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
   displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
   idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  max: z.number().int().positive().optional().describe("Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`.").meta({ title: 'Max' }),
   accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
@@ -1397,7 +1424,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
     .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s CLDR fraction digits decide. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
-  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (its child field's: a `fixed` code, the code the line or its header holds, or the home currency) is not copied, the cell stays empty and the grid says why. Nothing is converted.").meta({ title: 'Autofill' }),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
 }).superRefine((column, ctx) => {
@@ -1643,6 +1670,50 @@ function refuseMalformedLookupFilterEntry(
   }
 }
 
+/**
+ * The prescription a boolean `inlineEdit` meets (protocol 18, ADR-0049
+ * enforce-or-remove; the field-group ruling of #35889, 「一律只看分组」).
+ *
+ * Since a field group of the PARENT decides whether the parent's form inlines
+ * a child (`ObjectFieldGroupSchema.relatedList`), the relationship's
+ * `inlineEdit` only picks the form factor of a placed child. Measured on every
+ * reader of the key — the console's `attachInlineSubforms`
+ * (`ui/packages/app-shell/src/providers/MetadataProvider.tsx`), the form
+ * plugin's `resolveInlineMode` and the `field-no-consumers` lint's
+ * `formFactorOf` — `true` and `false` both read exactly as an absent key: the
+ * form factor picked from the child's shape. A boolean therefore declared
+ * something nothing did, and the arm leaves the vocabulary; `'grid'` and
+ * `'form'` stay.
+ *
+ * Stored and built metadata never meets this refusal: the protocol-18
+ * ADR-0087 conversion `field-inline-edit-boolean-removed` deletes a boolean
+ * `inlineEdit` (lossless — absent is what it read as) on every data-at-rest
+ * seam, and is retired from the authoring funnel, so a live author is refused
+ * here and told what decides the placement instead.
+ *
+ * ⛔ Runtime text — no tracker numbers (`check:doc-authoring`).
+ */
+const INLINE_EDIT_BOOLEAN_RETIRED =
+  '`field.inlineEdit: true` and `field.inlineEdit: false` were removed in @objectstack/spec 19.0.0 '
+  + '(ADR-0049 enforce-or-remove) — neither boolean had an effect: a field group of the parent '
+  + '(`fieldGroups[].relatedList`) decides whether the parent\'s form inlines this child, and both '
+  + '`true` and `false` read as an absent key, the form factor picked from the child\'s shape. '
+  + 'Delete the key, or write `\'grid\'` (an editable line-item grid) or `\'form\'` (a list whose rows '
+  + 'open the child\'s full form) to choose the form factor; to inline the child in the parent\'s form, '
+  + 'name it in a field group of the parent (`fieldGroups[].relatedList`). '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
+ * The prose answer for a field-level spelling of "track this field's
+ * history" that is not a field key: it names the `fieldHistory` model
+ * (`resolveFieldHistory`), never `trackHistory`.
+ */
+function fieldHistorySpellingAnswer(key: string): string {
+  return `\`${key}\` is not a field key — a field's old → new values show on the record activity timeline `
+    + 'by default. Write `fieldHistory: false` to turn them off for this field (`true` opts a media or '
+    + 'structured-JSON field in), or `enable.fieldHistory: false` on the object to turn them off for every field.';
+}
+
 export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
@@ -1681,7 +1752,13 @@ export const FieldSchema = lazySchema(() => {
     // CASE-SENSITIVELY on the authored spelling, so a row per spelling is the
     // only way this channel can cover a family, and `not_null` was the spelling
     // it would have missed.
-    tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+    // `trackChanges` / `feedTracked` (the Salesforce "Track Field History" /
+    // "Feed Tracking" spellings) used to RENAME onto `trackHistory`, whose
+    // `false` turns nothing off; they take `tracked`'s answer instead, so both
+    // stay refused and the author is sent to the switch that works.
+    tracked: fieldHistorySpellingAnswer('tracked'),
+    trackChanges: fieldHistorySpellingAnswer('trackChanges'),
+    feedTracked: fieldHistorySpellingAnswer('feedTracked'),
     // [ADR-0158 L3] The natural spellings of a quantity's unit on the field
     // itself, answered in prose because the targets are NESTED keys of
     // `unitConfig` — the form the `currency` answer above takes. None of them
@@ -2294,6 +2371,44 @@ export const FieldSchema = lazySchema(() => {
     default: 'set_null',
   }),
   /**
+   * [ruling 7000907189 point 4 · #35315] What a Change Owner of the referenced
+   * (parent) record does to THIS object's records that point at it — the
+   * relationship-level cascade, declared on the child's reference field beside
+   * {@link deleteBehavior}, as Dynamics 365's per-relationship Assign cascade.
+   *
+   * - `'none'` (the default, also when omitted): the child rows keep their owner.
+   * - `'cascade'`: the Change Owner dialog offers this relationship as a tick,
+   *   and a Change Owner request that names it (`cascade: [{ object, field }]`)
+   *   also moves, to the parent's new owner, the child rows that point at the
+   *   parent AND are owned by the parent's PREVIOUS owner — no other rows (the
+   *   ruled default semantics; there is no filter key). Each cascaded row is an
+   *   ordinary update under the caller's own context, so it passes the caller's
+   *   own transfer verdict on the child object; a row it does not pass is
+   *   reported, never skipped, and one call moves at most the hand-over's row
+   *   cap. The reader is `@objectstack/core`'s `change-record-owner.ts`.
+   *
+   * Refused where it could never act (ADR-0049): on any type but `lookup` and
+   * `master_detail` (here), on a reference to a `sys_*` object (no `sys_*`
+   * object offers Change Owner), `'cascade'` on a multi-value relationship
+   * (`multiple: true`: its targets are one stored list, never one parent), and — on `ObjectSchema`, where the declaring
+   * object is known — `'cascade'` on a field of an object that does not offer
+   * Change Owner itself: one that is not structurally eligible, a
+   * `controlled_by_parent` detail (its access already follows its master, so
+   * it is not cascaded for access), or one whose `userActions.transfer` is
+   * off.
+   */
+  transferBehavior: z.enum(['none', 'cascade']).optional().meta({
+    description:
+      "What a Change Owner of the referenced (parent) record does to this object's records that point at it. "
+      + "'none' (default): they keep their owner. 'cascade': the Change Owner dialog offers this relationship, "
+      + "and when it is ticked the records here that point at the parent and are owned by the parent's previous "
+      + "owner move to the new owner too, each as the caller's own update (a row the caller may not transfer is "
+      + 'reported, never skipped; one call moves at most 500 rows). Only on lookup and master_detail fields, not '
+      + 'on a reference to a sys_ object, and cascade only on an object that offers Change Owner itself (eligible, '
+      + 'not controlled_by_parent, userActions.transfer not off).',
+    default: 'none',
+  }),
+  /**
    * Master-detail INLINE EDITING — the FORM FACTOR of the child's rows in the
    * parent's form. WHETHER the parent's form inlines this child is no longer
    * this key's to say (#35889, maintainer ruling B: 「明细表应该改成指看分组的定义了」):
@@ -2304,8 +2419,8 @@ export const FieldSchema = lazySchema(() => {
    * the record page and stays out of the form, whatever this key says.
    *
    * The value selects the EDITING FORM FACTOR of a placed child:
-   *   - `true` / absent → auto: the UI picks `grid` or `form` from the
-   *                child's shape (rich types / many fields → `form`, else `grid`).
+   *   - absent → auto: the UI picks `grid` or `form` from the child's shape
+   *                (rich types / many fields → `form`, else `grid`).
    *   - `'grid'` → an editable line-item grid (fast bulk entry; thin children
    *                like invoice lines / order items).
    *   - `'form'` → a compact read-only list; "Add" / per-row edit opens the
@@ -2313,8 +2428,14 @@ export const FieldSchema = lazySchema(() => {
    *                text, attachments, many fields).
    * Place true line-item/composition children with a group; leave
    * associations (comments, attachments) as tabs.
+   *
+   * The boolean arm is retired (#35926, ADR-0049): `true` and `false` both
+   * read as absent once the group decides the placement, so each is refused
+   * with {@link INLINE_EDIT_BOOLEAN_RETIRED}.
    */
-  inlineEdit: z.union([z.boolean(), z.enum(['grid', 'form'])]).optional().describe('How the parent\'s form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. true or absent = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form.'),
+  inlineEdit: z.enum(['grid', 'form'], {
+    error: (issue) => (typeof issue.input === 'boolean' ? INLINE_EDIT_BOOLEAN_RETIRED : undefined),
+  }).optional().describe('How the parent\'s form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. Absent = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form. A boolean is refused: true and false both read as absent.'),
   /** Optional section title for the inline grid (defaults to the child object label). */
   inlineTitle: z.string().optional().describe('Title for the inline master-detail grid'),
   /**
@@ -2329,7 +2450,8 @@ export const FieldSchema = lazySchema(() => {
   inlineAmountField: z.string().optional().describe('Numeric child field summed for the inline grid total'),
 
   /**
-   * Detail-page RELATED LIST — the read-side mirror of `inlineEdit`. On a
+   * Detail-page RELATED LIST — the record-page side of a child relationship,
+   * as `inlineEdit` is the form side (the form factor of a placed child). On a
    * child's `master_detail`/`lookup` field (whose `reference` is the parent),
    * this governs whether/how the child collection appears as a related list on
    * the parent's record DETAIL page. Owned children (`master_detail`) and
@@ -2382,7 +2504,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (the record-page side; inlineEdit picks the form factor on the form side). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2566,11 +2688,18 @@ export const FieldSchema = lazySchema(() => {
    * pick never replaces a value somebody wrote unless the pair says
    * `overwrite: true`.
    *
-   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`),
-   * which is unchanged: that key governs only the grid's implicit SAME-NAMED
-   * copy (on by default, overwriting). A declared pair applies in the grid too,
-   * under this key's own overwrite rule, and takes its target out of the
-   * same-named copy, so one target never has two writers on one pick.
+   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`):
+   * that key governs only the grid's implicit SAME-NAMED copy (on by default,
+   * overwriting). A declared pair applies in the grid too, under this key's
+   * own overwrite rule, and takes its target out of the same-named copy, so
+   * one target never has two writers on one pick.
+   *
+   * ⭐ The currency rule binds both copies (maintainer ruling 「B 币种不同就不填并说明」,
+   * record 7075336705 on objectstack-ai/objectstack#36249): an amount of money
+   * is copied only into a target in the same currency, else the target is left
+   * as it is and the form says why. Nothing is converted (ADR-0144 D5 refuses
+   * an implied rate of 1). The rule is the client's, like the fill itself: the
+   * line's currency is known only at run time, so no build-time door judges it.
    *
    * Three doors judge it: the parse (this field's superRefine — a single-value
    * relationship only), the object's parse (`refuseDishonestLookupAutofill` in
@@ -2594,8 +2723,9 @@ export const FieldSchema = lazySchema(() => {
   })).min(1).optional().describe(
     "Fields a pick in this lookup fills on the record being edited: each `{ target, source }` pair copies the picked record's `source` field (a field of the `reference` object) into this object's `target` field — e.g. `[{ target: 'unit_price', source: 'list_price' }]` on a quote line's product lookup. Read wherever this field is picked: the record form, and a line-item grid column over it. "
     + "OVERWRITE RULE — the default, `overwrite` absent or false: a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in; a value the user typed, or one the record already stored, stays. Only a pair that declares `overwrite: true` replaces the target on every pick, whatever it holds. "
+    + "CURRENCY RULE: an amount of money (a `currency` field, or a `formula` returning `currency`) is copied only into a target in the same currency, both in the home currency or both naming the same ISO 4217 code (a `fixed` code, or the code the record or its `master_detail` parent holds). Otherwise the target is left as it is and the form says why, naming both currencies and the picked amount; nothing is converted. A `number` carries no currency and copies as before. "
     + 'Client-side only: it fills the form, and nothing on the write path reads it — the filled value is saved as an ordinary write, and an import or API write that sets the lookup fills nothing. '
-    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy and is unchanged; a declared pair takes its target out of that copy.",
+    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy, under the same currency rule; a declared pair takes its target out of that copy.",
   ),
 
   /**
@@ -2723,18 +2853,33 @@ export const FieldSchema = lazySchema(() => {
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**
-   * Track this field's value changes on the record **activity timeline**. When
-   * TRUE, the platform's activity writer renders each change as a human-readable
-   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
-   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
-   * ServiceNow field auditing, Dataverse column auditing). The writer already
-   * captures the field diff; this flag controls whether it is surfaced legibly.
+   * Opt a no-line field into old → new values on the record **activity
+   * timeline** (ADR-0052 §5b). Since #36290 values show by default for every
+   * field, so `true` matters only for a media or structured-JSON type (image,
+   * file, json, …), which shows them only when asked. `false` and absent read
+   * the same — values show. ⛔ `false` is NOT an off switch: the field
+   * designer wrote it on every save while it meant nothing, so a stored
+   * `false` cannot be told from a choice. The off switch is
+   * {@link FieldSchema.fieldHistory} `false`.
    *
    * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
-   * (ADR-0049). See ADR-0052 §5b.
+   * (ADR-0049).
    */
-  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+  trackHistory: z.boolean().optional().describe("Opt a media or structured-JSON field into old → new values on the record activity timeline (ADR-0052 §5b). Every other field shows them already, so true changes nothing there. false and absent read the same: values show. false is not an off switch; turn a field's values off with fieldHistory: false."),
+
+  /**
+   * [#36290, ruling 7076513167 point 1] This field's off switch for old → new
+   * values on the record activity timeline. No default on purpose: a parsed
+   * field never carries the key, so only an author who wrote it turns values
+   * off. Absent: values show (a media or structured-JSON type only with an
+   * explicit `true`). `false`: the change is named by the field's label only.
+   * `true`: values show, a no-line type included. Under an object that writes
+   * `enable.fieldHistory: false`, values stay off whatever the field says. A
+   * credential field never shows values. Who reads a value is the field's read
+   * rule.
+   */
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity timeline. Absent: they show (a media or structured-JSON type only with true). false: off, the change names the field's label only. true: on, a media or JSON type included. Off whatever this says when the object sets enable.fieldHistory: false; a credential field never shows values. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —
@@ -2807,6 +2952,29 @@ export const FieldSchema = lazySchema(() => {
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`. On a `required` field the server reads it on every write: where it is not TRUE (FALSE, or null such as an unset boolean) the field is not required for that write, and a predicate the server cannot evaluate counts as shown, so the field stays required. Reads the record's own columns, with `formula` fields computed over the record being written, as the form computes them over the record being edited; a read THROUGH a reference field, or a formula that reads through one, calls label(), calls can() on a write that picks no permission-gated option, or reads current_user on a system write with no user, cannot be evaluated there."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
+  /**
+   * The CONDITIONAL hand lock (ruling record 7180466652, the two-tier field-lock
+   * model): while TRUE no person edits the field of an existing record at the
+   * console surfaces that honour `uiReadonly`, and every other write keeps it.
+   * The conditional twin of `uiReadonly` — see there for which writes are "by
+   * hand". A create is not judged (the create dialog has no record to read).
+   * Same scope as `readonlyWhen`: the bound record's OWN columns, e.g.
+   * P`record.status != 'draft'`.
+   *
+   * A predicate that cannot be evaluated (a syntax error, a missing operand)
+   * fails CLOSED — the field is locked — because no server judges this key
+   * (ADR-0137 D2); the edit dialog also refuses to submit, as it does for a
+   * faulted `visibleWhen`. `objectstack validate` checks the predicate.
+   *
+   * Allowed beside `readonlyWhen` (unlike `uiReadonly` beside `readonly`): the
+   * two predicates can differ, and where `readonlyWhen` is TRUE the server lock
+   * is the stricter one — it also drops the field from non-system writes.
+   *
+   * Read by the console only, through the one hand-lock verdict in
+   * `@object-ui/core` (`fieldReadOnlyByHand`); the engine never reads it, so a
+   * TRUE predicate refuses no API, import, action or flow write.
+   */
+  uiReadonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the field is read-only BY HAND on an existing record while TRUE: every console surface that honours `uiReadonly` (the edit dialog, record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the Gantt's drag, resize, progress handle, dependency link and in-place edit, the timesheet cell, the line-item grid) does not let a person edit it, while REST, import, action and flow writes keep it, judged by the object's validations — see `uiReadonly`. A create is not judged: the create dialog offers the field whatever the predicate says. A predicate the console cannot evaluate locks the field, and the edit dialog refuses to submit until it is fixed. Same scope as `readonlyWhen`: the bound record's OWN columns, e.g. P`record.status != 'draft'`. Allowed beside `readonlyWhen`, which is the stricter lock: where `readonlyWhen` is TRUE non-system writes are dropped as well. The engine never reads this key."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
@@ -2886,6 +3054,24 @@ export const FieldSchema = lazySchema(() => {
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
 
   /**
+   * Whether the field is asked for when a record is created (ADR-0085 §2: a
+   * creation-time intent of the field — which fields this business asks for
+   * when a record is born, not inferable from the schema — that binds every
+   * create surface and names none of them). Absent, as `true`: the field is
+   * asked for. `false`: every create surface leaves it out; editing, the
+   * record page and lists still show it.
+   *
+   * A `required: true` field cannot be switched off: a required field is
+   * always asked for on create, with or without a `defaultValue`, so the pair
+   * is refused here, at every door that parses a field (this schema's
+   * superRefine). A
+   * `requiredWhen` field is not refused: its gate is a predicate the parse
+   * cannot judge, and the write door still refuses a create born inside it.
+   * `liveness/field.json` carries its row.
+   */
+  showOnCreate: z.boolean().optional().describe('Ask for this field when a record is created. Absent or `true`: the field is on every create surface (the create dialog, the full-page create, an action-opened create). `false`: no create surface shows it; editing, the record page and lists still do, so a value is filled in after the record exists. Refused on a `required: true` field, with or without a `defaultValue`: a required field is always asked for on create. Keep the field on create, or drop `required`. A `requiredWhen` field is accepted, and its create is still refused when the predicate holds and the value is empty.'),
+
+  /**
    * [#7728] "The declared value is never returned on the generic data path."
    *
    * Opt-in, and deliberately NOT a synonym for anything already here. `hidden`
@@ -2919,6 +3105,45 @@ export const FieldSchema = lazySchema(() => {
   internal: z.boolean().optional().describe("Never return this field's value on the generic data path — the engine OMITS the key from `find`/`findOne` results, the 201 create body and the by-id update body, on the default projection AND when a client names the field in `?select=`. Storage, filtering and indexing are untouched, so a server-side verifier can still match on the column and a purpose-built mint route can still return the value once at creation. The read protection for ADR-0100's third credential channel (auth-subsystem one-way hashes on `text` columns). Omission, not masking: a mask signals 'a value is set', which carries no information on a `required` column."),
 
   readonly: z.boolean().default(false).describe('Read-only — never editable in forms, AND server-enforced on BOTH write paths: a non-system write to this field is silently dropped from the payload on UPDATE and on INSERT (a create can no longer directly seed e.g. `approval_status: "approved"`), symmetric with `readonlyWhen`. A stripped INSERT field still falls back to its `defaultValue`. Exempt from the strip on BOTH paths: `isSystem` writes (seed replay, migration). Exempt on the UPDATE path ONLY: an opt-in "historical" import (`preserveAudit`) — which admits a whitelist (the audit/timestamp family plus author-declared business `readonly` fields). On INSERT the exemption does NOT apply: a non-system create that requests `preserveAudit` still has its readonly fields stripped, and is warned loudly that the exemption is UPDATE-only — replaying archival readonly facts on create requires a system context. A normal (non-system) import is NOT system-context and still strips.'),
+
+  /**
+   * The HAND lock (ruling record 7180466652, the two-tier field-lock model).
+   * `readonly` is the SERVER lock — no client may write the field. This is
+   * the lock below it: no PERSON edits the field by hand at the console, and
+   * every other write keeps it, judged by the object's validations exactly as
+   * an ordinary field (a `state_machine` rule included). It is the shape of a
+   * status that moves only through actions — an order confirmed or cancelled
+   * by its buttons, never typed.
+   *
+   * "By hand" = the create and edit dialogs and the payload they submit, the
+   * record page's inline edit and stage path, the highlight-strip chip, grid
+   * inline edit and its multi-row save, kanban drag between columns grouped by
+   * the field (a swimlane board's drag writes the column's field only, never
+   * the swimlane's), calendar drag and quick-create, the Gantt's drag,
+   * resize, progress handle, dependency link and in-place edit, the timesheet
+   * cell, the command palette's create-as prefill, the line-item grid, and the in-app assistant
+   * acting for a person. Every console surface honours it; the in-app
+   * assistant, whose writes run in the AI service, does not read it yet
+   * (#37448). NOT by hand = REST create/update,
+   * import (the console import wizard included), declarative and script
+   * actions, flows. A console create leaves the field out, so the server
+   * applies its `defaultValue` — a `required` field with no `defaultValue`
+   * therefore fails every console create; an API, import or action insert may
+   * set it, judged by validations (a state machine's `initialStates`).
+   *
+   * Refused beside `readonly: true` (the superRefine below): the server lock
+   * already keeps every client out, so the pair says two things at once.
+   * Absent reads as `false`; no default is materialised, so a field that does
+   * not author it parses unchanged.
+   *
+   * Read by the console only, through the one hand-lock verdict in
+   * `@object-ui/core` (`fieldReadOnlyByHand`); `describe_object` (MCP) reports
+   * it as its own key. The engine never reads it — no write is stripped or
+   * reported in `x-objectstack-dropped-fields` for it. Not a security
+   * boundary: a caller who may edit the object can write the field through
+   * the API; field permissions (`editable` on a permission set) are that.
+   */
+  uiReadonly: z.boolean().optional().describe("Read-only BY HAND: the console's editing surfaces do not let a person edit the field — the create and edit dialogs (it is left off them and out of their payload), record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag and quick-create, the Gantt's drag, resize, progress handle, dependency link and in-place edit, the timesheet cell, the command palette's create-as prefill and the line-item grid — every console surface; the in-app assistant acting for a person does not honour it yet. Every other write KEEPS it — REST create/update, import, declarative and script actions and flows write it, judged by the object's validations exactly as an ordinary field (a `state_machine` rule included). For a field that changes only through actions, e.g. an order `status` moved by Confirm / Cancel buttons. A console create leaves the field out and the server applies its `defaultValue`, so a `required` field needs a `defaultValue`: without one every create from the console fails. An API, import or action insert may set it, judged by validations (a state machine's `initialStates`). Absent = false. Refused beside `readonly: true`, which already keeps every client out: `readonly` when no client may write the field, `uiReadonly` when only people at the console may not. Not a security boundary — field permissions are. The conditional twin is `uiReadonlyWhen`."),
 
   /**
    * [ADR-0066 D3] Capabilities required to READ/EDIT this field. A field
@@ -3205,6 +3430,43 @@ export const FieldSchema = lazySchema(() => {
       });
     }
   }
+  // The hand lock beside the server lock (ruling record 7180466652): a
+  // `readonly: true` field already keeps every client out, so `uiReadonly`
+  // beside it says two things at once — refused at every door that parses a
+  // field (`defineStack`, `os validate`, the metadata save). The conditional
+  // pair (`uiReadonlyWhen` beside `readonlyWhen`) is allowed: the predicates
+  // can differ, and the server lock is the stricter where both hold.
+  if (field.uiReadonly === true && field.readonly === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['uiReadonly'],
+      message:
+        '`uiReadonly: true` locks the field against editing by hand at the console while API, import, action and '
+        + 'flow writes keep it, and this field is also `readonly: true`, which keeps every client write out. Keep '
+        + 'one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not but '
+        + 'actions, imports and the API may (each write judged by the object\'s validations).',
+    });
+  }
+
+  // A required field is always asked for when a record is created: the
+  // person creating the record sees every value the record must have, so
+  // `showOnCreate: false` beside `required: true` is refused (#36425 item 6,
+  // which makes no exception). That holds with a `defaultValue` too, which
+  // the insert would resolve: the field is still asked for, its default
+  // filled in. Refused where the author can fix it, at every door that
+  // parses a field (`defineStack`, `os validate`, the metadata save).
+  if (field.showOnCreate === false && field.required === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['showOnCreate'],
+      message:
+        '`showOnCreate: false` would leave this field off every create surface, and it is `required: true`: a '
+        + 'required field is always asked for when a record is created, so the person creating it sees every value '
+        + 'the record must have. Keep the field on create (delete `showOnCreate`), or drop `required`; a value '
+        + 'needed only in some cases can be `requiredWhen` instead. A `defaultValue` makes no exception: the field '
+        + 'is still asked for, with its default filled in.',
+    });
+  }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a
   // relationship type it contradicts the type's own single static target, and
@@ -3290,6 +3552,53 @@ export const FieldSchema = lazySchema(() => {
         'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
         "`type: 'email'` if it holds an email address, or drop the key.",
     });
+  }
+  // [ruling 7000907189 point 4 · #35315] `transferBehavior` is the Change Owner
+  // cascade of a relationship: only a `lookup` or `master_detail` field points
+  // at a parent whose owner can change, and no `sys_*` object offers Change
+  // Owner, so on any other type, or on a reference to one, the key would parse
+  // and move nothing. An authored `'none'` off-type is refused too: the key
+  // describes nothing there (the `mailAssociation` precedent above). The
+  // declaring object's own eligibility is judged on `ObjectSchema`
+  // (`refuseIneligibleTransferCascades`), where that object is known.
+  if (field.transferBehavior !== undefined) {
+    if (field.type !== 'lookup' && field.type !== 'master_detail') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior` is only valid on `type: 'lookup'` or `type: 'master_detail'` (this field is " +
+          `\`${field.type}\`): it says whether a Change Owner of the record this field points at also moves ` +
+          "this object's records, and only a lookup or master_detail points at such a parent. Declare it on " +
+          'the reference field to the parent, or drop the key.',
+      });
+    } else if (
+      field.transferBehavior === 'cascade'
+      && typeof field.reference === 'string'
+      && field.reference.startsWith('sys_')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          `\`transferBehavior: 'cascade'\` cannot act on a reference to '${field.reference}': no sys_ object ` +
+          'offers the Change Owner action, so its owner never changes through it and nothing would cascade. ' +
+          "Drop the key, or set it to 'none'.",
+      });
+    } else if (field.transferBehavior === 'cascade' && field.multiple === true) {
+      // A multi-value relationship stores its targets as one JSON array, which
+      // the SQL driver refuses to compare by equality: the cascade's child read
+      // could never find a row there (the `lookupAutofill` precedent below).
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior: 'cascade'` is not valid on a multi-value relationship (`multiple: true`): a " +
+          'record here can point at several parents with different owners, so no single Change Owner decides ' +
+          "who it goes to, and its stored list of targets cannot be matched to one parent. Drop the key, set it " +
+          "to 'none', or make the field single-value if each record has one parent.",
+      });
+    }
   }
   // [#27945] `lookupAutofill` copies fields of the ONE record a pick chooses.
   // Off a relationship there is no pick, and on a multi-value relationship a

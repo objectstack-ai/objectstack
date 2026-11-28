@@ -37,6 +37,8 @@ const COLLECTION: Record<NamespaceUniqueType, string> = {
   book: 'books',
   analytics_cube: 'analyticsCubes',
   tool: 'tools',
+  ai_context: 'aiContexts',
+  knowledge_source: 'knowledgeSources',
 };
 
 /**
@@ -65,6 +67,10 @@ const item = (type: NamespaceUniqueType, name: string): Record<string, unknown> 
       return { name, title: name, sql: 'select 1', measures: {}, dimensions: {} };
     case 'tool':
       return { name, label: name, description: 'A tool', parameters: {} };
+    case 'ai_context':
+      return { name, label: name, object: 'crm_account' };
+    case 'knowledge_source':
+      return { name, label: name, adapter: 'memory', source: { kind: 'object', object: 'crm_account', content: ['name'] } };
     default:
       return { name, label: name };
   }

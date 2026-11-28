@@ -86,7 +86,10 @@ export const SysFlowCredential = ObjectSchema.create({
       description: 'The app the flow this credential belongs to comes from. Filled in by the platform; empty for flows created here.',
     }),
 
-    state: Field.select(['draft', 'active'], {
+    state: Field.select([
+      { label: 'draft', value: 'draft', color: 'gray' },
+      { label: 'active', value: 'active', color: 'green' },
+    ], {
       label: 'State',
       required: true,
       description:
@@ -141,6 +144,7 @@ export const SysFlowCredential = ObjectSchema.create({
     // masked on every engine read regardless; closing the door also keeps the
     // positions out of reach.
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: false,
     apiMethods: [],

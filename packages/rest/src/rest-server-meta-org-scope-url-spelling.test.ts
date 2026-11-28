@@ -51,6 +51,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { META_URL_TO_SINGULAR } from '@objectstack/spec/meta-spelling';
 import { RestServer } from './rest-server.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/objectql';
+
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 
@@ -141,7 +144,8 @@ const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
 // [#21124] `manage_platform_settings` too: these suites iterate every registered type, and a
 // `datasource` write is admitted only with it (`metaTypeWriteRefusal`, the type-level write admission).
-const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'], tenantId: ORG };
+// [ADR-0161 K4] `manage_knowledge_sources` for the same reason: a `knowledge_source` write asks it.
+const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings', 'manage_knowledge_sources'], tenantId: ORG };
 
 async function writeWith(type: string) {
     const b = boot(AUTHORIZED);

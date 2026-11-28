@@ -613,9 +613,10 @@ export interface ExtractedHookBodyWriteSet {
    *
    * ## Whose fault an unparseable body is — asked, not assumed
    *
-   * The body is parsed inside a synthesised wrapper (`async function __body(ctx)
-   * { … }`) because that is the shape the runtime compiles it into
-   * (`new AsyncFunction('ctx', source)`). So a parse failure here could in
+   * The body is parsed inside a synthesised parse enclosure (`async function
+   * __body(ctx) { … }`), a function-body context like the runtime's own wrapper
+   * (`hookBodyFunctionExpression` in `action-body-wrapper.ts`, which says why
+   * the enclosure is not a second spelling of it). So a parse failure here could in
    * principle be the WRAPPER's fault rather than the author's, and blaming the
    * author for the checker's own bug is the failure this whole change is about.
    * It cannot be: the wrapper is a constant, and `validate-hook-body-writes.
@@ -650,9 +651,10 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
   }
 
   const tsc = loadTypeScript();
-  // The runtime wraps a hook body as `new AsyncFunction('ctx', source)` — a
-  // FUNCTION BODY, not a module. Parse it in the same context so bare
-  // `return` / `await` mean what they mean at run time.
+  // The runtime runs a hook body as the body of an async arrow
+  // (`hookBodyFunctionExpression`) — a FUNCTION BODY, not a module. Parse it in
+  // a function-body context so bare `return` / `await` mean what they mean at
+  // run time.
   //
   // [#10653] Checked: this call cannot throw, so an unparseable body used to
   // reach the walk below as a partially recovered tree and come back as "fewer

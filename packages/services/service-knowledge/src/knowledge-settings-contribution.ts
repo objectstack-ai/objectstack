@@ -1,0 +1,198 @@
+// Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The knowledge base's settings surface, contributed WITH the service.
+ *
+ * The knowledge base is not a default capability: no deployment loads
+ * `KnowledgeServicePlugin` unless its host mounts it. Its settings used to be
+ * registered by `@objectstack/service-settings` on every boot all the same —
+ * the `knowledge` namespace, the `ai` namespace's embedder section, both
+ * "Test" buttons and the Setup entry — so every deployment showed a Knowledge
+ * page, an "Embedder" section and a test button with no service behind them.
+ * They now live and die with the service, the way the branding entry lives
+ * with its namespace and the "Connect an AI Assistant" page with the MCP
+ * capability: a deployment without this plugin serves none of them (a read or
+ * write of `knowledge` answers `404 UNKNOWN_NAMESPACE`, a write of an
+ * `embedder_*` key `400 UNKNOWN_KEY`), and one with it serves all of them.
+ *
+ * Called from `KnowledgeServicePlugin.init()`, which declares the settings
+ * plugin in `optionalDependencies`: the kernel inits that plugin first when it
+ * is present, so "no `settings` service" here is a fact about the composition,
+ * not a guess taken while the registry is still filling.
+ */
+
+import type { PluginContext } from '@objectstack/core';
+import {
+  knowledgeSettingsManifest,
+  knowledgeTestActionHandler,
+  aiSettingsManifest,
+  withAiEmbedderSection,
+  aiEmbedderSettingsSpecifiers,
+  aiTestEmbedderActionHandler,
+  type SettingsService,
+} from '@objectstack/service-settings';
+import {
+  KNOWLEDGE_INDEX_STATUS_ACTION,
+  KNOWLEDGE_REBUILD_ACTION,
+  knowledgeIndexStatusActionHandler,
+  knowledgeRebuildActionHandler,
+  type KnowledgeBuildActionsService,
+} from './knowledge-build-actions.js';
+
+/** The Setup bundle this contribution registers under. */
+export const KNOWLEDGE_SETUP_NAV_BUNDLE_ID = 'com.objectstack.service.knowledge.setup-nav';
+
+/**
+ * The Setup entry for the `knowledge` namespace. Its label stays keyed
+ * `apps.setup.navigation.nav_settings_knowledge` in `@objectstack/platform-objects`'
+ * bundles, where the console resolves every Setup entry, contributed or static.
+ * A factory, not a shared literal: the nav fold pushes contributed items into
+ * the merged tree by reference.
+ */
+export function knowledgeSetupNavItem(): Record<string, unknown> {
+  return {
+    id: 'nav_settings_knowledge',
+    type: 'url',
+    label: 'Knowledge',
+    url: '/apps/setup/system/settings/knowledge',
+    icon: 'book-open',
+    requiredPermissions: ['manage_platform_settings'],
+  };
+}
+
+type SettingsSlot = Pick<SettingsService, 'registerManifest' | 'registerAction' | 'getManifest'>;
+
+function keysOf(manifest: { specifiers: ReadonlyArray<{ key?: string }> }): Set<string> {
+  return new Set(manifest.specifiers.map((s) => s.key).filter((k): k is string => typeof k === 'string'));
+}
+
+/**
+ * Whether the served `ai` manifest IS the bundled declaration (#33933).
+ *
+ * Judged by identity, never by its key set: a host may register its own `ai`
+ * manifest with the bundled keys and a different scope, permission, default or
+ * option table, and that manifest must be left as the host wrote it. With no
+ * option source on an `ai` key the hub serves the registered declaration
+ * itself, so the bundled page is that very object. A page served through an
+ * option source is a copy whose sourced specifiers carry other options, which
+ * cannot be told apart from a host page that narrowed an option table; it is
+ * therefore NOT taken as bundled, and the caller warns. No `ai` key has an
+ * option source today.
+ */
+export function isBundledAiManifest(served: unknown): boolean {
+  return served === aiSettingsManifest;
+}
+
+function embedderKeys(): string[] {
+  return aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => typeof k === 'string');
+}
+
+/** How a host shapes what {@link contributeKnowledgeSettings} offers. */
+export interface KnowledgeSettingsContributionOptions {
+  /**
+   * Offer the embedder section (`ai.embedder_*`) and the `ai/test_embedder`
+   * action on the `ai` settings page. `false` offers neither and logs nothing
+   * about them at boot: a host that provides the embedder itself (registers
+   * the `embedder` service) leaves its administrators nothing to configure.
+   * The knowledge page, its actions and its Setup entry are offered either way.
+   * @default true
+   */
+  embedderSettings?: boolean;
+}
+
+/** What {@link contributeKnowledgeSettings} offered on this boot. */
+export interface KnowledgeSettingsContribution {
+  knowledge: boolean;
+  embedder: boolean;
+  nav: boolean;
+}
+
+/**
+ * Register the knowledge settings surface on the composition's settings
+ * service, and its Setup entry on the manifest service. A composition with no
+ * settings service gets none of it, Setup entry included: the entry would open
+ * a page the server does not serve.
+ *
+ * Given the knowledge service, the namespace also carries the administrator's
+ * rebuild entry, the `rebuild` and `index_status` actions
+ * (`knowledge-build-actions.ts`).
+ */
+export function contributeKnowledgeSettings(
+  ctx: PluginContext,
+  version: string,
+  service?: KnowledgeBuildActionsService,
+  options: KnowledgeSettingsContributionOptions = {},
+): KnowledgeSettingsContribution {
+  const offered: KnowledgeSettingsContribution = { knowledge: false, embedder: false, nav: false };
+  let settings: SettingsSlot | undefined;
+  try {
+    settings = ctx.getService<SettingsSlot>('settings');
+  } catch {
+    // No settings service: nothing claims a settings UI for the knowledge base.
+    return offered;
+  }
+  if (!settings || typeof settings.registerManifest !== 'function') return offered;
+
+  settings.registerManifest(knowledgeSettingsManifest);
+  settings.registerAction('knowledge', 'test', knowledgeTestActionHandler);
+  if (service) {
+    settings.registerAction('knowledge', KNOWLEDGE_REBUILD_ACTION, knowledgeRebuildActionHandler(service));
+    settings.registerAction('knowledge', KNOWLEDGE_INDEX_STATUS_ACTION, knowledgeIndexStatusActionHandler(service));
+  }
+  offered.knowledge = true;
+
+  // The embedder section joins the `ai` namespace — the bundled one only,
+  // recognised as that very declaration (`isBundledAiManifest`), and registered from its DECLARATION
+  // (`aiSettingsManifest`), never from the served copy `getManifest` returns
+  // (that copy carries option-source tables in place of declared ones). A host
+  // that registered its own `ai` manifest keeps it untouched and is told why
+  // it has no embedder keys; one whose `ai` already declares them keeps those.
+  // A host that switched the section off (`embedderSettings: false`) chose
+  // this: nothing joins, no handler is registered and nothing is said.
+  let ai: ReturnType<SettingsSlot['getManifest']> | undefined;
+  try {
+    ai = settings.getManifest('ai');
+  } catch {
+    ai = undefined;
+  }
+  const served = ai ? keysOf(ai) : new Set<string>();
+  const declaresEmbedder = aiEmbedderSettingsSpecifiers.some((s) => s.key !== undefined && served.has(s.key));
+  const isBundled = isBundledAiManifest(ai);
+  if (options.embedderSettings === false) {
+    // Off by the host's choice — see above.
+  } else if (ai && (declaresEmbedder || isBundled)) {
+    if (!declaresEmbedder) settings.registerManifest(withAiEmbedderSection(aiSettingsManifest));
+    settings.registerAction('ai', 'test_embedder', aiTestEmbedderActionHandler);
+    offered.embedder = true;
+  } else {
+    ctx.logger?.warn?.(
+      `KnowledgeServicePlugin: ${ai ? "the registered 'ai' settings namespace is not the bundled one" : "no 'ai' settings namespace is registered"}, ` +
+        `so the embedder settings (${embedderKeys().join(', ')}) are not offered. ` +
+        "Declare them in the host's 'ai' manifest (aiEmbedderSettingsSpecifiers) to configure an embedder from Setup.",
+    );
+  }
+
+  let manifestService: { register?(m: unknown): void } | undefined;
+  try {
+    manifestService = ctx.getService<{ register?(m: unknown): void }>('manifest');
+  } catch {
+    // No manifest service (lean kernels, tests): no app registry to contribute to.
+    return offered;
+  }
+  if (typeof manifestService?.register !== 'function') return offered;
+  manifestService.register({
+    id: KNOWLEDGE_SETUP_NAV_BUNDLE_ID,
+    namespace: 'sys',
+    version,
+    type: 'plugin',
+    scope: 'system',
+    name: 'Knowledge Service — Setup entries',
+    description: 'Setup navigation for the knowledge settings, offered only where the knowledge service is mounted.',
+    navigationContributions: [
+      // After platform-objects' Configuration entries (priority 100).
+      { app: 'setup', group: 'group_configuration', priority: 110, items: [knowledgeSetupNavItem()] },
+    ],
+  });
+  offered.nav = true;
+  return offered;
+}

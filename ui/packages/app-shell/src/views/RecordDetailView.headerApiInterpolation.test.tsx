@@ -12,9 +12,9 @@
  *
  * The record page's api handler used to gate `{field}` interpolation on
  * `params._rowRecord` alone — a stash only related-list row dispatches
- * carried. A `record_header` action targeting `/api/v1/data/:object/{id}`
+ * carried. A `record_page` action targeting `/api/v1/data/:object/{id}`
  * therefore went out with the literal `{id}` (`%7Bid%7D` on the wire → 400),
- * while the SAME declaration on `list_item` interpolated fine.
+ * while the SAME declaration on `record_row` interpolated fine.
  *
  * These tests exercise the handler set the view REALLY hands to its
  * ActionProvider (captured via a pass-through wrapper, same harness as
@@ -285,8 +285,13 @@ describe("RecordDetailView api handler — `{field}` target interpolation (objec
       });
     });
 
-    expect(authFetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = authFetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+    // Exactly one trigger goes out. The page's own reads after it (they share the
+    // authenticated fetch) are not this handler's calls.
+    const triggers = (authFetchSpy.mock.calls as unknown as Array<[string, RequestInit]>).filter(([u]) =>
+      String(u).includes('/trigger'),
+    );
+    expect(triggers).toHaveLength(1);
+    const [url, init] = triggers[0];
     expect(url).toContain('/api/v1/automation/copy_plan_flow/trigger');
     const body = JSON.parse(String(init.body));
     expect(body.params).toEqual({ comment: 'hi' });

@@ -397,6 +397,39 @@ export interface VisibleObjectExtension {
   label: unknown;
   fieldPatches: Record<string, AnyRec>;
   /**
+   * [ADR-0146 D10] Its `fieldGroups` records (`[]` when absent): the whole
+   * field arrangement the base's paired `.custom` package declares for the
+   * target. Carried for the one reader that addresses an object's groups by
+   * key (`validate-translation-references.ts`, `_sections.KEY`); like
+   * `validations`, carrying them changes nothing about which entries survive.
+   * Which package may write the key is the arrangement judge's question
+   * (`os validate` refuses any other writer), not this fold's.
+   */
+  fieldGroups: AnyRec[];
+  /**
+   * The record entries of its `relatedLists` (the `.custom` arrangement,
+   * ADR-0146 D10; a bare name carries no title and is left out) and of its
+   * `place` (`[]` when none). The ones naming a `list` are the child-list
+   * entries the extension brings onto the target's record-page tabs, each with
+   * its optional `label`; a field or group placement names none and is
+   * skipped by the reader. Carried for the
+   * one reader that addresses a tab title by list name
+   * (`validate-translation-references.ts`, `_relatedLists.LIST`); like
+   * `validations`, carrying them changes nothing about which entries survive.
+   */
+  relatedListEntries: AnyRec[];
+  /**
+   * [#36595] Its `relatedLists` as written, bare names included (`undefined`
+   * when it writes none): the `.custom` arrangement (ADR-0146 D10). Where the
+   * key is written, each entry REPLACES every entry of the owner and of the
+   * placements that it covers (`relatedListNameCovers`), so a bare name or an
+   * unlabelled entry takes a title away and `{ list, hidden: true }` takes the
+   * tab away (`registry-custom-arrangement.ts`, `@objectstack/objectql`). The
+   * one reader that needs the bare names is the `_relatedLists.LIST` check of
+   * `validate-translation-references.ts`.
+   */
+  relatedListArrangement?: unknown[];
+  /**
    * [#33494] Set on an entry the host's registry already holds
    * ({@link StoredObjectExtension}), folded in at its priority but never
    * located: its fields are no field of the stack, so no walk names one.
@@ -483,6 +516,12 @@ export function objectExtensionsByTarget(
         priority: typeof ext.priority === 'number' ? ext.priority : 200,
         fields: recordsOf(ext.fields),
         validations: recordsOf(ext.validations),
+        fieldGroups: Array.isArray(ext.fieldGroups) ? ext.fieldGroups.filter(isRec) : [],
+        relatedListEntries: [
+          ...(Array.isArray(ext.relatedLists) ? ext.relatedLists : []),
+          ...(Array.isArray(ext.place) ? ext.place : []),
+        ].filter(isRec),
+        ...(Array.isArray(ext.relatedLists) ? { relatedListArrangement: ext.relatedLists } : {}),
         label: ext.label,
         fieldPatches: isRec(ext.fieldPatches)
           ? Object.fromEntries(

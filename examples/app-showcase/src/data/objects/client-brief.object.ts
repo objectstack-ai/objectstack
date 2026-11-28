@@ -54,6 +54,7 @@ export const ClientBrief = ObjectSchema.create({
   label: 'Client Brief',
   pluralLabel: 'Client Briefs',
   icon: 'share-2',
+  color: 'pink',
   description:
     'A client-facing project brief published by opaque share link — the showcase\'s `publicSharing` demonstration (ADR-0047).',
 

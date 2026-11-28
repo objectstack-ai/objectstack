@@ -1,0 +1,68 @@
+{
+  "name": "@objectstack/knowledge-pgvector",
+  "version": "19.0.0-next.2",
+  "license": "Apache-2.0",
+  "description": "PostgreSQL + pgvector knowledge adapter for ObjectStack: an open vector store for self-hosted deployments.",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "dev": "tsc -w",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/knowledge-pgvector --project tsconfig.test.json"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/objectql": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "knowledge",
+    "rag",
+    "pgvector",
+    "postgresql",
+    "vector-search"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/knowledge-pgvector"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

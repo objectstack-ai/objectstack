@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { formTypeWriteRefusal } from './protocol-form-writes.js';
+import { readUnreadableFormBodies } from './protocol-form-reads.js';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -81,7 +83,6 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
-import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -97,7 +98,7 @@ import { type I18nLabel } from '@objectstack/spec/ui';
 // reference on the narrow `/ui` entry; the export statement is what keeps
 // no-unused-locals green. index.ts deliberately does not re-export it
 // (curated entry, unchanged).
-import { type FormFieldInput } from '@objectstack/spec/ui';
+import { type FormFieldInput, type I18nLabel, type UnreadableFormBody } from '@objectstack/spec/ui';
 export type { FormFieldInput };
 import { type TranslationBundle } from '@objectstack/spec/system';
 import {
@@ -107,8 +108,6 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
     type MetadataLock,
-    type MetadataLockSource,
-    type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 // [#28409, ADR-0146 D3 / D8 item 2] The pair's id, the one spelling N-08 owns,
 // and the one predicate that says a stored row is the served override of a
@@ -621,7 +620,7 @@ import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 import { ProtocolRegistryHydrationFacet, type ObjectRegistryRefusal, type RegistryHealStop, type RegistryWriteThroughRequest } from './protocol-registry-hydration.js';
 import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
-import { ProtocolSaveFacet } from './protocol-save.js';
+import { ProtocolSaveFacet, packagelessRowHeldBaseDraftAddress } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
 import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.js';
 import type { RegistryQuestion } from './registry-question.js';
@@ -1590,6 +1589,11 @@ export class ObjectStackProtocolImplementation implements
         return restoredBodyDerivation.call(host, type);
     }
 
+    /** [ADR-0159 card ② items 5 and 7] {@link formTypeWriteRefusal}, asked of a restored body against its binding. */
+    private formRestoreRefusal(type: string, item: unknown, name: string, binding: string | null): Promise<Error | undefined> {
+        return formTypeWriteRefusal(protocolHost(this), type, item, name, binding);
+    }
+
     /**
      * [#21470] What a restore passes to `repo.restoreVersion` as
      * `deriveRestoredBody`: the divergent `name` refusal FIRST, then
@@ -1625,6 +1629,7 @@ export class ObjectStackProtocolImplementation implements
     private restoredBodyWriter(type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
         // [#25467 cut 8] The body moved to `protocol-authoring-gate.ts` (see `AuthoringGateHost`).
         const host: ThisParameterType<typeof restoredBodyWriter> = {
+            formRestoreRefusal: (...a) => this.formRestoreRefusal(...a),
             objectExtensionItemRefusal: (...a) => this.objectExtensionItemRefusal(...a),
             refuseRestoredBodyTheSaveDoorRefuses: (...a) => this.refuseRestoredBodyTheSaveDoorRefuses(...a),
             restoredBodyDerivation: (...a) => this.restoredBodyDerivation(...a),
@@ -3048,6 +3053,11 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolDiscoveryAndBasesFacet.getPackagedMappingBase(protocolHost(this), name);
     }
 
+    /** Contract: the shared docblock on {@link getPackagedPageBase}; [ADR-0159 D5] an old-shape base's form is its projection. */
+    getPackagedFormBase(name: string): unknown {
+        return ProtocolDiscoveryAndBasesFacet.getPackagedFormBase(protocolHost(this), name);
+    }
+
     /**
      * [#30062, ADR-0146 D2] The base package a SERVED metadata document is the
      * declared override of, or `undefined` when it is none — read off the
@@ -3523,6 +3533,11 @@ export class ObjectStackProtocolImplementation implements
     async getMetaItemsPerPackage(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItemsPerPackage(protocolHost(this), request);
+    }
+
+    /** Contract: {@link readUnreadableFormBodies} [ADR-0159 D6 rule 7]; a server-only extension the anonymous form doors feature-detect. */
+    async getUnreadableFormBodies(): Promise<UnreadableFormBody[]> {
+        return readUnreadableFormBodies(protocolHost(this));
     }
 
     /**
@@ -4350,6 +4365,10 @@ export class ObjectStackProtocolImplementation implements
      * `@objectstack/rest`, and its runtime twin) asks for it; every other
      * reader of this method reads no draft. A failed draft read throws, as
      * the overlay read does, for the same [#5707] reason.
+     *
+     * [#36601] `opts.withVersion` adds `overlayVersion`: the active row's
+     * keyed version token at this address (`null` for none), which a per-item
+     * publish there takes as `If-Match`. Without it the key is not served.
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -4357,44 +4376,8 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }, opts: { withDraft?: boolean } = {}): Promise<{
-        type: string;
-        name: string;
-        code: unknown | null;
-        overlay: unknown | null;
-        overlayScope: 'env' | null;
-        effective: unknown | null;
-        /** [#29814] The pending draft row as stored, only when `opts.withDraft` asked; `null` for none. */
-        draft?: unknown | null;
-        /**
-         * Load-time validation result for the effective payload — same
-         * shape attached to getMetaItems/getMetaItem by
-         * decorateMetadataItem. Undefined for types without a registered
-         * Zod schema (function/service/router). Lets the Studio edit
-         * page surface invalid-metadata banners + inline field errors
-         * without a second round-trip.
-         */
-        _diagnostics?: MetadataDiagnostics;
-        // ── ADR-0010 protection envelope ──
-        lock: MetadataLock;
-        lockReason?: string;
-        // `MetadataLockSource` (artifact | package | env-forced) — the only
-        // producer feeding this field on this path is the item-lock
-        // resolution's `lockSource` ([#21738] {@link resolveItemLock}: the
-        // binding layer's declared `_lockSource`), typed
-        // `MetadataLockSource | undefined`. The `'overlay'` arm this annotation
-        // used to carry was dead: the door's `'artifact' | 'overlay'` is the
-        // resolution's `layer`, which `getEffectiveLock` reports in its refusal
-        // text and which never feeds this response (commit 11b779e0f).
-        lockSource?: MetadataLockSource;
-        lockDocsUrl?: string;
-        provenance?: MetadataProvenance;
-        packageId?: string;
-        packageVersion?: string;
-        editable: boolean;
-        deletable: boolean;
-        resettable: boolean;
-    }> {
+    }, opts: { withDraft?: boolean; withVersion?: boolean } = {}): ReturnType<typeof getMetaItemLayered> {
+        // [#36601] The answer's shape is the facet's own (`overlayVersion` joined it), declared once there.
         // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItemLayered(protocolHost(this), request, opts);
     }
@@ -5125,16 +5108,16 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#22737] A NESTED-RELATION condition is evaluated on its TARGET object
      * (`ObjectQL.lowerRelationConditions` reads it as the caller), so the
-     * target is asked the spec's one exposure decision for
-     * {@link RELATION_CONDITION_TARGET_OPERATION}. A target it does not serve
-     * is REFUSED in the data door's own exposure answer: `404
-     * OBJECT_API_DISABLED` for the off switch, `405
-     * OBJECT_API_METHOD_NOT_ALLOWED` with the effective operation set for a
-     * whitelist. Refused, not withheld as {@link servedExpand} withholds:
-     * dropping a condition would widen the result, and a related object the
-     * caller may not read already answers this position with a refusal. The
-     * decision takes no caller. The target is named, as the `internal: true`
-     * refusal at this hop names it: it is the lookup's declared target.
+     * target is asked FIRST [#35427] whether its package is disabled (the data
+     * route's predicate and order: `404 OBJECT_PACKAGE_DISABLED`, unexposed or
+     * not), then the spec's one exposure decision for
+     * {@link RELATION_CONDITION_TARGET_OPERATION}: `404 OBJECT_API_DISABLED` for
+     * the off switch, `405 OBJECT_API_METHOD_NOT_ALLOWED` with the effective
+     * operation set for a whitelist. Refused, not withheld as {@link servedExpand}
+     * withholds: dropping a condition would widen the result, and a related
+     * object the caller may not read already answers this position with a
+     * refusal. The decision takes no caller. The target is named, as the
+     * `internal: true` refusal at this hop names it: the lookup's declared target.
      */
     private refuseUnservedRelationTarget(target: string, param: string): void {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
@@ -5154,11 +5137,11 @@ export class ObjectStackProtocolImplementation implements
      * `enable` block (`apiEnabled: false` answers 404, an `apiMethods` whitelist
      * that does not grant the verb answers 405); the expansion's target was
      * never asked, so `GET /data/{source}?$expand={lookup}` served the row
-     * fields of an object `GET /data/{target}` refuses. Every level is asked the
-     * spec's one decision, `canServeApiOperation(enable, 'get')`
-     * ({@link EXPANSION_TARGET_OPERATION} says why `get`), against that level's
-     * own target, and the decision takes no caller, so an administrator and a
-     * member get the same tree.
+     * fields of an object `GET /data/{target}` refuses. Every level's own target
+     * is asked the spec's one decision, `canServeApiOperation(enable, 'get')`
+     * ({@link EXPANSION_TARGET_OPERATION} says why `get`), and [#35427] whether
+     * its package is disabled (its route's `404 OBJECT_PACKAGE_DISABLED`); both
+     * take no caller, so an administrator and a member get the same tree.
      *
      * Withheld, not refused, and that is the precedent measured on this door: a
      * related record the caller may not READ is answered by the engine's
@@ -5189,7 +5172,7 @@ export class ObjectStackProtocolImplementation implements
         return servedExpand.call(host, source, expand, depth);
     }
 
-    /** [#22661] Does the target's declared exposure serve an expansion read of it? */
+    /** [#22661, #35427] Do the target's declared exposure and its package (not disabled) serve an expansion read of it? */
     private servesExpansionTarget(target: string): boolean {
         // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
         const readEngine = () => this.engine;
@@ -8010,7 +7993,12 @@ export class ObjectStackProtocolImplementation implements
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
             readItemActiveRows: (...a) => this.readItemActiveRows(...a),
         };
-        return packagelessDraftAddress.call(host, type, name, member, body);
+        // [#35524] …at the draft address the read naming no package takes
+        // there: the row-held base's, where the member's active rows are
+        // bound to one dependent only ({@link packagelessRowHeldBaseDraftAddress}).
+        return packagelessRowHeldBaseDraftAddress(
+            protocolHost(this), type, name, member, packagelessDraftAddress.call(host, type, name, member, body),
+        );
     }
 
     /**
@@ -9807,6 +9795,10 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
         userTextLocales?: readonly (string | undefined)[];
+        /** [#36601] The caller's pin on the active row this promotion replaces (`PublishMetaItemRequestSchema.parentVersion`). */
+        parentVersion?: string | null;
+        /** [#36350] The caller's pin on the draft this promotion reads (`PublishMetaItemRequestSchema.draftVersion`). */
+        draftVersion?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
@@ -9825,8 +9817,8 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
-        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote (with a `form`'s removed old-shape rows). Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null; removedOldShapeRows?: readonly import('./protocol-form-writes.js').AppliedOldShapeFormRowRemoval[] };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
         /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
@@ -10683,6 +10675,14 @@ export class ObjectStackProtocolImplementation implements
      * real orphan object, and whether an adoption refuses, renames or leaves
      * the prefix unjudged is the maintainer's question (#28776's ruling). A
      * draft is judged by both owner judges when it is promoted.
+     *
+     * ## [#37604] The platform's own record is no orphan
+     *
+     * A package-less row whose body carries the platform's mark is the record
+     * the platform registers at every boot (`isPlatformRecordRow`,
+     * `@objectstack/metadata`), kept beside a package's item of the name in a
+     * slot of its own. It is left as it is stored, as an artifact-backed
+     * overlay is: rebound, it would become the target's item, mark and all.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;

@@ -5,7 +5,7 @@ description: Pluggable RAG / knowledge retrieval for ObjectStack agents — prot
 ---
 
 ObjectStack does not ship its own RAG engine. The market has many mature
-options (RAGFlow, LlamaIndex, Dify, Vectara, pgvector + custom pipelines)
+options (LlamaIndex, Dify, Vectara, pgvector + custom pipelines)
 and competing with them on chunking, embeddings, hybrid retrieval, and
 rerankers is not where the framework can add value.
 
@@ -21,7 +21,9 @@ The Knowledge Protocol contract and the `service-knowledge` orchestrator are ope
 framework mechanisms. The AI **consumer** that wires the `search_knowledge` tool
 into an in-product chat loop (shown below) ships in
 **ObjectOS**. On the open-source framework, reach your data through `@objectstack/mcp`
-(BYO-AI) instead.
+(BYO-AI) instead: its door serves the same `search_knowledge` tool wherever the
+knowledge service is installed, searching only the sources whose `aiExposed` is
+not `false`, as the caller.
 </Callout>
 
 This document describes the **why**, the **contract**, the **plugin
@@ -50,7 +52,7 @@ distinctive value to add **around** them:
    caller's `ExecutionContext` so RLS naturally applies — the same
    policy that protects REST and ObjectQL queries also protects what
    the LLM can read.
-3. **Realtime sync.** ObjectQL `record.*` events drive incremental
+3. **Realtime sync.** ObjectQL `data.record.*` events drive incremental
    reindex without manual cron jobs.
 4. **Unified audit + observability.** Knowledge searches participate in
    the same trace / audit pipeline as REST, ObjectQL, and tool calls.
@@ -78,11 +80,11 @@ delegates the rest to plugins.
 │  • Source registry (metadata)        │    │                              │
 │  • Ingest router → adapter.upsert    │    │  • knowledge-memory   │
 │  • Search router  → adapter.search   │    │      (dev/test only)         │
-│  • Permission wrapper (RLS filter)   │    │  • knowledge-ragflow  │
-│  • Event sync (record.* → upsert)    │    │      (reference impl, REST)  │
-│  • Audit + metrics                   │    │                       │
-│                                      │    │  (llamaindex / dify /  │
-│  Registers `knowledge` service       │    │   pgvector: planned)   │
+│  • Permission wrapper (RLS filter)   │    │  • knowledge-pgvector │
+│  • Event sync (record.* → upsert)    │    │      (PostgreSQL + pgvector) │
+│  • Audit + metrics                   │    │  • knowledge-turso    │
+│                                      │    │      (libSQL file, local)    │
+│  Registers `knowledge` service       │    │  (llamaindex / dify: planned)│
 └──────────────────────────────────────┘    └──────────────────────────────┘
               ▲
               │ consumes
@@ -104,63 +106,186 @@ any AI consumer.**
 
 ## 3. Protocol surface
 
-### 3.1 `KnowledgeSource` (declarative metadata)
+### 3.1 `KnowledgeSource` (the `knowledge_source` metadata type)
 
-A `KnowledgeSource` describes *what* to index and *which adapter* to
-use. It is stored as metadata (versioned, environment-scoped) just
-like a view or a flow.
-
-Three source kinds:
-
-| Kind     | Origin                                              | Example use case                |
-|----------|-----------------------------------------------------|---------------------------------|
-| `object` | An ObjectQL object — each record becomes a document | Customer notes, KB articles     |
-| `file`   | A folder in `IStorageService`                       | Onboarded PDFs, uploads         |
-| `http`   | A list of remote URLs                               | External docs, RSS, sitemaps    |
-
-`kind` is the discriminator, and each kind carries its own keys — a key from one
-kind is rejected on another:
+A knowledge source says *which records* to index, *which of their fields*
+become searchable text, and, when it is not the deployment's store, *which
+adapter* holds the index. It is a governed
+metadata type, `knowledge_source` (ADR-0161 K4): a package ships it as a
+`*.knowledge-source.ts` (or `.yml`) file under the stack's `knowledgeSources`
+collection, and an administrator creates or changes one at run time in Studio
+or through MCP. It takes no environment overlay.
 
 ```typescript
-// object — content comes from the named fields of each matching record
-source: {
-  kind: 'object',
-  object: 'kb_article',
-  contentFields: ['title', 'body'],       // at least one, required
-  metadataFields: ['category', 'author'], // optional, carried onto the document
-  where: { status: 'published' },         // optional ObjectQL filter
-}
+// src/ai/kb-articles.knowledge-source.ts
+import type { KnowledgeSource } from '@objectstack/spec/ai';
 
-// file — every object under a storage prefix
-source: {
-  kind: 'file',
-  prefix: 'knowledge/handbook/',
-  mimeTypes: ['application/pdf', 'text/markdown'], // optional; omit to take all
-}
+export const KbArticles: KnowledgeSource = {
+  name: 'kb_articles',                      // snake_case; with its package, the source's identity
+  label: 'Knowledge base',
+  // adapter: 'pgvector',                   // optional; omitted ⇒ the deployment's store
+  source: {
+    kind: 'object',                         // the one kind
+    object: 'kb_article',
+    content: ['title', 'body'],             // required, at least one, each field named
+    metadataFields: ['category', 'author'], // optional, carried onto the document
+    where: { status: 'published' },         // optional ObjectQL filter
+    split: { strategy: 'markdown', maxChars: 600 }, // optional; see 3.5
+  },
+};
 
-// http — an explicit URL list (each must be a valid URL)
-source: {
-  kind: 'http',
-  urls: ['https://docs.example.com/guide', 'https://docs.example.com/faq'],
-  userAgent: 'ObjectStack-KnowledgeBot/1.0', // optional
-}
+// objectstack.config.ts — the source mounts the knowledge service: no `requires` entry
+defineStack({ knowledgeSources: [KbArticles], /* … */ });
 ```
 
-Every source binds to a named **adapter id** (e.g. `'ragflow'`,
-`'memory'`). The adapter id is resolved at runtime by the plugin that
-registers itself with that name. Adapter config (endpoint, dataset id,
-…) is passed through opaquely.
+A source indexes the records of one object. Each matching record becomes a
+document; `content` lists the fields whose text is the document body, in
+order.
+
+**`content` lists its fields by name.** Embedding is egress: the text of every
+listed field is sent to the embedder and kept in an index outside the row
+store. So the list is explicit — `'*'` is refused at parse, with the
+instruction to list the fields — and a field added to the object later is not
+indexed until an author adds it here. Credential-class and `internal` fields
+are never indexed, even when named.
+
+**Every key has a reader, and an unknown key is refused**, never dropped. The
+keys an earlier release declared and nothing read are refused with what to
+write instead, and `os migrate meta --from 18` converts the mechanical ones:
+
+| Before 19 | Now |
+|:--|:--|
+| `id` | `name` (the value is unchanged, so the index is found again) |
+| `source.contentFields` | `source.content` (a `'*'` member is replaced by hand with the field names) |
+| `embedding`, `vectorStore` | removed: the embedder and the store are the deployment's, never a source's |
+| `adapterConfig` | removed: an adapter takes its settings as options of the plugin that mounts it |
+| `refresh.cron` | removed: nothing scheduled it |
+| `source.kind: 'file'` / `'http'` with `prefix`, `mimeTypes`, `urls`, `userAgent` | removed: a source indexes an object's records |
+
+A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
+`'memory'`), resolved at run time to the plugin that registered itself under
+that name (ADR-0161 K4):
+
+- **Named** — that adapter. One that is not mounted is refused at index and
+  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Omitted** — the deployment's adapter: the store the runtime mounted beside
+  the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
+  `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
+  else the only adapter registered. An adapter application code registers is
+  never the deployment's by registering. With several registered and none the
+  deployment's, the source is refused at registration and at its save,
+  `VALIDATION_ERROR` (400), naming them. The adapter is placed where it is
+  used, so a source registered before its store started finds it.
+
+**What mounts the service.** A stack that ships a `knowledge_source` — any
+item in its `knowledgeSources`, at the top level or in a package — is served
+the knowledge service and the deployment's store, exactly as
+`requires: ['knowledge']` serves them (the `mountedBy` of the `knowledge` row
+in `PLATFORM_CAPABILITY_PROVIDERS`). A host that mounts
+`KnowledgeServicePlugin` itself keeps its own, and the runtime adds no store.
+
+#### How a source is loaded
+
+The knowledge service reads the published `knowledge_source` items when it
+starts and follows the type from then on, with no restart:
+
+- **Added** — the source is registered, its index status is read, and a build
+  that is due runs (§3.6).
+- **Changed** — the source is registered again and its fingerprint and recipe
+  hash are read again: a changed `where` or `metadataFields` rebuilds inside
+  the same generation; a changed `content` list or `split` builds a new one.
+- **Removed** — the source is unregistered and its index is dropped through
+  the adapter's `dropSource` (§3.4). Over an adapter without that member the
+  index is kept, and the service says so once in its log, naming the source.
+
+A deployment that holds a `knowledge_source` item but mounts no knowledge
+service says so once at boot, naming the items: nothing loads, indexes or
+searches them until `KnowledgeServicePlugin` and an adapter are mounted. Such
+an item is one the stack does not ship — saved at run time or installed in a
+package after the boot — since a shipped one mounts the service.
+
+#### Who may author one
+
+Saving a source starts an egress and, with a paid embedder, a bill. Two guards
+stand at every door that writes one — Studio / REST `/meta`, the dispatcher,
+and the MCP draft door:
+
+1. **A capability of its own.** Creating, changing, publishing, rolling back
+   or deleting a `knowledge_source` needs `manage_knowledge_sources` **beside**
+   `manage_metadata`. Platform administrators hold it by default; nobody else
+   does until it is granted. A grant on the indexed object's records does not
+   imply it. Over MCP it is the human's own grant that is read, never the
+   agent's. The package doors ask it too: every write to an existing package
+   that holds a knowledge source (enable, disable, publish, publish-drafts,
+   discard-drafts, the commit revert, rollback, revert, adopt-orphans,
+   duplicate, the manifest update and delete) needs the capability, and is
+   refused `403` naming it otherwise. A package that holds none is written as
+   before. Two doors are not asked. Installing a package is one: a packaged
+   source arrives by the install door's own admission. Creating a package's
+   customization pair (ensure-customization) is the other: it writes nothing
+   of the base, and the pair it creates is empty. A duplicate also admits
+   each knowledge source it copies for the caller, by guard two below.
+2. **Source admission at save.** A source is saved only when its author may
+   themselves search what it would index. The save asks the same gates a
+   search asks ([Source admission](#source-admission-exposure-and-field-level-rules))
+   as the author: an object of a disabled package, an object the API does not
+   serve for `search`, a system object without `enable.aiReadable`, or a field
+   the author may not query refuses the save `403`, naming the object or the
+   field. The fields judged are the ones the source serves (`content`,
+   `metadataFields`, the title field) and the ones its `where` reads. A
+   verdict that cannot be reached, or a knowledge service that is registered
+   and cannot be resolved, refuses `503`; nothing is written.
+
+#### One name, one source
+
+A source is identified by the package that ships it and its `name`
+(ADR-0150): two packages may each ship a source of one name, and each has its
+own index. Where the name crosses the AI face — the `sources` list
+`search_knowledge` answers, its `sourceIds` argument, and the `sourceId` of a
+hit — a package's source is spelled `NAMESPACE-NAME` and a source no package
+holds keeps its bare name.
+
+`KnowledgeServicePlugin({ sources })` and `IKnowledgeService.registerSource`
+stay a door for the same schema: a registration in code is parsed by it (a
+retired key is refused with its prescription, never converted), belongs to no
+package, and takes a bare name. A name is one source, whichever door it came
+through: a code registration and an environment-authored item of one name are
+the same slot, and the second to arrive is refused `409`, naming both doors. A
+metadata item reloading its own earlier version is not a second arrival.
 
 ### 3.2 `KnowledgeDocument`, `KnowledgeChunk`, `KnowledgeHit`
 
 Canonical shapes shared by every adapter:
 
 - `KnowledgeDocument` — one logical document (`id`, `sourceId`,
-  `sourceRecordId?`, `content`, `metadata`, `permissions?`).
-- `KnowledgeChunk` — adapter-produced chunk of a document. The framework
-  does **not** chunk; adapters do.
+  `sourceRecordId?`, `content`, `metadata`, `permissions?`,
+  `organizationId?`, `docHash?`). `organizationId` is the organization of
+  the record the document was assembled from: the service sets it from the
+  record's `organization_id` under a walled tenancy posture (`group` or
+  `isolated`), and leaves it absent under `single` and for a record with no
+  organization — see
+  [Organization scope](#organization-scope). `docHash` is a hash of the
+  assembled document — content, title and metadata, and the organization
+  when the document has one, in a stable key order, behind a version prefix
+  (`v1:`). The service computes both on every document it hands an adapter;
+  the adapter stores them and returns `docHash` as stored, and never computes
+  or alters either.
+- `KnowledgeDocument.chunks?` — the document's passages, cut by the
+  service's splitter (see [3.5 The split](#35-the-split)). Set by the service,
+  and only on a document handed to an adapter that declares
+  `capabilities.chunks`. Derived from `content`, so not part of `docHash`.
+- `KnowledgeChunk` — one passage: `id` (the service sets it to
+  `${documentId}#${index}`, so a hit's `chunkId` is the same on every adapter),
+  `documentId`, `index`, `content` (what the adapter embeds and returns as a
+  snippet), and `headingPath?` (the headings it sits under, outermost first,
+  under the `markdown` strategy). The adapter indexes each passage as given and
+  does not split it again. A passage has no `metadata` of its own: it takes its
+  document's `metadata`. The chunk's former `metadata` key, which nothing wrote
+  or read, is retired, and a chunk that carries one is refused with the fix.
 - `KnowledgeHit` — a search result (`chunkId`, `documentId`, `score`,
-  `snippet`, `sourceRecordId?`, `metadata`).
+  `snippet`, `sourceRecordId?`, `metadata`, and `docHash?` and
+  `headingPath?`: the stored hash of the hit's document and the heading path
+  of its passage, both as the adapter stores them).
 
 The `sourceRecordId` field is the linchpin of permission-aware
 retrieval: when a hit references an ObjectQL record, the
@@ -168,6 +293,94 @@ retrieval: when a hit references an ObjectQL record, the
 caller's `ExecutionContext` and drops hits the user is not allowed to
 read. **A hit that the user could not have queried directly is never
 returned.**
+
+The re-check runs after ranking, so the service asks for more than it
+answers. For a caller who is not the system identity, each source is asked
+for `topK × 5` hits. When the hits that survive the
+re-check name fewer than `topK` records (several passages of one record
+count once), every source that answered as many hits as it was
+asked is asked once more, for `topK × 20`. That is the cap: a caller who may
+read fewer than `topK` of the rows within the cap gets fewer than `topK`
+hits. An
+adapter that answers fewer than it was asked (one that caps `topK`) is not
+asked again. For the system identity every source is asked for `topK`
+once. The answer is at most `topK` hits.
+How many hits the re-check removed is logged at `debug`, never returned to
+the caller.
+
+#### Records, not passages
+
+A search answers passages by default (`granularity: 'chunk'`): several
+passages of one record can take several of the `topK` places. With
+`granularity: 'record'` it answers records: one hit per record, the record's
+best-scoring passage, and `topK` counts records. Every source is then asked
+for `topK × 5` passages, for every caller, and refilled once at `topK × 20`
+when fewer than `topK` records survive; that is the cap, and fewer records
+within it means fewer hits, logged at `debug`.
+
+`groupBy` names a metadata field and groups by its value instead — "which
+policies", not "which clauses" — with the best hit of each group and the
+value in the hit's `metadata`; it implies record granularity, and is refused
+with `granularity: 'chunk'` (`VALIDATION_ERROR`, 400, as are an empty
+`groupBy` and an unknown `granularity`). Hits with the same value are one group whichever
+source they come from. An `object` source that does not list the field in
+its `metadataFields` is not searched, and a record with no value for it is
+not answered: a hit is never answered ungrouped.
+
+Each record-level hit is checked against its record as it reads now, one
+system-context read per source of only the records about to be answered
+(the source's `where` AND their ids). A record that was deleted or left
+`where` since it was indexed, or whose document hash computed now differs
+from the hit's `docHash`, is not answered, and the next record moves up (at
+most three rounds; a hit still unchecked after them is not answered). Its
+document is repaired in the background — a record-sync message with reason
+`freshness` [through the queue](#through-the-queue), or the inline sync
+without one — once until its hash matches again — except in a source with
+`refresh.onRecordChange: false`, whose index an external indexer owns: the
+service writes nothing there, and the hit is only not answered. A hit whose
+adapter stores no hash is checked for membership only. Record granularity
+also reads the display field in the permission re-check (as the caller, in
+the same query), so a caller's hit carries the record's `title` as it reads
+now; the system identity is not re-checked, so its hits carry the indexed
+title (the same whenever the hash matched).
+
+A hit's `title` is the value of the object's display field (ADR-0079
+`resolveDisplayField`: `nameField`, else the derived title field), set
+when the document is built. It is empty when that field is a
+credential-class or `internal` field, when the value is empty, and when
+the object resolves no display field. A source over an object with no
+registered definition reads a field named `title`. Documents indexed
+before this rule carry the value of a field named `title` until a complete
+reindex writes them again. So a source over an object that declares a
+`title` field the index may carry and the source does not serve (the display
+field is another field, none resolves, or the object's fields cannot be
+enumerated) is searched for a caller other than the system context only once
+its adapter's index status reports the fingerprint and the recipe hash the
+service computes now. The recipe hash names the title rule and is recorded
+only when a complete build completes, and only a build that purges removes
+the documents it did not walk. Until then the search refuses the source
+`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass, a source
+reload, the reconcile or `os knowledge rebuild` builds it. Under
+`buildAtBoot: false` (which also turns off the build on reload) nothing but
+the reconcile, where it runs, or `os knowledge rebuild` builds it. No build
+proves such a source, so it stays refused, when its
+`refresh.onRecordChange` is `false` (its builds purge nothing, and the boot
+pass and the reconcile leave it alone) or when its adapter has no
+`listDocuments`, no `completeBuild` or no index status.
+
+The proof covers the index as its last complete build left it. So each hit of
+a proven source is also checked against its record as it reads now, with one
+read per source per search round in the system context. A hit is served only
+when the record still belongs to the source (its `where` included) and the
+document the store holds is the one the current recipe assembles from it (the
+same `docHash`). A document the build's purge left in place, or one written
+after the build under an earlier recipe, is never served. The search repairs
+a stale or missing record's own document in the background, once per document
+until a later search finds it current; a document under a foreign id is
+dropped and not repaired. A check that cannot be made drops the hit: the
+read fails, the hit names no record or carries no hash, the hash cannot be
+computed, or the tenancy posture cannot be read. The read decides only whether
+a hit is served; nothing it reads is added to the hit.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -178,15 +391,13 @@ interface IKnowledgeService {
   getAdapter(id: string): IKnowledgeAdapter;
   listAdapters(): string[];
 
-  // Sources
+  // Sources — registration in code; a metadata item is loaded by the service
   registerSource(source: KnowledgeSource): void;
   unregisterSource(sourceId: string): void;
   listSources(): KnowledgeSource[];
   getSource(sourceId: string): KnowledgeSource | undefined;
 
-  // Documents
-  indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void>;
-  deleteDocument(sourceId: string, documentId: string): Promise<void>;
+  // Index
   reindexSource(sourceId: string, opts?: KnowledgeReindexOptions): Promise<KnowledgeReindexResult>;
 
   // Search
@@ -194,28 +405,222 @@ interface IKnowledgeService {
 }
 ```
 
-`KnowledgeSearchOptions` includes `sourceIds`, `topK`, `filter`, and
+A `sourceId` is the name the AI face spells: a bare name for a source no
+package holds, `NAMESPACE-NAME` for a package's. A bare name that only
+packages hold resolves to the one package's source when one holds it, and is
+refused `409`, naming the candidates, when several do. There is no push door:
+the service builds every document itself, from the records a source selects —
+`indexDocument` and `deleteDocument` left the contract with the `file` and
+`http` kinds they served.
+
+`KnowledgeSearchOptions` includes `sourceIds`, `topK`, `filter`,
+`granularity`, `groupBy`, and
 the all-important `executionContext` (from the permission-aware tool
-execution work — see `actions-as-tools.mdx`). `KnowledgeReindexOptions`
+execution work — see `actions-as-tools.mdx`). See
+[Records, not passages](#records-not-passages) for `granularity` and `groupBy`. `KnowledgeReindexOptions`
 accepts `dryRun` and `limit`; `reindexSource` returns a
-`KnowledgeReindexResult` (`indexed`, `discovered`, `ok`, …).
+`KnowledgeReindexResult` (`indexed`, `discovered`, `skipped`, `purged`,
+`failed`, `failures`, `ok`, …) — see [Reindex: skip and purge](#reindex-skip-and-purge)
+and [3.5 The split](#35-the-split).
 
 ### 3.4 `IKnowledgeAdapter` (implemented by plugins)
 
 ```ts
 interface IKnowledgeAdapter {
   readonly id: string;
+  readonly capabilities?: { chunks?: boolean };        // takes the service's passages
+  readonly embedding?: {                                // what its embedder is
+    maxInputTokens?: number;                            //   longest input it accepts
+    model?: string; dimensions?: number; variant?: string; // what its vectors are
+  };
   upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void>;
   search(query: string, opts: AdapterSearchOptions): Promise<KnowledgeHit[]>;
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
+  listDocuments?(
+    ctx: AdapterContext,
+    opts: { cursor?: string; limit: number },
+  ): Promise<{ documents: { documentId: string; docHash?: string }[]; nextCursor?: string }>;
+  indexStatus?(ctx: AdapterContext): Promise<{ fingerprint?: string; recipeHash?: string; building?: boolean }>;
+  beginBuild?(ctx: AdapterContext): Promise<void>;     // with completeBuild, as a pair
+  completeBuild?(ctx: AdapterContext): Promise<void>;
+  dropSource?(ctx: AdapterContext): Promise<void>;     // everything held for ctx.source
   healthCheck?(): Promise<{ ok: boolean; message?: string }>;
 }
 ```
 
-The adapter surface is **deliberately minimal**: no embedding
-management, no chunk strategy, no rerank toggles. Those are the
-adapter's private concerns. Adapters that need extra knobs expose them
-in their plugin options.
+The adapter contract carries what an adapter **reports**, never how it
+is configured: no embedding configuration, no rerank toggles. Those are the
+adapter's private concerns; adapters that need extra knobs expose them in
+their plugin options. The split is the service's (ADR-0161 K1): an adapter
+that declares `capabilities.chunks` receives every document with the
+service's passages and indexes them as given; one that does not receives
+whole documents, without `chunks`, and splits them itself, as before.
+`embedding.maxInputTokens` reports the longest input the adapter's embedder
+accepts (an adapter fills it from `IEmbedder.maxInputTokens`); the service
+reads it each time it splits, never once at boot, because the embedder may
+register later — an adapter that resolves its embedder late serves it from a
+getter.
+
+Every member past `upsert` / `search` / `delete` is optional (ADR-0161
+K8): an adapter that lacks one keeps working, and the service does what it
+did before that member existed. `AdapterSearchOptions.organizationIds` is the
+caller's organizations; an adapter that reads it ranks only those
+organizations' documents, filtering before it ranks — see
+[Organization scope](#organization-scope). `AdapterSearchOptions.scope` holds a
+search to chosen records the same way — see [Record scope](#record-scope).
+`listDocuments` lists the documents the
+adapter holds for a source, a page of at most `limit` entries at a time, each
+with the `docHash` it was stored with; `nextCursor` is absent once the
+listing is complete. A document written while a listing runs may be missing
+from it — the safe direction, since a missing entry is never purged.
+`indexStatus`, `beginBuild` and `completeBuild` carry the index fingerprint —
+see [§3.6](#36-the-index-fingerprint).
+
+`dropSource` removes everything the adapter holds for a source (ADR-0161 K8,
+item 4): every document, passage and vector of every generation, the one
+under construction included, and what it recorded about the index. The
+service calls it when a source stops being served — its metadata item was
+removed, or a package now holds its name. After it `indexStatus` answers as
+for a source never seen, and a source registered again under the same key is
+built from nothing. Dropping a source the adapter holds nothing for is not an
+error.
+
+`ctx.source.name` is the source's **index key**: the one string an adapter
+keys what it holds by, and the string `KnowledgeDocument.sourceId` carries.
+For a source no package holds it is the name as authored; for a package's
+source the service spells a key that carries the package too, so two
+packages' sources of one name are two keys. An adapter stores and compares
+the key; it never derives it, parses it or shows it to a person.
+
+**The contract test suite.** Every adapter package runs the same suite
+against its own factory:
+
+```ts
+import { runKnowledgeAdapterContract } from '@objectstack/service-knowledge/testing';
+
+runKnowledgeAdapterContract({
+  name: 'my-adapter',
+  makeAdapter: () => new MyAdapter(/* a fresh, empty store */),
+  implements: {
+    listDocuments: true, chunks: true, organizationIds: true,
+    indexStatus: true, builds: true, refusesOtherFingerprint: true, generations: true,
+    scope: true,
+  },
+});
+```
+
+It covers upsert / search / delete, `listDocuments` page boundaries and
+`docHash` round-trips, the organization filter, and — through a real
+`KnowledgeService` — the skip and the purge below, a search from one
+organization under `isolated` and `group`, and the chunk channel: an adapter
+that takes chunks receives the service's passages and indexes them unchanged,
+one that does not keeps receiving whole documents, and a `whole` document over
+the embedder's budget is removed and reported; and the index fingerprint of
+§3.6 — that every call carries one, that a write or a search under another
+is refused by code, a complete reindex as one build, and, for an adapter that
+keeps generations, the switch at the end of a build. `implements` declares the optional members, and the suite
+checks the declaration against the adapter. `./testing` is a test-only,
+ESM-only entry that imports `vitest`; nothing in the runtime entry reaches it.
+`knowledge-memory` runs it as the reference implementation; `knowledge-pgvector`
+runs it against a live PostgreSQL in CI; `knowledge-turso` runs it on libSQL
+`:memory:` and on a `file:` URL in its own unit tests.
+
+### 3.5 The split
+
+The knowledge service cuts documents into passages once, in one splitter,
+and hands the same passages to every adapter that declares
+`capabilities.chunks` — so one source gives the same passages on each of
+them. The object source's `split` key chooses how:
+
+```typescript
+split: {
+  strategy: 'recursive', // 'whole' | 'recursive' | 'markdown'
+  maxChars: 600,         // optional: longest passage, in characters
+  minChars: 200,         // optional: merge adjacent pieces shorter than this (default 200)
+}
+```
+
+| Strategy | How it cuts |
+|----------|-------------|
+| `whole` | One passage per document. |
+| `recursive` (the default) | At blank lines, then line breaks, then sentence ends, then semicolons, then characters — each next level only for a piece still too long. A Markdown table or list item is one unit while it fits; a table that does not fit is cut between rows, each piece repeating the header row. Adjacent pieces are merged while the merged piece is shorter than `minChars`; a short title block leads the text after it. |
+| `markdown` | One section per heading (a `#` inside a code fence is no heading), each cut as `recursive` cuts. Every passage begins with its heading path (`Policy > Transport > Air`), which counts toward its length and is embedded with it, and carries it as `headingPath`. A heading with no text of its own joins the next passage. |
+
+**Sentence ends, for Chinese and English text.** `。？！` end a sentence
+wherever they stand. `. ? !` end one only before whitespace or the end of the
+text, so 「3.2 条」 and 「400.50 元」 stay whole. An end mark followed by a
+closing quote or bracket ends nothing, so the split never falls right after a
+closing quote or bracket: 「他说：“好。”然后」 stays one sentence. `；` ends a
+clause wherever it stands, `;` only before whitespace.
+
+**How long a passage may be.** `maxChars` is the source's `split.maxChars`,
+else the settings page's **Knowledge → Target chunk size**
+(`knowledge.chunk_target`), else 800. And when the adapter reports its
+embedder's `maxInputTokens`, every passage's token estimate (the shared
+`estimateTokens` from `@objectstack/spec/shared`) also stays within **80%** of
+that limit. A passage keeps both bounds, so the effective length is the
+smaller one; with no limit known, only `maxChars` applies. A `minChars` above
+the effective `maxChars` reads as `maxChars`. The splitter never overlaps
+passages.
+
+**`whole` over the limit.** A `whole` document whose estimate is over the 80%
+budget is **removed from the index and reported, never truncated**:
+`reindexSource` counts it in `failed` and names it in `failures`
+(`[{ documentId, reason }]`, at most 20; `failed` counts them all), the event
+sync logs it at `error` with the source, the record id, the estimate and the
+limit. With no limit known nothing is checked.
+The estimate runs high on purpose — on Chinese text about 1.4× a real
+tokenizer — so a `whole` document's usable length is about **60%** of the
+model's limit; choose `recursive` or `markdown` for longer documents.
+
+**A split change is a new index.** `docHash` covers the assembled document,
+not its passages, so the skip alone would keep an unchanged document under
+its old passages. The index fingerprint (§3.6) hashes the resolved split, so
+changing `split`, `chunk_target` or the embedder's limit changes the
+fingerprint: the source's stored index is refused until a complete reindex
+rebuilds it.
+
+### 3.6 The index fingerprint
+
+Vectors from two embedding models — or from two splits of the same text —
+are not comparable, and ranking one against the other answers with noise
+that looks like an answer (ADR-0161 K7). So every index is built under one
+**fingerprint**, which the knowledge service computes and hands to the
+adapter on every call (`AdapterContext.index`, `AdapterSearchOptions.index`):
+
+| Component | Read from |
+|:--|:--|
+| embedding model, `variant`, dimensions | the adapter's `embedding` descriptor — what it reports for the embedder it calls (`IEmbedder.model`, `IEmbedder.dimensions`) |
+| split configuration and the splitter's version | the split the service applies, as resolved; absent for an adapter that splits for itself |
+| content recipe | the object, the ordered content list, and the assembly rule's version |
+
+Beside it rides a **recipe hash** of what assembly reads but no vector
+depends on: the source's `where`, its `metadataFields`, the title field and
+the fields an index may not carry. Both are SHA-256 over values in a fixed
+order, so the same source and the same adapter give the same hashes on every
+machine; no key on a source sets either. An adapter that reports no
+`embedding` descriptor gives the fingerprint no model, so a model change
+cannot be seen for it.
+
+**What the adapter does with it.** A write or a search carrying a
+fingerprint other than the one the source's stored index was built under is
+refused `KNOWLEDGE_REBUILD_REQUIRED` (409), never written into or answered
+from that index. A source that holds nothing takes the first fingerprint it
+is handed. A complete reindex is one build: the service calls `beginBuild`
+before it lists or writes anything, and `completeBuild` once every row is
+written and the purge is done; `completeBuild` records the recipe hash,
+which `indexStatus` reads back. An adapter that keeps **generations**
+(`knowledge-memory` does) builds a new fingerprint's index beside the active
+one and switches to it at `completeBuild`; until then the old one answers
+its own fingerprint. An adapter that does not refuses `beginBuild` under a
+new fingerprint and says how to clear the source so it can be built afresh.
+
+**What a caller sees.** `KnowledgeService.search` over several sources
+answers from the sources it can search, and logs each refused one by name; it
+throws the refusal (with its code and status, and `refused` naming every
+source) only when no source could be searched. The `search_knowledge` tool
+adds a `refused` list naming each refused source, so an agent never reads a
+source that needs a rebuild as one with nothing to say.
 
 ---
 
@@ -227,16 +632,15 @@ Adapters ship as standalone npm packages, registered via the standard
 ```ts
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';
-import { KnowledgeRagflowPlugin } from '@objectstack/knowledge-ragflow';
+import { KnowledgePgvectorPlugin } from '@objectstack/knowledge-pgvector';
+import { KnowledgeTursoPlugin } from '@objectstack/knowledge-turso';
 
 defineStack({
   plugins: [
     new KnowledgeServicePlugin(),
     new KnowledgeMemoryPlugin(),                        // dev / test
-    new KnowledgeRagflowPlugin({                        // production
-      endpoint: process.env.RAGFLOW_URL!,
-      apiKey: process.env.RAGFLOW_KEY!,
-    }),
+    new KnowledgePgvectorPlugin(),                      // self-hosted, PostgreSQL + pgvector
+    new KnowledgeTursoPlugin(),                         // local / not on PostgreSQL, a libSQL file
   ],
 });
 ```
@@ -252,8 +656,139 @@ Each plugin:
 3. Owns its own dependencies (SDK, fetch client, embedder).
 4. Owns its own lifecycle / health checks.
 
-Multiple adapters can co-exist; sources pick which one to use via the
-`adapter` field.
+Multiple adapters can co-exist; a source picks one with its `adapter` field,
+or leaves it out for the deployment's store (§3.1).
+
+### 4.1 `knowledge-pgvector` — the open vector store on PostgreSQL
+
+`@objectstack/knowledge-pgvector` keeps a source's passages and vectors in
+PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector)
+extension, for a self-hosted deployment that wants no separate vector
+service. It takes the service's passages, embeds them with the kernel's
+`embedder` service (or the `embedder` it is given), and answers a search by
+an exact scan.
+
+- **Which database.** The `url` option when it is given, else the platform
+  database when that is PostgreSQL (`OS_DATABASE_URL`). Its own small pool
+  (`poolMax`, default 4; a connection that takes more than
+  `connectTimeoutMs`, default 5000, fails); no pooled connection waits on the
+  embedder. Where organizations
+  have databases of their own, the store is still the ONE database the
+  plugin connects to; organizations are kept apart by its
+  `organization_id` column, which every search filters on before ranking.
+- **Where the tables are.** In their own schema, `os_knowledge` (option
+  `schema`): `knowledge_generation`, one row per source and generation, and
+  one passage table per vector width, `knowledge_vec_d<width>`. Object
+  tables live in the connection's own schema, and the platform's drift
+  checks read only that one — so no store table can collide with an object
+  table or be reported as drift.
+- **When the database is not ready.** Without the `vector` extension — and
+  the right to create it — or the right to create the schema, the plugin
+  still registers and boot goes on: it creates nothing, warns with the SQL a
+  database owner runs (`CREATE EXTENSION IF NOT EXISTS vector;` and the
+  schema's DDL), `healthCheck` answers `ok: false` with that SQL, and every
+  call answers `SERVICE_UNAVAILABLE` until the SQL has run. No restart is
+  needed after. A database it cannot reach is reported as unreachable, with
+  no SQL. A caller reads one sentence; the driver's text and the SQL go only
+  to the operator — the health check, the boot warning and the log.
+- **Search.** Two legs in one statement, merged by reciprocal rank fusion
+  (`k` = 60, each leg at most `topK`) before the service's re-check: an exact
+  scan by cosine distance, so any width works — including a 3072-wide model —
+  and a keyword leg on `to_tsvector('simple', content)` (a GIN expression
+  index), a word of three characters or more as a phrase, a shorter term or
+  one in Han, kana or Hangul script by `ILIKE`. The organization filter, the
+  [record scope](#record-scope) and the metadata `filter` (equality per key)
+  are one `WHERE`, run in both legs before either ranks.
+  `queryPrefix` is put before every query before it is embedded, for a model
+  that embeds questions and passages differently.
+- **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
+  not embedded again; its row's metadata is rewritten.
+- **Rebuilds.** A write or a search under another fingerprint is refused
+  (§3.6). `beginBuild` under a new fingerprint opens a generation beside the
+  active one, so a complete reindex rebuilds the source with nothing cleared
+  by hand. The walk and the event-sync writes of the build carry the new
+  fingerprint and land in the new generation only. A search during the build
+  is refused `KNOWLEDGE_REBUILD_REQUIRED`, saying the source is being
+  rebuilt. `completeBuild` makes the new generation active and retires the
+  old one in one transaction. It then deletes the old one's passages in
+  batches (`deleteBatchSize`, default 1,000) and its row last; a deletion
+  that stops is finished by the next build. One builder per source: a
+  PostgreSQL advisory lock, held on a connection of its own from
+  `beginBuild` to `completeBuild`. A second builder is refused
+  `LOCK_CONFLICT` (409). The lock is freed at completion, when the process or
+  its connection dies, or after `buildLockIdleMs` (15 minutes) without a
+  call of the build (event-sync writes do not count). It is a session lock,
+  so the store needs a direct or session-mode connection, never a
+  transaction-mode pooler. A stopped build is resumed by the next `beginBuild` under the same
+  fingerprint, with what it wrote. A generation never takes over passage rows
+  left without a generation row: they are deleted before any generation opens.
+- **An approximate index is an operator's step.** The store creates no
+  HNSW or IVFFlat index; add one by hand when a table outgrows an exact scan
+  (`CREATE INDEX ON os_knowledge.knowledge_vec_d1536 USING hnsw (embedding
+  vector_cosine_ops);`). pgvector's HNSW index takes at most 2,000
+  dimensions, so a 3072-wide table stays on the exact scan.
+- **The text is stored.** Each row holds its passage's text: it is as
+  sensitive as the record it came from, and it is in every backup of the
+  database.
+
+### 4.2 `knowledge-turso` — the open vector store in a libSQL file
+
+`@objectstack/knowledge-turso` keeps a source's passages and vectors in a
+[libSQL](https://github.com/tursodatabase/libsql) database of its own, with
+libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
+store for local development and for a deployment not on PostgreSQL. It takes
+the service's passages, embeds them with the kernel's `embedder` service (or
+the `embedder` it is given), and answers a search by an exact scan.
+
+- **Which database.** The `url` option (`file:`, `:memory:` or a
+  `libsql://` Turso URL), else `knowledge.db` under the project's
+  `.objectstack/data/`, beside the platform database. Never the platform's
+  own file: two engines writing one SQLite file in one process lose rows, so a
+  URL naming `objectstack.db`, `dev.db`, `standalone.db` or the file
+  `OS_DATABASE_URL` names is refused. On a file the store sets WAL and a busy
+  timeout (`busyTimeoutMs`, default 5000); in one process every call of the
+  store runs its database work one at a time.
+- **Tables.** `knowledge_generation`, one row per source and generation
+  (fingerprint, recipe hash, width, model, active or being built; at most one
+  of each per source, by a unique index — a second build joins the one under
+  way when its fingerprint is the same, and replaces it otherwise, so the
+  first builder's writes are then refused), and one passage table per source and generation,
+  `knowledge_<source>_g<n>`, its vector column sized for that generation
+  (`<source>` is the source's index key). A key that is not snake_case is
+  refused before any SQL.
+- **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
+  at most `topK`) before the service's re-check: an exact scan by cosine
+  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  passage table (kept in step by triggers), a term of three characters or
+  more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
+  the [record scope](#record-scope) and the metadata `filter` (JSON equality
+  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
+  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
+  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
+  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
+  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+- **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
+  under a new fingerprint builds a new generation table beside the active
+  one, which keeps answering its own fingerprint, and switches at the end of
+  the build; the old table is dropped. A build of a third fingerprint
+  abandons one left unfinished. A table of the package's earlier releases
+  (`knowledge_<source>` with exactly their columns) is never served: a search
+  answers `KNOWLEDGE_REBUILD_REQUIRED`, and the table is dropped when the first
+  complete reindex finishes. A table of any other shape under one of the
+  store's names (an object's table, in a database shared with object tables)
+  is neither served nor dropped: a rebuild that would replace it, like a
+  `dropSource`, is refused `SERVICE_UNAVAILABLE`, naming the table, and
+  nothing is removed.
+- **Re-embedding.** A passage whose text is unchanged (its `chunk_hash`) is
+  not embedded again within a generation.
+- **When it cannot run.** A database that cannot be opened, one holding a
+  table named `knowledge_generation` that is not the store's (the reason names
+  it, and it is left as it is), or a platform
+  with no native libSQL build (there is none for Windows on ARM): the plugin
+  still registers and boot goes on; it warns with the reason, `healthCheck`
+  answers `ok: false`, and every call answers `SERVICE_UNAVAILABLE`.
+- **The text is stored.** Each row holds its passage's text, as sensitive as
+  the record it came from, and in every copy of the file.
 
 ---
 
@@ -267,6 +802,9 @@ search_knowledge tool
    │  ToolExecutionContext { actor: U, … }
    ▼
 IKnowledgeService.search(q, { executionContext, sourceIds })
+   │
+   ├─► per object source: may U reach it? (exposure + field-level rules,
+   │       see below) ── a refused source is not searched for U
    │
    ├─► adapter.search(q, …)  ──► returns raw hits with sourceRecordId
    │
@@ -286,37 +824,384 @@ This is the same pattern as the existing permission-aware data tools
 No matter how aggressive an adapter's retrieval is, the user never
 sees a chunk extracted from a record they can't read.
 
-For `file` and `http` sources (no underlying ObjectQL record), the
-adapter is responsible for honouring an opaque `permissions` field on
-each document. Sources that need fine-grained ACLs should be declared
-with a `permissions` mapping function at index time.
+### Organization scope
+
+In a deployment with more than one organization, the adapter ranks only the
+caller's organizations' documents (ADR-0161 K8, item 9). Without that, the
+best-ranked passages could all belong to another organization, and the
+re-read above would empty those places. The filter decides what is ranked;
+the re-read still decides what is returned.
+
+- **At assembly.** Under the `group` and `isolated` tenancy postures, a
+  document built from a record carries the record's `organization_id` as
+  `organizationId`. Under `single`, and for a record with no organization,
+  it carries none.
+- **At search.** For each source, the service hands the adapter
+  `organizationIds`, the organizations the tenancy wall gives the caller for
+  that object: under `isolated` the caller's active organization, under
+  `group` every organization the caller holds a membership in. The service
+  computes the set from the caller's execution context and the deployment's
+  posture. No tool argument or search option supplies it, and
+  `search_knowledge` refuses an `organizationIds` argument.
+- **No filter** (`organizationIds` absent) under `single`, for the system
+  identity, and for an object outside the wall
+  (tenancy disabled, or no `organization_id` column). The adapter ranks every
+  document of the source, as before.
+- **An empty set** (`[]`) is a caller with no organization behind a wall, for
+  example no active organization under `isolated`. The adapter ranks
+  nothing; an empty set never means "no filter".
+- **A posture that cannot be read**: a search leaves every `object` source
+  unsearched for that call and logs it at `error`. A reindex stops before
+  writing anything and says why.
+
+**Documents indexed before this change** carry no `organizationId`. Behind a
+wall, a filtered search does not rank them until a complete reindex writes
+them again. The organization is part of `docHash`, so the reindex does not
+skip them. Under `single` nothing changes: a document without an organization
+hashes as before, and the reindex skips it as before.
+
+### Record scope
+
+A search can be held to chosen records (ADR-0161 K8, item 17): "only inside
+this policy". `KnowledgeSearchOptions.scope` is a list of `{ object, ids }`
+entries.
+
+```ts
+const hits = await knowledge.search('notice period', {
+  topK: 5,
+  scope: [{ object: 'policy', ids: [policyId] }],
+  executionContext: ctx,
+});
+```
+
+- **The object a source indexes.** An entry naming it holds that source to
+  those records.
+- **A parent object.** An entry naming another object reaches a source that
+  lists, in its `metadataFields`, a `lookup` or `master_detail` field pointing
+  at that object. The source is then held to the documents whose stored value
+  of that field is one of the ids (any one of them, for a lookup declared
+  `multiple`). A `user` field is not a parent link. A source that lists no such
+  field is not reached by the entry, and neither is one that lists two or more
+  of them (logged once at `warn`, naming the fields). A parent two hops away
+  (policy → chapter → clause) is not reached.
+- **Several entries** are a union. A source no entry reaches is not searched.
+- **Empty.** `scope: []`, or an entry whose `ids` is empty, answers no hits; it
+  never means "no scope". Without `scope`, nothing changes.
+- **Bounds.** At most 10 entries, each with at most 500 ids; `object` and every
+  id a non-empty string, and no other key on an entry. Past them the call is
+  refused before any adapter is asked, with `code: 'VALIDATION_ERROR'`,
+  `status: 400` and a message naming the bound.
+
+The service turns the entries into terms for each source and hands them to the
+adapter as `AdapterSearchOptions.scope`: `{ kind: 'record', ids }`, judged on
+the document's `sourceRecordId`, or `{ kind: 'metadata', field, ids }`, judged
+on its stored `metadata[field]`, values compared as strings. An adapter that
+reads the member filters before it ranks, so `topK` is filled from in-scope
+documents; `organizationIds`, `scope` and the opaque `filter` all apply.
+Whatever the adapter does, the service checks every hit after it answers and
+drops a hit no term holds for, a hit without the value included, so an adapter
+returns the document's `metadata` on its hits. An adapter written before the
+member keeps working: out-of-scope documents then take ranking places, its
+scoped searches may answer fewer than `topK`, and the service logs that once
+for the adapter. The contract suite pins both halves: each term kind on the
+adapter alone, and the service's check over the adapter with the member
+stripped.
+
+The scope is judged on the index copy and only narrows. Every hit is still
+re-read as the caller, so a caller who cannot read a scoped record gets
+nothing from it. Source admission already requires each `metadataFields`
+member to be queryable by the caller, and the parent record is never read. A
+document indexed before its source listed the lookup is in no parent scope
+until a complete reindex writes it again. How many hits the scope removed is
+logged, never returned, and an entry that reaches no source answers the same
+empty result a source withheld from the caller gives.
+
+### Source admission: exposure and field-level rules
+
+A passage is built at index time, under a system context, from every
+`content` member of its source, the object's display field (the
+title) and the source's `metadataFields`. A row re-check alone would therefore serve a caller the text
+of a field a field-level rule hides from them. So before a source is
+searched for a non-system caller, the service asks, once per object per search:
+
+- **Disabled package** — an object whose owning package is disabled is not
+  searched.
+- **API exposure** — the spec's one exposure decision for the `search`
+  operation, the one the cross-object search asks: `enable.apiEnabled: false`,
+  or an `enable.apiMethods` whitelist that does not grant `search` (granting
+  `list` does), keeps the object's sources out of the search.
+- **System objects** — a `sys_*` object is searched only when it declares
+  `enable.aiReadable: true` (the AI read tools' posture).
+- **Field-level rules** — every field the source serves (each `content`
+  member; each `metadataFields` member; the display field the title is read
+  from), less the credential-class and `internal: true` fields an index never
+  carries, must be one the caller may **query**, per the `security`
+  service's `getQueryableFields`. Without that answer: its `getReadableFields`
+  less every field declaring a `maskingRule`; with no `security` service at
+  all: every field except those declaring a `maskingRule`. Queryable, not
+  merely readable, because a passage carries the unmasked value.
+
+The answer is per **source**, not per field: when one served field is hidden
+from the caller, that source is not searched for them at all — its passages
+mix the hidden field's text into one unit that cannot be partially withheld.
+The fields a source's `where` reads are judged by the same rule: the source
+selects its records by them, so a caller who may not query one of them is not
+served that source. To keep a source searchable for restricted callers,
+declare its `content` / `metadataFields` / `where` from fields every intended
+reader may query, and put sensitive fields in a separate source. Every gate fails closed: a
+lookup that throws — the `security` service lookup included, unless the kernel
+answers that no `security` service is registered — or a `security` service
+that answers neither field question, keeps the source out of that caller's
+search. The system context bypasses these gates as it bypasses the row
+re-check. A caller with no execution context, or a service with no data engine
+bound, is searched no source at all; a hit with no
+`sourceRecordId` cannot be re-checked and is dropped; and the service drops a
+hit whose reported `sourceId` names another source than the one searched. That
+check sees only the `sourceId` an adapter reports: an adapter that labels
+another source's passage with the searched source's id is not caught by it, so
+two sources must not share one adapter-side store. A restricted caller's empty
+answer is this narrowing, not a missing index.
+
+The same gates are asked once more, of the **author**, when a source is saved
+at run time — see [Who may author one](#who-may-author-one).
 
 ---
 
 ## 6. Sync model
 
-For `object` sources, `KnowledgeService` subscribes to the ObjectQL engine's
-`data.record.created`, `data.record.updated` and `data.record.deleted` events
-(the legacy unprefixed `record.*` shape is still accepted). Each event triggers
-a single `adapter.upsert` / `adapter.delete` call — the record body is read
-from the event's `after`, and a delete's id from its required `recordId`.
+On a kernel that composes a `realtime` service, `KnowledgeService` subscribes
+to the ObjectQL engine's
+`data.record.created`, `data.record.updated`, `data.record.restored` and
+`data.record.deleted` events. A bare `record.*` event is not part of the
+vocabulary: no producer emits one, and the subscription ignores it. On a kernel
+without one, the data engine's after-write hooks are the trigger instead
+([below](#without-a-realtime-service-the-after-write-hooks)); either way the
+same two service calls sync a row, and each write is synced once.
 
-- **MVP (Phase 1):** synchronous, inline with the originating mutation.
-  Fast for low-volume dev / demo. Indexing failures are logged but do
-  not block the originating write.
-- **Phase 2:** async via `service-queue` for batching, retries, and
-  back-pressure.
+A source's `where` decides which rows it indexes on every path — the event
+sync as well as `reindexSource`. For a created, updated or restored row, with a
+data engine bound, each source re-reads the row under the system context:
+`find(object, { where: { $and: [where, { id }] }, limit: 1 })` (just `{ id }`
+when the source has no `where`).
+
+- **A row comes back** — the document is built from the re-read row, not from
+  the event's `after`, so a write result that omits a field (a projected
+  result, a formula the write did not return) cannot leave the document
+  short. The same field rules as a reindex apply: the fields the source lists
+  and the object's display field as the title, never a credential-class or
+  `internal` field.
+- **No row comes back** — the row does not match (a draft, or a row that
+  stopped matching), and its document is deleted. Deleting an absent document
+  changes nothing.
+- **A restored row** (a recycle-bin restore) takes the same path, so it
+  re-enters the index only if it matches.
+- **No data engine bound** — nothing can be re-read: a source without `where`
+  builds the document from the event's `after`, and a source with `where` is
+  not synced, which the service logs once per source as a warning.
+
+A delete removes the row's document: through the queue, by the same re-read
+(no row comes back); inline, by the event's required `recordId`. Syncs of one
+document run one after another in the process, so two syncs of the same row
+cannot interleave: each re-reads after the previous one finished, and the last
+leaves the index agreeing with the database.
+
+### Through the queue
+
+Where the kernel composes a durable `queue` service — the platform's
+`QueueServicePlugin` over a data engine, whose database adapter keeps messages
+in `sys_job_queue` — and a data engine is bound, the sync runs through that
+queue (ADR-0161 K1). The standard runtime mounts `queue` on every preset but `minimal`.
+
+- **A save publishes; it does not sync.** For each source that indexes the
+  written object on record change, either trigger (the realtime subscription,
+  or the after-write hooks [below](#without-a-realtime-service-the-after-write-hooks))
+  publishes one message to the `knowledge-record-sync` queue: the source's
+  index key, the object, the record id, and why (`event`, or `freshness` for
+  the repair a search starts). Never a field value: `sys_job_queue` is an
+  object an administrator can list, and a record body there would be a copy of
+  the row outside its permissions. The save does not wait for the re-read, the
+  split, the embedding call or the store write.
+- **After the commit, and never for a rollback.** The message is published
+  through the engine's `runAfterOpenUnitsCommit`: once the unit of work open
+  at the write commits (the write's own unit, or a caller's
+  `engine.transaction(…)`), and not at all when it rolls back. So nothing is
+  processed before the write commits, and a write that rolls back leaves the
+  index as it was. With no unit open the message is published at once. A
+  publish that fails is logged at `error`; the document is stale until the
+  record's next save, a search that finds it stale, or the reconcile.
+- **The worker** subscribes in `kernel:ready`, resolves the source by its
+  index key when it processes the message, and re-reads the row as above: a
+  row comes back → its document is written; none → its document is deleted.
+- **Retries.** A failure a retry can change — the re-read, the split, the
+  embedding call, the store write — is thrown to the queue, which retries it
+  with backoff: eight attempts, 5 s doubling to a 2 min cap, so a provider
+  outage of six and a half minutes is ridden out (the plugin's
+  `recordSyncRetry` option). Then the message is a dead letter the queue lists
+  (`listFailed`), naming the source and the record in its metadata, and the
+  plugin says so once at `error`. The [reconcile](#reconcile-keeping-the-index-correct)
+  repairs what a dead letter names.
+- **Not retried**, because a retry cannot change them, and completed with no
+  write: a source no longer registered, or no longer indexing the object on
+  record change. A `whole` document over the embedder's budget is removed from
+  the index and reported at `error`, as on every path. A source whose adapter
+  is not mounted is retried like a failure, so a store that registers late is
+  met by a later attempt, and one that never does leaves a dead letter.
+- **A burst of saves.** Every save publishes its own message — one queue row
+  per source per save; completed rows are kept for `sys_job_queue`'s declared
+  retention (7 days). No message is keyed by its document: the queue
+  suppresses a keyed publish while a message with the key is pending **or
+  running**, and for a day after it completed, so a save made while a sync of
+  the record runs would be lost, and a completed sync would block the record's
+  later saves. Each message re-reads the row as it is when it is processed, so
+  the last one leaves the last committed version.
+- **A delete** leaves the index when its message is processed. Until then a
+  member's search (each hit re-read as the member) and a `granularity:
+  'record'` search (each hit checked against its record) do not answer it: the
+  record no longer exists. A system-identity search at chunk granularity
+  re-reads nothing, so it can answer the deleted record's chunks until the
+  message is processed.
+- **A restart** loses nothing published: messages wait in `sys_job_queue` and
+  are processed after it.
+
+### Without a durable queue
+
+With only the kernel's built-in fallback queue (synchronous, in-process, no
+durability, no retry; it labels itself `degraded`), a queue with no dead-letter
+surface (`listFailed` — the in-memory `MemoryQueueAdapter` has none), or no data
+engine bound, the sync runs inline and the plugin says so once at boot, at `warn`. A
+host that mounts the service by hand adds `QueueServicePlugin` over the
+ObjectQL engine to get the queued sync.
+
+**When the inline sync runs.** On the realtime trigger the engine publishes
+`data.record.created` and `data.record.updated` from inside the write, after
+its `after*` hooks — before any unit of work around the write commits (the
+write's own unit, opened when a metadata hook can abort it, or a caller's
+`engine.transaction(…)`). The in-process realtime service awaits each
+subscriber, so the save waits for the embedder, the re-read runs inside the
+same open transaction and sees the row the write just made, and a failed sync
+is logged and not retried. If that unit then rolls back, the index is wrong in
+one of two ways:
+
+- **The uncommitted row matched** — the document stays built from a row that
+  never committed.
+- **The uncommitted row did not match** — the document was deleted, so the
+  committed row, which may still match, is missing from the index.
+
+The row's next event or a `reindexSource` repairs a row that still exists. A
+document built from an **insert** that rolled back has no row left to repair it
+from; it stays until a complete reindex purges it (below) — at the latest, the
+next [reconcile](#reconcile-keeping-the-index-correct). Inline, a write's sync
+can also wait behind an earlier in-flight sync of the same document (on a
+single-connection pool, up to the pool's acquire timeout); the index still ends
+consistent.
+
+`data.record.restored` is
+published after the restore's own unit has committed.
 
 <Callout type="warn">
-  **A predicate write leaves the index stale.** A `multi: true` update/delete
-  reaches `updateMany` / `deleteMany`, which report only an affected row count,
-  so it publishes the aggregate `data.records.updated` / `data.records.deleted`
+  **A predicate write leaves the index stale until its reconcile.** A
+  `multi: true` update/delete reaches `updateMany` / `deleteMany`, which report
+  only an affected row count, so it publishes the aggregate
+  `data.records.updated` / `data.records.deleted`
   ([#4639](https://github.com/objectstack-ai/objectstack/issues/4639)) rather
   than per-record events. A knowledge index is a per-record projection and
-  `matched: 40` names no record, so there is no upsert or delete to derive —
-  the service logs a warning naming the object and count instead of failing
-  silently. Repair such an index with an explicit `reindexSource`.
+  `matched: 40` names no record, so there is no upsert or delete to derive.
+  Instead the event asks for a [reconcile](#reconcile-keeping-the-index-correct)
+  of every source over the object, which starts once the object has had no
+  further predicate write for two minutes (at the latest ten minutes after the
+  first), and the service logs a warning naming the object, the count and the
+  sources. Over an adapter that does not implement `listDocuments` no
+  reconcile can repair the index, and the warning says the documents of
+  deleted rows and of rows that stopped matching stay in it.
 </Callout>
+
+### Without a realtime service: the after-write hooks
+
+A kernel that composes no `realtime` service publishes no `data.record.*`
+event (the ObjectQL plugin bridges that same service to the engine). There,
+`KnowledgeServicePlugin` registers the data engine's `afterInsert`,
+`afterUpdate` and `afterDelete` hooks on every object a source with
+`refresh.onRecordChange` not `false` indexes, and each hook does what the
+subscription does: [through the queue](#through-the-queue) it publishes the
+record's message on the same commit, and without one it calls the same
+`handleRecordUpsert` / `handleRecordDelete` — the re-read under `where`, the
+field rules and the per-document ordering above all apply. The points below
+describe that inline sync. The plugin takes exactly one of the two triggers, chosen at
+`kernel:ready`, so a write is never synced twice. A source registered or loaded
+later for a new object gets its hooks when it arrives.
+
+- **Off the write's response.** A hook runs inside the write, so it only hands
+  the sync off and returns: the re-read, the split and the embed run after the
+  write has answered, and a slow embedding provider does not slow the write.
+- **After the commit.** The sync starts through the engine's
+  `runAfterOpenUnitsCommit`: once the unit of work open at the write commits
+  (the write's own unit, or a caller's `engine.transaction(…)`), so the re-read
+  sees the committed row; never when that unit rolls back, so a rolled-back
+  write leaves the index as it was. With no unit open it starts at once. The
+  hook itself observes the same pre-commit moment as the realtime event above;
+  the deferral is what keeps its sync out of it.
+- **A user delete** de-indexes the row through `afterDelete`, by the row's id.
+- **A predicate write** (`multi: true`) is synced row by row: an object with an
+  `afterUpdate` / `afterDelete` hook gets one dispatch per matched row, so no
+  aggregate event is involved and no predicate-write reconcile is asked for
+  (the scheduled [reconcile](#reconcile-keeping-the-index-correct) still runs). Such a write is held to the engine's per-row
+  hook ceiling (10,000 matched rows, `MAX_BULK_PER_ROW_HOOK_ROWS`), as it is on
+  every object that already carries a per-row hook (the audit plugin's, for
+  one): over it the write is refused and nothing is written.
+- **A recycle-bin restore** runs no hooks (a restore is not a create, ADR-0148
+  D2), so the plugin also registers one engine middleware that hears the
+  `restore` operation: once a restore has answered, each row it wrote back is
+  synced, the master first, through the same seams (the queue, or the deferral
+  above, so a restore inside a unit that rolls back indexes nothing). A restore
+  that refuses or fails syncs nothing; one that landed with a stale roll-up
+  (`ERR_SUMMARY_RECOMPUTE`) syncs its rows. A restored row is re-read under each
+  source's `where`, as a write's is.
+
+The inline sync is in-process: a sync that has not finished when the process
+stops is lost, and the next reconcile or `reindexSource` repairs it. Through the
+queue, a message survives the restart.
+
+### Reindex: skip and purge
+
+A `reindexSource` over an adapter that implements
+`listDocuments` first lists what the adapter holds for the source (document
+id → stored `docHash`), then walks the object's rows page by page:
+
+- **Skip.** A row whose document's computed `docHash` equals the listed one is
+  not written again; the result counts it in `skipped`. Every other document
+  is written (`indexed`). A listed entry without a `docHash` reads as changed.
+- **Purge.** After a **complete** walk — no `limit`, no `dryRun`, no failed
+  page — every document listed before the walk that the walk did not see is a
+  candidate. Each candidate is confirmed by the same re-read the event sync
+  makes (the source's `where` AND the record id, under the system context) and
+  deleted only when that finds no row. A row created or restored during the
+  walk keeps its document: if it was listed, the re-read finds it; if it was
+  not, it was never a candidate. The purge of a document waits for any
+  in-flight event sync of the same document. `purged` counts the deletions.
+- **Known limit: numeric record ids.** The purge reads the record id back from
+  the document id as text and re-reads by that text. On driver-mongodb and
+  driver-memory, which do not equate `'5'` with `5`, a row stored under a
+  caller-supplied numeric id is not found by that re-read; if such a row was
+  restored (or came back into `where`) after the walk read past it, its
+  document is deleted. The row itself is untouched, and its document returns at
+  the row's next event or the next complete reindex. Platform-minted ids are
+  text on every driver, so this needs a caller-supplied numeric id.
+- **`purged: null`** means no purge ran: a walk with a `limit` or a `dryRun`,
+  a failed walk, a source with `refresh.onRecordChange: false` (an external
+  indexer owns its index), or an adapter without `listDocuments` — which also
+  skips nothing, the walk otherwise unchanged. A listing that fails skips and
+  purges nothing either, and the result's `message` says why.
+- A listed document whose id is not one the source derives from a record
+  (`<sourceId>:<recordId>`) is never purged, since no row can confirm it; the
+  result's `message` counts such documents.
+
+A re-read or delete that fails stops the purge — a re-read that answers no
+list of rows counts as failed, never as "no row" — and the result is
+`ok: false`, `purged` counts the deletions made before it, and the `message`
+names the document. A walk page that answers no list of rows stops the walk
+the same way, with `purged: null`, rather than ending it as if the source were
+empty. The event sync shares that re-read: when it answers no list of rows, the
+sync leaves the document in place and logs a warning, rather than deleting it.
 
 ### Retention deletes are covered by a reap guard
 
@@ -325,10 +1210,13 @@ their retention window — is the one bulk path that *is* handled, and it is
 handled at the source rather than after the fact
 ([#4672](https://github.com/objectstack-ai/objectstack/issues/4672)).
 
-For every object an `object` source projects, the plugin registers an ADR-0057
+For every object a source projects, the plugin registers an ADR-0057
 **reap guard** with the lifecycle service. The sweep hands the guard the
 candidate rows before deleting them; the guard deletes each row's document and
-returns the ids it confirms. Rows it does not confirm stay put.
+returns the ids it confirms. Rows it does not confirm stay put. The guarded
+set follows the sources: a source added after boot for an object with no
+guard gets one when it is loaded, so a reaped row of that object is
+de-indexed too.
 
 - **Failure direction.** If `adapter.delete` fails, the row is *kept* and
   retried on the next sweep. A row may outlive its index entry; an index entry
@@ -340,76 +1228,130 @@ returns the ids it confirms. Rows it does not confirm stay put.
 - **Batching** is the sweep's: 500 rows per batch, 20 batches per sweep, the
   backlog draining across sweeps.
 - **Opt-out.** `refresh.onRecordChange: false` on a source — or
-  `enableEventSync: false` on the plugin — turns off inline index sync in both
-  directions, event subscription and reap-time de-index alike. An index an
+  `enableEventSync: false` on the plugin — turns off the record sync in both
+  directions, the record-change sync (queued or inline: nothing is published,
+  nothing subscribed) and reap-time de-index alike. An index an
   external indexer owns is never a reason to hold up another package's
   retention.
 
-Application-level predicate writes remain uncovered: de-indexing them needs an
-adapter-side enumeration capability that no adapter declares today, and that
-surface stays unbuilt until a real `object` source calls for it.
+Application-level predicate writes are not de-indexed as they happen. Their
+stale documents are removed by the reconcile they ask for (below), over an
+adapter that implements `listDocuments`.
 
-`file` / `http` sources rely on explicit `reindexSource` calls
-(typically triggered by a cron job, a Console button, or a webhook).
+### Reconcile: keeping the index correct
+
+Events keep an index fresh; the reconcile keeps it correct (ADR-0161 K1).
+`KnowledgeService.reconcileSources()` walks every source it covers with a
+complete build — the same walk as the first build and `os knowledge rebuild`,
+under the same cluster lease and fence, with the same [skip and
+purge](#reindex-skip-and-purge) and the same `completeBuild`. Its build record
+says `trigger: 'reconcile'`. One reconcile repairs:
+
+- a document whose row was deleted, or left `where`, by a predicate write;
+- a document built from an insert that rolled back;
+- a row whose event was lost, or whose sync failed;
+- a row changed while the embedder was down.
+
+A document whose row did not change is skipped, so it is not sent to the
+embedding provider again: a reconcile of a current index costs a read of
+every row the source's `where` matches.
+
+**What it walks.** An `object` source whose `refresh.onRecordChange` is not
+`false`, with a data engine bound, on an adapter that implements
+`listDocuments`. An adapter without `listDocuments` can neither skip nor
+purge, so a walk would re-embed every document and remove nothing: such a
+source is left alone, and the service says so once per source at `warn`,
+naming `os knowledge rebuild`. Sources are walked one after another; a build
+of a source another node holds is `not-run` on this one.
+
+**The index state.** The reconcile is the third moment the service reads a
+source's index state, beside the boot and a source reload. A source whose
+state reads `nothing`, `new-fingerprint`, `recipe-changed` or
+`no-recipe-hash` is built as the boot would build it, a new generation for a
+new fingerprint: a split or embedder setting saved while the server runs is
+picked up by the next reconcile instead of at the next restart. The build's
+start line says what it costs, as every build's does.
+
+**When it runs.**
+
+- **Daily.** `KnowledgeServicePlugin` schedules one job, `knowledge:reconcile`,
+  on the platform's job service, at 03:00 UTC (`'0 3 * * *'`). The plugin's
+  `reconcile` option moves it (`{ cron, timezone }`) or turns it off
+  (`false`, which also stops the predicate-write reconcile). A run whose walk
+  of some source failed, lost its lease or timed out is `degraded` in the
+  job's run history, naming the source; every other run is `success`. With no
+  job service composed, the plugin says once at boot that nothing reconciles
+  on a schedule.
+- **After a predicate write**, as above: one request per source however many
+  bulk events arrive, started once the object has had no further predicate
+  write for two minutes, and at the latest ten minutes after the first.
+
+The record of the last build stays in memory on the node that ran it.
 
 ---
 
 ## 7. MVP (Phase 1) scope
 
-Phase 1 ships the protocol, the orchestrator, two adapters, and the AI
-tool wiring. It is **not** production-grade — it is "production-shaped":
-the surface is stable, the unique value-add (permission-aware
-retrieval) works end-to-end, and a real adapter (`ragflow`) is wired
-up.
+Phase 1 ships the protocol, the orchestrator, the in-memory reference
+adapter, and the AI tool wiring. It is **not** production-grade — it is
+"production-shaped": the surface is stable and the unique value-add
+(permission-aware retrieval) works end-to-end. The vector stores that
+followed (§4.1, §4.2) are the adapters to run in production.
 
 | Component | In Phase 1 | Notes |
 |-----------|-----------:|-------|
-| `KnowledgeSourceSchema` | ✅ | object / file / http kinds |
+| `KnowledgeSourceSchema` | ✅ | The schema of the `knowledge_source` metadata type; one kind, `object` (the `file` and `http` kinds were retired, ADR-0161 K4) |
 | `KnowledgeDocument` / `Chunk` / `Hit` | ✅ | Canonical shapes |
-| `IKnowledgeService` contract | ✅ | search / index / delete / reindex |
-| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck |
+| `IKnowledgeService` contract | ✅ | search / reindex / register (the push door, `indexDocument` / `deleteDocument`, was retired) |
+| `IKnowledgeAdapter` contract | ✅ | upsert / search / delete / healthCheck; optional `listDocuments`, the index-fingerprint members and `dropSource`, with a contract test suite (`@objectstack/service-knowledge/testing`) |
 | `service-knowledge` orchestrator | ✅ | Adapter routing, RLS wrapper, sync |
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
-| `knowledge-ragflow` | ✅ | Minimal REST adapter (datasets + chunks + retrieval) |
+| `knowledge-ragflow` | retired | Shipped in Phase 1; its requests did not match the RAGFlow HTTP API, and the package was removed. Use `knowledge-pgvector`, `knowledge-turso` or an adapter of your own |
 | `search_knowledge` AI tool | ✅ | Threads `ToolExecutionContext` |
-| Event-driven sync for `object` sources | ✅ (sync) | MVP synchronous; queue in Phase 2 |
+| Event-driven sync | ✅ | Through the queue service when one is durable (retries, dead letters); inline otherwise |
 | Console source-management UI | ⏳ Phase 2 |  |
-| Async indexer (queue) | ⏳ Phase 2 |  |
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
-| `knowledge-pgvector` | ⏳ Phase 3 |  |
+| `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 
 - Reranker hooks, hybrid retrieval toggles, MMR — adapter-private.
-- Field-level masking — Phase 1 enforces row-level only.
+- Field-level masking inside a passage. A source serving a field the caller
+  may not query is not searched for that caller at all (§5, source
+  admission); a passage is never re-projected or redacted per caller.
 - Cost / quota enforcement — Phase 2.
 - Multi-tenant index isolation — defer to adapter capability matrix.
 
 ---
 
-## 8. Compatibility with existing `Embedding` primitives
+## 8. The embedder and the store are the deployment's
 
-`packages/spec/src/ai/embedding.zod.ts` already defines
-`EmbeddingModelSchema` and `VectorStoreSchema`. Those primitives
-describe *configuration*; the Knowledge Protocol describes *behaviour*.
-
-Adapters may consume `EmbeddingModel` / `VectorStore` references from a
-`KnowledgeSource.embedding` field (when supplied), but they are free to
-ignore them when the underlying backend manages embeddings
-internally (RAGFlow, Dify, Vectara).
+A knowledge source names neither a model nor a store. The embedder is
+configured once for the deployment and every source is embedded by it; the
+store is the adapter the deployment installs, which a source names with
+`adapter`. The `embedding` and `vectorStore` keys a source once declared were
+never read by a service or an adapter and are retired (ADR-0161 K6), and the
+`EmbeddingModelSchema` / `VectorStoreSchema` primitives they composed left the
+spec with them. What an adapter's embedder is — model, dimensions, input
+limit — is something the adapter **reports** (`IKnowledgeAdapter.embedding`,
+§3.4), and the index fingerprint (§3.6) is computed from that report.
 
 ---
 
 ## 9. Open questions
 
-- **Where does chunk-level ACL live?** Currently the framework checks
-  row-level ACLs by re-querying via `dataEngine.find`. Field-level
-  masking would require either (a) re-running `select` projections or
-  (b) standardising a `redact` step. Deferred.
+- **Where does chunk-level ACL live?** The framework checks row-level
+  ACLs by re-querying via `dataEngine.find`, and field-level rules at
+  source granularity (§5): a source serving a field the caller may not
+  query is not searched for them. Finer grain — serving such a caller a
+  passage with the hidden field's text removed — would require either
+  (a) indexing one passage per field-visibility class or (b) standardising
+  a `redact` step. Deferred.
 - **Multiple adapters per source.** Useful for mirroring (e.g. write
-  to RAGFlow and pgvector simultaneously) but adds significant
+  to pgvector and an external engine simultaneously) but adds significant
   complexity. Not in Phase 1.
 - **Embedding cost attribution.** Belongs in `service-analytics`. The
   Knowledge Protocol simply emits typed events.
@@ -421,5 +1363,3 @@ internally (RAGFlow, Dify, Vectara).
 - `actions-as-tools.mdx` —
   the `ExecutionContext` threading the Knowledge Protocol reuses.
 - `architecture.mdx` — overall service / plugin layering.
-- `packages/spec/src/ai/embedding.zod.ts` — pre-existing embedding /
-  vector store primitives the protocol composes with.

@@ -68,6 +68,7 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     row: () => keys(2),
   },
   pages: { data: { home: { label: 'Accueil' } }, key: 'home', row: () => keys(1) },
+  forms: { data: { 'lead.web_intake': { label: 'Inscription web' } }, key: 'lead.web_intake', row: () => keys(1) },
   flows: { data: { onboarding: { label: 'Intégration' } }, key: 'onboarding', row: () => keys(1) },
   hooks: {
     data: { credit_guard: { refusals: { CREDIT_LIMIT: { message: 'Limite de crédit dépassée.' } } } },
@@ -86,6 +87,8 @@ const ONE_ENTRY: Record<string, { data: Record<string, unknown>; key: string; ro
     row: () => keys(2),
   },
   mappings: { data: { lead_feed: { label: 'Import des pistes' } }, key: 'lead_feed', row: () => keys(1) },
+  // Keyed by the package's manifest id, dots and all (objectstack#35513).
+  packages: { data: { 'com.acme.crm': { name: 'CRM Acme' } }, key: 'com.acme.crm', row: () => keys(1) },
   metadataForms: { data: { object: { label: 'Objet' } }, key: 'object', row: () => keys(1) },
   // `settingsCommon` is one strict object, not a record of author-named nodes:
   // its members (`sourceLabels`) are what the card counts and samples.

@@ -500,6 +500,11 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'the tenant index the registry declares on a provisioned tenant column',
   },
+  // [ADR-0153 D4] The provenance index's leading column.
+  'sync-provenance-index.ts#<module> :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'leads the provenance index the registry declares on a synced object, a local copy whose columns the platform provisions; it reads no row',
+  },
   'registry-top-level.ts#<module> :: owning_business_unit_id': {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0117 D1 anchor under',

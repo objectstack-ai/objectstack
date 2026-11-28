@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` has passed as `lapsed`; `status` is a readonly field only automation may change.",
-      "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
+      "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' }` (no top-level `schedule`; the request names no zone, and a cron with none warns `flow-schedule-timezone-missing`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -42,8 +42,8 @@
     },
     {
       "id": 3,
-      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs.",
-      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection).",
+      "prompt": "Build an autolaunched flow `crm_budget_approval` on `project`: when `budget` increases past 100000, route to a manager who can approve, reject, or send it back to the submitter for revision; a resubmission returns to the manager. Cap it at two send-backs. The project page draws its `budget_line` rows as a body table through the lookup `budget_line.project`; those lines must not change while the request is pending.",
+      "expected_output": "The ADR-0044 shape: an `approval` node (`type: 'approval'`, `approvers: [{ type: 'position', value: 'crm_manager' }]`, `lockRecord: true`, `maxRevisions: 2`) with `approve` / `reject` out-edges plus a `revise` out-edge to an `approval_revise` node, and a resubmit edge back into the approval node typed `type: 'back'` — what legalises the cycle for `registerFlow`. The flow lives in `flows` (no `approvals` collection). `budget_line.project` becomes a `master_detail`: `lockRecord` locks the record and its `master_detail` child rows only, and a `lookup` child drawn as a body table stays editable while pending (the warning `approval-detail-editable-while-pending`, which refuses nothing).",
       "files": [],
       "assertions": {
         "must_contain": [
@@ -51,7 +51,8 @@
           "approval_revise",
           "type: 'back'",
           "maxRevisions",
-          "revise"
+          "revise",
+          "master_detail"
         ],
         "must_not_contain": [
           "approvals: [",
@@ -354,7 +355,7 @@
     {
       "id": 20,
       "prompt": "Our package `acme.billing` ships the flow `billing_invoice_paid`. When it runs it should call the `notify_owner` flow that the installed package `acme.crm` ships. Write the node and anything else the package needs.",
-      "expected_output": "A `type: 'subflow'` node with `config: { flowName: 'notify_owner' }` in `billing_invoice_paid`, plus `acme.billing`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A package flow's bare child name resolves to its own package's flow, else the one holder in its declared dependency closure plus `sys`; without the dependency the flow still passes `os validate`, and the node fails at run time (`outside-closure`, naming `acme.crm`). No copy of `notify_owner` into `acme.billing` or into the environment, and no package-qualified flow name.",
+      "expected_output": "A `type: 'subflow'` node with `config: { flowName: 'notify_owner' }` in `billing_invoice_paid`, plus `acme.billing`'s manifest declaring `dependencies: { 'acme.crm': '^1.0.0' }` (any range). A package flow's bare child name resolves to its own package's flow, else the one holder in its declared dependency closure plus `sys`; without the dependency the node fails at run time (`outside-closure`, naming `acme.crm`). `os validate` warns `flow-subflow-unknown` here with or without the dependency, because `acme.billing`'s own stack does not hold `notify_owner`: the warning is expected on this correct call and is not that failure. No copy of `notify_owner` into `acme.billing` or into the environment, and no package-qualified flow name.",
       "files": [],
       "assertions": {
         "must_contain": [

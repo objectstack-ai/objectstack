@@ -1,0 +1,143 @@
+/**
+ * objectstack-ai/objectstack#36256 item 3 — a drill's conditions become the
+ * standard list's own chips where a chip can say them, and stay its base
+ * filter where none can.
+ */
+import { describe, it, expect } from 'vitest';
+import { drillListConditions, measuredFieldsOf } from '../drillConditions';
+
+const rows = (filter: Record<string, unknown>) =>
+  drillListConditions(filter).chips.conditions.map(({ field, operator, value }) => ({ field, operator, value }));
+
+describe('drillListConditions', () => {
+  it('reads each field compared with a value as one chip row, through $and', () => {
+    expect(rows({
+      $and: [
+        { stage: 'closed_won', close_date: { $gte: '2026-01-01', $lt: '2026-04-01' } },
+        { lead_source: { $in: ['web', 'referral'] }, amount: { $null: false } },
+      ],
+    })).toEqual([
+      { field: 'stage', operator: 'equals', value: 'closed_won' },
+      { field: 'close_date', operator: 'greater_than_or_equal', value: '2026-01-01' },
+      { field: 'close_date', operator: 'less_than', value: '2026-04-01' },
+      { field: 'lead_source', operator: 'in', value: ['web', 'referral'] },
+      { field: 'amount', operator: 'is_not_null', value: undefined },
+    ]);
+  });
+
+  it('keeps what no chip can say as the base filter, ANDed', () => {
+    const { chips, rest } = drillListConditions({
+      stage: { $ne: 'closed_lost' },
+      account: { industry: 'tech' },
+      $or: [{ a: 1 }, { b: 2 }],
+      owner: { $regex: 'x' },
+    });
+    expect(chips.conditions.map((c) => c.operator)).toEqual(['not_equals']);
+    expect(rest).toEqual({ $and: [{ account: { industry: 'tech' } }, { $or: [{ a: 1 }, { b: 2 }] }, { owner: { $regex: 'x' } }] });
+  });
+
+  it('draws a condition stated twice as one chip', () => {
+    expect(rows({
+      $and: [{ close_date: { $gte: '2026-10-01' } }, { close_date: { $gte: '2026-10-01', $lt: '2027-01-01' } }],
+    })).toEqual([
+      { field: 'close_date', operator: 'greater_than_or_equal', value: '2026-10-01' },
+      { field: 'close_date', operator: 'less_than', value: '2027-01-01' },
+    ]);
+  });
+
+  it("words a date field's open bounds as the list's date filter does", () => {
+    const { chips } = drillListConditions(
+      { close_date: { $gt: '2026-09-30', $lt: '2027-01-01' }, amount: { $lt: 5 } },
+      { dateFields: new Set(['close_date']) },
+    );
+    expect(chips.conditions.map((c) => [c.field, c.operator])).toEqual([
+      ['close_date', 'after'],
+      ['close_date', 'before'],
+      ['amount', 'less_than'],
+    ]);
+  });
+
+  it("writes a dataset month bucket's range as two date rows that compare exactly what the bucket counted (objectstack#37034)", () => {
+    // The dataset answer's drill range for 2026-10: `{ $gte, $lt }`, ISO
+    // instants (core's dataset-format). The list's chip reads each bound as a
+    // date (plugin-list `formatConditionDate`); the value stays the one the
+    // query compares. No date-family operator says "on or after", and `after`
+    // (>) would drop the records at the bound, so the lower bound keeps `>=`.
+    const { chips, rest } = drillListConditions(
+      { issued_on: { $gte: '2026-10-01T00:00:00.000Z', $lt: '2026-11-01T00:00:00.000Z' } },
+      { dateFields: new Set(['issued_on']) },
+    );
+    expect(rest).toBeUndefined();
+    expect(chips.conditions.map((c) => [c.field, c.operator, c.value])).toEqual([
+      ['issued_on', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z'],
+      ['issued_on', 'before', '2026-11-01T00:00:00.000Z'],
+    ]);
+  });
+
+  it("lowers a page block's rule array, and an AST node, to chips", () => {
+    // HotCRM's 销售主页 KPI tile: the spec's rule-array form, handed as written.
+    expect(drillListConditions([{ field: 'stage', operator: 'equals', value: 'closed_won' }]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([{ field: 'stage', operator: 'equals', value: 'closed_won' }]);
+    expect(drillListConditions([['stage', '=', 'closed_won'], ['amount', '>', 5]]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([
+        { field: 'stage', operator: 'equals', value: 'closed_won' },
+        { field: 'amount', operator: 'greater_than', value: 5 },
+      ]);
+  });
+
+  it('lowers an `and` node to chips, and keeps an `or` node and an any-of group as the base filter', () => {
+    expect(drillListConditions(['and', ['stage', '=', 'closed_won'], ['amount', '>', 5]]).chips.conditions
+      .map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([
+        { field: 'stage', operator: 'equals', value: 'closed_won' },
+        { field: 'amount', operator: 'greater_than', value: 5 },
+      ]);
+    expect(drillListConditions(['or', ['stage', '=', 'closed_won'], ['stage', '=', 'negotiation']])).toEqual({
+      chips: { logic: 'and', conditions: [] },
+      rest: { $or: [{ stage: 'closed_won' }, { stage: 'negotiation' }] },
+    });
+    // A rule array with an any-of group (`{ or: [rule, ...] }`): the rule is a
+    // chip, the group the base filter's `$or`.
+    const { chips, rest } = drillListConditions([
+      { field: 'stage', operator: 'equals', value: 'closed_won' },
+      { or: [
+        { field: 'lead_source', operator: 'equals', value: 'web' },
+        { field: 'lead_source', operator: 'equals', value: 'referral' },
+      ] },
+    ]);
+    expect(chips.conditions.map(({ field, operator, value }) => ({ field, operator, value })))
+      .toEqual([{ field: 'stage', operator: 'equals', value: 'closed_won' }]);
+    expect(rest).toEqual({ $or: [{ lead_source: 'web' }, { lead_source: 'referral' }] });
+  });
+
+  it('keeps a filter it cannot lower as the base filter, exactly as it arrived', () => {
+    // A scalar on a list operator: the spec's lowering refuses it.
+    const refused = [['stage', 'in', 'won']];
+    expect(drillListConditions(refused)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: refused });
+  });
+
+  it.each([
+    ['an array that is neither rules nor AST', [{ stage: 'closed_won' }]],
+    ['a rule with a blank field', [{ field: '', operator: 'equals', value: 'closed_won' }]],
+    ['a rule with no field', [{ operator: 'equals', value: 'closed_won' }]],
+    ['a valid rule beside a malformed one', [{ field: 'stage', operator: 'equals', value: 'closed_won' }, { stage: 'x' }]],
+    ['a string', 'stage = closed_won'],
+    ['a number', 7],
+  ])('keeps a filter the conversion answers nothing for as the base filter, exactly as it arrived: %s', (_, filter) => {
+    // Not empty, so never read as no filter: that would list every record.
+    expect(drillListConditions(filter)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: filter });
+  });
+
+  it.each([undefined, null, [], {}])('answers no rows and no rest for no filter: %j', (filter) => {
+    expect(drillListConditions(filter)).toEqual({ chips: { logic: 'and', conditions: [] }, rest: undefined });
+  });
+});
+
+describe('measuredFieldsOf', () => {
+  it('names the fields a measure scope says hold a value', () => {
+    expect(measuredFieldsOf({ $and: [{ stage: 'won' }, { amount: { $null: false } }] })).toEqual(['amount']);
+    expect(measuredFieldsOf({})).toEqual([]);
+  });
+});

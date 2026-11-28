@@ -1533,6 +1533,354 @@
           "ref": "#32269"
         }
       ]
+    },
+    {
+      "id": "ai.mcp-answer-labels-units-source",
+      "title": "MCP read answers speak the business's words: a lookup group is named by its record's label, select groups come back in the declared option order, an amount names its currency, the answer carries a source line in the caller's language, and no internal field rides a write answer",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin calling /api/v1/mcp with a personal osk_ key (identity-auth.api-key-ui-lifecycle mints one)",
+        "a member whose language is zh-CN, calling with their own key, for the source line's language"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a personal API key for each persona",
+          "showcase_task rows across several projects and statuses: its project field is a master_detail to showcase_project and its status a select (examples/app-showcase/src/data/objects/task.object.ts)",
+          "showcase_project rows with a budget: a currency field declared currencyMode fixed, defaultCurrency USD (examples/app-showcase/src/data/objects/project.object.ts)"
+        ]
+      },
+      "steps": [
+        "as the admin, aggregate_records on showcase_task with aggregations [{ function: 'count', alias: 'n' }] and groupBy ['project']; record each group row",
+        "read showcase_project over REST and note the name of each project the groups name by id",
+        "aggregate_records on showcase_task grouped by ['status'] with no orderBy; then the same with limit 2; record the order of the groups and the truncated fact",
+        "aggregate_records on showcase_project with aggregations [{ function: 'sum', field: 'budget', alias: 'total_budget' }]; record the answer's currency facts",
+        "query_records on showcase_task with a where on status; record the source block beside the answer",
+        "repeat steps[4] as the zh-CN member with their own key",
+        "run the MCP write-response tripwire pin at the run subject sha (automated.ref) and record its result"
+      ],
+      "acceptance": [
+        {
+          "clause": "a group keyed by a lookup or master_detail field carries KEY__label beside the id, holding the referenced record's name field, read as the caller",
+          "oracle": "api",
+          "verify": "each group row of steps[0] has project__label equal to that project's name read over REST in steps[1]; a group whose project the caller cannot read carries no label (packages/mcp/src/mcp-http-tools.ts#withLookupGroupLabels, #LOOKUP_LABEL_SUFFIX)",
+          "evidence": "the aggregate answer and the REST read"
+        },
+        {
+          "clause": "select groups come back in the declared option order when the call states no order of its own, and the cut keeps the first declared groups with truncated true",
+          "oracle": "api",
+          "verify": "the status groups follow the option order the object declares; with limit 2 the first two declared statuses come back and truncated is true",
+          "evidence": "both aggregate answers"
+        },
+        {
+          "clause": "an amount over a fixed-currency field names its currency by the column alias; a count names none",
+          "oracle": "api",
+          "verify": "the sum answer names USD for total_budget (packages/mcp/src/mcp-http-tools.ts#fixedAmountCurrencies), and the count of steps[0] carries no currency",
+          "evidence": "the sum answer"
+        },
+        {
+          "clause": "a read answer carries a source block whose line states object, filter and figures by field label, in the caller's language",
+          "oracle": "api",
+          "verify": "the query answer carries source.line naming the object and the status filter by label, in English for the admin and in Chinese for the zh-CN member (packages/mcp/src/object-query-source.ts#composeObjectQuerySource; the tool description tells the model to quote it: packages/mcp/src/mcp-http-tools.ts#OBJECT_QUERY_SOURCE_DESCRIPTION)",
+          "evidence": "both query answers"
+        },
+        {
+          "clause": "no write answer an MCP caller receives carries a value of a field declared internal",
+          "oracle": "test",
+          "verify": "the tripwire pin passes at the run subject sha; it enumerates the bridge's write faces at runtime, so a new face without a recipe fails it",
+          "evidence": "the pin's output"
+        }
+      ],
+      "negative": [
+        "a lookup group answered as a bare id with no label, while the caller can read the referenced record, is a FAIL",
+        "a label naming a record the caller cannot read is a FAIL: the label is read as the caller, never with other rights",
+        "a source line that names a field the caller's served definition does not show is a FAIL"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/mcp/src/mcp-http-tools.aggregation-entry.test.ts, packages/mcp/src/mcp-write-response-internal-fields.tripwire.test.ts"
+      },
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ai core feature 2: answers use labels and units and never expose internal values",
+        "packages/mcp/src/mcp-http-tools.ts#withLookupGroupLabels",
+        "packages/mcp/src/mcp-http-tools.ts#fixedAmountCurrencies",
+        "packages/mcp/src/object-query-source.ts#composeObjectQuerySource",
+        "packages/spec/src/ai/object-query-source.zod.ts#ObjectQuerySourceSchema"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature ai 2 (labels and units, no internal values) to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ai.mcp-record-write-permission-and-confirmation",
+      "title": "An agent's record writes over MCP pass the same permissions as the REST door: an overstep is refused with the REST code and writes nothing, delete_record without the confirmation member deletes nothing, and a write through the OAuth door names the client as performer on behalf of the person",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "a restricted member (OWD-private object, own rows only) calling /api/v1/mcp with their own osk_ key",
+        "the same member through an OAuth client holding data:write (identity-auth.oauth-app-consent-loop registers one)",
+        "seeded admin, for the REST controls and the audit read"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a member persona whose permission set reads and edits an OWD-private object but cannot delete it, and who owns at least one row while another user owns another",
+          "an OAuth client registered and consented for the member with data:write and data:read",
+          "the audit plugin on (a stock showcase boot registers it)"
+        ]
+      },
+      "steps": [
+        "as the member over MCP (key), update_record a row the member owns; then update_record the row the OTHER user owns; record both answers and re-read both rows over REST as the admin",
+        "repeat the second update over REST as the member; compare code and status with the MCP refusal",
+        "as the member over MCP, create_record on an object the member's permission set does not let them create; record the answer and the admin's REST count before and after",
+        "as the member over MCP, delete_record the member's own row with no confirm member; record the answer and re-read the row",
+        "as the admin over MCP, delete_record a scratch row with no confirm member, then again with confirm: true; record both answers",
+        "as the member through the OAuth client, update_record the member's own row; as the admin, read the newest sys_audit_log row for that record"
+      ],
+      "acceptance": [
+        {
+          "clause": "a write the member's REST call would be refused is refused over MCP with the same code and status, and nothing is written",
+          "oracle": "api",
+          "verify": "the update of the other user's row and the create the set withholds each answer the REST twin's code and status in the coded envelope, and the admin's re-read shows the row unchanged and the count unchanged",
+          "evidence": "the MCP answers, the REST answers and the admin re-reads"
+        },
+        {
+          "clause": "a write the member may make succeeds over MCP exactly as over REST",
+          "oracle": "api",
+          "verify": "the update of the member's own row answers success and the admin's re-read shows the new value",
+          "evidence": "the MCP answer and the re-read"
+        },
+        {
+          "clause": "delete_record without the confirmation member deletes nothing and answers ACTION_CONFIRMATION_REQUIRED, status 428, naming the member to send; with confirm: true the permitted delete runs",
+          "oracle": "api",
+          "verify": "the unconfirmed call is a tool error whose envelope carries code ACTION_CONFIRMATION_REQUIRED, status 428 and details.confirmationMember, and the row still reads; the confirmed admin call deletes it (packages/mcp/src/mcp-http-tools.ts#recordDeleteConfirmationRefusal)",
+          "evidence": "both answers and the re-reads"
+        },
+        {
+          "clause": "a write through the MCP OAuth door leaves an audit row naming the client as performer and the person it acted for",
+          "oracle": "api",
+          "verify": "the sys_audit_log row of the update carries the member as user_id and metadata.performed_by the OAuth client id with metadata.on_behalf_of the member (packages/plugins/plugin-audit/src/audit-writers.ts#auditPerformerMetadata)",
+          "evidence": "the audit row"
+        }
+      ],
+      "negative": [
+        "an MCP write that succeeds where the same member's REST write is refused is a FAIL: MCP must not be a side door",
+        "an unconfirmed delete_record that deletes the row is a FAIL",
+        "an OAuth-door write whose audit row cannot be told from a plain session's is a FAIL of the dual attribution rule"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/mcp/src/mcp-delete-record-confirmation.test.ts, packages/plugins/plugin-audit/src/agent-dual-attribution.integration.test.ts"
+      },
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ai core feature 3: writing data passes permissions and confirmation; an overstep is stopped and leaves a trace",
+        "packages/mcp/src/mcp-http-tools.ts#recordDeleteConfirmationRefusal",
+        "packages/mcp/src/mcp-http-tools.ts#DELETE_NAMED_RECORD_IS_APPROVAL",
+        "packages/plugins/plugin-audit/src/audit-writers.ts#auditPerformerMetadata",
+        "the action half of this feature is ai.mcp-run-action-exposure-gate; the overstep's own trace is ai.agent-overstep-refusal-trace (planned)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the record-write half of North Star core feature ai 3 to an item (the action half was ai.mcp-run-action-exposure-gate); read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ai.agent-overstep-refusal-trace",
+      "title": "An agent's refused write leaves a trace an administrator can read: a run_action or record write that a permission, exposure or confirmation gate refuses writes one bounded audit row naming the agent, the person, the door and the refusal code",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "an agent acting for a member over MCP (key or OAuth client) whose write is refused",
+        "the administrator who reads the audit log afterwards"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a refusal-trace writer: at the base sha a gate-refused action call writes no audit row (packages/runtime/src/action-invocation-audit.ts header: a call a gate refused ahead of the branch writes no row)"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "a refused agent write is listed in the audit log with its door, its performer, the person and the refusal code, and carries no record values",
+          "oracle": "api",
+          "verify": "read sys_audit_log after a refused run_action and a refused update_record over MCP",
+          "evidence": "the audit rows"
+        }
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ai core feature 3: an overstep is stopped and leaves a trace",
+        "packages/runtime/src/action-invocation-audit.ts#recordActionInvocation (rows only for calls that cleared the admission gates)",
+        "packages/plugins/plugin-audit/src/action-invocation-audit.ts#ACTION_INVOCATION_AUDIT_ACTION",
+        "precedent for a bounded refusal row: identity-auth.scim-refused-audit-row"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — planned. North Star core feature ai 3 asks that an overstep leave a trace; at 49c8e0f0 the agent doors refuse loudly but write no audit row for a refused call. Steps arrive with the writer, in the edit that promotes this item after a run in which it passes",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ai.product-skill-claims-gates",
+      "title": "The published product skills are held to the platform: every identifier a skill table names exists, every schema member it presents as exhaustive is named, every marked example compiles against the current packages, and the generated skill references are in sync — each gate can go red",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": [
+        "ci"
+      ],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a built workspace: the examples gate compiles marked blocks against the packages' built types",
+          "a scratch copy of one skill file for the red probes, outside the repo or reverted after"
+        ],
+        "knownGaps": [
+          "the gates judge existence and compilation, never semantics: a row that names a live key and describes it wrongly passes every gate here (the identifier gate's own header says so). The semantic half is covered per capability by the items whose behaviour a skill describes, and by the scenario-card evals"
+        ]
+      },
+      "steps": [
+        "run pnpm check:skill-identifier-liveness and record both legs' verdicts",
+        "run pnpm --filter @objectstack/spec check:skill-examples, check:skill-refs and check:skill-docs; record each verdict",
+        "red probe, leg 1: in a scratch copy of a skill, add a surface-table row whose first cell names an identifier that exists nowhere; run the identifier gate against it; record the red; revert",
+        "red probe, examples: break a marked example (rename an imported export to one that does not exist); run the examples gate; record the red; revert",
+        "after both reverts, re-run every gate; record green"
+      ],
+      "acceptance": [
+        {
+          "clause": "every gate is green on a clean tree",
+          "oracle": "build",
+          "verify": "each command exits 0 and prints its own pass line",
+          "evidence": "the gate outputs"
+        },
+        {
+          "clause": "the identifier gate goes red on a phantom row, naming the skill and the identifier",
+          "oracle": "build",
+          "verify": "the probe run exits non-zero and names the planted identifier (scripts/check-skill-identifier-liveness.mjs#BINDINGS; its ledger scripts/skill-identifier-liveness-ledger.json)",
+          "evidence": "the red output and the green re-run"
+        },
+        {
+          "clause": "the examples gate goes red on a marked block that no longer compiles, naming the block",
+          "oracle": "build",
+          "verify": "the probe run exits non-zero naming the skill file and the compile error (packages/spec/scripts/check-skill-examples.ts#extractFromFile)",
+          "evidence": "the red output and the green re-run"
+        }
+      ],
+      "negative": [
+        "a green identifier gate after the phantom row is planted is a FAIL of the gate itself",
+        "a green examples run on the broken block is a FAIL; first check the block carries the marker, since an unmarked block is a fragment the gate does not compile by design"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:ai core feature 5: what the skills say matches what the platform does",
+        "scripts/check-skill-identifier-liveness.mjs#BINDINGS",
+        "packages/spec/scripts/check-skill-examples.ts#extractFromFile",
+        "packages/spec/scripts/build-skill-references.ts",
+        "packages/spec/scripts/build-skill-docs.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature ai 5 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "ai.chat-question-card",
+      "title": "When the AI ends its turn on a clarifying question, a clickable question card takes the composer's place: one click answers with the next message, Skip gives the composer back with its draft, and the conversation shows the question collapsed",
+      "since": "v19",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form, in the AI chat"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an AI service that serves an agent with a model and the ask_which tool, so an ambiguous question ends the turn on a question (service-ai is a Cloud/EE package: ai.open-edition-honest-degradation)",
+          "an ambiguous question, e.g. 'how much revenue this quarter' where the agent can read more than one revenue figure"
+        ],
+        "knownGaps": [
+          "BLOCKED(environment): the open tree registers no AI service, so no turn ends on a question. When the card shows, what an answer sends and the skip mark are pinned (automated.ref)"
+        ]
+      },
+      "steps": [
+        "type a few words in the composer without sending them, then ask an ambiguous question; wait for the turn to end",
+        "read the composer area and the last assistant message; check that the reply's Regenerate button is absent",
+        "click Skip; read the composer and its draft; reload the conversation and check the card does not come back",
+        "ask another ambiguous question and click one option; read the next user message"
+      ],
+      "acceptance": [
+        {
+          "clause": "the card takes the composer's place once the turn ends on a question, and the conversation shows the question without its options",
+          "oracle": "dom",
+          "verify": "the question card is shown where the input was, the input is hidden but still in the DOM, and the last assistant message reads 'AI asks: QUESTION' (ui/packages/plugin-chatbot/src/chat/pendingQuestion.ts#findPendingQuestion)",
+          "evidence": "a screenshot of the composer area and the message"
+        },
+        {
+          "clause": "Skip gives the composer back with the draft typed before the question, and the card stays away after a reload on this device",
+          "oracle": "dom",
+          "verify": "the input holds the typed words, the question shows collapsed with its options inside, and localStorage holds objectstack:ai-chat-question-skip:CONVERSATION_ID (ui/packages/plugin-chatbot/src/chat/questionSkip.ts#QUESTION_SKIP_STORAGE_PREFIX)",
+          "evidence": "the input value, the message DOM and the storage entry"
+        },
+        {
+          "clause": "one click on an option sends its label as the next user message",
+          "oracle": "network",
+          "verify": "the chat request after the click carries the option label as the user message",
+          "evidence": "the request body"
+        }
+      ],
+      "negative": [
+        "a card that shows while the turn still streams, a draft lost after Skip, or an answer sent twice is a FAIL"
+      ],
+      "blocked": {
+        "by": "environment",
+        "ref": "service-ai is Cloud/EE: no open-tree AI service answers the chat (FOLLOW-UPS §18c, ai.console-ai-surface-gating)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-chatbot/src/__tests__/pendingQuestion-37874.test.ts, ui/packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.questionCard-37874.test.tsx"
+      },
+      "source": [
+        "ui/packages/plugin-chatbot/src/chat/pendingQuestion.ts#findPendingQuestion",
+        "ui/packages/plugin-chatbot/src/chat/composerGate.tsx#ComposerGate",
+        "ui/packages/plugin-chatbot/src/chat/questionSkip.ts#QUESTION_SKIP_STORAGE_PREFIX",
+        "packages/spec/src/ai/ask-question.zod.ts#parseAskQuestionEnvelope"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-27",
+          "change": "initial — the question card wired into the AI chat (question-card topic #37871, Q2b). Blocked(environment): no open-tree AI service; no live run made",
+          "ref": "#37874"
+        }
+      ]
     }
   ]
 }

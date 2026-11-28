@@ -13,16 +13,17 @@
  * chip itself, after the identity (title, api-name or kind chips) and before
  * the meta; the right slot holds actions only. The identity chips sit in
  * one `contents` wrapper, so the chip is the same child of the same row
- * whatever identity chips a pillar shows.
+ * whatever identity chips a pillar shows. (The Interfaces pillar's header was
+ * the fourth until objectstack#36502 retired that pillar.)
  *
- * The REAL four pillars against one server double that serves a pending draft
- * for the open object, the open flow and the open page. Access has no
- * item-level draft: its writable "saved as draft" note is the pillar's status.
+ * The REAL pillars against one server double that serves a pending draft
+ * for the open object and the open flow. Access (since objectstack#36905 the
+ * permission set's full-screen page) has no item-level draft: its writable
+ * "saved as draft" note is the page's status.
  *
  * Pinned:
- *  - with a draft, the chip in all four headers is a child of the header's
+ *  - with a draft, the chip in all three headers is a child of the header's
  *    title row at the same index, after the identity and outside the actions;
- *  - the Interfaces actions keep their order with the chip gone from them;
  *  - CONTROL: no draft (and, for Access, a read-only package), no chip, and
  *    Access's read-only link stays in the actions slot.
  */
@@ -114,7 +115,8 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
-import { AccessPillar, AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage';
 import '../../services/builtinComponents.js';
 import { t } from '../metadata-admin/i18n';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
@@ -173,10 +175,11 @@ const CASES: PillarCase[] = [
   {
     pillar: 'Data',
     testId: 'data-object-header',
-    element: (readOnly) => <DataPillar packageId={PKG} readOnly={readOnly} />,
-    // objectstack#34794 — the object's machine name is the title's tooltip.
+    element: (readOnly) => <DataPillar objectName="acme_account" packageId={PKG} readOnly={readOnly} />,
+    // objectstack#36904 — the full-screen item header: settled once it reads
+    // the loaded object's label.
     settled: async (header) => {
-      await waitFor(() => expect(within(header).getByRole('heading', { level: 1 })).toHaveAttribute('title', OBJECT.name), {
+      await waitFor(() => expect(within(header).getAllByTestId('studio-detail-title')[0]).toHaveTextContent(OBJECT.label), {
         timeout: 8000,
       });
     },
@@ -184,23 +187,16 @@ const CASES: PillarCase[] = [
   {
     pillar: 'Automations',
     testId: 'auto-flow-header',
-    element: (readOnly) => <AutomationsPillar packageId={PKG} readOnly={readOnly} />,
+    element: (readOnly) => <AutomationsPillar packageId={PKG} flowName={FLOW.name} readOnly={readOnly} />,
     settled: async () => {
       await screen.findByTestId('auto-flow-meta', undefined, { timeout: 8000 });
     },
   },
   {
-    pillar: 'Interfaces',
-    testId: 'if-item-header',
-    element: (readOnly) => <InterfacesPillar packageId={PKG} readOnly={readOnly} />,
-    settled: async () => {
-      await screen.findByRole('button', { name: 'Select hello' }, { timeout: 8000 });
-    },
-  },
-  {
+    // objectstack#36905 — a permission set's full-screen page took the Access pillar's place.
     pillar: 'Access',
-    testId: 'access-item-header',
-    element: (readOnly) => <AccessPillar packageId={PKG} readOnly={readOnly} />,
+    testId: 'permission-detail-header',
+    element: (readOnly) => <StudioPermissionSetPage packageId={PKG} name="acme_rep" readOnly={readOnly} />,
     settled: async (header) => {
       await within(header).findByRole('button', { name: en('engine.studio.access.explain.open') }, { timeout: 8000 });
     },
@@ -229,7 +225,7 @@ async function statusPlace(header: HTMLElement): Promise<{ index: number; chip: 
 }
 
 describe('the status chip sits in the same place in every pillar’s item header (objectui#12524)', () => {
-  it('with a draft, all four headers draw it as the same child of the title row: after the identity, before meta and actions', async () => {
+  it('with a draft, all three headers draw it as the same child of the title row: after the identity, before meta and actions', async () => {
     const places: Array<{ pillar: string; index: number; text: string }> = [];
     for (const c of CASES) {
       const header = await openHeader(c);
@@ -251,33 +247,20 @@ describe('the status chip sits in the same place in every pillar’s item header
       cleanup();
     }
 
-    expect(places.map((p) => p.pillar)).toEqual(['Data', 'Automations', 'Interfaces', 'Access']);
-    // The same index in all four.
+    expect(places.map((p) => p.pillar)).toEqual(['Data', 'Automations', 'Access']);
+    // The same index in all three.
     expect(new Set(places.map((p) => p.index)).size, JSON.stringify(places)).toBe(1);
-    // The three item drafts say so; Access says its edits save as drafts.
+    // The two item drafts say so; Access says its edits save as drafts.
     expect(places.map((p) => p.text)).toEqual([
-      en('engine.studio.unpublishedDraft'),
       en('engine.studio.unpublishedDraft'),
       en('engine.studio.unpublishedDraft'),
       en('engine.studio.access.banner'),
     ]);
   });
 
-  it('the Interfaces actions keep their order, and the chip is no longer one of them', async () => {
-    const header = await openHeader(CASES[2]);
-    const { row } = await statusPlace(header);
-    const actions = row.lastElementChild as HTMLElement;
-    expect(within(actions).queryByTestId('studio-item-status')).toBeNull();
-    expect(within(actions).queryByText(en('engine.studio.unpublishedDraft'))).toBeNull();
-    const order = Array.from(actions.querySelectorAll('[data-testid]'))
-      .map((el) => el.getAttribute('data-testid'))
-      .filter((id) => id === 'canvas-mode-toggle' || id === 'if-properties-toggle');
-    expect(order).toEqual(['canvas-mode-toggle', 'if-properties-toggle']);
-  });
-
-  it('CONTROL: with no draft, Data, Automations and Interfaces draw no status chip', async () => {
+  it('CONTROL: with no draft, Data and Automations draw no status chip', async () => {
     server.drafts = false;
-    for (const c of CASES.slice(0, 3)) {
+    for (const c of CASES.slice(0, 2)) {
       const header = await openHeader(c);
       // The draft read has settled (the header's identity is in), and nothing says draft.
       await waitFor(() => expect(mockClient.getDraft).toHaveBeenCalled());
@@ -288,11 +271,14 @@ describe('the status chip sits in the same place in every pillar’s item header
   });
 
   it('CONTROL: a read-only package draws no Access status; its read-only link stays in the actions slot', async () => {
-    const header = await openHeader(CASES[3], true);
+    const header = await openHeader(CASES[2], true);
     expect(within(header).queryByTestId('studio-item-status')).toBeNull();
     const link = within(header).getByTestId('studio-readonly-link');
     const row = titleRow(header);
-    expect(link.parentElement).toBe(row.lastElementChild);
-    expect(link.parentElement).toHaveClass('ml-auto');
+    // A direct child of the page's primary action group, the group a direct
+    // child of the right-aligned actions slot: not merely somewhere inside it.
+    const slot = row.lastElementChild;
+    expect(slot).toHaveClass('ml-auto');
+    expect(link.parentElement!.parentElement).toBe(slot);
   });
 });

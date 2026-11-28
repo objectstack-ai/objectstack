@@ -32,6 +32,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
 | **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
 | **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+| **focus** | `boolean` | optional | Honours a conversation focus: the chat request's `context.focus`, the record the user pinned the conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when this is true; absent reads as false. |
 
 
 ---
@@ -66,7 +67,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
 | **label** | `string` | ✅ | Display label |
 | **role** | `string` | ✅ | Agent role |
-| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean; … }` | ✅ | Capability set implied by the agent surface |
 
 ### Nested Shape: `AiAgentSummary.capabilities`
 
@@ -76,6 +77,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **canvas** | `boolean` | ✅ | Drives the Live Canvas split view (ADR-0037) |
 | **debug** | `boolean` | ✅ | Exposes the build-doctor debug drawer |
 | **resume** | `boolean` | ✅ | Turns resume durable multi-step runs (ADR-0013) |
+| **focus** | `boolean` | optional | Honours a conversation focus: the chat request's `context.focus`, the record the user pinned the conversation to (`ToolExecutionContext.focus`). A client draws the pin and sends the key only when this is true; absent reads as false. |
 
 
 ---
@@ -95,7 +97,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | **name** | `string` | ✅ | Agent name — the `:agentName` path segment |
 | **label** | `string` | ✅ | Display label |
 | **role** | `string` | ✅ | Agent role |
-| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean }` | ✅ | Capability set implied by the agent surface |
+| **capabilities** | `{ authoring: boolean; canvas: boolean; debug: boolean; resume: boolean; … }` | ✅ | Capability set implied by the agent surface |
 
 
 ---
@@ -222,7 +224,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **models** | `(string \| { id: string; label: string; default: boolean; costMultiplier?: number })[]` | ✅ | Models this system offers |
+| **models** | `(string \| { id: string; label: string; tierLabel?: string; default: boolean; … })[]` | ✅ | Models this system offers |
 | **defaultModel** | `string` | optional | Default model id, when the service reports one |
 
 ### Nested Shape: `AiModelsResponse.models[number]`
@@ -231,6 +233,7 @@ const result = AiAgentCapabilitiesSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Model id |
 | **label** | `string` | ✅ | Display label for the picker |
+| **tierLabel** | `string` | optional | Display name of the model's tier alone (for example 'Fast'), in the language the response is served in. The closed picker shows it in place of `label`, which may also carry the model's name; the open list keeps `label`. Optional: absent, the picker shows `label` as before. |
 | **default** | `boolean` | ✅ | Whether this is the environment default |
 | **costMultiplier** | `number` | optional | Factor by which one message on this model draws on the AI allowance, compared with one message on the environment's default model: 20 means one message here uses as much allowance as 20 on the default. Normalised to the default: the entry with `default: true` carries 1, and every other entry carries its model's cost weight divided by the default model's cost weight. Written by cloud service-ai's GET /api/v1/ai/models; absent when the service reports none, and then nothing is shown for it. |
 
@@ -567,6 +570,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -629,6 +633,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -1318,8 +1323,9 @@ This schema accepts one of the following structures:
 | **allowPurge** | `never` | optional | [REMOVED] `objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049): the `purge` ObjectQL operation it claimed to gate did not exist then, so granting the bit delivered nothing (a compliance/GDPR erase the author believed was permission-locked was not). Delete the key. The operation now exists with the recycle bin (ADR-0148), and its grant is spelled `manageRecycleBin` (purge an entry, empty an object's entries, and the permanent delete). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **allowRestoreOwnDeleted** | `boolean` | optional | Recycle bin: restore the entries of this object the caller deleted. Bounded by read; implied by manageRecycleBin and modifyAllRecords, not by allowDelete. |
 | **manageRecycleBin** | `boolean` | optional | Recycle bin administration on this object: restore any entry, not only your own, and purge (the permanent delete, purging one entry, emptying the object's entries). Bounded by read; implied by modifyAllRecords. |
-| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
-| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing): reads every record of the object. Casts no field vote: a field another permission set hides stays hidden; reading every field is viewAllFields. |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. Casts no field vote: field rows (this set's and others') still hide or lock their fields; reading every field is viewAllFields. |
+| **viewAllFields** | `boolean` | optional | View All Fields: a read vote on every field of this object, including fields added later. Casts no edit vote: edits come from the default or from explicit editable: true field rows. A field row of the same set beats it, so an own readable: false row keeps the field hidden for this set. Grants no object access and widens no record. Allowed on the '*' entry. |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
 | **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
 | **apiOperations** | `Enum<'get' \| 'list' \| 'create' \| 'update' \| 'delete' \| 'upsert' \| 'bulk' \| …>[]` | optional | Server-resolved effective API operations for this object. Present only when the object tightens exposure via apiMethods; absent = default-allow. The frontend renders this effective set, never the raw whitelist. Vocabulary is the EFFECTIVE ApiOperation set (six primitives + eight derived verbs), not the authored six-value ApiMethod enum. |
@@ -1377,6 +1383,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locales** | `{ code: string; label: string; isDefault?: boolean }[]` | ✅ | Available locales |
+| **sourceLocale** | `string` | optional | The language the app's own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation |
+| **fallbackChain** | `string[]` | optional | The locales the server consults, in order, after the requested one and before the authored text: the deployment's declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain is not walked for a request that negotiates to `sourceLocale` |
 
 ### Nested Shape: `GetLocalesResponse.locales[number]`
 
@@ -1520,6 +1528,7 @@ This schema accepts one of the following structures:
 | **name** | `string` | ✅ | Item name |
 | **code** | `any` | ✅ | LAYER 1 — the packaged artifact baseline exactly as shipped, before any tenant customization. `null` when no artifact ships this item (it exists only as an overlay). |
 | **overlay** | `any` | ✅ | LAYER 2 — the stored customization row ALONE, not merged with `code`. `null` when the environment has not customized the item. |
+| **overlayVersion** | `string \| null` | optional | ADR-0008 version token of the stored ACTIVE row at this read's address (`?package=`, and the bundle member): the published layer a publish of this item replaces. The same keyed token the plain uncached read serves as `version` and a publish receipt serves as `version`. Send it back as `If-Match` on `POST /meta/:type/:name/publish` and a publish over a row that moved since this read is refused 409 `METADATA_CONFLICT` instead of replacing it. `null` when no active row is stored at that address — an item served from code or a package artifact alone — so the next publish creates one: pin it with `If-None-Match: *`. ABSENT from a server that does not serve it: absence means "not served", never "no row". Opaque — echo it verbatim, never parse it. |
 | **overlayScope** | `Enum<'env'> \| null` | ✅ | Which scope the `overlay` row was read from: `env`, the environment layer — the only layer a read serves (ADR-0131 D6). `null` exactly when `overlay` is null. |
 | **effective** | `any` | ✅ | LAYER 3 — the merged result, i.e. the value an ordinary `GET /meta/:type/:name` would return under `item`. `null` when the item resolves to nothing at all. |
 | **draft** | `any` | optional | LAYER — the pending draft row exactly as stored: untranslated, ungoverned, with no injected columns (unlike the `?state=draft` item read, which serves the draft translated and governed). For the requested `packageId` when one is given. `null` when no draft is pending. A client building an edit buffer reads `draft ?? overlay ?? code`. ABSENT from a server that does not serve this layer: absence means "not served", never "no draft". |
@@ -1528,7 +1537,7 @@ This schema accepts one of the following structures:
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | ✅ | Whether an overlay write is permitted. Always present on this path. |
@@ -1577,7 +1586,7 @@ This schema accepts one of the following structures:
 | **lockReason** | `string` | optional | Human-readable explanation shown next to a refused write. Present only when the resolved item declares `_lockReason`. |
 | **lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Which layer asserted the lock. Present only when the resolved item declares `_lockSource`. |
 | **lockDocsUrl** | `string` | optional | Documentation link surfaced beside `lockReason`. Present only when the resolved item declares `_lockDocsUrl`. |
-| **provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Where the item came from (package \| org \| env-forced). Present only when the resolved item declares `_provenance`. |
+| **provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Where the item came from (package \| org \| env-forced \| platform). Present only when the resolved item declares `_provenance`. |
 | **packageId** | `string` | optional | Owning package machine id. Present only when the resolved item declares `_packageId`. |
 | **packageVersion** | `string` | optional | Owning package version. Present only when the resolved item declares `_packageVersion`. |
 | **editable** | `boolean` | optional | Whether an overlay write is permitted — false iff `lock` is `no-overlay` or `full`. A derived verdict: do not recompute it from `lock` client-side. |
@@ -1653,6 +1662,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | **items** | `any[]` | ✅ | Array of metadata items |
 | **registrations** | `Record<string, { state: 'registered' } \| { state: 'refused'; reason: object } \| { state: 'unregistered' }>` | optional | The automation engine's verdict on each listed flow, keyed by the item's `name`: one entry per listed item that is not a pending draft. Present only on a `flow` list answered by a process that runs an automation service; absent otherwise, and absence means no engine judged them, never `registered`. The verdict is the answering process's engine. Beside the items, never inside one: an item's `status` stays what its author declared. |
 | **disabledActions** | `Record<string, string[]>` | optional | For each listed object, keyed by the item's `name`: the names in its `actions` that this deployment's activation ledger switches off, so a call to any of them is refused 409 `ACTION_DISABLED` (the item read's `disabledActions`). One entry per listed object that is not a pending draft, `[]` when none of its actions is switched off. Present only on an `object` list answered by a process whose data engine has an activation ledger attached; absent otherwise, and absence means no ledger answered, never that nothing is switched off. Beside the items, never inside one: each item's `actions` is served as declared. |
+| **changedAt** | `Record<string, string>` | optional | When each listed item last changed, keyed by the item's `name`: the `updated_at` of the stored row whose content the list serves for that item, an ISO-8601 instant in UTC written with `Z`. One entry per listed item served from a stored row; an item the list serves from code (a code-shipped or file-loaded definition) has no recorded change time and no entry, never a stand-in such as the read time. Where an item has several stored layers in scope (its package's own row, the package-less row, the package's declared override, environment-wide or scoped to one package), the time is the effective layer's: the row whose content is the listed item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the draft row's time, since the draft is its content. Where several listed items share a name (a name two or more packages ship, the members of a bundle), the latest of their times. Only the names of items in this answer are keyed, and a door that leaves out some item of a name (the per-caller read gate, a query filter) answers no entry for that name, since the entry may be the time of the item it left out. A view a stored view container expands is not served from a row of its own name and has no entry. Absent when no listed item is served from a stored row. Beside the items, never inside one: an item's body is served as stored. |
 
 ### Nested Shape: `GetMetaItemsResponse.registrations[string][state='registered']`
 
@@ -1693,13 +1703,14 @@ One changed key path of the pending draft, and the last write that changed it.
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **types** | `string[]` | ✅ | Available metadata type names (e.g., "object", "plugin", "view") |
-| **entries** | `{ type: string; label: string; description?: string; filePatterns: string[]; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
+| **entries** | `{ type: string; schemaId: string; label: string; description?: string; … }[]` | optional | Enriched per-type registry entries (Phase 3a) |
 
 ### Nested Shape: `GetMetaTypesResponse.entries[number]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `string` | ✅ | Singular type identifier |
+| **schemaId** | `string` | ✅ | Same value as `type`: the id the type's `schema`, `form` and `list` are bound to |
 | **label** | `string` | ✅ | Human-readable label |
 | **description** | `string` | optional | Brief description |
 | **filePatterns** | `string[]` | ✅ | Glob patterns used to discover artifacts of this type |
@@ -1712,6 +1723,10 @@ One changed key path of the pending draft, and the last write that changed it.
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 | **overrideSource** | `Enum<'registry' \| 'env'>` | ✅ | Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable |
 | **createSeed** | `any` | optional | Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively. |
+| **schema** | `Record<string, any>` | optional | JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one. |
+| **form** | `{ type?: Enum<'simple' \| 'tabbed' \| 'wizard'>; layout?: Enum<'vertical' \| 'horizontal'>; columns?: integer; title?: string; … }` | optional | Form layout of the type's Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone. |
+| **list** | `{ data?: object \| object \| object; columns: object[] }` | optional | Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description. |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| object \| string \| Record<string, string>; objectName?: string; … }[]` | optional | Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry's declarative actions merged with plugin-registered ones. Absent when there are none. |
 
 
 ---
@@ -1782,8 +1797,9 @@ One changed key path of the pending draft, and the last write that changed it.
 | **allowPurge** | `never` | optional | [REMOVED] `objects.<object>.allowPurge` was removed in @objectstack/spec 17 (ADR-0049): the `purge` ObjectQL operation it claimed to gate did not exist then, so granting the bit delivered nothing (a compliance/GDPR erase the author believed was permission-locked was not). Delete the key. The operation now exists with the recycle bin (ADR-0148), and its grant is spelled `manageRecycleBin` (purge an entry, empty an object's entries, and the permanent delete). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **allowRestoreOwnDeleted** | `boolean` | optional | Recycle bin: restore the entries of this object the caller deleted. Bounded by read; implied by manageRecycleBin and modifyAllRecords, not by allowDelete. |
 | **manageRecycleBin** | `boolean` | optional | Recycle bin administration on this object: restore any entry, not only your own, and purge (the permanent delete, purging one entry, emptying the object's entries). Bounded by read; implied by modifyAllRecords. |
-| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing) |
-| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. |
+| **viewAllRecords** | `boolean` | optional (default: `false`) | View All Data (Bypass Sharing): reads every record of the object. Casts no field vote: a field another permission set hides stays hidden; reading every field is viewAllFields. |
+| **modifyAllRecords** | `boolean` | optional (default: `false`) | Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused. Casts no field vote: field rows (this set's and others') still hide or lock their fields; reading every field is viewAllFields. |
+| **viewAllFields** | `boolean` | optional | View All Fields: a read vote on every field of this object, including fields added later. Casts no edit vote: edits come from the default or from explicit editable: true field rows. A field row of the same set beats it, so an own readable: false row keeps the field hidden for this set. Grants no object access and widens no record. Allowed on the '*' entry. |
 | **readScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Read depth: own\|unit\|unit_and_below\|org |
 | **writeScope** | `Enum<'own' \| 'own_and_reports' \| 'unit' \| 'unit_and_below' \| 'org'>` | optional | [ADR-0057 D1] Write depth: own\|unit\|unit_and_below\|org |
 
@@ -1793,7 +1809,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | :--- | :--- | :--- | :--- |
 | **readable** | `boolean` | optional (default: `true`) | Field read access |
 | **editable** | `boolean` | optional (default: `false`) | Field edit access |
-| **when** | `string` | optional | Row condition narrowing where this entry votes, authored in canonical CEL like `rowLevelSecurity[].using` (a field of this object compared with a literal or a `current_user.*` value using `==`, `!=`, `<`, `<=`, `>`, `>=` or `in`, combined with `&&` / `\|\|`; e.g. status in ["approved", "signing", "active"]). Absent, the entry votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on every other row, so the most-permissive merge across the caller's sets is unchanged: a set that locks a field only from a stage onward does not lock the rows before it, and a co-held set that says nothing about the field still lifts nothing, unless it holds the super-user bypass on the object (its own entry for the object, otherwise its `'*'` wildcard). Such a set votes on every field of the object, on every row, whatever `when` says: `viewAllRecords` votes `readable: true`, and `modifyAllRecords` votes `readable: true` and `editable: true`, so a row-conditioned lock never binds a Modify All holder. View All never grants an edit. Otherwise union without deny is unchanged. The write gate judges the condition on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep `readable: true` (the default) on a row-conditioned entry. Where no row can be judged (a predicate update with no row address, a stored row the caller cannot read, a condition that does not resolve for the request) the entry is judged as its lock: it contributes no edit grant on that write. Validated like an RLS predicate at authoring and publish time: the fields it names must exist on the entry's object and it may not reach across a relation; a condition that cannot be lowered is refused there, never dropped at runtime. Readers that hold no row (`/auth/me/permissions`, the object-wide field projections, the write preview on an update) report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses. The record-scoped field projection (`GET /data/{object}/{id}/field-access`, the answer a record's edit form reads) holds the row: it judges the condition on the stored row exactly as the write gate does on an update of that row, so a lock that applies only from a stage onward disables the field only on the rows it names. |
+| **when** | `string` | optional | Row condition narrowing where this entry votes, authored in canonical CEL like `rowLevelSecurity[].using` (a field of this object compared with a literal or a `current_user.*` value using `==`, `!=`, `<`, `<=`, `>`, `>=` or `in`, combined with `&&` / `\|\|`; e.g. status in ["approved", "signing", "active"]). Absent, the entry votes on every row. Present, the entry votes as declared on the rows the condition matches and is ABSENT on every other row, so the most-permissive merge across the caller's sets is unchanged: a set that locks a field only from a stage onward does not lock the rows before it, and a co-held set that says nothing about the field still lifts nothing. A set carrying `viewAllFields` on the object (its own entry for the object, otherwise its `'*'` wildcard) votes `readable: true` on every field, on every row, and never an edit, so a row-conditioned lock binds its holders; `viewAllRecords` and `modifyAllRecords` cast no field vote. Otherwise union without deny is unchanged. The write gate judges the condition on the stored row BEFORE an update (so a lock on `status in [...]` holds on an approved row even when the write changes `status`) and on the incoming row of an insert, as the caller sent it. It reaches the EDIT vote only — reads are judged row-blind — so `readable: false` beside a `when` is refused at parse time: keep `readable: true` (the default) on a row-conditioned entry. Where no row can be judged (a predicate update with no row address, a stored row the caller cannot read, a condition that does not resolve for the request) the entry is judged as its lock: it contributes no edit grant on that write. Validated like an RLS predicate at authoring and publish time: the fields it names must exist on the entry's object and it may not reach across a relation; a condition that cannot be lowered is refused there, never dropped at runtime. Readers that hold no row (`/auth/me/permissions`, the object-wide field projections, the write preview on an update) report a row-conditioned entry as its lock, so a client never advertises an edit the gate refuses. The record-scoped field projection (`GET /data/{object}/{id}/field-access`, the answer a record's edit form reads) holds the row: it judges the condition on the stored row exactly as the write gate does on an update of that row, so a lock that applies only from a stage onward disables the field only on the rows it names. |
 | **rollupSourceUnreadableReason** | `string` | optional | Authoring-time acknowledgement, read only by `os lint` (the runtime does not read it): why holders of this set are meant to read this roll-up `summary` column although the set cannot read the child object, the aggregated child field or a child field the roll-up's `filter` tests (e.g. 'Service staff read account totals but not invoice rows'). Declared on the set's entry for the summary column, it turns that set's `security-rollup-source-unreadable` warning for the column into an `info` note quoting the reason, so `os lint --strict` passes; every other finding is unchanged. The runtime does not read the key, but the entry that carries it is an ordinary declaring entry: it votes `readable: true` in the field merge (only declaring sets vote, and the most permissive vote wins), so on a set that had no entry for the column, adding one to carry the reason restores the column for holders whose other sets mask it. A blank reason is refused, and so is a reason beside `readable: false`, an entry that declares no read to acknowledge. |
 
 
@@ -1931,12 +1947,14 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -1972,7 +1990,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -1991,11 +2009,11 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2071,11 +2089,11 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2577,7 +2595,7 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 | :--- | :--- | :--- | :--- |
 | **error** | `string` | ✅ | Human-readable refusal sentence, unchanged by `currentVersion`: it names the item and the version the door judged current. For display and logs; branch on `code` and read `currentVersion`, never parse this. |
 | **code** | `'METADATA_CONFLICT'` | ✅ | ADR-0112 registered code of the optimistic-lock refusal. |
-| **currentVersion** | `string \| null` | ✅ | The version token of the head the door judged current — the value the sentence names — or `null` when no row of the target lifecycle exists. Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` when it is `null`), or re-read the item to merge first. A `null` for an item whose read serves `editable: false` prescribes no pin: that item takes no save. Opaque — echo it verbatim, never parse it. |
+| **currentVersion** | `string \| null` | ✅ | The version token of the head the door judged current — the value the sentence names — or `null` when no row of the target lifecycle exists. Send it as `If-Match` to overwrite deliberately (or `If-None-Match: *` when it is `null`), or re-read the item to merge first. A `null` for an item whose read serves `editable: false` prescribes no pin: that item takes no save. On the per-item publish door a refused `draftVersion` names the DRAFT's current token instead: send it back as `draftVersion` in the publish body (never as `If-Match`, which pins the active row), and there `null` means no draft is pending — nothing is left to publish. Opaque — echo it verbatim, never parse it. |
 
 
 ---
@@ -2647,6 +2665,8 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 | **message** | `string` | optional | Optional human-readable note recorded with the publish history event. |
 | **packageId** | `string \| null` | optional | ADR-0048 — the software package the draft being promoted was listed under, when the caller has one to state (`?package=<id>` on the REST door). Named, the publish promotes that package's draft and no other. ABSENT names no package: the publish promotes the draft a draft save that names no package writes — the draft of the one package the item's active rows are bound to, else its package-unbound draft, promoted into that package — and answers `404 NO_DRAFT` when neither exists, as the strict draft read does. For an item never published into a package it is the package-unbound draft, else the one package's draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, with none and no package-unbound draft, the drafts) are bound to two or more packages, except a bundled type's member whose active rows a base package and a package declaring it both hold, with no package-unbound row beside them: the read naming no package serves the base's row, and the publish promotes the base's draft into it, as naming the base does (two packages neither of which declares the other are still refused). ⚠️ `null` is NOT the same as absent: the implementation branches on the KEY BEING PRESENT, and `null` pins the lookup to the package-UNBOUND row. Spread it in conditionally; a present-and-`undefined` key coerces to `null` downstream and makes a package-bound draft unfindable — a silent `no_draft`. |
 | **member** | `string` | optional | Bundle member selector, for a metadata type whose identity is a pair (today only `email_template`, identified by `(name, locale)`): the member this request addresses, spelled as its discriminator value (`zh-CN`). Absent, the canonical member (`en-US` for `email_template`), which is what a bare-name read answers; naming the canonical value is the same request. It is not the response translation locale, which `?locale=` and `Accept-Language` choose. Refused with 400 `VALIDATION_ERROR` on a type that has no members, and for a blank value or one longer than a stored member can be (100 characters). A well-formed member with nothing stored or shipped answers as that door answers an absent item. |
+| **parentVersion** | `string \| null` | optional | ADR-0008 optimistic-concurrency pin on the PUBLISHED layer: the version token of the active row the caller loaded and means to replace (on the REST door, the `If-Match` request header; the `/layers` read's `overlayVersion`, the plain read's `version` and a publish receipt's `version` serve it). A token that is not the current active row's at the address the promotion writes is refused 409 `METADATA_CONFLICT`, whose `currentVersion` names the active row's current token, and nothing is promoted: the draft stays pending. ⚠️ `null` is NOT the same as absent: a present `null` asserts "no active row here" (on the REST door, `If-None-Match: *`, which takes `*` alone and never beside `If-Match`), refused 409 when one exists; an ABSENT key is unpinned and promotes over whatever is live, as before. It pins the active row only — which draft is promoted is the address's, as without it; the draft's own pin is `draftVersion`. |
+| **draftVersion** | `string` | optional | ADR-0008 optimistic-concurrency pin on the DRAFT this publish promotes: the version token of the pending draft row the caller wrote or loaded and means to publish (on the REST door, the `draftVersion` member of the publish body, beside `message`; a draft save's receipt `version` and the draft read's `version` serve it). A token that is not the current draft row's at the address the promotion reads is refused 409 `METADATA_CONFLICT`, whose `currentVersion` names the draft's current token (`null` when no draft is pending), and nothing is promoted: a draft another writer changed after the caller wrote or read it is never published on that writer's behalf. ABSENT is unpinned and promotes whichever draft is pending, as before. It pins the draft only — the active row the promotion replaces is `parentVersion`'s (`If-Match`), and the two may be sent together: the draft is judged first, so a request stale on both is refused naming the draft's token. The address is resolved before either pin: no draft at the address while another package holds one answers `404 NO_DRAFT`, not this conflict. |
 | **userTextLocales** | `string[]` | optional | The locales the user-facing sentences of this write's findings (`advisories[].userMessage`, and `issues[].userMessage` on its 422) are composed in, in ladder order: the locale the request names, then the workspace default. Each is read against the platform locale table, whole and then one subtag shorter at a time; a value that names no table language is passed over, and `en` is the last rung. Stated by the door that holds the request (the REST door and the dispatcher state `[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), never read from a wire body. ABSENT ⇒ the sentences are composed in `en`. It selects a language only: what is judged, refused or saved does not depend on it. |
 
 
@@ -3368,6 +3388,7 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
 
 
 ---
@@ -3506,6 +3527,14 @@ A write-path strip event: caller-supplied fields legally dropped from the payloa
 | **message** | `string` | ✅ | Human-readable message — a validation rule's author-written text where one exists. |
 | **rule** | `string` | optional | The `name` of the ADVISORY validation rule this finding reports. Present only on an advisory rule hit. |
 | **severity** | `Enum<'warning' \| 'info'>` | optional | The advisory rule's declared severity, `warning` or `info`. Present only on an advisory rule hit. |
+| **scope** | `{ field: string; value: string }[]` | optional | The row columns a scoped lookup cell was resolved within, each with the cell the row gave it, in the order the refusal names them. Present only on an import cell error whose `code` is `reference_out_of_scope`: the value matches a record, but none within these columns, so a client can name the scoping column and its cell in its own text instead of parsing `message`. |
+
+### Nested Shape: `ValidateDataIssue.scope[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | API name of the row column that scoped the lookup. |
+| **value** | `string` | ✅ | The cell the row gave that column, as the importer typed it. |
 
 
 ---

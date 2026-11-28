@@ -180,6 +180,49 @@ function objectApiDisabledError(object: string): Error {
   return err;
 }
 
+/**
+ * [#35525] The registry's answer to "does `objectName` belong to a DISABLED
+ * package?" — `SchemaRegistry#isObjectPackageDisabled`, the ONE predicate the
+ * data route asks (metadata-protocol's `isObjectOfDisabledPackage`) before it
+ * answers `404 OBJECT_PACKAGE_DISABLED`. Handed over as that predicate itself
+ * (`@objectstack/core`'s `registryObjectPackageDisabled`), never a second
+ * reading of the package state. `true` only for such an object: a registry that
+ * cannot answer hides nothing, as on the data route.
+ */
+export type ObjectPackageDisabledProbe = (objectName: string) => boolean;
+
+const OBJECT_PACKAGE_DISABLED_CODE: RegisteredErrorCode = 'OBJECT_PACKAGE_DISABLED';
+
+/**
+ * [#35525] `404 OBJECT_PACKAGE_DISABLED` — the data route's words for an object
+ * whose owning package is disabled (metadata-protocol's
+ * `objectPackageDisabledError`): the same code, status and sentence, so a
+ * caller reads one answer for the object whichever door it asked.
+ */
+function objectPackageDisabledError(object: string): Error {
+  const err = new Error(
+    `Object '${object}' belongs to a disabled package and is not being served. ` +
+      'Re-enable the package to restore access.',
+  ) as DoorRefusal;
+  err.code = OBJECT_PACKAGE_DISABLED_CODE;
+  err.status = 404;
+  err.object = object;
+  return err;
+}
+
+/**
+ * [#35525] Refuse the query when any object it reads — the base object, a
+ * declared join, a relationship hop — belongs to a disabled package, with the
+ * data route's `404 OBJECT_PACKAGE_DISABLED`. The first such object, in the
+ * set's order, is the one named. Every caller, system included: the data route
+ * asks the same predicate of every caller.
+ */
+export function assertObjectsOfServedPackages(objects: Iterable<string>, isObjectPackageDisabled: ObjectPackageDisabledProbe): void {
+  for (const object of objects) {
+    if (isObjectPackageDisabled(object) === true) throw objectPackageDisabledError(object);
+  }
+}
+
 /** `405 OBJECT_API_METHOD_NOT_ALLOWED`, with the effective operation set. */
 function objectApiMethodNotAllowedError(object: string, allowed: string[]): Error {
   const err = new Error(

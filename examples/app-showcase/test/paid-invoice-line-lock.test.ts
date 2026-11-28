@@ -93,10 +93,15 @@ interface Fixture {
  */
 async function invoicesWithLines(hooks?: unknown[]): Promise<Fixture> {
   const engine = await bootShowcase(hooks);
+  engine.setHomeLocalizationResolver(async () => ({ currency: 'USD' }));
   const account: any = await engine.insert('showcase_account', { name: 'Contoso', status: 'active' }, SYSTEM as never);
   const product: any = await engine.insert('showcase_product', { name: 'Widget B', unit_price: 49.99 }, SYSTEM as never);
+  // A line's amounts follow its invoice's currency (objectstack#36005), so a
+  // line with a price needs a header with a code: a blank one refuses the line
+  // `ERR_CURRENCY_CODE_REQUIRED`. A coded header projects its home amount, so
+  // the bare engine is handed the home currency the showcase's `.env` pins.
   const header = async (name: string) =>
-    String(((await engine.insert('showcase_invoice', { name, account: String(account.id), status: 'draft' }, SYSTEM as never)) as any).id);
+    String(((await engine.insert('showcase_invoice', { name, account: String(account.id), status: 'draft', currency_code: 'USD' }, SYSTEM as never)) as any).id);
   const paid = await header('INV-1003');
   const draft = await header('INV-1004');
   const line = async (invoice: string) =>
@@ -209,7 +214,7 @@ describe('the draft control: a draft header\'s lines add, edit, move and remove 
     const f = await invoicesWithLines();
     const other = String(((await f.engine.insert(
       'showcase_invoice',
-      { name: 'INV-1002', account: String(((await f.engine.find('showcase_account', {}, SYSTEM as never))[0] as any).id), status: 'draft' },
+      { name: 'INV-1002', account: String(((await f.engine.find('showcase_account', {}, SYSTEM as never))[0] as any).id), status: 'draft', currency_code: 'USD' },
       SYSTEM as never,
     )) as any).id);
     await f.engine.update('showcase_invoice_line', { id: f.draftLine, invoice: other }, USER as never);

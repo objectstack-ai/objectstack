@@ -81,7 +81,7 @@ export const MarkDoneAction = defineAction({
   // the action.
   //
   // #8990 — `has()` guards the SPARSE action face: this action reaches
-  // `list_item`, so its predicate binds a list row carrying only the view's
+  // `record_row`, so its predicate binds a list row carrying only the view's
   // `$select` projection, and CEL aborts with `No such key: done` on any task
   // list that does not project the column (fail-closed, the button silently
   // is not offered). The comparison is `!= true` rather than the older
@@ -92,7 +92,7 @@ export const MarkDoneAction = defineAction({
   visible: 'has(record.done) && record.done != true',
   // No `record_section`: the Task Detail header already draws it, and its
   // quick-actions bar carries only what the header does not (one action row).
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -118,14 +118,14 @@ export const ReopenTaskAction = defineAction({
   operation: 'update',
   patch: { done: false },
   execution: 'perRecord',
-  // #8990 — `has()` guards the sparse `list_item` face, as on Mark Done.
+  // #8990 — `has()` guards the sparse `record_row` face, as on Mark Done.
   visible: 'has(record.done) && record.done == true',
   // The task list's row menu only. The Task Detail page's header lists its
   // action ids explicitly (`showcase_task_detail`, `kind: 'full'`), and
   // `test/record-action-location-hosts.test.ts` holds that list equal to the
-  // task's `record_header` / `record_more` set, so adding `record_header` here
+  // task's `record` / `record_page` set, so adding `record_page` here
   // means adding the id to that header too.
-  locations: ['list_item'],
+  locations: ['record_row'],
   refreshAfter: true,
 });
 
@@ -137,12 +137,12 @@ export const OpenDocsAction = defineAction({
   objectName: task,
   type: 'url',
   target: 'https://objectstack.ai',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   refreshAfter: false,
 });
 
 /**
- * flow — launch the Reassign screen-flow wizard. Row-level (`list_item`) so the
+ * flow — launch the Reassign screen-flow wizard. Row-level (`record_row`) so the
  * row's `recordId` flows into the flow, which collects `new_assignee` via a
  * `screen` node and writes it back with `update_record`. The objectui
  * FlowRunner renders the screen and resumes the run.
@@ -154,7 +154,7 @@ export const BulkReassignAction = defineAction({
   objectName: task,
   type: 'flow',
   target: 'showcase_reassign_wizard',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   refreshAfter: true,
 });
 
@@ -166,7 +166,7 @@ export const QuickViewAction = defineAction({
   objectName: task,
   type: 'modal',
   target: 'showcase_component_gallery',
-  locations: ['list_item'],
+  locations: ['record_row'],
   refreshAfter: false,
 });
 
@@ -189,11 +189,16 @@ export const RecalcEstimateAction = defineAction({
   execution: 'perRecord',
   // Names the task (see MarkDoneAction's note on the hole and its fallback).
   successMessage: "Estimate recalculated for {{ record.title | default:'the task' }}.",
-  // `record_section` only: the Task Detail page's `record:quick_actions` bar
-  // names it, and the engine location-filters even explicitly-named actions.
-  // Not `record_more` too, so the page draws it once, in that bar, and not
-  // again under the header's ⋯ overflow.
-  locations: ['record_section'],
+  // `record_section`: the Task Detail page's `record:quick_actions` bar names
+  // it, and the engine location-filters even explicitly-named actions. And
+  // `record_page` folded into the header's ⋯ (`component: 'action:menu'`,
+  // formerly `record_more`; objectstack#36150): the authored page is drawn on the
+  // desktop full page only, and on a phone or in the side drawer the task
+  // takes the standard page, which draws no `record_section` action — the
+  // ⋯ overflow is where the action is found there. The authored header lists
+  // its action ids and leaves this one out, so the full page still draws it
+  // once, in the bar.
+  locations: ['record_section', 'record_page'], component: 'action:menu',
   // The endpoint is record-scoped and rejects a body without an id. On a
   // record surface the page supplies it; invoked from a LIST ROW (see the
   // `legacy_row_actions` view) nothing else can, so name the body key the
@@ -226,7 +231,7 @@ export const RecalcEstimateAction = defineAction({
  * warns about (`packages/lint/src/validate-action-locations.ts`), and `[]` is
  * that same nowhere said deliberately (see NewTaskAction).
  *
- * So `record_more` here is an explicit SINGLE-RECORD placement, not a way of
+ * So `record_page` folded into the ⋯ here is an explicit SINGLE-RECORD placement, not a way of
  * dodging an everywhere-default: it puts the action in the record overflow
  * menu, where the dispatch carries exactly one id and the recalc endpoint's
  * flow reads it as a list of one (via `recordIdParam`). Placement being
@@ -254,7 +259,7 @@ export const RecalcSelectionAction = defineAction({
   // `result`, never the selection. So it names the record it ran against, and
   // says "the whole selection" only when no record is bound.
   successMessage: "Estimates recalculated for {{ record.title | default:'the whole selection' }}.",
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   recordIdParam: 'recordId',
   refreshAfter: true,
 });
@@ -271,8 +276,23 @@ export const LogTimeAction = defineAction({
   // implicitly claims the `default` key), so pointing a form action there opens
   // a list as a form — now a build error (#2554).
   target: 'showcase_task.form',
-  locations: ['record_header', 'record_related'],
+  locations: ['record_page', 'record_related'],
   refreshAfter: true,
+});
+
+/**
+ * ask_ai — open the in-app assistant focused on this task (ADR-0160 D7). It
+ * takes no `target`: what the assistant reads about the record is chosen by
+ * the record's context pack, not by the action. The console draws it only
+ * where its assistant honours a focus, and sends nothing on a click.
+ */
+export const AskAboutTaskAction = defineAction({
+  name: 'showcase_ask_about_task',
+  label: 'Ask AI',
+  icon: 'sparkles',
+  objectName: task,
+  type: 'ask_ai',
+  locations: ['record_page'],
 });
 
 /**
@@ -346,11 +366,11 @@ export const SubmitForSignoffAction = defineAction({
   successMessage: "{{ record.name | default:'Invoice' }} submitted for finance + legal sign-off.",
   // Only on invoices not yet sent. `record.`-prefixed comparison, per the
   // ActionEngine's fail-closed CEL evaluation (see MarkDoneAction's note).
-  // #8990 — `has()` guards the sparse face this reaches via `list_item`; the
+  // #8990 — `has()` guards the sparse face this reaches via `record_row`; the
   // `!=` against a literal never faults on a projected NULL, so `has()` alone
   // is the whole guard.
   visible: "has(record.status) && record.status != 'sent'",
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -375,8 +395,8 @@ export const SubmitForSignoffAction = defineAction({
  * `OS_PRINT_BROWSER_ENDPOINT`, and `OS_PRINT_CONSOLE_URL`), a record they may
  * not edit (attaching needs it), an impersonation session.
  *
- * `list_item` puts it in the invoice list's row menu, where the console draws
- * it. `record_header` is its record-page placement, beside Submit for Sign-off.
+ * `record_row` puts it in the invoice list's row menu, where the console draws
+ * it. `record_page` is its record-page placement, beside Submit for Sign-off.
  * ⚠️ The console draws record-header actions in a page's `page:header`, and a
  * print page may not hold one, so on the invoice's record page (a print page)
  * neither action is drawn until the console gives a print page a header host.
@@ -394,7 +414,7 @@ export const GenerateInvoicePdfAction = defineAction({
   recordIdParam: 'recordId',
   bodyExtra: { app: 'com.example.showcase', object: invoice, page: 'showcase_invoice_document' },
   successMessage: 'The PDF is attached to the invoice.',
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   refreshAfter: true,
 });
 
@@ -465,7 +485,7 @@ export const ActionParamGalleryAction = defineAction({
     capabilities: [],
   },
   successMessage: 'Params received — every widget type rendered through the shared field-widget map.',
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   refreshAfter: false,
 });
 
@@ -503,7 +523,7 @@ export const ArchiveTaskAction = defineAction({
   // "Not available for this record", which names neither. Display only; it
   // never gates the dispatch.
   disabledReason: 'Mark the task done first.',
-  locations: ['record_header'],
+  locations: ['record_page'],
   refreshAfter: false,
 });
 
@@ -569,6 +589,7 @@ export const allActions = [
   RecalcEstimateAction,
   RecalcSelectionAction,
   LogTimeAction,
+  AskAboutTaskAction,
   NewTaskAction,
   SubmitForSignoffAction,
   GenerateInvoicePdfAction,

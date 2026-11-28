@@ -41,7 +41,7 @@ import { FeedFilterMode as FeedFilterModeEnum, FeedItemType as FeedItemTypeEnum 
 import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import { classifyLoadError } from '@object-ui/react';
 import { recordDisplayValueAt, resolveNameField } from '@object-ui/core';
-import type { FeedItem, FeedItemType } from '@object-ui/types';
+import type { FeedItem, FeedItemType, FieldChangeEntry } from '@object-ui/types';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
 
 const FILTER_MODE_VALUES: readonly string[] = FeedFilterModeEnum.options;
@@ -222,6 +222,36 @@ const ACTIVITY_MILESTONE_KIND = 'milestone';
 export const MILESTONE_ACTIVITY_FEED_TYPE: FeedItemType = 'system';
 
 /**
+ * The three values that make a `sys_activity` row an APPROVAL STEP
+ * (objectstack#35723): plugin-approvals writes one per step it records —
+ * submitted, approved, rejected, recalled — about the record the request
+ * governs.
+ *
+ * The row follows ADR-0052 §5: `type` stays the domain-neutral `system`, the
+ * domain kind rides in `metadata.kind`, and `source_object` points at the
+ * request. The writer's names are `APPROVAL_ACTIVITY_TYPE`,
+ * `APPROVAL_ACTIVITY_KIND` and `APPROVAL_ACTIVITY_SOURCE_OBJECT`
+ * (`@objectstack/plugin-approvals`, `approval-activity-feed.ts`). That package is
+ * a server plugin this UI package does not depend on, so the values are
+ * restated here and pinned by the tests, as {@link ACTIVITY_MILESTONE_KIND} is.
+ *
+ * All three are read, not the kind alone. `system` is a type only the platform
+ * may write (the app activity door refuses it), so an app's own entry cannot
+ * draw as an approval step; and the request pointer is what plugin-approvals'
+ * read gate on `sys_activity` keys on, so a row drawn as an approval step is
+ * exactly a row served only to the users who can read the record's approvals.
+ */
+const APPROVAL_ACTIVITY_TYPE = 'system';
+const APPROVAL_ACTIVITY_KIND = 'approval';
+const APPROVAL_ACTIVITY_SOURCE_OBJECT = 'sys_approval_request';
+
+/**
+ * The feed type an approval step renders as (objectstack#35723): the stream's
+ * one-line approval entry, whose 「看审批」 opens the record's approvals.
+ */
+export const APPROVAL_ACTIVITY_FEED_TYPE: FeedItemType = 'approval';
+
+/**
  * Feed kinds an ObjectUI surface produces WITHOUT going through
  * {@link ACTIVITY_TYPE_TO_FEED_TYPE}.
  *
@@ -304,6 +334,7 @@ export const PRODUCED_FEED_TYPES: ReadonlySet<FeedItemType> = new Set<FeedItemTy
   ...Object.values(ACTIVITY_TYPE_TO_FEED_TYPE).filter((v): v is FeedItemType => Boolean(v)),
   UNMAPPED_ACTIVITY_FEED_TYPE,
   MILESTONE_ACTIVITY_FEED_TYPE,
+  APPROVAL_ACTIVITY_FEED_TYPE,
   ...FEED_TYPES_PRODUCED_OFF_MAP,
 ]);
 
@@ -447,6 +478,94 @@ function activityChangedFields(row: SysActivityRow): string[] | undefined {
   const raw = row?.changed_fields;
   if (!Array.isArray(raw)) return undefined;
   return raw.filter((f): f is string => typeof f === 'string' && f.length > 0);
+}
+
+/**
+ * One changed field of an activity row (objectstack#36290): a
+ * {@link FieldChangeEntry} as the served change code gives it, plus the option
+ * each side matched. The timeline words each side from these facts in the
+ * reader's language: the option by the field's option label, a yes/no
+ * (`oldValue` / `newValue` a boolean, no display text) by the pack's word, and
+ * an empty side (`null`, no display text) by the pack's word for empty.
+ * Package-local hand-off: written by {@link activityFieldChangesOf}, read by
+ * `RecordActivityTimeline`, never authored.
+ */
+export interface ActivityFieldChange extends FieldChangeEntry {
+  oldOption?: string;
+  newOption?: string;
+}
+
+/**
+ * How plugin-audit writes an empty side of a change into the change code: the
+ * writer's `summaryValueOf` renders a null, undefined or `''` value as this
+ * text (`packages/plugins/plugin-audit/src/audit-writers.ts`), and the code
+ * carries no other mark for it.
+ */
+const WRITER_EMPTY_VALUE_TEXT = '∅';
+
+/** One side of a served change: `{ text, option?, boolean? }`, or `null` when it is not that shape. */
+function servedChangeSide(value: unknown): { value: unknown; display?: string; option?: string } | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const { text, option, boolean } = value as { text?: unknown; option?: unknown; boolean?: unknown };
+  if (typeof text !== 'string') return null;
+  if (option !== undefined && typeof option !== 'string') return null;
+  if (boolean !== undefined && typeof boolean !== 'boolean') return null;
+  if (typeof option === 'string') return { value: option, display: text, option };
+  if (typeof boolean === 'boolean') return { value: boolean };
+  if (text === '' || text === WRITER_EMPTY_VALUE_TEXT) return { value: null };
+  return { value: text, display: text };
+}
+
+/**
+ * The changed fields of a `sys_activity` row, one entry per field, from the
+ * field-change code plugin-audit serves in `metadata.summary_message`
+ * (`{ key: 'fieldChanges', object, changes: [{ field, from, to }] }`), or
+ * `undefined` when the row carries none.
+ *
+ * The server narrows that code to the reader before it is served
+ * (objectstack#36290, plugin-audit `activity-field-redaction.ts`): a change of
+ * a field the reader may not read is dropped, and a reference field's change
+ * is kept only for a reader served the referenced record's title. So this
+ * reads the changes it is handed and adds none; the record page draws one line
+ * for each of them. A reference side's text is the record's title the writer
+ * read, and an option side names the option it matched.
+ *
+ * Read from the `metadata` JSON string only, as {@link activityKindOf} reads
+ * the kind. A code this version cannot read whole (any change not of the
+ * shape above) gives `undefined`, and the row draws its summary as before.
+ */
+export function activityFieldChangesOf(row: SysActivityRow): ActivityFieldChange[] | undefined {
+  const raw = row?.metadata;
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const code = (parsed as { summary_message?: unknown }).summary_message;
+  if (typeof code !== 'object' || code === null || Array.isArray(code)) return undefined;
+  const { key, changes } = code as { key?: unknown; changes?: unknown };
+  if (key !== 'fieldChanges' || !Array.isArray(changes) || changes.length === 0) return undefined;
+  const out: ActivityFieldChange[] = [];
+  for (const change of changes) {
+    if (typeof change !== 'object' || change === null) return undefined;
+    const { field, from, to } = change as { field?: unknown; from?: unknown; to?: unknown };
+    const before = servedChangeSide(from);
+    const after = servedChangeSide(to);
+    if (typeof field !== 'string' || !field || !before || !after) return undefined;
+    out.push({
+      field,
+      oldValue: before.value,
+      newValue: after.value,
+      ...(before.display !== undefined ? { oldDisplayValue: before.display } : {}),
+      ...(after.display !== undefined ? { newDisplayValue: after.display } : {}),
+      ...(before.option !== undefined ? { oldOption: before.option } : {}),
+      ...(after.option !== undefined ? { newOption: after.option } : {}),
+    });
+  }
+  return out;
 }
 
 /** A row as `sys_activity` returns it. Loose on purpose: the block reads a
@@ -603,7 +722,7 @@ export function normalizeFilterMode(value: unknown, block: string): FeedFilterMo
  *
  * ## The failure being repaired (objectui#5877)
  *
- * `types: ['approval']` parses, typechecks, builds, and renders a permanently
+ * `types: ['call']` parses, typechecks, builds, and renders a permanently
  * EMPTY tab with nothing said anywhere. Every entry is a declared member of the
  * spec's `FeedItemType`, so the sibling diagnostic above has nothing to report
  * — and the author, or the AI writing the metadata, reads the result as a
@@ -702,7 +821,7 @@ function warnUnproducedFeedTypes(kinds: readonly FeedItemType[], block: string):
  * | `[]`                          | `[]`        | nothing — the author said "no kinds" |
  * | `['crm_task']` (none known)   | `[]`        | nothing, plus one diagnostic   |
  * | `['task', 'crm_task']`        | `['task']`  | the recognised members, plus one diagnostic |
- * | `['approval']` (no producer)  | `['approval']` | nothing, plus one diagnostic — the kind is declared and honoured, but nothing emits it (objectui#5877) |
+ * | `['call']` (no producer)      | `['call']`  | nothing, plus one diagnostic — the kind is declared and honoured, but nothing emits it (objectui#5877) |
  *
  * `undefined` now means "no `types` key was authored" and ONLY that. It used to
  * mean that OR "everything you authored was dropped", and {@link applyFeedConfig}
@@ -1059,6 +1178,13 @@ export function composeImpersonatedActor(template: string | undefined, admin: st
   return pattern.split('{{admin}}').join(admin).split('{{user}}').join(user);
 }
 
+/** Whether a `sys_activity` row is an approval step (objectstack#35723). See {@link APPROVAL_ACTIVITY_FEED_TYPE}. */
+function isApprovalStepRow(row: SysActivityRow, rawType: string, activityKind: string | undefined): boolean {
+  return rawType === APPROVAL_ACTIVITY_TYPE
+    && activityKind === APPROVAL_ACTIVITY_KIND
+    && row?.source_object === APPROVAL_ACTIVITY_SOURCE_OBJECT;
+}
+
 /**
  * One `sys_activity` row → one {@link FeedItem}, or `null` when the row is not
  * record activity (see {@link ACTIVITY_TYPE_TO_FEED_TYPE}).
@@ -1100,8 +1226,11 @@ export function activityRowToFeedItem(
   const activityKind = activityKindOf(row);
   const feedType = COMPLETED_FEED_TYPES.has(mapped) && activityKind === ACTIVITY_MILESTONE_KIND
     ? MILESTONE_ACTIVITY_FEED_TYPE
-    : mapped;
+    : isApprovalStepRow(row, rawType, activityKind)
+      ? APPROVAL_ACTIVITY_FEED_TYPE
+      : mapped;
   const changedFields = activityChangedFields(row);
+  const fieldChanges = activityFieldChangesOf(row);
   const recordFacts = activityRecordFacts(row);
   const item: FeedItem & ActivityRecordFacts = {
     id: row.id as string | number,
@@ -1125,6 +1254,9 @@ export function activityRowToFeedItem(
     ...(activityKind ? { activityKind } : {}),
     actorId: activityActorId(row),
     ...(changedFields ? { changedFields } : {}),
+    // Each changed field with its before and after values, as served to this
+    // reader (objectstack#36290). See `activityFieldChangesOf`.
+    ...(fieldChanges ? { fieldChanges } : {}),
     // Which record the summary names, and by what name, as stored
     // (objectstack#29962). See `withReaderRecordName`.
     ...recordFacts,

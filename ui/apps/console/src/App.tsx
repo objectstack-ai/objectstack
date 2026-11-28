@@ -22,7 +22,6 @@ import { DevMasterDetail } from './dev/DevMasterDetail';
 import { DevLists } from './dev/DevLists';
 import { DevModal } from './dev/DevModal';
 import { DevLookup } from './dev/DevLookup';
-import { DevRowActions } from './dev/DevRowActions';
 import {
   AiAddressRedirect,
   ConsoleShell,
@@ -32,6 +31,7 @@ import {
   ConsoleToaster,
   LoadingScreen,
   DefaultHomeLayout,
+  DocsPortalShell,
   DefaultHomePage,
   DefaultOrganizationsLayout,
   DefaultOrganizationsPage,
@@ -41,6 +41,7 @@ import {
   DefaultSettingsPage,
   DefaultAcceptInvitationPage,
   useMetadata,
+  usePhoneViewport,
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
@@ -102,6 +103,9 @@ const DocPage = lazy(() => import('./pages/DocPage'));
  * body loads the chat UI when it first renders.
  */
 const SharedRecordPage = lazy(() => import('./pages/SharedRecordPage'));
+// Dev-only page drawn with `ObjectGrid`: lazy, so the grid package stays off
+// every first load.
+const DevRowActions = lazy(() => import('./dev/DevRowActions'));
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || '';
 const AUTH_URL = `${SERVER_URL}/api/v1/auth`;
@@ -203,27 +207,37 @@ function homeChecklist(placement: FirstRunChecklistPlacement) {
  * apps on a phone (objectstack#34596). The route sits under
  * `ConsolePermissionsScope`, which is what tells the checklist whether this
  * session may write the settings it lists; for anyone else it draws nothing.
+ *
+ * From 768 px up the platform home page is retired (objectstack#36732): the
+ * address resolves like `/` does on a desktop and redirects into the
+ * last-used app, the declared default or the first product app, and draws the
+ * page — its no-apps empty state — only for a viewer with no product app. A
+ * phone keeps its app list here, unchanged.
  */
 function HomeRoute() {
   const { user } = useAuth();
-  return (
+  const phone = usePhoneViewport();
+  const page = (
     <DefaultHomeLayout userId={user?.id}>
       <DefaultHomePage checklist={homeChecklist} />
     </DefaultHomeLayout>
   );
+  return phone ? page : <RootLandingRedirect home={page} />;
 }
 
 /**
- * The docs portal's frame (objectstack#35424): Home's layout with the docs bar,
- * around the lazily loaded docs layout, so the bar is up while the portal's
- * chunk loads.
+ * The docs portal's frame, around the lazily loaded docs layout, so the frame
+ * is up while the portal's chunk loads. From 768 px up it is the app-less
+ * variant of the app shell (objectstack#37197): the sidebar with a neutral
+ * 「Documentation」 head and the docs tree, no top bar, no app guessed. A
+ * phone keeps Home's layout with the docs bar (objectstack#35424).
  */
 function DocsPortalRoute() {
   const { user } = useAuth();
   return (
-    <DefaultHomeLayout userId={user?.id} variant="docs">
+    <DocsPortalShell userId={user?.id}>
       <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
-    </DefaultHomeLayout>
+    </DocsPortalShell>
   );
 }
 
@@ -481,7 +495,7 @@ export function App() {
             {/* Dev-only: row-action inline-overflow (multiple primary actions). */}
             <Route path="/dev/row-actions" element={
               <ProtectedRoute>
-                <DevRowActions />
+                <Suspense fallback={<LoadingScreen />}><DevRowActions /></Suspense>
               </ProtectedRoute>
             } />
             <Route path="/organizations" element={

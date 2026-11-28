@@ -23,7 +23,7 @@ export function useObjectViewPluginSchema({
     activeView,
     objectDef,
     onEdit,
-    isAdmin,
+    canManageViews,
     location,
     navigate,
     viewId,
@@ -38,7 +38,12 @@ export function useObjectViewPluginSchema({
     activeView: ReturnType<typeof buildViewTabs>[number];
     objectDef: ConsoleObjectViewProps['objects'][number];
     onEdit: ConsoleObjectViewProps['onEdit'];
-    isAdmin: boolean;
+    /**
+     * May the reader change the object's views (objectstack#36448,
+     * `mayManageViews`): the plugin's Create View and its view actions
+     * (settings, share, delete) all lead to a `view` metadata write.
+     */
+    canManageViews: boolean;
     location: Location;
     navigate: NavigateFunction;
     viewId: string | undefined;
@@ -89,8 +94,8 @@ export function useObjectViewPluginSchema({
         showFilters: activeViewFilter,
         showSort: activeViewSort,
         showCreate: false, // We render our own create button in the header
-        allowCreateView: isAdmin,
-        viewActions: isAdmin ? [
+        allowCreateView: canManageViews,
+        viewActions: canManageViews ? [
             { type: 'settings' as const },
             { type: 'share' as const },
             { type: 'delete' as const },
@@ -117,7 +122,7 @@ export function useObjectViewPluginSchema({
                 }
             }
         },
-    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, isAdmin, viewLabel, unlabelledViewText, servedViews, language]);
+    }), [objectDef, onEdit, activeViewSearch, activeViewFilter, activeViewSort, activeView?.id, activeView?.name, activeView?.label, navigate, viewId, canManageViews, viewLabel, unlabelledViewText, servedViews, language]);
 
     return { mergedViews, objectViewSchema };
 }

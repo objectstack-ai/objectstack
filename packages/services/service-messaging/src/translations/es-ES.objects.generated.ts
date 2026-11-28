@@ -226,7 +226,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales).",
+        help: "Agrupa estas notificaciones en un único resumen en lugar de enviar cada una al llegar: daily lo envía a medianoche, weekly el lunes a medianoche y none envía cada una de inmediato. Las notificaciones críticas siempre se envían al momento. Se aplica en una preferencia cuyo canal es * (todos los canales). Si se deja vacío, decide la siguiente preferencia: la predeterminada para todos los usuarios y, después, none.",
         options: {
           none: "none",
           daily: "daily",
@@ -235,7 +235,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales)."
+        help: "Una franja diaria en la que las notificaciones se retienen y se entregan al terminar, por ejemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Las horas son HH:MM en esa zona horaria (UTC si se omite tz) y la franja puede pasar de medianoche. Las notificaciones críticas no se retienen. Se aplica en una preferencia cuyo canal es * (todos los canales). { \"off\": true } significa sin horario de silencio; si se deja vacío, decide la siguiente preferencia: la predeterminada para todos los usuarios y, después, ninguno."
       },
       created_at: {
         label: "Created At"

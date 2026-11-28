@@ -8,7 +8,7 @@
 
 import React from 'react';
 import type { DateFieldMetadata, DateTimeFieldMetadata, FieldMetadata, SelectOptionMetadata } from '@object-ui/types';
-import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
+import { ComponentRegistry, declaresQuantityUnit, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
 // The platform's own value-shape contract, asked rather than restated
 // (objectui#6744). See `locationStoredValueSchemaFor` below for why this is a
 // runtime import in the barrel and not a hand-written coordinate range.
@@ -17,38 +17,36 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber, readHomeAmountSource } from '@object-ui/i18n';
-import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
+import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, ObjectIconTile, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
 import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { withFieldCarrier } from './withFieldCarrier.js';
+import { recoverableLazy } from './recoverableLazy.js';
 // Pure formatting rule shared with `AddressField`'s readonly branch — no React,
 // so this does not pull the widget out of its lazy chunk (objectui#4037).
 import { formatAddress, type AddressValue } from './widgets/address-format.js';
+import { referenceRecordCache, referenceRecordKey, heldReferenceRecord } from './widgets/referenceRecordCache.js';
+import { getPersonInitials } from './widgets/personDisplay.js';
 import { deriveHexBadgePalette } from './hexBadgePalette.js';
 // The same arrangement for numbers: one formatting call shared with
 // `NumberField`'s read-only branch (objectui#11431), and likewise for currency
 // (`CurrencyField`) and percent (`PercentField`) (objectui#11444).
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
+import { QuantityText, UnitCodeText } from './widgets/QuantityText.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { GridField } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
-// only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
-// fetched RECORD and the referenced object's schema, not a resolved name: the
-// name is a display value, resolved per render from the row the viewer may
-// read (objectui#10501), so it follows the permission policy of the render
-// that shows it rather than the one in force when the record arrived.
-type LookupCacheEntry =
-  | { state: 'pending'; promise: Promise<void> }
-  | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
-  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
-  | { state: 'refused' }
-  | { state: 'err' };
-const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
+// only trigger one network call. It holds the fetched RECORD and the
+// referenced object's schema, not a resolved name (objectui#10501); a pick
+// fills it too (objectstack#36046). Its own module, which `LookupField`
+// shares: `./widgets/referenceRecordCache.ts`.
+const lookupNameCache = referenceRecordCache;
 
 /**
  * Pick the most reasonable display name from an arbitrary record object.
@@ -294,7 +292,7 @@ function useLookupName(
   // `displayField`s could share one; the key is left as it was so that this
   // change does not alter how many reads a screen makes.
   const cacheKey = isResolvable
-    ? `${referenceTo}:${String(value)}:${displayField ?? ''}`
+    ? referenceRecordKey(referenceTo!, value as string | number, displayField)
     : '';
 
   React.useEffect(() => {
@@ -445,7 +443,14 @@ export interface CellRendererProps {
   alwaysShowYear?: boolean;
   /**
    * The cell is one of a grid COLUMN's cells, read against the cells above
-   * and below it (objectstack#25884). Read by the `date` cell only.
+   * and below it (objectstack#25884). Read by the `date` cell and the
+   * `markdown` cell.
+   *
+   * The `markdown` cell then draws its value in the cell face
+   * (objectstack#36344): a heading is a bold line at the cell's own text size
+   * instead of a heading element, so a value that starts with `# Heading`
+   * keeps the row's height. The record page does not pass it and keeps the
+   * heading elements, at the document face's sizes (objectstack#37801).
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase
@@ -590,6 +595,10 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
 
 import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
 export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
+import { resolveFormulaValueType } from './formulaValueType.js';
+// The face a `formula` / `summary` cell draws its result as, for a surface
+// that decides something before the cell draws (objectstack#37008).
+export { resolveFormulaValueType };
 import { HomeAmountHint } from './widgets/CurrencyField.js';
 // `summaryDeclaresCurrency` is the cell's own test for drawing a roll-up as
 // money; the grid footer formats the same field's total by it.
@@ -614,6 +623,17 @@ export { formatCurrency };
  * than a formatter of its own.
  */
 export { formatNumberFieldValue };
+
+/**
+ * A quantity with its unit (ADR-0158): the face `NumberCellRenderer` and
+ * `NumberField`'s read-only branch share, the hook that resolves the unit, and
+ * the one formatter. Exported so a host face that draws a quantity outside a
+ * cell makes the same calls.
+ */
+export { QuantityText, UnitCodeText };
+export { formatQuantity, quantityDisplayPlaces, type QuantityDisplay } from './widgets/quantity-format.js';
+export { useQuantityUnit, useStandardUnitLabel, useUnitCatalog, readUnitCatalog } from './widgets/useQuantityUnit.js';
+export { UnitCodeField } from './widgets/UnitCodeField.js';
 
 /**
  * Format currency value in compact form for mobile display.
@@ -825,13 +845,18 @@ function findDeclaredOption(
  * reads too. Only a scalar stored value is matched; an array or an expanded
  * record keeps the coerced text, since neither is one option's code.
  */
-export function TextCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function TextCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   const safe = coerceToSafeValue(value);
   // THE FLOOR by name and nothing more (objectui#8496), on the coerced text.
   // ⛔ Deliberately NOT `isBlankCellText`: a stored `'   '` is a value of a text
   // cell and keeps its spaces — the trim belongs to the renderers that go on to
   // coerce the text into a number, a date or an `href`.
   if (isEmptyValue(safe)) return <EmptyValue />;
+  // A unit-code field (ADR-0158 Open item 8): the code's label, or the bare
+  // code when the unit has none to show.
+  if (typeof value === 'string' && declaresQuantityUnit(field)) {
+    return <UnitCodeText value={value} field={field} record={dependentValues} />;
+  }
   // `options` is a spec key on every field (`FieldSchema.options`), but the
   // per-type metadata of the types this cell draws does not name it, so it is
   // read structurally, as `LookupCellRenderer` reads its static options.
@@ -846,7 +871,7 @@ export function TextCellRenderer({ value, field }: CellRendererProps): React.Rea
 /**
  * Number field cell renderer
  */
-export function NumberCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
+export function NumberCellRenderer({ value, field, dependentValues }: CellRendererProps): React.ReactElement {
   // Hook before the empty-value early return — a value flipping between null
   // and set must not change the hook count between renders (same rule as
   // CurrencyCellRenderer below).
@@ -858,6 +883,12 @@ export function NumberCellRenderer({ value, field }: CellRendererProps): React.R
   if (isBlankCellText(safe)) return <EmptyValue />;
 
   const num = Number(safe);
+  // A quantity (ADR-0158): its unit's label and display width, through the
+  // face `NumberField`'s read-only branch draws too. The row is the record a
+  // `record`-mode quantity reads its code from.
+  if (!isNaN(num) && declaresQuantityUnit(field)) {
+    return <QuantityText value={num} field={field} record={dependentValues} className="tabular-nums" />;
+  }
   // The width (`scale` through `resolveFieldScale`), the grouping policy
   // (`scale` / `useGrouping`) and the two fraction-digit arms are assembled in
   // `formatNumberFieldValue`, the one call `NumberField`'s read-only branch
@@ -1537,94 +1568,6 @@ export function DateTimeCellRenderer({ value, field, deadlineSettled, alwaysShow
   );
 }
 
-// Semantic color mapping (auto-detect from value text for priority & status fields)
-// Keys use underscore notation; lookup normalizes spaces/hyphens to underscores automatically.
-// Chinese keys are stored as-is and matched directly (no normalization side-effects).
-const SEMANTIC_COLOR_MAP: Record<string, string> = {
-  // Priority values (en)
-  critical: 'red',
-  urgent: 'red',
-  high: 'orange',
-  medium: 'yellow',
-  normal: 'blue',
-  low: 'gray',
-  none: 'gray',
-  // Severity values (en): info is the quiet level, not an alarm colour
-  info: 'blue',
-  warning: 'yellow',
-  // Status values (en)
-  paid: 'green',
-  completed: 'green',
-  done: 'green',
-  active: 'green',
-  approved: 'green',
-  resolved: 'green',
-  pending: 'yellow',
-  waiting: 'yellow',
-  on_hold: 'yellow',
-  shipped: 'blue',
-  in_progress: 'blue',
-  open: 'blue',
-  processing: 'blue',
-  draft: 'gray',
-  new: 'gray',
-  inactive: 'gray',
-  closed: 'gray',
-  cancelled: 'red',
-  canceled: 'red',
-  rejected: 'red',
-  failed: 'red',
-  overdue: 'red',
-  delivered: 'purple',
-  archived: 'indigo',
-  // CRM lifecycle values (en)
-  contacted: 'blue',
-  qualified: 'purple',
-  converted: 'green',
-  won: 'green',
-  lost: 'red',
-  // Priority values (zh)
-  紧急: 'red',
-  严重: 'red',
-  高: 'orange',
-  中: 'yellow',
-  普通: 'blue',
-  低: 'gray',
-  无: 'gray',
-  // Status values (zh)
-  新建: 'gray',
-  草稿: 'gray',
-  待处理: 'yellow',
-  待审核: 'yellow',
-  待联系: 'yellow',
-  挂起: 'yellow',
-  进行中: 'blue',
-  处理中: 'blue',
-  已联系: 'blue',
-  跟进中: 'blue',
-  已发货: 'blue',
-  打开: 'blue',
-  已确认: 'green',
-  已审核: 'green',
-  已通过: 'green',
-  已完成: 'green',
-  已支付: 'green',
-  已签收: 'green',
-  已转化: 'green',
-  成单: 'green',
-  赢得: 'green',
-  已签约: 'green',
-  已交付: 'purple',
-  已归档: 'indigo',
-  已关闭: 'gray',
-  已取消: 'red',
-  已拒绝: 'red',
-  失败: 'red',
-  逾期: 'red',
-  流失: 'red',
-  丢失: 'red',
-};
-
 // Color to Tailwind class mapping for custom Badge styling
 // Color → Tailwind class mapping for status-style badges.
 // Uses the modern "soft pill" pattern (Tailwind UI style): -50 background,
@@ -1659,30 +1602,10 @@ const DOT_COLOR_MAP: Record<string, string> = {
   pink: 'bg-pink-500',
 };
 
-// Color palette used by the deterministic fallback when no schema/semantic
-// color matches. Excludes 'gray' to ensure visual contrast between values.
-const BADGE_FALLBACK_PALETTE: readonly string[] = [
-  'blue', 'green', 'purple', 'orange', 'pink', 'indigo', 'yellow', 'red',
-];
-
-/**
- * Stable string hash (djb2-ish) → palette index.
- * Same value always yields the same color across renders/sessions.
- */
-function hashToColor(value: string): string {
-  let h = 5381;
-  for (let i = 0; i < value.length; i++) {
-    h = ((h << 5) + h) ^ value.charCodeAt(i);
-  }
-  const idx = Math.abs(h) % BADGE_FALLBACK_PALETTE.length;
-  return BADGE_FALLBACK_PALETTE[idx];
-}
-
 /**
  * Map a hex color (e.g. '#8B5CF6') to the nearest named palette color the
  * badge/dot maps understand. Object field options almost always declare colors
- * as HEX, so without this the explicit author color is ignored and a semantic/
- * hash heuristic takes over (e.g. a purple 'In Review' rendered alarming-red).
+ * as HEX, so without this the explicit author color would be ignored.
  * Low-saturation hexes resolve to 'gray'; otherwise bucket by hue.
  */
 function hexToPaletteName(hex: string): string | undefined {
@@ -1751,8 +1674,8 @@ function resolveColorName(color?: string): string | undefined {
  *      unreadable under a label; honoring the declaration must not turn that
  *      into a legibility bug across every list view.
  *
- * Non-hex declarations (family names, the semantic value map, the hash
- * fallback) are untouched and keep resolving exactly as before.
+ * Family-name declarations are untouched and keep resolving exactly as
+ * before; an option with no declared colour renders neutral.
  * -------------------------------------------------------------------------*/
 
 // The colour math (contrast floors, HSL/RGB conversion, `deriveHexBadgePalette`)
@@ -1811,35 +1734,51 @@ export function getDotHexAppearance(color?: string): HexColorAppearance | undefi
   };
 }
 
-export function getBadgeColorClasses(color?: string, val?: unknown): string {
+/**
+ * The badge an option with no declared colour renders: the theme's muted
+ * surface, the same classes an empty value has always received. Its tokens
+ * are theme variables, so light and dark need no `dark:` variant.
+ */
+const NEUTRAL_BADGE_CLASSES = 'bg-muted text-muted-foreground border-border';
+
+/**
+ * Badge classes for a select option: the colour its author declared (a
+ * palette family name, or a hex snapped to the nearest family; callers that
+ * honour a hex exactly ask `getBadgeHexAppearance` first), else the neutral
+ * badge.
+ *
+ * A colour on a badge means exactly one thing: the author declared it. No
+ * colour is derived from the option's value, by a lookup table or by a hash.
+ * Ruled on objectstack#36882 (option A, comment 7178358629): undeclared
+ * options render neutral on every surface, and declaring `color` on the
+ * option is the only way to colour one.
+ *
+ * @param color the option's declared `color`
+ * @param _value the option's value. Not consulted: kept so existing call
+ *   sites keep compiling, because no colour is derived from it.
+ */
+export function getBadgeColorClasses(color?: string, _value?: unknown): string {
   const named = resolveColorName(color);
   if (named && BADGE_COLOR_MAP[named]) return BADGE_COLOR_MAP[named];
-  if (val == null || val === '') return 'bg-muted text-muted-foreground border-border';
-  const key = String(val).toLowerCase().replace(/[\s-]/g, '_');
-  const semantic = SEMANTIC_COLOR_MAP[key];
-  if (semantic && BADGE_COLOR_MAP[semantic]) return BADGE_COLOR_MAP[semantic];
-  // Deterministic fallback so distinct values are visually distinguishable
-  // even when metadata declares no colors.
-  return BADGE_COLOR_MAP[hashToColor(key)];
+  return NEUTRAL_BADGE_CLASSES;
 }
 
 /**
- * Resolve a semantic color name (e.g. "red", "green") for a value, suitable
- * for callers that need a raw color token rather than CSS classes (for
- * example, the Gantt renderer paints bars via inline styles).
+ * Palette family name (e.g. "red", "green") of a declared option colour, for
+ * callers that need a raw colour token rather than CSS classes (inline-style
+ * painters). A family name passes through, a hex resolves to its nearest
+ * family; anything else, including no declaration at all, answers
+ * `undefined` so the caller paints its own default. The value is never
+ * consulted (objectstack#36882, see `getBadgeColorClasses`).
  *
- * Resolution order: explicit option color → semantic value mapping →
- * deterministic hash fallback. Returns `undefined` only when no value is
- * supplied so the caller can fall back to its own default.
+ * @param color the option's declared `color`
+ * @param _value the option's value. Not consulted: kept so existing call
+ *   sites keep compiling.
  */
-export function getSemanticColorName(color?: string, val?: unknown): string | undefined {
+export function getSemanticColorName(color?: string, _value?: unknown): string | undefined {
   const named = resolveColorName(color);
   if (named && BADGE_COLOR_MAP[named]) return named;
-  if (val == null || val === '') return undefined;
-  const key = String(val).toLowerCase().replace(/[\s-]/g, '_');
-  const semantic = SEMANTIC_COLOR_MAP[key];
-  if (semantic) return semantic;
-  return hashToColor(key);
+  return undefined;
 }
 
 // Resolved hex values for the -500 shade of each palette color. Mirrors
@@ -1865,7 +1804,9 @@ const COLOR_NAME_HEX: Record<string, string> = {
  */
 export function getSemanticHex(name?: string, fallback: string = '#3b82f6'): string {
   if (!name) return fallback;
-  return COLOR_NAME_HEX[name] ?? fallback;
+  // Own keys only: a name spelled like an inherited key (`constructor`,
+  // `toString`) is no palette family and takes the fallback, never a function.
+  return Object.prototype.hasOwnProperty.call(COLOR_NAME_HEX, name) ? COLOR_NAME_HEX[name] : fallback;
 }
 
 /**
@@ -1917,15 +1858,15 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
       || (isPlainObjectValue(val) ? String(coerceToSafeValue(val)) : humanizeLabel(String(val)));
 
     if (appearance === 'dot') {
-      // Resolve a real CSS color for the dot. Prefer explicit option color,
-      // then semantic mapping for the value, then deterministic palette.
-      // An explicitly declared hex is painted as declared (objectui#5141);
-      // every other declaration keeps resolving to a palette family below.
+      // The dot's colour is the option's declared colour and nothing else
+      // (objectstack#36882): an explicitly declared hex is painted as
+      // declared (objectui#5141), a family name resolves to its palette dot,
+      // and an option that declares no colour gets the gray dot.
       const hexDot = getDotHexAppearance(option?.color);
-      const colorName = resolveColorName(option?.color)
-        || SEMANTIC_COLOR_MAP[String(val).toLowerCase().replace(/[\s-]/g, '_')]
-        || hashToColor(String(val).toLowerCase().replace(/[\s-]/g, '_'));
-      const dotClass = hexDot ? hexDot.className : (DOT_COLOR_MAP[colorName] || DOT_COLOR_MAP.gray);
+      const colorName = resolveColorName(option?.color);
+      const dotClass = hexDot
+        ? hexDot.className
+        : (colorName && DOT_COLOR_MAP[colorName]) || DOT_COLOR_MAP.gray;
       // max-w-full bounds the (otherwise content-sized) inline-flex box so the
       // inner truncate can engage; title keeps the full label on hover
       // (objectui#3466, same class of bug as the badge branch below).
@@ -1941,8 +1882,8 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
       );
     }
 
-    // An explicitly declared hex renders as declared (objectui#5141); family
-    // names, the semantic value map and the hash fallback are unchanged.
+    // An explicitly declared hex renders as declared (objectui#5141); a family
+    // name resolves to its palette badge, no declaration to the neutral one.
     const hexBadge = getBadgeHexAppearance(option?.color);
     const colorClasses = hexBadge ? hexBadge.className : getBadgeColorClasses(option?.color, val);
     // max-w-full + inner truncate: in bounded containers (detail highlight
@@ -2033,8 +1974,11 @@ export function EmailCellRenderer({ value }: CellRendererProps): React.ReactElem
           {safe}
         </a>
       </Button>
+      {/* A select-first grid does not draw this (`data-cell-copy`): there a
+          click selects the cell and Ctrl/Cmd+C copies it (objectstack#36015). */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/email:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyEmail', 'Copy email')}
@@ -2130,8 +2074,10 @@ export function PhoneCellRenderer({ value }: CellRendererProps): React.ReactElem
         <PhoneIcon className="h-3 w-3 shrink-0" />
         <span className="truncate">{safe}</span>
       </a>
+      {/* Not drawn in a select-first grid, as `EmailCellRenderer`'s. */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyPhone', 'Copy phone number')}
@@ -2288,7 +2234,9 @@ function displayableImagesOf(value: unknown): Array<{ url: string; name?: string
  *
  * Clicking a thumbnail opens a full-screen lightbox (single or gallery). The
  * click is `stopPropagation`-guarded so, inside a grid row, enlarging an image
- * doesn't also trigger row navigation.
+ * doesn't also trigger row navigation. Each thumbnail is a `data-cell-opener`:
+ * in a select-first grid a plain click selects the cell, and the cell's open
+ * button or Ctrl/Cmd+Enter opens the lightbox (objectstack#36015).
  */
 export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElement {
   const { t } = useObjectTranslation();
@@ -2351,6 +2299,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
               key={idx}
               src={img.url}
               alt={imageAlt(idx, img.name)}
+              data-cell-opener=""
               onClick={open(idx)}
               className="size-8 cursor-zoom-in rounded-md border-2 border-background object-cover transition-transform hover:scale-110 hover:z-10"
             />
@@ -2358,6 +2307,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
           {imgs.length > 3 && (
             <button
               type="button"
+              data-cell-opener=""
               onClick={open(3)}
               className="size-8 rounded-md border-2 border-background bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground hover:bg-muted/80"
             >
@@ -2376,6 +2326,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
       <img
         src={imgs[0].url}
         alt={imageAlt(0, imgs[0].name)}
+        data-cell-opener=""
         onClick={open(0)}
         className="size-10 cursor-zoom-in rounded-md object-cover transition-transform hover:scale-105"
       />
@@ -2465,6 +2416,19 @@ function referencedRecordId(item: unknown): string | number | undefined {
  * link address" behave the way a link is supposed to; a plain left click is
  * handed to the host so navigation stays in-app.
  */
+/**
+ * Whether a referenced record is drawn as a chip (objectstack#36147): the
+ * referenced object's colour tile (`ObjectSchema.color` and `icon`,
+ * objectstack#35985) then the record's name, on a muted pill, the name
+ * wrapping instead of truncating. A record page's field area provides it;
+ * everywhere else a reference keeps its link face. A chip with no host route
+ * is the same pill, not a link.
+ */
+export const ReferenceChipContext = React.createContext(false);
+
+const REFERENCE_CHIP_CLASS =
+  'inline-flex max-w-full items-start gap-1.5 rounded-md bg-muted px-1.5 py-0.5 align-top text-foreground';
+
 function ReferencedRecordLink({
   objectName,
   recordId,
@@ -2483,13 +2447,34 @@ function ReferencedRecordLink({
   children: React.ReactNode;
 }): React.ReactElement {
   const host = useRelatedRecordActions();
+  const chip = React.useContext(ReferenceChipContext);
   const navigable = !!objectName && recordId != null && recordId !== '';
   const href =
     navigable && host?.recordHref
       ? host.recordHref(objectName as string, recordId as string | number)
       : null;
 
-  if (!href) return <>{children}</>;
+  const face = chip ? (
+    <>
+      <ObjectIconTile
+        icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+        color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+        size="xs"
+        className="mt-0.5"
+      />
+      <span className="min-w-0 break-words">{label || children}</span>
+    </>
+  ) : children;
+
+  if (!href) {
+    return chip ? (
+      <span className={REFERENCE_CHIP_CLASS} data-record-chip="">
+        {face}
+      </span>
+    ) : (
+      <>{children}</>
+    );
+  }
 
   // Hovering the link (or Space on it) shows the referenced record's card
   // (objectstack#27604): the same reference, a glance instead of a visit.
@@ -2497,12 +2482,20 @@ function ReferencedRecordLink({
     <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
       <a
         href={href}
-        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        className={cn(
+          chip ? cn(REFERENCE_CHIP_CLASS, 'transition-colors hover:bg-accent') : 'text-primary underline-offset-4 hover:underline',
+          className,
+        )}
+        data-record-chip={chip ? '' : undefined}
         // A host's list grid draws a referenced record as a small chip led by
         // the name's first letter (objectstack#35548); these say which link
-        // is one and what its letter is. Nothing else reads them.
+        // is one and what its letter is.
         data-record-link=""
         data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -2517,7 +2510,7 @@ function ReferencedRecordLink({
           host.openRecord(objectName as string, recordId as string | number);
         }}
       >
-        {children}
+        {face}
       </a>
     </RecordHoverCard>
   );
@@ -2906,17 +2899,18 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // own field form says of `returnType` that consumers read it "instead of
   // re-parsing the expression", so a formula over two currency fields that
   // declares `number` (or nothing) renders as a number here, not as money.
-  const returnType = field && 'returnType' in field ? field.returnType : undefined;
+  //
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
   // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
   // a stored home amount included) reads the tenant default, as that child
   // field's own cells do.
-  const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
-  const valueType = declaresMoney && typeof value === 'number'
-    ? 'currency'
-    : returnType ?? (typeof value === 'number' ? 'number' : 'text');
+  //
+  // The rule is `resolveFormulaValueType`, exported, so a surface that must
+  // know the face before this cell draws (a gallery card's label) asks the
+  // same function and cannot disagree with it (objectstack#37008).
+  const valueType = resolveFormulaValueType(field, value);
   if (valueType === 'number') {
     return <NumberCellRenderer value={value} field={field} />;
   }
@@ -3264,7 +3258,15 @@ export function UnresolvedReferenceMark({
  * `sys_user` policy, the object the runtime expands it into and the object
  * `UserField` points the picker at. The field's `reference` is not read.
  */
-export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
+/**
+ * A person's face in a cell (objectstack#36023): 24 px drawn, 20 px laid out,
+ * so it never makes its row taller than a row of text. A 32 px face made a
+ * list row 41 px tall, and the row dropped back to 33 px while the cell was
+ * edited, so the list jumped.
+ */
+const CELL_AVATAR_CLASS = 'size-6 -my-0.5';
+
+export function UserCellRenderer({ value: stored }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
   const perms = usePermissions();
@@ -3275,7 +3277,15 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   // avatar-stack branch below and rendered an empty stack (objectui#8481) —
   // and the floor alone would let `0` through to `UnresolvedUserReference`,
   // which is not what a user reference of zero is.
-  if (isEmptyValue(value) || !value) return <EmptyValue />;
+  if (isEmptyValue(stored) || !stored) return <EmptyValue />;
+
+  // objectstack#36046 — a stored id this page already holds the person for
+  // (a pick in this cell, which stores the id and keeps the record it picked)
+  // is drawn as that person, as an expanded value is: never the raw id until
+  // the list is read again. An id nothing here holds stays unresolved, below.
+  const value: CellRendererProps['value'] = Array.isArray(stored)
+    ? stored.map((entry: unknown) => heldReferenceRecord(personObject, entry) ?? entry)
+    : heldReferenceRecord(personObject, stored) ?? stored;
 
   // A primitive is an UNRESOLVED reference, not "the ID/username" (objectui#8434).
   // The comment that stood here stated the branch's premise, and the premise was
@@ -3320,24 +3330,24 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
             );
           }
           const name = user.name || user.username || 'User';
-          const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+          const initials = getPersonInitials(String(name));
           
           return (
             <Avatar
               key={idx}
-              className="size-8 border-2 border-white"
+              className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}
               title={name}
             >
               {user.image && <AvatarImage src={user.image} alt={name} />}
-              <AvatarFallback className="bg-blue-500 text-white text-xs">
+              <AvatarFallback className="bg-blue-500 text-white text-[10px]">
                 {initials}
               </AvatarFallback>
             </Avatar>
           );
         })}
         {value.length > 3 && (
-          <Avatar className="size-8 border-2 border-white">
-            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+          <Avatar className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}>
+            <AvatarFallback className="bg-gray-200 text-gray-600 text-[10px]">
               +{value.length - 3}
             </AvatarFallback>
           </Avatar>
@@ -3372,13 +3382,14 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   }
 
   const name = user.name || user.username || 'User';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  // objectstack#36046 — the initials every person chip draws: letters only.
+  const initials = getPersonInitials(String(name));
   
   return (
     <div className="flex items-center gap-2">
-      <Avatar className="size-8">
+      <Avatar className={CELL_AVATAR_CLASS}>
         {user.image && <AvatarImage src={user.image} alt={name} />}
-        <AvatarFallback className="bg-blue-500 text-white text-xs">
+        <AvatarFallback className="bg-blue-500 text-white text-[10px]">
           {initials}
         </AvatarFallback>
       </Avatar>
@@ -4760,7 +4771,11 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  'grid': () => import('./widgets/GridField.js').then(m => ({ default: m.GridField })),
+  // The grid's public face, already in this chunk, not its body: the face loads
+  // the body through its one loader (objectstack#36102) and asks again after a
+  // failed load, where a lazy wrapper around the body here would add a second
+  // loader beside the face's own (objectstack#36451).
+  'grid': () => Promise.resolve({ default: GridField }),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
@@ -4893,22 +4908,24 @@ export { fieldHelpText } from './fieldHelpText.js';
 // page's compact related rows).
 export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
-/** Cache so each widget type creates one lazy component (and one chunk request). */
+/** Cache so each widget type creates one lazy component (and one chunk request at a time). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();
 
 /**
  * Lazily-loaded form field widget for a field type. Shares the exact loaders
  * of {@link fieldWidgetMap} (the same components `registerField` registers for
- * forms), wrapped in `React.lazy` and cached per type — so a consumer can
+ * forms), wrapped in `recoverableLazy` and cached per type — so a consumer can
  * render any form-supported field type without eagerly bundling every widget.
  * Render inside a `<Suspense>` boundary. Unknown types resolve to the `text`
- * widget via {@link resolveFormWidgetType}.
+ * widget via {@link resolveFormWidgetType}. A failed chunk load reaches the
+ * nearest error boundary and is not kept: the next mount loads again
+ * (objectstack#36608).
  */
 export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> {
   const key = resolveFormWidgetType(fieldType);
   // A retired key has no loader in `fieldWidgetMap` by construction, so it is
   // answered with the tombstone before the lazy path (which would otherwise
-  // call `React.lazy(undefined)`). The tombstone is BOUND to `key`: a host
+  // call the lazy wrapper with no loader). The tombstone is BOUND to `key`: a host
   // that resolved the key from an authored `widget` hands over a `field` whose
   // `type` is a live type, and the refusal must name what was resolved
   // (objectui#10471) — see {@link retiredFieldTombstoneFor}.
@@ -4916,7 +4933,7 @@ export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> 
   let Widget = lazyFieldWidgets.get(key);
   if (!Widget) {
     // `resolveFormWidgetType` only returns keys the map holds, hence the `!`.
-    Widget = React.lazy(fieldWidgetLoaderByKey[key]!);
+    Widget = recoverableLazy(fieldWidgetLoaderByKey[key]!);
     lazyFieldWidgets.set(key, Widget);
   }
   return Widget;
@@ -4976,7 +4993,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // `kind:'html'` page drew a code editor and dropped its text.
   'code',
   // No other package owns the bare `time`/`address` key, but `registerField`
-  // wraps each call in a fresh `React.lazy(...)`, so re-registration (HMR,
+  // wraps each call in a fresh lazy component, so re-registration (HMR,
   // re-import) fails the registry's identity check every time and logs the
   // same "bare-name fallback overwritten" warning at every boot regardless.
   'time',
@@ -5153,8 +5170,9 @@ export function registerField(fieldType: string): void {
     return;
   }
   
-  // Create lazy component
-  const LazyFieldWidget = React.lazy(loader);
+  // Create lazy component. A failed chunk load is not kept: the next mount
+  // loads again (objectstack#36608).
+  const LazyFieldWidget = recoverableLazy(loader);
 
   // Register with field namespace. No LAYOUT wrapper — the form renderer owns
   // label/description/spacing. The only thing wrapped is the metadata carrier:
@@ -5363,6 +5381,7 @@ export * from './FieldEditWidget.js';
 export {
   collectRequiredWhenPromptFields,
   requiredWhenPromptReads,
+  requiredWhenPromptAsksOn,
   type RequiredWhenPromptField,
   type RequiredWhenPromptOptions,
 } from './requiredWhenPrompt.js';
@@ -5380,6 +5399,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';
@@ -5427,6 +5450,12 @@ export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';
 export type { ImageCropperDialogProps } from './widgets/ImageCropperDialog.js';
+// The in-page file preview a record's attachments and a file field open
+// (objectstack#36442), and the delimited-text reader its CSV view shares with
+// the grid's import wizard.
+export { FilePreviewDialog } from './widgets/FilePreviewDialog.js';
+export type { FilePreviewDialogProps, FilePreviewItem } from './widgets/FilePreviewDialog.js';
+export { decodeSpreadsheetText, parseDelimited } from './widgets/delimitedText.js';
 export * from './widgets/LocationField.js';
 export * from './widgets/FormulaField.js';
 export * from './widgets/SummaryField.js';
@@ -5434,7 +5463,10 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+// `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
+// first use, or earlier through `preloadGridField` (objectstack#36102). The
+// pure helpers beside them are eager. See `widgets/GridField.ts`.
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
 export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
@@ -5522,6 +5554,17 @@ export { useUploadingScope, UploadingScopeProvider } from './widgets/uploadingSc
 // "tell my host I am uploading" would reach only half the sinks.
 export { useUploadingSignal } from './widgets/useUploadingSignal.js';
 export type { UploadingScope } from './widgets/uploadingScope.js';
+
+// The headings a markdown value's `document` face draws, read from the face's
+// own parse (`./widgets/markdownHeadings.ts`, objectstack#37562): a reader that
+// must agree with the drawn page (the record page opening a cited section)
+// counts them here, never with a second markdown reader. Loaded on demand
+// through `MarkdownContent`, the module the face itself loads on demand, so
+// react-markdown stays in that lazy chunk.
+export function loadDrawnMarkdownHeadings(): Promise<typeof import('./widgets/markdownHeadings.js').drawnMarkdownHeadings> {
+  return import('./widgets/MarkdownContent.js').then((m) => m.drawnMarkdownHeadings);
+}
+export type { DrawnMarkdownHeading } from './widgets/markdownHeadings.js';
 
 // Initialize registry
 registerAllFields();

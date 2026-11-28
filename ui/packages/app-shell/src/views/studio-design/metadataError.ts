@@ -691,6 +691,23 @@ function publishLocator(type: string, body: SentBody, locale: string): IssueLoca
 }
 
 /**
+ * objectstack#36511 — a refused single-item publish (`POST /meta/:type/:name/publish`)
+ * as the {@link PublishFailure} a package publish reports per draft, so the
+ * top bar's Save reads it through {@link publishRefusal} as Publish does.
+ */
+export function publishFailureOf(type: string, name: string, e: unknown): PublishFailure {
+  const code = (e as { code?: unknown } | null)?.code;
+  const issues = issuesOf(e);
+  return {
+    type,
+    name,
+    error: formatMetadataError(e),
+    ...(typeof code === 'string' ? { code } : {}),
+    ...(issues.length > 0 ? { issues } : {}),
+  };
+}
+
+/**
  * One publish failure as its Pending changes entry shows it: a sentence in the
  * designer's words naming where to look, and the failure's own text behind
  * Details; a failure with no issues, as its text. `type` is the failure's type folded to the canonical singular;

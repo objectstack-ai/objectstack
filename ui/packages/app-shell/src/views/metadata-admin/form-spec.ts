@@ -123,7 +123,7 @@ export interface FormFieldSpec {
    * named narrowing — the one element type in this file that the header's
    * "every key the two layers agree on comes FROM the spec" rule had never
    * been applied to. `visibleWhen` was among the dropped pair, so an author
-   * could legally write a per-option predicate into a `*.form.ts`, have it
+   * could legally write a per-option predicate into a `*.metadata-form.ts`, have it
    * parse clean against `SelectOptionSchema` (`z.core.$strict`, so the schema
    * really does declare it), and get a narrowing that this renderer then
    * ignored: accepted, stored, shipped, inert — ADR-0049's declared≠enforced,

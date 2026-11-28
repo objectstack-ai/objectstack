@@ -127,7 +127,9 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -174,9 +176,9 @@ afterEach(() => {
 function renderZh() {
   return render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
-      </MemoryRouter>
+      <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+        <DataPillar objectName="showcase_custom_ticket" packageId={PKG} />
+      </MemoryRouter></StudioSaveHarness>
     </I18nProvider>,
   );
 }
@@ -218,6 +220,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     const { name, body, opts } = objectSaves().at(-1)!;
     expect(name).toBe(OBJECT);
@@ -231,6 +234,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     expectAuthoredBody(objectSaves().at(-1)!.body, 'Level');
   });

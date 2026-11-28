@@ -572,8 +572,14 @@ describe('[#32572] install-local refuses a package with two enabled jobs of one 
             jobs: [TWIN],
         } as never);
         // No `manifest`: its jobs reach the artifact's top level and no package body — the residual.
-        const host = defineStack({ objects: [{ ...SYNCED, name: 'jobs_app_host_rec', label: 'Host record' }], jobs: [TWIN_SLOW] } as never);
+        // Composition now refuses a job name enabled in a body and the residual, so this is an artifact it did
+        // not build (the door's backstop case): the residual's job is composed under a stand-in name, and its
+        // own name restored in the JSON the door reads.
+        const STAND_IN = `${TWIN.name}_stand_in`;
+        const host = defineStack({ objects: [{ ...SYNCED, name: 'jobs_app_host_rec', label: 'Host record' }], jobs: [{ ...TWIN_SLOW, name: STAND_IN }] } as never);
         const bundle = JSON.parse(JSON.stringify(composeStacks([alpha, host, defineStack(artifact(undefined) as never)] as never[], { manifest: 'preserve' })));
+        for (const job of bundle.jobs as Array<{ name: string }>) if (job.name === STAND_IN) job.name = TWIN.name;
+        expect(bundle.jobs.map((job: { name: string }) => job.name), 'the body job\'s top-level copy and the residual\'s own job').toEqual([TWIN.name, TWIN.name]);
 
         const res = await install(bundle);
 

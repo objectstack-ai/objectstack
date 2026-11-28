@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, type FieldRulePredicate } from '@object-ui/core';
+import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, declaresUnitCode, quantityUnitCodePointers, withUnitCodePointer, type FieldRulePredicate } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
 import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
@@ -182,7 +182,7 @@ function SectionDivider({ sectionKey, anchorId, label, description, collapsible,
               ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-semibold text-foreground">{label}</span>
+          <span className="text-sm font-medium text-foreground">{label}</span>
         </div>
       )}
       {/* A section's authored blurb. Carried on the divider because a sectioned
@@ -580,6 +580,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // not be evaluated (see `handleSubmit`). Byte-identical to the `en` pack.
     'form.visibleWhenFaulted':
       "Can't submit: the visibleWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
+    // objectstack#36806 — the same refusal for a faulted `uiReadonlyWhen` (the
+    // hand lock no server judges). Byte-identical to the `en` pack.
+    'form.uiReadonlyWhenFaulted':
+      "Can't submit: the uiReadonlyWhen rule of {{fields}} could not be evaluated. The rule must be fixed before this form can be submitted.",
     // objectui#12108 — the hint under an empty field the server fills at insert
     // (see `renderFieldDescription`). Byte-identical to the `en` pack.
     'form.serverDefaultHint': 'Set automatically when saved.',
@@ -1379,12 +1383,21 @@ function renderFieldDescription(
 
 /**
  * Widget keys whose DISPLAY reads a sibling field's value: a `record`-mode
- * amount (ADR-0144 D2) shows the currency its record's code field holds, and a
- * `formula` declaring `returnType: 'currency'` is drawn by the same widget.
- * They get the live record (`dependentValues`) and nothing else from the
- * data-source family — they query nothing.
+ * amount (ADR-0144 D2) shows the currency its record's code field holds, a
+ * `formula` declaring `returnType: 'currency'` is drawn by the same widget, and
+ * a roll-up `summary` declaring its currency (D6 as amended) reads the same code
+ * off the record. They get the live record (`dependentValues`) and nothing else
+ * from the data-source family — they query nothing.
  */
-const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula']);
+const RECORD_CURRENCY_WIDGET_TYPES = new Set(['currency', 'formula', 'summary']);
+
+/**
+ * Widget keys whose display reads a sibling field's value for a quantity's
+ * unit (ADR-0158): a `record`-mode quantity shows the unit its record's code
+ * field holds, and its organization picks the unit's display decimal places.
+ * `NumberField` takes `dependentValues` by name, so it never reaches the DOM.
+ */
+const QUANTITY_WIDGET_TYPES = new Set(['number']);
 
 function stripRegisteredFieldProps(type: string, props: RenderFieldProps): RenderFieldProps {
   const {
@@ -1437,6 +1450,9 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // A record-mode amount's symbol and decimals follow the code the user picks
     // in its sibling select, so the amount box needs the live record too.
     ...(RECORD_CURRENCY_WIDGET_TYPES.has(normalizedType) ? { dependentValues } : {}),
+    // A record-mode quantity's unit follows the code in its sibling field, and
+    // a unit code field offers its record's organization's units.
+    ...(QUANTITY_WIDGET_TYPES.has(normalizedType) || declaresUnitCode(fieldProps.field as never) ? { dependentValues } : {}),
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
@@ -2186,6 +2202,7 @@ ComponentRegistry.register('form',
             // `readonly`, so it has nothing to evaluate it for.
             visibleWhen: isFailClosedSectionGate(f) ? undefined : (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -2245,14 +2262,36 @@ ComponentRegistry.register('form',
     // stored BLANK field rule is a fault like any other (ADR-0137 D2; see
     // `FieldRuleFaults`) and is refused; a new one is refused earlier, at
     // authoring, by the form schema's triad wire.
-    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames } = React.useMemo(() => {
+    // [objectstack#36806] A faulted `uiReadonlyWhen` (the hand lock's
+    // predicate) is refused the same way, on an edit form (a create never
+    // judges it). It has the one possible judge here: no server evaluates the
+    // hand lock, so ADR-0137 D2's "the submit refuses what render let through"
+    // can only be this form. Render already holds the field locked (the hand
+    // lock fails closed); the refusal says the rule itself must be fixed.
+    const { conditionallyHiddenFieldNames, faultedVisibleWhenFieldNames, faultedUiReadonlyWhenFieldNames } = React.useMemo(() => {
       const hidden = new Set<string>();
       const faulted: string[] = [];
+      const faultedHandLock: string[] = [];
       for (const f of fields as FormFieldConfig[]) {
         const name = f?.name;
         if (!name) continue;
         const visibleWhen = (f as any).visibleWhen;
         const visibleOn = (f as any).visibleOn;
+        const uiReadonlyWhen = isCreateForm ? undefined : (f as any).uiReadonlyWhen;
+        if (uiReadonlyWhen != null && visibleWhen == null && f.type !== 'section-divider') {
+          // `readonlyWhen` rides along so the verdict short-circuits exactly as
+          // on the `visibleWhen` path below: a field the server lock already
+          // holds never has its hand lock judged, so it never blocks the save.
+          const handLock = resolveFieldRuleState(
+            { readonlyWhen: (f as any).readonlyWhen, uiReadonlyWhen },
+            ruleRecord,
+            { readonly: (f as any).readonly === true },
+            previousRecord,
+            predicateScope,
+            `field '${name}'`,
+          );
+          if (handLock.faults.uiReadonlyWhen !== undefined) faultedHandLock.push(name);
+        }
         if (visibleWhen == null && visibleOn == null) continue;
         if (visibleWhen != null) {
           // A fail-closed section gate (objectui#13055) is judged off the triad.
@@ -2261,6 +2300,7 @@ ComponentRegistry.register('form',
             {
               visibleWhen: gate ? undefined : visibleWhen,
               readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+              uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
               requiredWhen: (f as any).requiredWhen,
             },
             ruleRecord,
@@ -2276,6 +2316,7 @@ ComponentRegistry.register('form',
             `field '${name}'`,
           );
           if (st.faults.visibleWhen !== undefined && f.type !== 'section-divider') faulted.push(name);
+          if (st.faults.uiReadonlyWhen !== undefined && f.type !== 'section-divider') faultedHandLock.push(name);
           if (!st.visible || (gate && !sectionGateVisible(f, ruleRecord, previousRecord, predicateScope))) {
             hidden.add(name);
             continue;
@@ -2290,7 +2331,11 @@ ComponentRegistry.register('form',
           hidden.add(name);
         }
       }
-      return { conditionallyHiddenFieldNames: hidden, faultedVisibleWhenFieldNames: faulted };
+      return {
+        conditionallyHiddenFieldNames: hidden,
+        faultedVisibleWhenFieldNames: faulted,
+        faultedUiReadonlyWhenFieldNames: faultedHandLock,
+      };
     }, [fields, ruleRecord, previousRecord, isCreateForm, predicateScope]);
 
     // ── The section grouping contract (objectui#6236, maintainer ruling
@@ -2504,6 +2549,7 @@ ComponentRegistry.register('form',
           {
             visibleWhen: (f as any).visibleWhen,
             readonlyWhen: isCreateForm ? undefined : (f as any).readonlyWhen,
+            uiReadonlyWhen: isCreateForm ? undefined : (f as any).uiReadonlyWhen,
             requiredWhen: (f as any).requiredWhen,
           },
           ruleRecord,
@@ -2565,6 +2611,12 @@ ComponentRegistry.register('form',
     // Read once per object and handed down on the field's own metadata.
     const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+    // The unit code fields a quantity on this form points at (ADR-0158 Open
+    // item 8): each is drawn as the unit picker (`withUnitCodePointer`).
+    const unitCodePointers = React.useMemo(
+      () => quantityUnitCodePointers((fields as Array<{ field?: unknown }>).map((f) => f?.field || f)),
+      [fields],
+    );
 
     // The record as each visible update action would leave it
     // (objectstack#28382). A declarative update action writes its static
@@ -2757,8 +2809,16 @@ ComponentRegistry.register('form',
         const key = tabKeyByFieldName.get(name);
         if (key) out.add(key);
       }
+      // A host slot whose collection the last save was refused on
+      // (objectstack#35889's placed lines): the host owns that refusal, since
+      // no field of THIS form carries it, and says so on the slot row.
+      for (const f of fields as FormFieldConfig[]) {
+        if (f?.type !== 'form-slot' || !(f as { slotRefused?: boolean }).slotRefused) continue;
+        const key = tabKeyByFieldName.get(f.name);
+        if (key) out.add(key);
+      }
       return out;
-    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames]);
+    }, [fieldTabs, tabKeyByFieldName, rejectedFieldNames, fields]);
 
     // objectstack#34615 — below `sm` a horizontal tab strip that does not fit
     // scrolls sideways inside its own box (see the strip's classes) instead of
@@ -3013,6 +3073,14 @@ ComponentRegistry.register('form',
     // the explicit call belongs beside the `onDirtyChangeProp?.(...)` one
     // below, not back in a subscription's teardown ordering.
     const resetInFlightRef = React.useRef(false);
+    // The window in which a lookup's OPENING fill is written (objectstack#37289):
+    // the targets a create form's opening value fills from its record
+    // (`onAutofill(patch, { opening: true })`, objectstack#35050). The fill
+    // joins the opening values — the dirty baseline takes it first — so the
+    // dependent-lookup clear further down reads it as it reads a `defaultValues`
+    // reset: it re-bases and acts on nothing. That clear is its only reader;
+    // the value channels above report the fill as they always have.
+    const openingFillInFlightRef = React.useRef(false);
     /**
      * objectstack#28106 — try each AI-proposed change this form draws and has
      * not tried yet, against `baseline` (the record the form holds). Tried
@@ -3239,13 +3307,18 @@ ComponentRegistry.register('form',
     // still-mounted drawer, the carried input re-applied inside it — fills
     // the parent AND the lookup in one operation; read as an edit, it would
     // empty every saved pair the moment the record opened. So the comparison
-    // is re-based, never acted on, in two cases: inside the explicit reset
+    // is re-based, never acted on, in three cases: inside the explicit reset
     // window (`resetInFlightRef`, the same signal the two value channels above
-    // read), and on a notification that names no field — react-hook-form's
-    // whole-record replacement (`reset()`, including the bare ones the cancel
-    // and `resetOnSubmit` paths call). Everything else is a value moving in
-    // this form — a user's pick, or one of the clears above emptying a field —
-    // and is acted on. That is also what makes a multi-level chain converge:
+    // read); inside a lookup's opening fill (`openingFillInFlightRef`,
+    // objectstack#37289) — a create form that opened with a lookup AND the
+    // lookup scoping it (a related tab's New seeding both) has that lookup
+    // fill its own parent from its record, and read as an edit, that fill
+    // emptied the seeded pair and the record saved unlinked; and on a
+    // notification that names no field — react-hook-form's whole-record
+    // replacement (`reset()`, including the bare ones the cancel and
+    // `resetOnSubmit` paths call). Everything else is a value moving in this
+    // form — a user's pick, a fill that pick makes, or one of the clears above
+    // emptying a field — and is acted on. That is also what makes a multi-level chain converge:
     // clearing `contact` is itself a named change, so a lookup scoped by
     // `contact` is cleared in the same pass.
     //
@@ -3285,7 +3358,7 @@ ComponentRegistry.register('form',
         const before = seen;
         const now = readParents();
         seen = now;
-        if (resetInFlightRef.current || !info?.name) return;
+        if (resetInFlightRef.current || openingFillInFlightRef.current || !info?.name) return;
         const outermost = origin === undefined;
         if (outermost) origin = info.name;
         try {
@@ -3624,6 +3697,16 @@ ComponentRegistry.register('form',
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
         return Promise.resolve();
       }
+      if (faultedUiReadonlyWhenFieldNames.length > 0) {
+        event?.preventDefault?.();
+        raiseRefusal(t('form.uiReadonlyWhenFaulted', {
+          fields: faultedUiReadonlyWhenFieldNames
+            .map((n) => fieldLabelByName[n] || n)
+            .join(t('validation.formInvalidJoiner')),
+        }));
+        setRejectedFieldNames(faultedUiReadonlyWhenFieldNames);
+        return Promise.resolve();
+      }
       return submitThroughValidation(event);
     };
 
@@ -3714,6 +3797,7 @@ ComponentRegistry.register('form',
         readonly: staticReadonly,
         visibleWhen,
         readonlyWhen,
+        uiReadonlyWhen,
         requiredWhen,
         ...fieldProps
       } = field;
@@ -3782,7 +3866,14 @@ ComponentRegistry.register('form',
       // see `isFailClosedSectionGate`.
       const failClosedGate = isFailClosedSectionGate(field);
       const ruleState = resolveFieldRuleState(
-        { visibleWhen: failClosedGate ? undefined : visibleWhen, readonlyWhen: isCreateForm ? undefined : readonlyWhen, requiredWhen },
+        {
+          visibleWhen: failClosedGate ? undefined : visibleWhen,
+          readonlyWhen: isCreateForm ? undefined : readonlyWhen,
+          // The hand lock's predicate (`Field.uiReadonlyWhen`), folded into the
+          // same read-only verdict; judged on an edit only, as `readonlyWhen`.
+          uiReadonlyWhen: isCreateForm ? undefined : uiReadonlyWhen,
+          requiredWhen,
+        },
         ruleRecord,
         {
           required: staticRequired,
@@ -4257,7 +4348,8 @@ ComponentRegistry.register('form',
                   // metadata was stashed (standalone forms).
                   // A record-currency code field also carries the codes its
                   // object's records already hold (`usedCurrencyCodes`).
-                  field: withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]),
+                  // A unit code field a quantity points at carries that pointer.
+                  field: withUnitCodePointer(withUsedCurrencyCodes(field.field || field, usedCurrencyCodes[name]), unitCodePointers.get(name)),
                   ...formField,
                   inputType: fieldProps.inputType,
                   // The field's label, forwarded explicitly because the
@@ -4337,17 +4429,25 @@ ComponentRegistry.register('form',
                   // A fill made by the value a create form OPENED with
                   // (`opening`, objectstack#35050) joins the opening values:
                   // the dirty baseline takes it first, so a form nobody has
-                  // touched yet still closes without the discard prompt.
+                  // touched yet still closes without the discard prompt; and
+                  // it is written inside `openingFillInFlightRef`, so it moves
+                  // no dependent lookup's parent (objectstack#37289).
                   onAutofill:
                     !isCreateForm && CREATE_AUTOFILL_WIDGET_TYPES.has(normalizeFieldType(resolvedType))
                       ? undefined
                       : (patch: Record<string, unknown>, options?: { opening?: boolean }) => {
                           if (options?.opening) baselineRef.current = { ...baselineRef.current, ...patch };
-                          for (const [target, filled] of Object.entries(patch)) {
-                            form.setValue(target, filled, {
-                              shouldDirty: !options?.opening,
-                              shouldValidate: !!form.getFieldState(target).error,
-                            });
+                          const outerFill = openingFillInFlightRef.current;
+                          openingFillInFlightRef.current = outerFill || !!options?.opening;
+                          try {
+                            for (const [target, filled] of Object.entries(patch)) {
+                              form.setValue(target, filled, {
+                                shouldDirty: !options?.opening,
+                                shouldValidate: !!form.getFieldState(target).error,
+                              });
+                            }
+                          } finally {
+                            openingFillInFlightRef.current = outerFill;
                           }
                         },
                   // The value a create form opened with, for a lookup to fill

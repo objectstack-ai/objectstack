@@ -98,7 +98,8 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   `POST /api/v1/auth/service-account/register` with `name` and an optional
   `ownerId`): a user of kind `agent`, a plain member of the active
   organization, accountable to a named person who is a member there (the
-  caller by default). Its name carries its purpose. It never signs in: it has
+  caller by default) and whose own account is active: an account runs only
+  while its owner's does. Its name carries its purpose. It never signs in: it has
   no password and no session, and its email is a placeholder that is never
   delivered. Its owner, or an administrator of its organization, mints its
   key (*Create API Key* on the account, or
@@ -133,9 +134,16 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
     accountable owner. When the owner leaves the organization, the account is
     suspended, and it is not resumed until an administrator names a new owner.
     When the organization's directory (SCIM) deactivates or deletes the owner,
-    the account is suspended too, a re-activation of the owner does not resume
-    it, and `resume` refuses until the owner is re-activated or a new owner is
-    named.
+    or a platform administrator bans the owner, the account is suspended too,
+    each with a reason of its own, and an unban or a re-activation of the owner
+    does not resume it; a timed ban leaves it suspended after the ban expires.
+    `register`, `set-owner` and `resume` refuse an owner whose account is
+    disabled, whichever way it was disabled, so the account is resumed only
+    once the owner's account is active again or a new owner is named. A person
+    who is still accountable for an account is not deleted: the delete is
+    refused until a new owner is named. The OAuth applications and SCIM
+    credentials the owner registered are ended too (see
+    [What a ban, a deactivation or a removal ends](/docs/permissions/authentication#what-a-ban-a-deactivation-or-a-removal-ends)).
   - **`retire`** (an administrator) ends its membership and revokes every key
     for good; the account's record stays, so what it wrote still names it.
 
@@ -298,10 +306,10 @@ own `ask` / `build` records use exactly these fields):
 | `surface` | `'ask'` \| `'build'` — the product surface this agent binds (ADR-0063 §1) |
 | `role` | Free-text **persona** string (e.g. `"Senior Support Engineer"`) — not an enum |
 | `instructions` | System prompt / prime directives |
-| `model` | Provider + model config (`provider`: `openai` \| `azure_openai` \| `anthropic` \| `local`) |
+| `model` | Model config: `model` (the model name, optional — absent means the deployment's default model), `temperature`, `maxTokens`, `topP`. There is no `provider`: it was **removed in protocol 19 (#37712)** because no runtime read it — the deployment's AI settings choose the provider, and resolve the model name among the providers they turn on |
 | `skills` | Skill names to attach (the primary Agent → Skill → Tool capability model) |
-| `tools` | **Removed in protocol 17 (#3894)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. This is **not** a rename: there is no key the value moves to. Declare each tool on a **skill** instead — a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — and attach that skill through `skills` (ADR-0064) |
-| `knowledge` | **Removed in protocol 17 (#3896)** — typed `never`, so writing it fails `tsc`, and a value that reaches the runtime is rejected at parse. Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who “scoped” access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |
+| `tools` | **Removed in protocol 17 (#3894)** — the key is not on the type, so a `defineAgent({ … })` literal that sets it fails `tsc` as an excess property, and the strict schema refuses it at parse as an unknown key, naming the [upgrade guide](https://objectstack.ai/docs/protocol-upgrade). This is **not** a rename: there is no key the value moves to. Declare each tool on a **skill** instead — a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — and attach that skill through `skills` (ADR-0064) |
+| `knowledge` | **Removed in protocol 17 (#3896)** — the key is not on the type, so a `defineAgent({ … })` literal that sets it fails `tsc` as an excess property, and the strict schema refuses it at parse as an unknown key, naming the [upgrade guide](https://objectstack.ai/docs/protocol-upgrade). Declaring `sources` / `indexes` here never scoped retrieval: `search_knowledge` takes `sourceIds` from the LLM's own tool-call arguments, not from the agent record, so an author who “scoped” access here scoped nothing. This is **not** a rename: there is no key the value moves to — delete the block. Restrict retrieval at the knowledge-service / source level (per-source permissions), and describe intended grounding in `instructions` so the model asks for the right sources |
 
 There is no `type` field and no fixed agent "type" taxonomy — behaviour comes from
 persona, instructions, skills, and tools. There are no `triggers` / `schedule`
@@ -357,7 +365,6 @@ Your responsibilities:
 Always be professional and data-driven.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.7,
     maxTokens: 2000,
@@ -393,7 +400,6 @@ Your responsibilities:
 Always be empathetic and solution-focused.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.5,
     maxTokens: 1500,
@@ -426,7 +432,6 @@ Tasks:
 Use reputable data sources.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-3.5-turbo',
     temperature: 0.3,
     maxTokens: 1000,
@@ -462,7 +467,6 @@ Responsibilities:
 Use the data tools to query records and aggregate metrics.`,
 
   model: {
-    provider: 'openai',
     model: 'gpt-4',
     temperature: 0.2,
     maxTokens: 3000,

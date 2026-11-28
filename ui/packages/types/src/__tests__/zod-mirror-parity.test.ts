@@ -154,7 +154,15 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **51 entries** in `KnownDrift`, **91 keys** across them — 51 / 90 until
+ *   - **51 entries** in `KnownDrift`, **91 keys** across them — 51 / 92 until
+ *     objectstack#35827 retired `DataTableSchema.onBatchSave` with the staged
+ *     edit model: its TS face is `never` now and its mirror arm refuses it as
+ *     retired, so it LEFT the `data-display.zod.ts#DataTableSchema` entry: the
+ *     key total fell by one and the entry count did not move. It was 51 / 91
+ *     until objectstack#35955 declared `DataTableSchema.onColumnHide`, the host's
+ *     handler for the column menu's "Hide column", as a runtime slot refused
+ *     by name on the mirror, so it JOINED the same
+ *     `data-display.zod.ts#DataTableSchema` entry. It was 51 / 90 until
  *     objectstack#35678 declared `DataTableSchema.floatingBar`, the host-built
  *     selection bar the table floats over its rows, as a runtime slot refused
  *     by name on the mirror, so it JOINED the same
@@ -564,7 +572,11 @@
  *     seeded long after the 121). It is ⛔ not replaced with a fresh digit, for the
  *     reason above. The full statement is on that ledger, which owns it — read it
  *     there, and ⛔ do not copy it back.
- *   - **5 entries** in `RuntimeOnlyDeclared`, **31 keys** across them — 5 / 30
+ *   - **5 entries** in `RuntimeOnlyDeclared`, **30 keys** across them — 5 / 31
+ *     until objectstack#35827 retired `DataTableSchema.singleClickEdit`, read
+ *     only by the staged edit model it retired with: the key left the
+ *     `DataTableSchema` entry and `RuntimeOnlyNamedAllowList`, and the entry
+ *     count held. It was 5 / 30
  *     until objectui#11068's `keyboardNavigation` build filed `DataTableSchema`'s
  *     `keyboardNavigation` here, on the entry that already existed, BY NAME with its
  *     reason on `RuntimeOnlyNamedAllowList`: the flag `ObjectGrid` resolves from the
@@ -2485,7 +2497,7 @@ interface KnownDrift {
    * `resolveSelectionMode` in `renderers/complex/data-table.tsx` implements
    * `'single'` as a real mode.)
    *
-   * The eleven callbacks — RUNTIME SLOT (objectui#6124) ×11: `renderers/complex/data-table.tsx`
+   * The ten callbacks — RUNTIME SLOT (objectui#6124) ×10: `renderers/complex/data-table.tsx`
    * CALLS every one of them off `schema.*` (`schema.onRowEdit?.(r)`,
    * `schema.onSelectionChange(selectedData)`, …), so the TS side keeps them callable
    * and the mirror refuses them by name.
@@ -2505,10 +2517,14 @@ interface KnownDrift {
    * face, so still a runtime slot; had it been read as `'retired'` off its
    * siblings, the arm would publish "no renderer reads this key" to every author
    * who trips it, and objectui#6175 wired that read on purpose.
+   *
+   * ⭐ ELEVEN → ten: objectstack#35827 retired `onBatchSave` with the staged
+   * editing model that called it. It is a tombstone on BOTH faces now (`never` on
+   * the interface, `'retired'` on the mirror), which is no drift.
    */
   'data-display.zod.ts#DataTableSchema':
     | 'onRowEdit' | 'onRowDelete' | 'onSelectionChange' | 'onColumnsReorder'
-    | 'onAddRecord' | 'onBatchSave' | 'onCellChange' | 'onColumnResize'
+    | 'onAddRecord' | 'onCellChange' | 'onColumnResize'
     | 'onRowActionDef' | 'onRowClick' | 'onRowSave'
     // objectui#7759 group E — `renderCellEditor` is a RUNTIME SLOT in the
     // objectui#6124 shape (`data-table` reads `schema.renderCellEditor` and calls
@@ -2536,7 +2552,11 @@ interface KnownDrift {
     // objectstack#35678 — `floatingBar` is a RUNTIME SLOT in the same shape:
     // the host-built selection bar `data-table` floats over its rows
     // (`ObjectGrid` supplies it while rows are selected).
-    | 'floatingBar';
+    | 'floatingBar'
+    // objectstack#35955 — `onColumnHide` is a RUNTIME SLOT in the objectui#6124
+    // shape: `data-table` calls it with the column's key when the column menu's
+    // "Hide column" is picked; `ObjectGrid` forwards its host's handler.
+    | 'onColumnHide';
   /** RUNTIME SLOT (objectui#7759 group E, the objectui#6124 shape): `data-table`, `ObjectGrid` and `VirtualGrid` call `col.cell(value, row)`. */
   'data-display.zod.ts#TableColumnSchema': 'cell';
   /**
@@ -3662,6 +3682,10 @@ interface RuntimeOnlyDeclared {
    * node it builds, beside `editable`, whose value its default follows. Filed BY
    * NAME with its reason on `RuntimeOnlyNamedAllowList` below; ⛔ not mirrored,
    * since no document authors it on a `data-table` node.
+   *
+   * ⭐ SHRANK by one with objectstack#35827: `singleClickEdit` chose how the staged
+   * model's click-to-edit opened a cell, and that model is retired, so the member
+   * left the interface and this entry with it.
    */
   'data-display.zod.ts#DataTableSchema':
     | 'onColumnReorder'
@@ -3669,7 +3693,7 @@ interface RuntimeOnlyDeclared {
     | 'onSearchChange' | 'onSortChange'
     | 'disableInnerScroll' | 'editable' | 'keyboardNavigation' | 'manualPagination' | 'manualSearch' | 'manualSorting'
     | 'page' | 'rowActionDefs' | 'rowClassName' | 'rowCount' | 'rowStyle'
-    | 'search' | 'selectionResetKey' | 'showAddRow' | 'showSelectionCount' | 'singleClickEdit' | 'sort';
+    | 'search' | 'selectionResetKey' | 'showAddRow' | 'showSelectionCount' | 'sort';
   /**
    * 1 of `FormSchema`'s former 9. OVERSIGHT group — `onSubmit`, `onChange` and
    * `onCancel` are mirrored beside it. Read at `renderers/form/form.tsx:997`, by
@@ -3890,7 +3914,7 @@ interface RuntimeOnlyNamedAllowList {
    */
   'data-display.zod.ts#DataTableSchema': {
     disableInnerScroll: 'host-composition flag: set in code by ObjectGrid on the one grouped table so it overflows into the grid scroll container; authored in no document';
-    editable: 'host-paired flag: set in code by ObjectGrid beside the onRowSave / onBatchSave save path it supplies; an authored value stages edits that nothing persists, and no document authors it';
+    editable: 'host-paired flag: set in code by ObjectGrid beside the select-first model and the onRowSave save path it supplies; without both the table refuses it and draws read-only, and no document authors it';
     keyboardNavigation: 'host-resolved flag: set in code by ObjectGrid from the keyboardNavigation key of the object-grid node, defaulting to the editable it hands down beside it; authored in no document';
     manualPagination: 'host-driven server paging: set in code by ObjectGrid with rowCount, page and the onPageChange slot; authored in no document';
     manualSearch: 'host-driven server search: set in code by ObjectGrid with search and the onSearchChange slot; authored in no document';
@@ -3904,7 +3928,6 @@ interface RuntimeOnlyNamedAllowList {
     selectionResetKey: 'imperative reset token: ObjectGrid bumps it in code to clear the checkboxes after a bulk action; authored in no document';
     showAddRow: 'host-paired flag: set in code by ObjectGrid from create permission, beside the onAddRecord slot the row calls; authored in no document';
     showSelectionCount: 'host-composition flag: set false in code by ObjectGrid, whose BulkActionBar shows the selection instead; authored in no document';
-    singleClickEdit: 'host-paired flag: set in code by ObjectGrid with editable, choosing how a cell enters inline edit; authored in no document';
     sort: 'controlled sort for manualSorting: set in code by ObjectGrid and RelatedList from their own sort state; authored in no document';
   };
   /**
@@ -5811,6 +5834,16 @@ function typeLiteralOf(shape: Record<string, unknown>): string | undefined {
   return values.length === 1 && typeof values[0] === 'string' ? values[0] : undefined;
 }
 
+/**
+ * Barrel names the spec exports for an UNRELATED schema, so the same-name rule
+ * (1) above would pair two layers that never meet. Each is skipped on its
+ * `spec#NAME` side only: a `ComponentPropsMap` row still pairs it by its `type`.
+ */
+const SPEC_NAME_COLLISIONS: Readonly<Record<string, string>> = {
+  FormSchema:
+    "objectui's `FormSchema` is the `form` component node; the spec's (ADR-0159 card ②, objectstack#37086) is the `form` METADATA ITEM — `name` `OBJECT.KEY`, one `object` — which reaches a renderer only through `@objectstack/rest`'s form doors, never as a node",
+};
+
 /** Every derived spec pair, with the keys its spec side declares and the mirror side does not. */
 function measureSpecOnlyKeys(): { pairs: string[]; specOnly: string[] } {
   const spec: Record<string, unknown> = { ...SpecData, ...SpecUi };
@@ -5823,7 +5856,7 @@ function measureSpecOnlyKeys(): { pairs: string[]; specOnly: string[] } {
     if (!mirrorShape) continue;
     const literal = typeLiteralOf(mirrorShape);
     const sides: [string, unknown][] = [];
-    if (name in spec) sides.push([`spec#${name}`, spec[name]]);
+    if (name in spec && !(name in SPEC_NAME_COLLISIONS)) sides.push([`spec#${name}`, spec[name]]);
     if (literal !== undefined && literal in rows) sides.push([`ComponentPropsMap['${literal}']`, rows[literal]]);
     const bag = objectOf(mirrorShape.properties);
     const mirrored = new Set([...Object.keys(mirrorShape), ...(bag ? Object.keys(bag) : [])]);
@@ -5857,6 +5890,13 @@ otherwise add a SPEC_ONLY_KEY_ROWS row saying what happens to it.`).toEqual([]);
     expect(dead, 'a row for a key the mirror now declares, or the spec no longer does — delete it').toEqual([]);
     const bare = Object.entries(SPEC_ONLY_KEY_ROWS).filter(([, row]) => row.why.trim().length < 40);
     expect(bare.map(([key]) => key), 'a row without its reason is an oversight').toEqual([]);
+  });
+
+  it('every name collision is still a collision, and says why', () => {
+    const spec: Record<string, unknown> = { ...SpecData, ...SpecUi };
+    const stale = Object.keys(SPEC_NAME_COLLISIONS).filter((name) => !(name in spec) || !(name in ZodBarrel));
+    expect(stale, 'a collision row for a name one side no longer exports — delete it').toEqual([]);
+    expect(Object.values(SPEC_NAME_COLLISIONS).every((why) => why.trim().length >= 40)).toBe(true);
   });
 
   it('the pairing can see both kinds of pair (non-vacuity)', () => {

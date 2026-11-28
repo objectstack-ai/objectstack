@@ -31,7 +31,13 @@ import {
 } from '@object-ui/components';
 import type { DashboardWidgetSchema, DashboardWidgetTypeName } from '@object-ui/types';
 import { completeWidgetLayout, defaultWidgetPlacement } from '@object-ui/types';
-import { resolveDashboardFilterDefs, type DashboardFilterDef, type RegistryComponentMeta } from '@object-ui/core';
+import {
+  DATE_RANGE_FILTER_NAME,
+  resolveDashboardFilterDefs,
+  columnIdentity,
+  type DashboardFilterDef,
+  type RegistryComponentMeta,
+} from '@object-ui/core';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
 import { t, tFormat } from '../i18n.js';
 // The spec's `I18nLabel` resolver (new in @objectstack/spec 17.0.0-rc.6),
@@ -45,10 +51,11 @@ import {
   DatasetNamesEditor,
   datasetDimensionOptions,
   datasetMeasureOptions,
-  datasetPickerOptions,
 } from './ReportDefaultInspector.js';
-import { useDatasetCatalog, useDatasetSemantics } from '../previews/useDatasetCatalog.js';
-import { packageDatasetsFirst } from './dataset-picker-options.js';
+import { useDatasetCatalog, useDatasetSemantics, type DatasetDimensionInfo } from '../previews/useDatasetCatalog.js';
+import { datasetLabelOptions, packageDatasetsFirst } from './dataset-picker-options.js';
+import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './servedLabel.js';
+import { useServedWidgetText } from '../../studio-design/servedDashboardText.js';
 import { DatasetCreateEntry, useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
 import type { ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { widgetMissingInputs } from '../../studio-design/metadataError.js';
@@ -97,8 +104,30 @@ function findWidget(
   return { widget: widgets[index], index };
 }
 
+/**
+ * The binding the shipped dashboard gives widget `widgetId` for filter
+ * `filterName`, when it re-targets the filter to a field (a string). An
+ * opt-out (`false`) or no entry ships nothing to restore: `undefined`.
+ */
+export function shippedFilterBinding(
+  shipped: Record<string, unknown> | null | undefined,
+  widgetId: string | undefined,
+  filterName: string,
+): string | undefined {
+  if (!shipped || !widgetId) return undefined;
+  const widgets = Array.isArray((shipped as any).widgets) ? ((shipped as any).widgets as unknown[]) : [];
+  const widget = widgets.find(
+    (w): w is { filterBindings?: unknown } => !!w && typeof w === 'object' && (w as { id?: unknown }).id === widgetId,
+  );
+  const bindings = widget?.filterBindings;
+  if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings)) return undefined;
+  const binding = (bindings as Record<string, unknown>)[filterName];
+  return typeof binding === 'string' && binding !== '' ? binding : undefined;
+}
+
 export function DashboardWidgetInspector({
   draft,
+  shipped,
   selection,
   onPatch,
   onClearSelection,
@@ -139,8 +168,11 @@ export function DashboardWidgetInspector({
   // Report inspector's pickers share (see `datasetPickerOptions` and its
   // siblings): a dataset's declared `description` rides as the combo's muted
   // `hint`, a member's `label` beside its name. The stored value is the name.
+  // objectstack#36373 — business wording: a data source reads as its label,
+  // a field as its label; the machine names stay the stored values, reachable
+  // on hover (`nameOnHover` on each combo below).
   const datasetComboOptions: InspectorComboOption[] = React.useMemo(() => {
-    const opts: InspectorComboOption[] = datasetPickerOptions(
+    const opts: InspectorComboOption[] = datasetLabelOptions(
       packageDatasetsFirst(catalog.datasets, datasetAuthoring?.packageId),
     );
     if (datasetName && !opts.some((o) => o.value === datasetName)) {
@@ -149,8 +181,8 @@ export function DashboardWidgetInspector({
     return opts;
   }, [catalog.datasets, datasetName, datasetAuthoring?.packageId]);
   const measureOptions: ObjectFieldInfo[] = React.useMemo(
-    () => datasetMeasureOptions(semantics.measures),
-    [semantics.measures],
+    () => datasetMeasureOptions(semantics.measures, locale),
+    [semantics.measures, locale],
   );
   const dimensionOptions: ObjectFieldInfo[] = React.useMemo(
     () => datasetDimensionOptions(semantics.dimensions),
@@ -161,7 +193,7 @@ export function DashboardWidgetInspector({
   // object-field source. The combo prints the value (the dimension name)
   // itself, so the label is the author's text alone.
   const fieldComboOptions: InspectorComboOption[] = React.useMemo(
-    () => semantics.dimensions.map((d) => ({ value: d.name, label: d.label ?? d.name, hint: d.type })),
+    () => semantics.dimensions.map((d) => ({ value: d.name, label: d.label ?? d.name })),
     [semantics.dimensions],
   );
 
@@ -169,6 +201,11 @@ export function DashboardWidgetInspector({
   // The dashboard's own dateRange + globalFilters declarations, normalized
   // to the same flat def list the runtime broadcasts from — so the editor
   // offers exactly the filters the renderer will apply.
+  // The language the widget's own title is shown and edited in, and the
+  // served (translated) titles the Studio pairs with the published layer.
+  const language = useLabelLanguage(locale);
+  const servedWidgets = useServedWidgetText();
+
   const filterDefs: DashboardFilterDef[] = React.useMemo(
     () =>
       resolveDashboardFilterDefs({
@@ -177,6 +214,24 @@ export function DashboardWidgetInspector({
       }),
     [draft],
   );
+
+  // objectstack#36373 — a filter is named by its label: the author's, else the
+  // built-in date filter's own name, else the label of the dimension that
+  // reads its field. Its machine name is the last resort, never the first.
+  const dimensionLabelForField = (field: string): string | undefined =>
+    dimensionLabelOf(semantics.dimensions, field);
+  const filterName = (def: DashboardFilterDef): string =>
+    resolveInlineI18nLabel(def.label, language) ||
+    (def.name === DATE_RANGE_FILTER_NAME ? t('engine.inspector.widget.filterBindingDateRange', locale) : '') ||
+    dimensionLabelForField(def.field) ||
+    def.name;
+  // The field picker's empty face names the filter's own field by its label.
+  const filterDefaultPlaceholder = (def: DashboardFilterDef): string => {
+    const label = dimensionLabelForField(def.field);
+    return label
+      ? tFormat('engine.inspector.widget.filterBindingDefault', locale, { field: label })
+      : t('engine.inspector.widget.filterBindingDefaultField', locale);
+  };
 
   if (selection.kind !== 'widget') {
     return (
@@ -198,6 +253,11 @@ export function DashboardWidgetInspector({
   }
 
   const { widget, index } = hit;
+  const widgetServedTitle =
+    servedWidgets && typeof widget.id === 'string' ? servedWidgets.widgets.get(widget.id) ?? null : null;
+  // objectstack#36481 — when readers in this language are served a
+  // translation instead of the title saved here, the box says so before Save.
+  const titleNote = servedLabelNote(widget.title, widgetServedTitle, language);
   // The box the grid auto-places this widget in, and the widget's layout
   // completed against it — what the width / height inputs show and write.
   const placement = defaultWidgetPlacement(index);
@@ -239,7 +299,7 @@ export function DashboardWidgetInspector({
             {t('engine.inspector.widget.kind', locale)}
           </div>
           <div className="truncate text-sm font-semibold">
-            {resolveInlineI18nLabel(widget.title, locale) ||
+            {shownLabel(widget.title, widgetServedTitle, language) ||
               selection.label ||
               tFormat('engine.inspector.widget.untitledN', locale, { n: index + 1 })}
           </div>
@@ -302,7 +362,11 @@ export function DashboardWidgetInspector({
       <Field id="widget-title" label={t('engine.inspector.widget.title', locale)}>
         <Input
           id="widget-title"
-          value={resolveInlineI18nLabel(widget.title, locale) ?? ''}
+          // objectstack#36373 — shown and written in the session language:
+          // the served translation while the title is the published source,
+          // an edit into that language's entry (`servedLabel.ts`). Emptying
+          // the box keeps the write it has always made.
+          value={shownLabel(widget.title, widgetServedTitle, language)}
           onChange={(e) =>
             patchWidget({
               // Never `{ title: e.target.value }` — that is the flattening
@@ -311,11 +375,29 @@ export function DashboardWidgetInspector({
               // so its map limb is `Record<string, unknown>`, while a stored
               // title that parses as `I18nLabel` has string entries only and the
               // entry written here is `e.target.value`.
-              title: setLocalized(widget.title, locale, e.target.value) as DashboardWidgetSchema['title'],
+              title: (e.target.value === ''
+                ? setLocalized(widget.title, language, '')
+                : writtenLabel(widget.title, widgetServedTitle, language, e.target.value, '')) as DashboardWidgetSchema['title'],
             })
           }
           disabled={readOnly}
+          aria-describedby={titleNote ? 'widget-title-served-note' : undefined}
         />
+        {titleNote && (
+          <p
+            id="widget-title-served-note"
+            role="note"
+            data-testid="widget-title-served-note"
+            data-note-kind={titleNote.kind}
+            className="text-[11px] leading-snug text-muted-foreground"
+          >
+            {tFormat(
+              titleNote.kind === 'kept' ? 'engine.inspector.servedLabel.kept' : 'engine.inspector.servedLabel.ifKept',
+              locale,
+              { served: titleNote.served },
+            )}
+          </p>
+        )}
       </Field>
 
       <Field id="widget-type" label={t('engine.inspector.widget.type', locale)}>
@@ -367,7 +449,7 @@ export function DashboardWidgetInspector({
             placeholder={t('engine.inspector.widget.datasetPlaceholder', locale)}
             searchPlaceholder={t('engine.inspector.widget.datasetPlaceholder', locale)}
             disabled={readOnly}
-            mono
+            nameOnHover
           />
           {heldHint('dataset')}
           <p className="text-[10px] leading-snug text-muted-foreground">
@@ -415,10 +497,11 @@ export function DashboardWidgetInspector({
       </div>
 
       {/* Dashboard filter bindings (framework#2501) — one row per dashboard
-          filter: an Apply toggle (unchecked writes `false` = opt out) and a
-          field picker re-targeting the filter to THIS widget's field (empty =
-          default: the filter's own field). Only rendered when the dashboard
-          declares filters. */}
+          filter: an Apply toggle (unchecked writes `false` = opt out; checked
+          again restores the field the shipped dashboard binds, else the
+          default) and a field picker re-targeting the filter to THIS widget's
+          field (empty = default: the filter's own field). Only rendered when
+          the dashboard declares filters. */}
       {filterDefs.length > 0 && (
         <div className="space-y-3 rounded-md border p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -453,12 +536,17 @@ export function DashboardWidgetInspector({
                         `||` also fixes the truthiness gate: an object is always
                         truthy, so a map that resolves to nothing never reached
                         `def.name`. */}
-                    {resolveInlineI18nLabel(def.label, locale) || def.name}
+                    {filterName(def)}
                   </Label>
                   <InspectorCheckboxField
                     label={t('engine.inspector.widget.filterBindingApply', locale)}
                     value={!optedOut}
-                    onCommit={(apply) => setBinding(apply ? undefined : false)}
+                    // Undoing an opt-out restores the shipped binding: the
+                    // stored body is the whole document, so a dropped key is
+                    // the filter's own field, never the package's re-target.
+                    onCommit={(apply) =>
+                      setBinding(apply ? shippedFilterBinding(shipped, widget.id, def.name) : false)
+                    }
                     disabled={readOnly}
                   />
                 </div>
@@ -473,15 +561,15 @@ export function DashboardWidgetInspector({
                         // (objectui#3997). Includes the filter name because a
                         // dashboard has several of these rows.
                         ariaLabel={tFormat('engine.inspector.widget.filterBindingField', locale, {
-                          filter: resolveInlineI18nLabel(def.label, locale) || def.name,
+                          filter: filterName(def),
                         })}
                         value={override}
                         onCommit={(v) => setBinding(v ? v : undefined)}
                         options={fieldComboOptions}
-                        placeholder={tFormat('engine.inspector.widget.filterBindingDefault', locale, { field: def.field })}
+                        placeholder={filterDefaultPlaceholder(def)}
                         searchPlaceholder={t('engine.form.searchFields', locale)}
                         disabled={readOnly}
-                        mono
+                        nameOnHover
                       />
                     </div>
                     {override && !readOnly && (
@@ -581,6 +669,15 @@ export function DashboardWidgetInspector({
       )}
     </div>
   );
+}
+
+/**
+ * The label of the dataset dimension that reads the object field a dashboard
+ * filter names. A dimension's column is `columnIdentity()`'s answer — its
+ * declared `field`, else its `name` — the same column the filter applies to.
+ */
+function dimensionLabelOf(dimensions: DatasetDimensionInfo[], field: string): string | undefined {
+  return dimensions.find((d) => columnIdentity(d) === field)?.label || undefined;
 }
 
 /**

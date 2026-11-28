@@ -1,15 +1,335 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
+import { classifyAdmissionTenancyPosture } from '@objectstack/core';
 import type {
   IDataEngine,
+  IEmbedder,
+  IJobService,
+  IQueueService,
   IRealtimeService,
+  JobRunOutcome,
+  QueueMessage,
 } from '@objectstack/spec/contracts';
 import type { KnowledgeSource } from '@objectstack/spec/ai';
-import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import { EMBEDDER_SERVICE, KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
+import {
+  OPENAI_COMPATIBLE_PRESETS,
+  createOpenAIEmbedder,
+  documentedMaxBatchSize,
+  type OpenAICompatiblePreset,
+} from '@objectstack/embedder-openai';
+import { aiTestEmbedderActionHandler } from '@objectstack/service-settings';
+import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { KnowledgeService } from './knowledge-service.js';
 import type { KnowledgeLogger } from './knowledge-service.js';
+import {
+  RECONCILE_DEFAULT_CRON,
+  RECONCILE_JOB,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
+  type KnowledgeBuildLock,
+  type KnowledgeReconcileReport,
+} from './knowledge-build.js';
+import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
+import { KnowledgeRecordHooks, recordHookEngineOf } from './knowledge-record-hooks.js';
+import {
+  KNOWLEDGE_RECORD_SYNC_QUEUE,
+  readRecordSyncMessage,
+  recordSyncPublishOptions,
+  resolveRecordSyncQueue,
+  resolveRecordSyncRetry,
+  type KnowledgeRecordSyncRetry,
+} from './knowledge-record-sync-queue.js';
+import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
+import { KNOWLEDGE_SOURCE_TYPE } from './knowledge-source-registry.js';
+import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
+
+/**
+ * Whether `err` is the kernel's refusal for a service NOTHING registered under
+ * `name` — the one miss a caller may read as absence.
+ *
+ * Both in-repo kernels answer a sync `getService` miss by throwing, and
+ * `ObjectKernel` keeps the two faults that share that branch apart on purpose,
+ * in their messages: `[Kernel] Service 'NAME' not found…` when nothing
+ * registered the name, and `Service 'NAME' is async - use await` when a
+ * factory registered it and the sync accessor cannot instantiate it
+ * (`LiteKernel` answers only the first). The first is absence; the second, and
+ * any other throw, is a service that exists and cannot be used.
+ */
+export function isServiceNotRegisteredError(err: unknown, name: string): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return message.startsWith(`[Kernel] Service '${name}' not found`);
+}
+
+/**
+ * Where an operator configures the embedder, and why a saved change waits for
+ * a restart — the tail of every "no embedder" answer below.
+ */
+const EMBEDDER_SETTINGS_REMEDY =
+  'under Settings → AI & Embedder, then restart the server: the embedder settings are read when it starts';
+
+/** The `ai.embedder_*` keys a complete provider needs, named in the "not saved" answer. */
+const EMBEDDER_REQUIRED_KEYS =
+  'ai.embedder_provider, ai.embedder_api_key and ai.embedder_model (ai.embedder_base_url for a custom or Azure endpoint)';
+
+/** One resolved setting as the settings service answers it: the value and the layer it came from. */
+interface ResolvedEmbedderSetting {
+  value?: unknown;
+  source?: string;
+}
+
+/** The slice of `SettingsService` this plugin reads at boot. */
+interface EmbedderSettingsReader {
+  getNamespace(namespace: string): Promise<{ values: Record<string, ResolvedEmbedderSetting | undefined> }>;
+}
+
+/** What the `ai.embedder_*` settings resolve to at boot. */
+type EmbedderFromSettings =
+  | {
+      kind: 'configured';
+      embedder: IEmbedder;
+      provider: string;
+      model: string | undefined;
+      /** The batch cap passed to the embedder: the saved size, held to the model's documented cap. */
+      batchSize: number | undefined;
+      /** The saved size, when the documented cap lowered it. */
+      savedBatchSize: number | undefined;
+      /** The host requests go to — named in the boot line; the key never is. */
+      endpointHost: string;
+    }
+  | {
+      kind: 'unconfigured';
+      reason: string;
+      /**
+       * `true` when nothing asked for an embedder (no provider saved, or `none`
+       * saved): the boot line is `info`. `false` when the operator saved
+       * something that does not build one: the boot line is `warn`.
+       */
+      quiet: boolean;
+    };
+
+/**
+ * The `IEmbedder` registered when the settings configure none. Every use of it
+ * — `embed()` with any input, or reading `dimensions` to size a vector column —
+ * answers the same error, which names the missing settings and the restart, so
+ * an adapter that embeds refuses indexing and search with that text instead of
+ * a bare "service not found". Nothing is sent anywhere.
+ */
+class UnconfiguredEmbedder implements IEmbedder {
+  readonly id = 'unconfigured';
+  constructor(private readonly reason: string) {}
+  get dimensions(): number {
+    throw this.refusal();
+  }
+  async embed(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    throw this.refusal();
+  }
+  private refusal(): Error {
+    return new Error(`No embedder is configured, so nothing was embedded and nothing was sent: ${this.reason}.`);
+  }
+}
+
+/**
+ * A setting's value when the operator SAVED it (any layer but the manifest
+ * default, an `OS_*` override included), else `undefined`. The `ai.embedder_*`
+ * defaults — `embedder_provider: 'none'`, `embedder_batch_size: 64` — are no
+ * decision anybody made, so they never count as configuration.
+ */
+function savedValue(values: Record<string, ResolvedEmbedderSetting | undefined>, key: string): unknown {
+  const entry = values[key];
+  if (!entry || (entry.source ?? 'default') === 'default') return undefined;
+  const { value } = entry;
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  return value;
+}
+
+/** The providers whose form offers the Base URL field (`embedder_base_url`'s `visible` rule). */
+const BASE_URL_PROVIDERS: ReadonlySet<string> = new Set(['custom', 'azure']);
+
+/**
+ * A saved number key read as a positive integer: the value (a number, or its
+ * decimal text, as an `OS_*` override hands it over), `undefined` when nothing
+ * is saved, `null` when what is saved is not one.
+ */
+function positiveIntegerSetting(value: unknown): number | undefined | null {
+  if (value === undefined) return undefined;
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\s*\d+\s*$/.test(value) ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** The host of an endpoint URL, or the URL itself when it does not parse. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Build the embedder the saved `ai.embedder_*` settings describe, or say why
+ * there is none. Completeness is judged by the settings page's own
+ * "Test embedder" check (`aiTestEmbedderActionHandler`), handed only the SAVED
+ * values, so the boot and the button agree on what "configured" means.
+ */
+async function embedderFromSettings(ctx: PluginContext): Promise<EmbedderFromSettings> {
+  let settings: EmbedderSettingsReader | undefined;
+  try {
+    settings = ctx.getService<EmbedderSettingsReader | undefined>('settings') ?? undefined;
+  } catch (err) {
+    if (!isServiceNotRegisteredError(err, 'settings')) throw err;
+  }
+  if (!settings || typeof settings.getNamespace !== 'function') {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason:
+        'the settings service is not mounted, so the ai.embedder_* settings cannot be read — mount it and save ' +
+        `the embedder ${EMBEDDER_SETTINGS_REMEDY}, or register an IEmbedder as the '${EMBEDDER_SERVICE}' service ` +
+        "from a plugin's init() or start()",
+    };
+  }
+
+  let values: Record<string, ResolvedEmbedderSetting | undefined>;
+  try {
+    values = (await settings.getNamespace('ai')).values ?? {};
+  } catch (err) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `the ai settings could not be read (${err instanceof Error ? err.message : String(err)}) — ` +
+        `check them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  if (!('embedder_provider' in values)) {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason:
+        "the 'ai' settings namespace does not declare the embedder keys (ai.embedder_*) — declare them in the " +
+        `host's 'ai' manifest, or register an IEmbedder as the '${EMBEDDER_SERVICE}' service from a plugin's ` +
+        'init() or start()',
+    };
+  }
+
+  const provider = savedValue(values, 'embedder_provider');
+  if (provider === undefined) {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason: `no embedder provider is saved — save ${EMBEDDER_REQUIRED_KEYS} ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  if (provider === 'none') {
+    return {
+      kind: 'unconfigured',
+      quiet: true,
+      reason: `ai.embedder_provider is saved as 'none' (embeddings disabled) — pick a provider ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+
+  const saved: Record<string, unknown> = {};
+  for (const key of Object.keys(values)) {
+    const value = savedValue(values, key);
+    if (value !== undefined) saved[key] = value;
+  }
+  const check = await aiTestEmbedderActionHandler({ namespace: 'ai', actionId: 'test_embedder', values: saved, ctx: {} });
+  if (!check.ok) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason: `the saved embedder settings are incomplete (${check.message ?? 'no detail'}) — complete them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+
+  const providerId = String(provider);
+  const preset = Object.prototype.hasOwnProperty.call(OPENAI_COMPATIBLE_PRESETS, providerId)
+    ? (providerId as OpenAICompatiblePreset)
+    : undefined;
+  // The saved Base URL applies only to the providers whose form offers the
+  // field (`custom`, `azure`, the manifest's `visible` rule); every other
+  // provider uses its preset endpoint.
+  const baseUrl =
+    BASE_URL_PROVIDERS.has(providerId) && typeof saved.embedder_base_url === 'string'
+      ? saved.embedder_base_url.trim()
+      : undefined;
+  const model = typeof saved.embedder_model === 'string' ? saved.embedder_model.trim() : undefined;
+  // The two number keys can arrive as text: an `OS_AI_EMBEDDER_*` override of a
+  // key with no numeric default is handed over as the env string. A positive
+  // integer, as a number or as its decimal text, is the value; anything else
+  // is refused below rather than dropped.
+  const dimensions = positiveIntegerSetting(saved.embedder_dimensions);
+  const savedBatch = positiveIntegerSetting(saved.embedder_batch_size);
+  if (dimensions === null || savedBatch === null) {
+    const key = dimensions === null ? 'embedder_dimensions' : 'embedder_batch_size';
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `ai.${key} is saved as '${String(saved[key])}', which is not a positive integer — correct it ` +
+        EMBEDDER_SETTINGS_REMEDY,
+    };
+  }
+  // Only a SAVED batch size is a batch cap; unsaved, the embedder batches at the
+  // model's own documented cap (some providers accept 10, not the default 64).
+  // A saved size is held to that documented cap when the saved model has one:
+  // an explicit `maxBatchSize` would otherwise override it. A model the table
+  // does not know, or no saved model, keeps the saved size as saved.
+  const documentedCap = model ? documentedMaxBatchSize(model) : undefined;
+  const batchSize =
+    savedBatch !== undefined && documentedCap !== undefined ? Math.min(savedBatch, documentedCap) : savedBatch;
+  // Ollama ignores the key, and the embedder requires a non-empty one.
+  const apiKey =
+    typeof saved.embedder_api_key === 'string' && saved.embedder_api_key !== ''
+      ? saved.embedder_api_key
+      : providerId === 'ollama'
+        ? 'ollama'
+        : '';
+  const endpoint = baseUrl || (preset ? OPENAI_COMPATIBLE_PRESETS[preset] : '');
+  if (!endpoint) {
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason: `ai.embedder_provider '${providerId}' names no known endpoint and no ai.embedder_base_url is saved — save one ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+  try {
+    const embedder = createOpenAIEmbedder({
+      preset,
+      baseUrl: endpoint,
+      apiKey,
+      model,
+      dimensions,
+      maxBatchSize: batchSize,
+      id: providerId,
+    });
+    return {
+      kind: 'configured',
+      embedder,
+      provider: providerId,
+      model,
+      batchSize,
+      savedBatchSize: batchSize !== savedBatch ? savedBatch : undefined,
+      endpointHost: hostOf(endpoint),
+    };
+  } catch (err) {
+    // The embedder's own refusals name the option, never the key's value.
+    return {
+      kind: 'unconfigured',
+      quiet: false,
+      reason:
+        `the saved embedder settings do not build an embedder (${err instanceof Error ? err.message : String(err)}) — ` +
+        `correct them ${EMBEDDER_SETTINGS_REMEDY}`,
+    };
+  }
+}
 
 /**
  * Configuration options for the `KnowledgeServicePlugin`.
@@ -21,26 +341,119 @@ export interface KnowledgeServicePluginOptions {
    */
   sources?: KnowledgeSource[];
   /**
-   * Subscribe to ObjectQL `data.record.created` / `data.record.updated` /
-   * `data.record.deleted` events from `IRealtimeService` for `object`
-   * sources. Defaults to `true`. Set to `false` to disable inline event
-   * sync (e.g. when an external indexer drives upserts).
+   * Keep `object` sources in step with record writes. Defaults to `true`. Set
+   * to `false` to disable event sync (e.g. when an external indexer drives
+   * upserts). With a `realtime` service composed, the plugin subscribes to
+   * ObjectQL `data.record.created` / `data.record.updated` /
+   * `data.record.restored` / `data.record.deleted` events from
+   * `IRealtimeService`; without one, it registers the data engine's
+   * `afterInsert` / `afterUpdate` / `afterDelete` hooks on every indexed
+   * object instead, plus one engine middleware that hears a recycle-bin
+   * `restore` (which runs no hook, ADR-0148 D2), and each sync starts once the
+   * write's unit of work commits, off the write's response
+   * (`KnowledgeRecordHooks`). One of the two, never both: each write and each
+   * restore is synced once.
+   *
+   * Where the kernel composes a durable `queue` service (the platform's
+   * `QueueServicePlugin` over a data engine) and a data engine is bound, the
+   * sync runs through that queue (`KNOWLEDGE_RECORD_SYNC_QUEUE`): either
+   * trigger publishes one message per source — identifiers only — once the
+   * write's unit of work commits, and nothing for a write that rolls back; the
+   * save does not wait for the embedder, and a failed sync is retried
+   * ({@link recordSyncRetry}) and then kept as a dead letter the reconcile
+   * repairs. Without a durable queue the sync runs inline, as the boot says
+   * once at `warn`.
+   *
+   * A created, updated or restored row is re-read against each source's
+   * `where` (with a data engine bound): a matching row is indexed from the
+   * re-read row, and a row that does not match has its document removed —
+   * see `KnowledgeService.handleRecordUpsert`.
    *
    * The aggregate `data.records.updated` / `data.records.deleted` events a
-   * predicate write (`multi: true`) publishes carry a count, not records:
-   * they cannot be synced and only log a warning that the index may be stale.
+   * predicate write (`multi: true`) publishes carry a count, not records, so
+   * they cannot be synced one by one: each asks for a reconcile of every
+   * source over the object (`KnowledgeService.requestReconcile`), which
+   * starts once no further predicate write on it arrived for two minutes,
+   * and logs a warning saying so. Unless `reconcile: false`.
    * @default true
    */
   enableEventSync?: boolean;
+  /**
+   * The retry budget of a queued record sync ({@link enableEventSync}): a
+   * failed attempt is retried after `backoffMs`, doubled each attempt up to
+   * `maxBackoffMs`; after `maxAttempts` the message is a dead letter the
+   * queue lists (`IQueueService.listFailed`), naming the source and the
+   * record in its metadata. A member left out takes its default.
+   * @default { maxAttempts: 8, backoffMs: 5000, maxBackoffMs: 120000 } — the
+   * seven waits sum to 395 s, so a provider outage of six minutes is ridden out
+   */
+  recordSyncRetry?: Partial<KnowledgeRecordSyncRetry>;
+  /**
+   * Offer the embedder section (`ai.embedder_*`) and its **Test embedder**
+   * action (`ai/test_embedder`) on the `ai` settings page. Set to `false` on a
+   * host that provides the embedder itself (registers the `embedder` service,
+   * which this plugin then keeps): neither is offered, and the boot line that
+   * says why they are missing is not logged. The knowledge settings page is
+   * offered either way.
+   * @default true
+   */
+  embedderSettings?: boolean;
   /** Default top-K when callers omit it. @default 10 */
   defaultTopK?: number;
+  /**
+   * Build, after boot and in the background, every source whose adapter
+   * holds nothing for it or marks it as needing a rebuild (ADR-0161 K7,
+   * "What starts a rebuild"; `KnowledgeService.buildSourcesAtBoot`). One node
+   * builds each source, under the `cluster` service's lock. A build sends the
+   * source's content fields to the embedding provider, which bills for them.
+   * `false` leaves every source as it is; an administrator then builds one
+   * with `os knowledge rebuild`.
+   * @default true
+   */
+  buildAtBoot?: boolean;
+  /**
+   * [ADR-0161 K4 ◆] The deployment's adapter: the id of the store the runtime
+   * mounts beside this plugin for the `knowledge` capability. Set by the
+   * runtime's capability composition (`resolveCapabilityArgument` in
+   * `@objectstack/core`, read by `os serve` and `@objectstack/verify`), which
+   * constructs this plugin and the store together; a host that mounts the
+   * plugin itself leaves it unset. A source that names no `adapter` binds to
+   * it (`KnowledgeServiceOptions.deploymentAdapter`). A service option, never
+   * an adapter-contract member.
+   */
+  deploymentAdapter?: string;
+  /**
+   * The reconcile (ADR-0161 K1: "a reconcile pass keeps it correct";
+   * `KnowledgeService.reconcileSources`): one job on the platform's job
+   * service walks every source whose store lists its documents, completely,
+   * so each index ends equal to its source — the documents of rows inserted
+   * or changed without an event written, those of rows deleted or moved out
+   * of `where` purged, and nothing embedded again for a row that did not
+   * change. It also runs after a predicate write, once the object has had no
+   * further one for two minutes (event sync on).
+   *
+   * - Omitted: the job runs once a day at 03:00 UTC
+   *   (`RECONCILE_DEFAULT_CRON`, `'0 3 * * *'`).
+   * - `{ cron, timezone }`: the job runs on that cron expression, in that
+   *   IANA time zone (UTC when omitted). Either member may be omitted.
+   * - `false`: no job is scheduled and a predicate write asks for no
+   *   reconcile; an administrator keeps an index correct with
+   *   `os knowledge rebuild`.
+   *
+   * With no job service composed, the plugin says so once at boot and
+   * nothing reconciles on a schedule (the predicate-write reconcile still
+   * runs).
+   * @default { cron: '0 3 * * *' }
+   */
+  reconcile?: false | { cron?: string; timezone?: string };
 }
 
 /**
  * `KnowledgeServicePlugin` — registers `IKnowledgeService` with the
  * kernel, binds it to `IDataEngine` for RLS-aware permission filtering,
- * and (optionally) subscribes to `IRealtimeService` so ObjectQL record
- * mutations automatically propagate to adapter backends.
+ * and (optionally) subscribes to `IRealtimeService` — or, on a kernel with no
+ * `realtime` service, to the data engine's after-write hooks — so ObjectQL
+ * record mutations automatically propagate to adapter backends.
  *
  * @example
  * ```ts
@@ -50,8 +463,8 @@ export interface KnowledgeServicePluginOptions {
  * const kernel = new ObjectKernel();
  * kernel.use(new KnowledgeServicePlugin({
  *   sources: [{
- *     id: 'task_notes', label: 'Task notes', adapter: 'memory',
- *     source: { kind: 'object', object: 'task', contentFields: ['notes'] },
+ *     name: 'task_notes', label: 'Task notes', adapter: 'memory',
+ *     source: { kind: 'object', object: 'task', content: ['notes'] },
  *   }],
  * }));
  * await kernel.bootstrap();
@@ -69,8 +482,14 @@ export class KnowledgeServicePlugin implements Plugin {
    * order-if-present so the resolution is deterministic (ADR-0116, #4471).
    * Soft, not hard: without an engine the service degrades on purpose
    * (pure-search mode with conservative RLS).
+   *
+   * The settings plugin is ordered ahead the same way: init() contributes the
+   * knowledge settings to its `settings` service (`contributeKnowledgeSettings`),
+   * so its absence there is a fact about the composition, never a guess.
    */
-  optionalDependencies = ['com.objectstack.engine.objectql'];
+  // Literal ids: the boot-order gates read this array statically. The second
+  // is `SETTINGS_PLUGIN_ID` from `@objectstack/service-settings`.
+  optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.settings'];
 
   private service: KnowledgeService | null = null;
   private subscriptionId: string | undefined;
@@ -84,6 +503,29 @@ export class KnowledgeServicePlugin implements Plugin {
    */
   private realtime: IRealtimeService | undefined;
   private logger: KnowledgeLogger | undefined;
+  /**
+   * The record sync's after-write hooks, when the kernel composes no
+   * `realtime` service (`KnowledgeRecordHooks`); `undefined` while the realtime
+   * subscription is the trigger, or before `kernel:ready`.
+   */
+  private recordHooks: KnowledgeRecordHooks | undefined;
+  /** The loader of the published `knowledge_source` items (`knowledge-source-loader.ts`). */
+  private loader: KnowledgeSourceLoader | undefined;
+  /** Dropped at destroy: the protocol's mutation signal and the service's source-change signal. */
+  private unsubscribes: Array<() => void> = [];
+  /** The one reap guard, and the objects it is registered for so far ({@link syncReapGuards}). */
+  private reapGuard: ReturnType<typeof createKnowledgeReapGuard> | undefined;
+  private readonly guardedObjects = new Set<string>();
+  /** The job service the reconcile is scheduled on, kept to cancel it at destroy ({@link scheduleReconcile}). */
+  private jobs: IJobService | undefined;
+  /**
+   * The durable queue the record sync runs through, captured where the worker
+   * subscribes ({@link startRecordSyncQueue}) for the same reason as
+   * {@link realtime}; `undefined` while the sync runs inline.
+   */
+  private syncQueue: IQueueService | undefined;
+  /** Whether init() bound a data engine to the service: the queued sync's worker re-reads through it. */
+  private dataEngineBound = false;
 
   constructor(private readonly options: KnowledgeServicePluginOptions = {}) {}
 
@@ -92,9 +534,9 @@ export class KnowledgeServicePlugin implements Plugin {
     try {
       engine = ctx.getService<IDataEngine>('objectql');
     } catch {
-      // Data engine not wired — service still works in pure-search mode
-      // but RLS re-checks will be conservative (drop object-source hits
-      // when caller is non-system).
+      // Data engine not wired — the service still mounts, and serves a
+      // caller that is not the system identity no source at all: no hit can
+      // be re-checked without an engine.
     }
 
     const logger: KnowledgeLogger = {
@@ -113,10 +555,90 @@ export class KnowledgeServicePlugin implements Plugin {
     };
 
     this.logger = logger;
+    this.dataEngineBound = engine !== undefined;
     this.service = new KnowledgeService({
       dataEngine: engine,
       logger,
       defaultTopK: this.options.defaultTopK,
+      ...(this.options.deploymentAdapter === undefined ? {} : { deploymentAdapter: this.options.deploymentAdapter }),
+      // The field gate's `security` service, resolved per search so plugin
+      // order is free (plugin-security registers it in its own start()).
+      // Only a GENUINE absence reads as "no security service" (the contract's
+      // fallback then applies: every field declaring a `maskingRule` is not
+      // queryable): a lookup answering nothing, or the kernel's own
+      // not-registered refusal. Any other throw — a registration that cannot
+      // be used, such as a factory the sync accessor cannot instantiate —
+      // propagates, and the service refuses the source fail-closed, as the
+      // analytics door refuses an unusable security service.
+      resolveSecurity: () => {
+        try {
+          return ctx.getService<KnowledgeFieldSecurity | undefined>('security') ?? undefined;
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'security')) return undefined;
+          throw err;
+        }
+      },
+      // The settings page's `knowledge.chunk_target`, the splitter's
+      // `maxChars` under a source's own `split.maxChars` (#37098). Read each
+      // time the service splits, never here: the settings service may hold a
+      // value saved after boot. No settings service, or none serving the
+      // `knowledge` namespace (it is contributed below only where one
+      // exists), reads as unset.
+      resolveChunkTarget: async () => {
+        let settings: { get?(ns: string, key: string): Promise<{ value?: unknown } | undefined> } | undefined;
+        try {
+          settings = ctx.getService('settings');
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'settings')) return undefined;
+          throw err;
+        }
+        if (typeof settings?.get !== 'function') return undefined;
+        let resolved: { value?: unknown } | undefined;
+        try {
+          resolved = await settings.get('knowledge', 'chunk_target');
+        } catch (err) {
+          // A host's own settings service without this namespace or key:
+          // nothing is configured there. Any other failure is the service's
+          // to report (it warns and splits by the source's own value).
+          if (err instanceof UnknownNamespaceError || err instanceof UnknownKeyError) return undefined;
+          throw err;
+        }
+        const value = resolved?.value;
+        return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+      },
+      // [ADR-0161 K8, item 9] The EFFECTIVE tenancy posture, read per assembly
+      // and per search from the kernel's `tenancy` service, classified the way
+      // every admission seam classifies it: never registered → `undefined` (no
+      // wall exists); registered and unreadable → a throw, which the service
+      // answers fail-closed. The async accessor first, so a factory-registered
+      // service resolves; the sync leg serves a `LiteKernel`-shaped host.
+      resolveTenancyPosture: () =>
+        classifyAdmissionTenancyPosture(async () => {
+          const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+          if (kernel && typeof kernel.getServiceAsync === 'function') {
+            return kernel.getServiceAsync<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          }
+          try {
+            return ctx.getService<{ posture?: string; isolationActive?: boolean }>('tenancy');
+          } catch (err) {
+            if (isServiceNotRegisteredError(err, 'tenancy')) return undefined;
+            throw err;
+          }
+        }),
+      // The cluster lock a build runs under, so one node builds a source
+      // (`knowledge-build.ts`). Resolved when a build starts; no `cluster`
+      // service is a one-node composition, and a lookup that throws for any
+      // other reason is the service's to report.
+      resolveBuildLock: () => {
+        let cluster: { lock?: KnowledgeBuildLock } | undefined;
+        try {
+          cluster = ctx.getService<{ lock?: KnowledgeBuildLock } | undefined>('cluster') ?? undefined;
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'cluster')) return undefined;
+          throw err;
+        }
+        return cluster?.lock && typeof cluster.lock.acquire === 'function' ? cluster.lock : undefined;
+      },
     });
 
     for (const source of this.options.sources ?? []) {
@@ -124,6 +646,13 @@ export class KnowledgeServicePlugin implements Plugin {
     }
 
     ctx.registerService(KNOWLEDGE_SERVICE, this.service);
+
+    // The knowledge settings page, the `ai` embedder section, both test
+    // actions and the Setup entry are offered only where this service is
+    // mounted — never by default (`@objectstack/service-settings`).
+    contributeKnowledgeSettings(ctx, this.version, this.service, {
+      embedderSettings: this.options.embedderSettings,
+    });
     ctx.logger.info?.(
       `KnowledgeServicePlugin: registered '${KNOWLEDGE_SERVICE}' service (eventSync=${
         this.options.enableEventSync !== false
@@ -132,24 +661,77 @@ export class KnowledgeServicePlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
+    this.loadPublishedSources(ctx);
+
+    // The embedder is provided at `kernel:bootstrapped`, after every
+    // `kernel:ready` handler has settled: an embedder another plugin registers
+    // in its init(), start() or `kernel:ready` (cloud `service-ai` reads its
+    // settings there) is seen and kept, never doubled. A consumer resolves
+    // `EMBEDDER_SERVICE` where it embeds, not at boot.
+    ctx.hook('kernel:bootstrapped', async () => {
+      // The published sources once more: a package another plugin registers
+      // in its own `kernel:ready` handler (the install-local rehydrate) is
+      // listed only now, and the first build below must see its sources.
+      await this.reconcileSources(ctx, 'boot');
+      await this.provideEmbedder(ctx);
+      // [ADR-0161 K7] The first build: every source a build is due for is
+      // built once, in the background — after the embedder is provided,
+      // since a build embeds, and never awaited, so the boot does not wait
+      // for it. `buildAtBoot: false` turns it off.
+      if (this.options.buildAtBoot !== false && this.service) {
+        // `buildSourcesAtBoot` resolves on every failure it can name; the
+        // catch is for one it cannot, so no rejection goes unhandled.
+        void this.service.buildSourcesAtBoot().catch((err: unknown) => {
+          ctx.logger.warn?.(
+            `KnowledgeServicePlugin: the boot build pass stopped (${err instanceof Error ? err.message : String(err)}); ` +
+              'no further source is built at this boot. Rebuild one with os knowledge rebuild.',
+          );
+        });
+      }
+    });
+    // Every store registers its adapter in its own start(), so the reading of
+    // which sources name an unmounted one is taken once all have started.
+    ctx.hook('kernel:bootstrapped', () => {
+      this.service?.reportUnmountedAdapters();
+    });
+    // [ADR-0161 K1] The daily reconcile. The job service may start after this
+    // plugin: it is resolved once every plugin has started, when an absent
+    // one is absent for good.
+    ctx.hook('kernel:bootstrapped', async () => {
+      await this.scheduleReconcile(ctx);
+    });
+
     if (this.options.enableEventSync === false) return;
     const service = this.service;
     if (!service) return;
 
+    // [ADR-0161 K3, item 2] The guarded object set follows the sources: a
+    // source registered or loaded after boot for an object no source indexed
+    // before gets its guard when it arrives.
+    this.unsubscribes.push(service.onSourcesChanged(() => this.syncReapGuards(ctx, service)));
+    // The after-write hooks follow the sources the same way, once started.
+    this.unsubscribes.push(service.onSourcesChanged(() => this.syncRecordHooks(ctx)));
+
     ctx.hook('kernel:ready', async () => {
       // Reap-path de-indexing first: it is independent of the realtime service,
       // and the branch below returns early when that one is absent.
-      this.installReapGuards(ctx, service);
+      this.syncReapGuards(ctx, service);
+      // The queue the record sync runs through, before either trigger starts:
+      // the queue plugin swapped its database adapter in during its own
+      // `kernel:ready` handler, registered in its init(), so before this one.
+      await this.startRecordSyncQueue(ctx, service);
 
       let realtime: IRealtimeService | null = null;
       try {
         realtime = ctx.getService<IRealtimeService>('realtime');
       } catch {
-        // realtime service not available — sync becomes opt-in via
-        // explicit handleRecordUpsert / handleRecordDelete calls.
+        // No realtime service, so the engine publishes no `data.record.*`
+        // event (the ObjectQL plugin bridges this same service to it): the
+        // data engine's after-write hooks are the trigger instead.
+        if (this.startRecordHooks(ctx, service)) return;
         ctx.logger.warn?.(
-          'KnowledgeServicePlugin: IRealtimeService unavailable — event sync disabled. ' +
-            'Adapters can still be driven manually via the service API.',
+          'KnowledgeServicePlugin: IRealtimeService unavailable and no data engine takes after-write hooks — ' +
+            'event sync disabled. Adapters can still be driven manually via the service API.',
         );
         return;
       }
@@ -168,15 +750,30 @@ export class KnowledgeServicePlugin implements Plugin {
         // `{ recordId, after }` as if it were the row (a document with none of
         // the record's fields), and a delete never resolves an id at all.
         //
-        // These three are the only per-record names the ObjectQL engine
-        // publishes. There is deliberately no `record.created|updated|deleted`
+        // These four are the only per-record names the ObjectQL engine
+        // publishes: created, updated, deleted, and `data.record.restored`
+        // (`RECORD_RESTORED_EVENT`, one per row a recycle-bin restore writes
+        // back — a restore is never a create, ADR-0148 D2). A restored row
+        // takes the upsert path: it is re-read against each source's `where`
+        // like any other written row, so it re-enters the index only if it
+        // matches. There is deliberately no `record.created|updated|deleted`
         // branch: no producer emits those names (the spec's `RealtimeEventType`
         // dropped them for the same reason), so a branch for them is dead code
         // plus a `payload.record ?? payload` fallback for a shape nobody sends.
         // An event type this handler does not name — those, and `metadata.*`
         // too — falls through without a sync.
-        if (type === 'data.record.created' || type === 'data.record.updated') {
+        //
+        // Through the queue ({@link startRecordSyncQueue}) the four ask for the
+        // same thing — the sync of the row's document, published once the
+        // write's unit commits — because the worker re-reads the row: its id is
+        // all a message carries.
+        if (type === 'data.record.created' || type === 'data.record.updated' || type === RECORD_RESTORED_EVENT) {
           const record = payload.after as Record<string, unknown> | undefined;
+          if (service.recordSyncQueued) {
+            const recordId = payload.recordId ?? record?.id;
+            if (typeof recordId === 'string' || typeof recordId === 'number') service.enqueueRecordSync(object, recordId);
+            return;
+          }
           if (record && typeof record === 'object') {
             await service.handleRecordUpsert(object, record);
           }
@@ -185,7 +782,8 @@ export class KnowledgeServicePlugin implements Plugin {
         if (type === 'data.record.deleted') {
           const recordId = payload.recordId;
           if (typeof recordId === 'string' && recordId !== '') {
-            await service.handleRecordDelete(object, recordId);
+            if (service.recordSyncQueued) service.enqueueRecordSync(object, recordId);
+            else await service.handleRecordDelete(object, recordId);
           }
           return;
         }
@@ -193,36 +791,21 @@ export class KnowledgeServicePlugin implements Plugin {
         // [#4639] Aggregate events from a predicate write (`multi: true`).
         // A knowledge index is a PER-RECORD projection, and `matched: 40`
         // names no record — there is no upsert or delete this handler could
-        // derive from it, and none of the adapters take a predicate. So the
-        // index is now stale in a way this subscription cannot repair.
+        // derive from it, and none of the adapters take a predicate.
         //
-        // Say so rather than falling through to the `return` below: a silent
-        // no-op here reads identically to "nothing happened", which is how the
-        // gap stayed invisible before #4639 gave bulk writes an event at all.
-        //
-        // [#4672] The warn STAYS, and it is deliberately still a warn about a
-        // gap — but a narrower gap than it named before. The platform's own
-        // predicate delete (the retention sweep's reap, and the source this
-        // issue called out as the main one) no longer reaches this handler as a
-        // stale index at all: `installReapGuards` de-indexes those rows before
-        // they are deleted. What is left is APPLICATION-level predicate writes
-        // — a caller's own `multi: true` update/delete — which no guard sits in
-        // front of. That half is honestly uncovered rather than quietly
-        // half-claimed, and stays so until a real object source justifies the
-        // adapter-enumeration surface it would need (#4606's enforced-first
-        // rule). Reporting it accurately is the whole job of this branch.
+        // [#4672] The platform's own predicate delete (the retention sweep's
+        // reap) never reaches this handler as a stale index: the lifecycle
+        // reap guard de-indexes those rows before they are deleted. What is
+        // left is APPLICATION-level predicate writes. [ADR-0161 K1, K3 item 3]
+        // Those are the reconcile's: the branch asks for a reconcile of every
+        // source over the object, which starts once the object has had no
+        // further predicate write for the quiet period — one walk per source
+        // however many bulk events arrive — and refreshes the rows that still
+        // match and purges the documents of rows that are gone or no longer
+        // match. A source whose store does not list its documents cannot be
+        // reconciled, and the warning keeps saying so.
         if (type === 'data.records.updated' || type === 'data.records.deleted') {
-          const matched = payload.matched;
-          ctx.logger.warn?.(
-            `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ` +
-              `${typeof matched === 'number' ? matched : 'an unreported number of'} record(s). ` +
-              'A bulk event carries a count, not records, so the knowledge index for this object ' +
-              'may now be stale and cannot be repaired from the event stream. ' +
-              'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows ' +
-              'before they are deleted; ' +
-              'application-level predicate writes are not, and need an explicit reindexSource.',
-            { object, type, matched },
-          );
+          this.onPredicateWrite(ctx, service, object, type, payload.matched);
           return;
         }
       });
@@ -231,8 +814,312 @@ export class KnowledgeServicePlugin implements Plugin {
   }
 
   /**
+   * Run the record sync through the composed `queue` service when it is
+   * durable ({@link resolveRecordSyncQueue}) and the service has a data engine
+   * (the worker re-reads the row): subscribe the worker on
+   * {@link KNOWLEDGE_RECORD_SYNC_QUEUE} and route the service's syncs there
+   * (`KnowledgeService.routeRecordSyncs`). Otherwise the sync stays inline,
+   * said once at `warn`: the save waits for the embedder, a failed sync is
+   * logged and not retried, and on the realtime trigger a sync runs inside
+   * the write's unit of work, before it commits.
+   *
+   * The worker throws what a retry can change, so the queue retries it on the
+   * {@link KnowledgeServicePluginOptions.recordSyncRetry} budget; on the last
+   * attempt it also says, at `error`, that the message is now a dead letter.
+   */
+  private async startRecordSyncQueue(ctx: PluginContext, service: KnowledgeService): Promise<void> {
+    const hasEngine = this.dataEngineBound;
+    const queue = resolveRecordSyncQueue((name) => ctx.getService<unknown>(name));
+    if (!queue || !hasEngine) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: ${
+          !hasEngine
+            ? 'no data engine is bound to re-read a row'
+            : 'no durable queue service is composed (the kernel\'s fallback queue and an in-memory queue keep no message across a restart and no dead letter)'
+        }, ` +
+          'so record changes are synced inline: a save of an indexed record waits for the embedder, a failed sync is ' +
+          "logged and not retried, and with a realtime service the sync runs inside the write's unit of work, so a " +
+          'write that rolls back can leave its document in the index until the reconcile. Compose the queue ' +
+          'capability over a data engine (QueueServicePlugin) to sync through the queue.',
+      );
+      return;
+    }
+    const retry = resolveRecordSyncRetry(this.options.recordSyncRetry);
+    await queue.subscribe(KNOWLEDGE_RECORD_SYNC_QUEUE, async (message: QueueMessage) => {
+      try {
+        await service.processRecordSync(message.data);
+      } catch (err) {
+        if (message.attempts >= retry.maxAttempts) {
+          const named = readRecordSyncMessage(message.data);
+          const report =
+            `KnowledgeServicePlugin: the sync of record '${named?.recordId ?? '?'}' of source '${named?.source ?? '?'}' ` +
+            `failed its last attempt (${message.attempts} of ${retry.maxAttempts}: ${err instanceof Error ? err.message : String(err)}) ` +
+            `and is now a dead letter on queue '${KNOWLEDGE_RECORD_SYNC_QUEUE}'. The record's document stays as it was ` +
+            'until the record\'s next save or the reconcile; replay the message, or rebuild the source with os knowledge rebuild.';
+          if (ctx.logger.error) ctx.logger.error(report);
+          else ctx.logger.warn?.(report);
+        }
+        throw err;
+      }
+    });
+    this.syncQueue = queue;
+    service.routeRecordSyncs((message) =>
+      queue.publish(KNOWLEDGE_RECORD_SYNC_QUEUE, message, recordSyncPublishOptions(message, retry)),
+    );
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: record sync runs through queue '${KNOWLEDGE_RECORD_SYNC_QUEUE}' (up to ` +
+        `${retry.maxAttempts} attempts, backoff ${retry.backoffMs} ms doubling to ${retry.maxBackoffMs} ms): a save ` +
+        "publishes once its unit of work commits and does not wait for the embedder.",
+    );
+  }
+
+  /**
+   * One aggregate event of a predicate write (`multi: true`) on `object`: ask
+   * for a reconcile of every source over it (`KnowledgeService.requestReconcile`)
+   * and say, at `warn`, what will happen and when. A source whose store does
+   * not list its documents cannot be reconciled: for it the warning says, as
+   * before, that the index may stay stale. `reconcile: false` asks for
+   * nothing and says that for every source. An object no source indexes is
+   * not stale anywhere: `debug` only.
+   */
+  private onPredicateWrite(ctx: PluginContext, service: KnowledgeService, object: string, type: string, matched: unknown): void {
+    const count = typeof matched === 'number' ? matched : 'an unreported number of';
+    const head =
+      `KnowledgeServicePlugin: '${object}' had a predicate write (${type}) affecting ${count} record(s). ` +
+      'A bulk event carries a count, not records, so ';
+    const reapNote =
+      'Retention-sweep deletes are covered separately: the lifecycle reap guard de-indexes those rows before they ' +
+      'are deleted; ';
+    const unrepaired = (sources: string): string =>
+      head +
+      `the knowledge index ${sources}may now be stale and cannot be repaired from the event stream. ` +
+      reapNote +
+      'application-level predicate writes are not. A complete reindexSource (no limit, no dryRun) refreshes ' +
+      'the documents of rows that still exist and match, and purges the documents of rows that are gone or ' +
+      "no longer match when the source's adapter lists its documents; over an adapter that does not, they " +
+      'stay in the index.';
+    if (this.options.reconcile === false) {
+      ctx.logger.warn?.(unrepaired('for this object '), { object, type, matched });
+      return;
+    }
+    const request = service.requestReconcile(object);
+    if (request.scheduled.length === 0 && request.unreconcilable.length === 0) {
+      ctx.logger.debug?.(`KnowledgeServicePlugin: '${object}' had a predicate write (${type}); no source the service keeps indexes it.`);
+      return;
+    }
+    if (request.scheduled.length > 0) {
+      const minutes = (ms: number): string => `${Math.round(ms / 60_000)} minute(s)`;
+      ctx.logger.warn?.(
+        head +
+          `the knowledge index of source(s) ${request.scheduled.join(', ')} cannot be repaired from the event stream ` +
+          `and may be stale until its reconcile, which starts once '${object}' has had no further predicate write ` +
+          `for ${minutes(RECONCILE_QUIET_MS)} (at the latest ${minutes(RECONCILE_MAX_WAIT_MS)} after the first): it ` +
+          'refreshes the documents of rows that still exist and match, and purges the documents of rows that are ' +
+          'gone or no longer match. ' +
+          reapNote.replace(/; $/, '.'),
+        { object, type, matched, reconcile: request.scheduled },
+      );
+    }
+    if (request.unreconcilable.length > 0) {
+      ctx.logger.warn?.(
+        unrepaired(`of source(s) ${request.unreconcilable.join(', ')} (no reconcile can repair it: its adapter does not list its documents, or no data engine is bound) `),
+        { object, type, matched, unreconcilable: request.unreconcilable },
+      );
+    }
+  }
+
+  /**
+   * Schedule the reconcile job ({@link KnowledgeServicePluginOptions.reconcile})
+   * on the composed job service, at `kernel:bootstrapped`. `reconcile: false`
+   * schedules nothing, said at `info`; no job service is said once at `warn`;
+   * a schedule the job service refuses (an unreadable cron expression) is
+   * said at `warn`, naming the option. The handler answers a `JobRunOutcome`
+   * (see {@link reconcileJobOutcome}), so the job's run history shows a
+   * reconcile whose walk of some source did not finish as `degraded`.
+   */
+  private async scheduleReconcile(ctx: PluginContext): Promise<void> {
+    const service = this.service;
+    if (!service) return;
+    const option = this.options.reconcile;
+    if (option === false) {
+      ctx.logger.info?.(
+        'KnowledgeServicePlugin: reconcile is off (reconcile: false): no index is reconciled on a schedule or after a ' +
+          'predicate write; rebuild a source with os knowledge rebuild.',
+      );
+      return;
+    }
+    let jobs: IJobService | undefined;
+    try {
+      jobs = ctx.getService<IJobService | undefined>('job') ?? undefined;
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err, 'job')) {
+        ctx.logger.warn?.(
+          `KnowledgeServicePlugin: the job service could not be read (${err instanceof Error ? err.message : String(err)}), ` +
+            'so nothing reconciles the knowledge indexes on a schedule; rebuild a source with os knowledge rebuild.',
+        );
+        return;
+      }
+    }
+    if (!jobs || typeof jobs.schedule !== 'function') {
+      ctx.logger.warn?.(
+        'KnowledgeServicePlugin: no job service is composed, so nothing reconciles the knowledge indexes on a schedule: ' +
+          'a row deleted or changed without an event stays as it is in an index until an operator rebuild ' +
+          "(os knowledge rebuild). Compose the job capability (requires: ['job']) to reconcile them daily.",
+      );
+      return;
+    }
+    const cron = option?.cron ?? RECONCILE_DEFAULT_CRON;
+    const timezone = option?.timezone ?? 'UTC';
+    try {
+      await jobs.schedule(
+        RECONCILE_JOB,
+        { type: 'cron', expression: cron, timezone },
+        async (): Promise<JobRunOutcome> => reconcileJobOutcome(await service.reconcileSources()),
+      );
+    } catch (err) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: the reconcile job was not scheduled: the job service refused '${cron}' ` +
+          `in ${timezone} (${err instanceof Error ? err.message : String(err)}). ` +
+          'Correct the plugin\'s reconcile option; until then nothing reconciles the indexes on a schedule.',
+      );
+      return;
+    }
+    this.jobs = jobs;
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: reconcile scheduled ('${cron}' ${timezone}, job '${RECONCILE_JOB}'): ` +
+        'each source whose store lists its documents is walked completely, unchanged documents are not embedded again.',
+    );
+  }
+
+  /**
+   * Register `EMBEDDER_SERVICE` from the `ai.embedder_*` settings, unless an
+   * embedder is already registered.
+   *
+   * - Already registered (cloud `service-ai`, or a host's own plugin) → kept,
+   *   one `info` line, the settings are not applied. A registration this sync
+   *   accessor cannot hand out (an async factory) is a registration too.
+   * - Saved and complete → an `@objectstack/embedder-openai` embedder for the
+   *   saved provider. The batch size is passed only when it was saved, and is
+   *   held to the saved model's documented cap (`documentedMaxBatchSize`).
+   * - Otherwise → an `UnconfiguredEmbedder`, whose every use answers an error
+   *   naming the missing settings; the boot itself succeeds.
+   *
+   * Read once, at boot: a saved change takes effect on the next restart (the
+   * settings page says so). Nothing is sent to a provider until the operator
+   * has saved one, and the API key is never logged.
+   */
+  private async provideEmbedder(ctx: PluginContext): Promise<void> {
+    let registered = true;
+    let existing: unknown;
+    try {
+      existing = ctx.getService<unknown>(EMBEDDER_SERVICE);
+    } catch (err) {
+      if (isServiceNotRegisteredError(err, EMBEDDER_SERVICE)) registered = false;
+    }
+    if (registered) {
+      const id = (existing as { id?: unknown } | undefined)?.id;
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: an embedder is already registered as '${EMBEDDER_SERVICE}'` +
+          `${typeof id === 'string' ? ` (id=${id})` : ''} — kept; the ai.embedder_* settings are not applied.`,
+      );
+      return;
+    }
+
+    const outcome = await embedderFromSettings(ctx);
+    if (outcome.kind === 'configured') {
+      ctx.registerService(EMBEDDER_SERVICE, outcome.embedder);
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: registered '${EMBEDDER_SERVICE}' from the ai.embedder_* settings ` +
+          `(provider=${outcome.provider}, endpoint=${outcome.endpointHost}, model=${outcome.model ?? '(embedder default)'}, ` +
+          `batch size=${outcome.batchSize ?? "the model's own cap"}` +
+          `${outcome.savedBatchSize !== undefined ? ` — the saved ${outcome.savedBatchSize}, held to the model's documented cap` : ''}). ` +
+          'A saved change takes effect on the next restart.',
+      );
+      return;
+    }
+
+    ctx.registerService(EMBEDDER_SERVICE, new UnconfiguredEmbedder(outcome.reason));
+    const line =
+      `KnowledgeServicePlugin: no embedder is configured (${outcome.reason}). The knowledge service is mounted; ` +
+      'an adapter that embeds refuses indexing and search with this reason until an embedder is configured.';
+    if (outcome.quiet) ctx.logger.info?.(line);
+    else ctx.logger.warn?.(line);
+  }
+
+  /**
+   * Load the published `knowledge_source` items (ADR-0161 K4, clause 3) and
+   * keep the service's sources in step with them.
+   *
+   * - **At boot**: one pass at `kernel:ready`, when every plugin has started
+   *   and the apps' packages are registered, and one more at
+   *   `kernel:bootstrapped`, before the first build (see `start`).
+   * - **While the process runs**: one pass on each signal that a published
+   *   item may have changed — the metadata protocol's mutation signal
+   *   (`onMetadataMutation`: a save, a publish, a delete, a revert, a
+   *   rollback, and on a cluster the same write converging on a peer), for a
+   *   `knowledge_source` item that is not a draft; and the kernel's
+   *   `metadata:reloaded` (a package published, installed or removed, a dev
+   *   artifact recompiled). A draft is not a published item and loads nothing.
+   *
+   * The listing is the protocol's execution read of the type
+   * (`getMetaItemsForExecution`, else `getMetaItems`): the stored bodies with
+   * each row's package, the merge every `/meta` read serves. With no
+   * `protocol` service there is no metadata store, and the sources are the
+   * ones registered in code.
+   */
+  private loadPublishedSources(ctx: PluginContext): void {
+    const service = this.service;
+    if (!service) return;
+    this.loader = new KnowledgeSourceLoader({
+      service,
+      logger: this.logger,
+      buildOnReload: this.options.buildAtBoot !== false,
+      readItems: () => readPublishedSources(ctx),
+      namespaceOf: (packageId) => packageNamespaceOf(ctx, packageId),
+    });
+
+    ctx.hook('kernel:ready', async () => {
+      await this.reconcileSources(ctx, 'boot');
+      // Resolved here, once every plugin has started, so a protocol that
+      // registers after this plugin is seen.
+      const protocol = protocolOf(ctx);
+      if (typeof protocol?.onMetadataMutation === 'function') {
+        const unsubscribe = protocol.onMetadataMutation((evt) => {
+          if (!evt || evt.type !== KNOWLEDGE_SOURCE_TYPE || evt.state === 'draft') return;
+          void this.reconcileSources(ctx, 'reload');
+        });
+        if (typeof unsubscribe === 'function') this.unsubscribes.push(unsubscribe);
+      }
+    });
+    ctx.hook('metadata:reloaded', async () => {
+      await this.reconcileSources(ctx, 'reload');
+    });
+  }
+
+  /** One loader pass; never throws — a failed pass is reported and changes nothing further. */
+  private async reconcileSources(ctx: PluginContext, reason: 'boot' | 'reload'): Promise<void> {
+    if (!this.loader) return;
+    try {
+      const result = await this.loader.reconcile(reason);
+      const total = result.added.length + result.changed.length + result.removed.length;
+      if (total === 0) return;
+      const part = (label: string, faces: string[]): string => (faces.length === 0 ? '' : ` ${label}: ${faces.join(', ')}.`);
+      ctx.logger.info?.(
+        `KnowledgeServicePlugin: knowledge_source items loaded.${part('Added', result.added)}` +
+          `${part('Changed', result.changed)}${part('Removed, index dropped', result.removed)}`,
+      );
+    } catch (err) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: loading the knowledge_source items failed (${err instanceof Error ? err.message : String(err)}); ` +
+          'the sources stay as they were. The next change to a knowledge source, or a restart, loads them again.',
+      );
+    }
+  }
+
+  /**
    * Register the lifecycle reap guard (#4672, ADR-0057 amendment) for every
-   * object an `object` source projects.
+   * object a source projects — at `kernel:ready`, and again each time the set
+   * of sources changes (ADR-0161 K3, item 2: the set is dynamic).
    *
    * ## Why the guard rather than an event
    *
@@ -244,37 +1131,32 @@ export class KnowledgeServicePlugin implements Plugin {
    * and it arrives batched and interruptible for free (500 rows a batch, 20
    * batches a sweep), which is the cost bound this work would otherwise owe.
    *
-   * ## Seams, all pre-existing
+   * ## Seams
    *
    * Reached exactly as `service-storage` reaches it for `sys_file` byte
    * reclaim: duck-typed `ctx.getService('lifecycle')` +
-   * `registerReapGuard(object, guard)`. No spec key, no `IKnowledgeAdapter`
-   * member, no `packages/objectql` change (#4606's zero-addition boundary).
-   * Guards compose by intersection (#5535), so registering here cannot displace
-   * storage's byte-reclaim guard, nor it ours.
+   * `registerReapGuard(object, guard)`. Guards compose by intersection
+   * (#5535), so registering here cannot displace storage's byte-reclaim
+   * guard, nor it ours.
    *
    * Silent when there is no lifecycle service (a bare kernel): the sweep is
-   * what deletes rows, so no sweeper means no orphans to prevent. Nothing is
-   * concluded about the registry either — this runs at `kernel:ready`, and the
-   * absence is neither cached nor asserted.
+   * what deletes rows, so no sweeper means no orphans to prevent. The absence
+   * is not cached: the next change of the sources asks again.
+   *
+   * ## The object set follows the sources
    *
    * One guard instance serves every object (it resolves its targets from the
-   * `object` it is called with), and re-registering the identical function is a
-   * documented no-op, so re-run wiring cannot double a de-index.
-   *
-   * ## Boundary, stated rather than implied
-   *
-   * The OBJECT SET is read once, here — every object declared by boot time,
-   * which is every object the sources a host composes can name. A source
-   * registered later through `registerSource` for an object that had none at
-   * boot is therefore unguarded, while one for an already-guarded object is
-   * picked up (the guard re-resolves its targets on each call). Making the set
-   * itself dynamic would mean a new notification surface on the service, which
-   * is precisely the addition #4606 rules out until a real `object` source
-   * exists to justify it.
+   * `object` it is called with, each call). The objects it is registered for
+   * are remembered, and each pass registers it for the objects that have a
+   * source now and had none before — a source loaded from a
+   * `knowledge_source` item saved after boot, or registered in code after
+   * boot, is guarded from that moment. An object whose last source was
+   * removed keeps its registration: the lifecycle service has no unregister,
+   * and the guard, finding no source for the object, confirms every row and
+   * de-indexes nothing.
    */
-  private installReapGuards(ctx: PluginContext, service: KnowledgeService): void {
-    const objects = guardedObjectsFor(service.listSources());
+  private syncReapGuards(ctx: PluginContext, service: KnowledgeService): void {
+    const objects = guardedObjectsFor(service.indexedSources()).filter((object) => !this.guardedObjects.has(object));
     if (objects.length === 0) return;
 
     type LifecycleLike = {
@@ -288,14 +1170,55 @@ export class KnowledgeServicePlugin implements Plugin {
     }
     if (!lifecycle || typeof lifecycle.registerReapGuard !== 'function') return;
 
-    const guard = createKnowledgeReapGuard(service, this.logger);
+    const guard = (this.reapGuard ??= createKnowledgeReapGuard(service, this.logger));
     // Called AS A METHOD, never through a detached reference: the real
     // `LifecycleService.registerReapGuard` reads `this.reapGuards`, so
     // `const register = lifecycle.registerReapGuard` throws on the first call.
-    for (const object of objects) lifecycle.registerReapGuard(object, guard);
+    for (const object of objects) {
+      lifecycle.registerReapGuard(object, guard);
+      this.guardedObjects.add(object);
+    }
     ctx.logger.info?.(
       `KnowledgeServicePlugin: reap guards registered with the lifecycle service for [${objects.join(', ')}] — ` +
         'rows are de-indexed before the retention sweep deletes them.',
+    );
+  }
+
+  /**
+   * Start the record sync on the data engine's after-write hooks
+   * (`KnowledgeRecordHooks`) — the trigger on a kernel with no `realtime`
+   * service. `false` when the `objectql` service takes no hooks.
+   */
+  private startRecordHooks(ctx: PluginContext, service: KnowledgeService): boolean {
+    let engine: unknown;
+    try {
+      engine = ctx.getService<unknown>('objectql');
+    } catch {
+      return false;
+    }
+    const hookEngine = recordHookEngineOf(engine);
+    if (!hookEngine) return false;
+    const hooks = new KnowledgeRecordHooks(hookEngine, service, this.logger);
+    this.recordHooks = hooks;
+    this.unsubscribes.push(() => hooks.stop());
+    const objects = hooks.sync();
+    ctx.logger.info?.(
+      'KnowledgeServicePlugin: no realtime service — record sync runs on the data engine\'s after-write hooks' +
+        `${objects.length > 0 ? ` for [${objects.join(', ')}]` : ''}; each sync starts once the write's unit of work ` +
+        'commits, off the write\'s response.' +
+        (hooks.watchesRestores
+          ? ' A recycle-bin restore re-indexes the rows it writes back (an engine middleware on the restore operation).'
+          : ' The engine takes no middleware, so a recycle-bin restore is not re-indexed until the reconcile.'),
+    );
+    return true;
+  }
+
+  /** Register the after-write hooks for the objects a source added since ({@link startRecordHooks}). */
+  private syncRecordHooks(ctx: PluginContext): void {
+    const objects = this.recordHooks?.sync() ?? [];
+    if (objects.length === 0) return;
+    ctx.logger.info?.(
+      `KnowledgeServicePlugin: record-sync after-write hooks registered for [${objects.join(', ')}].`,
     );
   }
 
@@ -316,6 +1239,36 @@ export class KnowledgeServicePlugin implements Plugin {
    * the same one either way: a teardown the kernel does not reach.
    */
   async destroy(): Promise<void> {
+    // The boot's first-build pass and the reconcile start no further build;
+    // one already walking runs to its end (a walk cannot be cancelled
+    // part-way). The reconcile job is cancelled.
+    this.service?.stopBuilds();
+    const jobs = this.jobs;
+    this.jobs = undefined;
+    if (jobs) {
+      try {
+        await jobs.cancel(RECONCILE_JOB);
+      } catch {
+        // the job service is going down too
+      }
+    }
+    for (const unsubscribe of this.unsubscribes.splice(0)) {
+      try {
+        unsubscribe();
+      } catch {
+        // best-effort
+      }
+    }
+    const syncQueue = this.syncQueue;
+    this.syncQueue = undefined;
+    if (syncQueue) {
+      // Messages already published stay in the queue, for the next start.
+      try {
+        await syncQueue.unsubscribe(KNOWLEDGE_RECORD_SYNC_QUEUE);
+      } catch {
+        // best-effort
+      }
+    }
     if (!this.subscriptionId) return;
     try {
       await this.realtime?.unsubscribe(this.subscriptionId);
@@ -337,4 +1290,90 @@ export class KnowledgeServicePlugin implements Plugin {
   async stop(_ctx?: PluginContext): Promise<void> {
     await this.destroy();
   }
+}
+
+/**
+ * The run outcome of one reconcile job run: `degraded`, naming each source
+ * whose walk failed, lost its lease or timed out, when one did; `completed`
+ * otherwise (a source another node held, or one the reconcile does not walk,
+ * is not a failure). Never a throw: a retry would walk every source again.
+ */
+export function reconcileJobOutcome(report: KnowledgeReconcileReport): JobRunOutcome {
+  if (report.unfinished.length === 0) return { outcome: 'completed' };
+  const named = report.unfinished.map((u) => `${u.sourceId} (${u.status}${u.message === undefined ? '' : `: ${u.message}`})`);
+  return {
+    outcome: 'degraded',
+    reason: `${report.unfinished.length} of ${report.sources.length} source(s) not reconciled: ${named.join('; ')}`,
+  };
+}
+
+/** The slice of the metadata protocol the loader reads, reached duck-typed. */
+interface KnowledgeSourceProtocol {
+  getMetaItemsForExecution?(request: { type: string }): Promise<unknown>;
+  getMetaItems?(request: { type: string }): Promise<unknown>;
+  onMetadataMutation?(listener: (evt: { type?: string; name?: string; state?: string } | undefined) => void): (() => void) | void;
+}
+
+function protocolOf(ctx: PluginContext): KnowledgeSourceProtocol | undefined {
+  try {
+    return ctx.getService<KnowledgeSourceProtocol | undefined>('protocol') ?? undefined;
+  } catch {
+    return undefined; // no protocol service: no metadata store to read.
+  }
+}
+
+/**
+ * The published `knowledge_source` items, or `null` when they cannot be read
+ * (the loader then changes nothing). No `protocol` service, or one with no
+ * list read, is a composition with no metadata store: it holds no item, which
+ * is an empty list, not a failed read.
+ */
+async function readPublishedSources(ctx: PluginContext): Promise<unknown[] | null> {
+  const protocol = protocolOf(ctx);
+  const read = typeof protocol?.getMetaItemsForExecution === 'function'
+    ? protocol.getMetaItemsForExecution.bind(protocol)
+    : typeof protocol?.getMetaItems === 'function'
+      ? protocol.getMetaItems.bind(protocol)
+      : undefined;
+  if (!read) return [];
+  let raw: unknown;
+  try {
+    raw = await read({ type: KNOWLEDGE_SOURCE_TYPE });
+  } catch (err) {
+    ctx.logger.warn?.(
+      `KnowledgeServicePlugin: the knowledge_source items could not be read (${err instanceof Error ? err.message : String(err)}); ` +
+        'the sources stay as they were.',
+    );
+    return null;
+  }
+  // The read hands back a bare array or an `{ items: [...] }` envelope, and
+  // each entry is the document itself or an `{ item }` wrapper.
+  const list = Array.isArray(raw) ? raw : (raw as { items?: unknown } | null | undefined)?.items;
+  if (!Array.isArray(list)) return [];
+  return list.map((entry) => {
+    const doc = entry && typeof entry === 'object' && 'item' in entry ? (entry as { item: unknown }).item : entry;
+    return stripReadDecorations(doc);
+  });
+}
+
+/**
+ * [ADR-0150 D2/D6] The manifest namespace of a package, from the engine's
+ * registry, or `undefined`: no engine, or an id with no package record. A
+ * source's face is then its bare name.
+ */
+function packageNamespaceOf(ctx: PluginContext, packageId: string): string | undefined {
+  type RegistryLike = { registry?: { getPackage?(id: string): { manifest?: { namespace?: unknown } } | undefined } };
+  let engine: RegistryLike | undefined;
+  try {
+    engine = ctx.getService<RegistryLike | undefined>('objectql') ?? undefined;
+  } catch {
+    return undefined;
+  }
+  let namespace: unknown;
+  try {
+    namespace = engine?.registry?.getPackage?.(packageId)?.manifest?.namespace;
+  } catch {
+    return undefined;
+  }
+  return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
 }

@@ -30,8 +30,11 @@ import {
   Skeleton,
   useIsMobile,
   RelatedCountStore,
+  ObjectIconTile,
+  RecordHeaderBarContext,
+  toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useDrawsAction, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -51,6 +54,7 @@ import type { DataSource, FieldMetadata } from '@object-ui/types';
 import type { ViewFilterElement } from '@objectstack/spec/ui';
 import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard, formatCurrency } from '@object-ui/fields';
 import {
+  fieldStaticallyReadOnlyByHand,
   buildExpandFields,
   collectPredicateFieldRefs,
   columnIdentity,
@@ -67,6 +71,8 @@ import {
   listViewPredicates,
   parentRelationshipFieldDef,
   PLATFORM_RECORD_COLUMNS,
+  shownQuantityUnitReads,
+  declaresQuantityUnit,
   recordDisplayValueAt,
   resolveNameField,
   composeParentScopeFilter,
@@ -80,16 +86,19 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  isAskAiAction,
   ActionRunner,
   type ActionDef,
   type ActionResult,
   type FilterNode,
+  withHeaderSortPick,
+  bulkDeleteRefusalLines,
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext, useRecordPagePreferences, type RelatedListPreference } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
+import { useObjectLabel, useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, recordCurrencyPath, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
-import { isMaskedDetailFieldType } from './fieldEnrichment';
+import { isComputedFieldType, isMaskedDetailFieldType } from './fieldEnrichment';
 import {
   COMPACT_RELATED_ROWS,
   RELATED_CARD_DROP_LINE,
@@ -98,12 +107,16 @@ import {
   RelatedCardCountContext,
   RelatedEnlargeContext,
   RelatedListCompactContext,
+  RelatedListConditionsSlotContext,
   RelatedListEnlargedContext,
   RelatedListTotalReportContext,
   useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
+import { relatedTabConditionsChanged, useRelatedTabConditions } from './relatedTabConditions';
 import { RelatedCardMenu, RelatedPanelHandle } from './RelatedCardMenu';
+import { normalizeSortSpec } from './relatedListSort';
+import { dependsOnFromParent } from './relatedParentScope';
 import { detectStatusField } from '@object-ui/types';
 
 export interface RelatedListProps {
@@ -185,7 +198,7 @@ export interface RelatedListProps {
    */
   onRowClick?: (row: any, event?: any, rows?: readonly any[]) => void;
   /**
-   * Child-object row actions (`locations` `list_item`, or `record_related`
+   * Child-object row actions (`locations` `record_row`, or `record_related`
    * inside a parent record — objectui#11270), already localized by the host.
    * Rendered in each row's overflow menu alongside Edit/Delete.
    */
@@ -193,7 +206,7 @@ export interface RelatedListProps {
   /** Execute one of {@link rowActions} against the clicked row. */
   onRowAction?: (action: RelatedRowActionDef, row: any) => void | Promise<void>;
   /**
-   * Child-object list actions (`locations: ['list_toolbar']`), already
+   * Child-object list actions (`locations: ['list']`), already
    * localized by the host. Rendered as header buttons next to Add/New —
    * e.g. `invite_user` on an organization's Invitations list.
    */
@@ -379,28 +392,9 @@ function resolveRelatedLookupLabel(record: any, refSchema: any): string | undefi
   );
 }
 
-/**
- * Normalize the spec `sort` union (`'field'` / `'-field'` string or
- * `[{field, order}]`) into the object-array form fed to `$orderby`.
- */
-/**
- * A related list's declared sort as the row read sends it (`$orderby`). The
- * record page's payload asks a list's first rows in this order
- * (objectstack#27627), so a compact card can take them.
- */
-export function normalizeSortSpec(
-  sort: RelatedListProps['defaultSort'],
-): Array<{ field: string; order: 'asc' | 'desc' }> {
-  if (!sort) return [];
-  if (typeof sort === 'string') {
-    const trimmed = sort.trim();
-    if (!trimmed) return [];
-    return trimmed.startsWith('-')
-      ? [{ field: trimmed.slice(1), order: 'desc' }]
-      : [{ field: trimmed, order: 'asc' }];
-  }
-  return sort.filter((s) => !!s?.field);
-}
+// The sort normalizer lives in its own module so the side-effect-free
+// `/core` subpath can export it without this component.
+export { normalizeSortSpec };
 
 /** The permission context this component reads field-level security from. */
 type FieldReadPolicy = ReturnType<typeof usePermissions>;
@@ -492,14 +486,14 @@ function dropRedactedColumns<T>(cols: T[], redacted: ReadonlySet<string>): T[] {
 }
 
 /**
- * One `list_toolbar` action button on a related-list header (e.g. "Invite
+ * One `list` action button on a related-list header (e.g. "Invite
  * User" on an organization's Invitations list). Extracted into its own
  * component so the action's `visible` CEL predicate can be evaluated with a
  * hook (`useCondition`) without violating the rules-of-hooks inside a `.map()`.
  *
  * The SAME bridge (`RelatedRecordActionsBridge.deriveActions`) feeds both a
- * child object's row actions (`list_item`) and these header toolbar actions
- * (`list_toolbar`), spreading each action's `visible` predicate through
+ * child object's row actions (`record_row`) and these header toolbar actions
+ * (`list`), spreading each action's `visible` predicate through
  * untouched. The row path already honors `visible` (via the data-table's
  * `DataTableRowActionItem`); this brings the toolbar path to parity so e.g.
  * `invite_user` (`visible: "features.organization != false"`) hides when its
@@ -993,12 +987,17 @@ function useBodyTableTotals(opts: {
  * The totals of a body table as a line under it — the enlarged face's form;
  * the table face draws the same figures as the table's own last row, each in
  * its column (`summaryRow`). Labelled as the list's total, never as a page's.
+ * `omitted`: the table face's line for the columns it left out for width
+ * (objectstack#35831), the same figures under their columns' names.
  */
-const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ totals }) => {
+const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[]; omitted?: boolean }> = ({ totals, omitted }) => {
   const { t } = useDetailTranslation();
   if (totals.length === 0) return null;
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs" data-body-table-totals="">
+    <div
+      className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t pt-2 text-xs"
+      {...(omitted ? { 'data-body-table-omitted-totals': '' } : { 'data-body-table-totals': '' })}
+    >
       <span className="font-medium text-muted-foreground">{t('form.masterDetail.total', { defaultValue: 'Total' })}</span>
       {totals.map((total) => (
         <span key={total.key} className="inline-flex items-center gap-1" data-body-table-total={total.key}>
@@ -1019,8 +1018,8 @@ const BodyTableTotalsLine: React.FC<{ totals: readonly BodyTableTotal[] }> = ({ 
  * roomier defaults.
  */
 export const BODY_TABLE_DENSITY = [
-  '[&_thead_th]:h-8 [&_thead_th]:px-3 [&_thead_th]:py-0 [&_thead_th]:text-[13px]',
-  '[&_tbody_td]:h-8 [&_tbody_td]:px-3 [&_tbody_td]:py-0 [&_tbody_td]:text-[13px] [&_tbody_td]:leading-tight',
+  '[&_thead_th]:h-8 [&_thead_th]:px-3 [&_thead_th]:py-0 [&_thead_th]:text-xs',
+  '[&_tbody_td]:h-8 [&_tbody_td]:px-3 [&_tbody_td]:py-0 [&_tbody_td]:text-sm [&_tbody_td]:leading-tight',
 ].join(' ');
 
 /**
@@ -1074,6 +1073,10 @@ interface RelationFieldDef {
   multiple?: unknown;
   hidden?: unknown;
   readonly?: unknown;
+  defaultValue?: unknown;
+  options?: unknown;
+  dependsOn?: unknown;
+  lookupFilters?: unknown;
 }
 
 function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]> {
@@ -1093,13 +1096,37 @@ function relationFieldEntries(fields: unknown): Array<[string, RelationFieldDef]
  *    lists only UNLINKED children (this relationship empty): a row already
  *    here would be a no-op pick, and a row under another parent would move
  *    silently. Moving a child between parents stays on the child's own
- *    form, where the change is visible (seat ruling on L1-a S1, #35725);
+ *    form, where the change is visible (seat ruling on L1-a S1, #35725).
+ *    When the relationship lookup is scoped by the child's own fields
+ *    (`dependsOn`: a contract's opportunity `dependsOn` the contract's
+ *    account), the picker lists only children that lookup could name this
+ *    parent from: each `dependsOn` field equal to the parent's value
+ *    (objectstack#36707 — the opportunity's 合同 tab listed every account's
+ *    unlinked contracts, and a pick linked another customer's contract).
+ *    A scope it cannot resolve (the parent's value is empty or not read, or
+ *    a `lookupFilters` comparand reads `$record`) offers no picker;
  *  - `master_detail` with a source catalog: the picker lists the catalog and
  *    a pick creates a row of this list naming it (`linkField`). The catalog
  *    is the child's one other REQUIRED single-valued `lookup` (a line's
  *    product): the field every row must name, so a pick is a whole row;
  *  - `master_detail` with no catalog (none, or more than one required
  *    lookup): `undefined`, and 「+ 添加」 creates a new row directly.
+ *
+ * A required lookup is a catalog only when both halves of "a pick is a whole
+ * row" hold (objectstack#36659 — a contract's required primary contact was
+ * read as its catalog, so the account's 合同 tab listed every account's
+ * contacts and a pick would have created a contract from a contact):
+ *
+ *  - its candidates are the same for every row: no `dependsOn` and no
+ *    `lookupFilters` entry reading `$record`. A lookup scoped by the row (the
+ *    contact `dependsOn` the contract's account) is a party of that row, and
+ *    the picker, which lists the catalog for the list, cannot apply the scope;
+ *  - the pick leaves nothing for a person to write: every OTHER required
+ *    field of the child has a default the insert applies (`defaultValue`, or
+ *    a select option marked `default`), is `readonly`, or is computed.
+ *    `required` is the writer's contract, so a child that still needs a
+ *    start date or an amount is a record someone fills in on its form, not a
+ *    line a pick completes.
  *
  * `undefined` too for any other field type and for a multi-valued
  * relationship, whose membership a pick cannot write.
@@ -1108,12 +1135,17 @@ export function derivedAddOf(
   childFields: unknown,
   referenceField: string | undefined,
   childObject: string | undefined,
+  parentRecord?: Record<string, unknown>,
 ): RelatedListAdd | undefined {
   if (!referenceField || !childObject) return undefined;
   const entries = relationFieldEntries(childFields);
   const rel = entries.find(([name]) => name === referenceField)?.[1];
   if (!rel || rel.multiple === true) return undefined;
-  if (rel.type === 'lookup') return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }] } };
+  if (rel.type === 'lookup') {
+    const scope = parentScopeOf(rel, parentRecord);
+    if (!scope) return undefined;
+    return { picker: { object: childObject, filter: [{ field: referenceField, operator: 'is_empty' }, ...scope] } };
+  }
   if (rel.type !== 'master_detail') return undefined;
   const catalogs = entries.filter(([name, def]) =>
     name !== referenceField
@@ -1121,11 +1153,67 @@ export function derivedAddOf(
     && def.required === true
     && def.multiple !== true
     && def.hidden !== true
-    && def.readonly !== true
+    // A console create fills no hand-locked field (`uiReadonly`), as no `readonly` one.
+    && !fieldStaticallyReadOnlyByHand(def)
     && typeof def.reference === 'string' && def.reference !== '');
   if (catalogs.length !== 1) return undefined;
   const [catalogField, catalogDef] = catalogs[0];
+  if (scopedByRow(catalogDef)) return undefined;
+  const leftToWrite = entries.some(([name, def]) =>
+    name !== referenceField
+    && name !== catalogField
+    && def.required === true
+    && !insertDefaults(def)
+    && !fieldStaticallyReadOnlyByHand(def)
+    && !isComputedFieldType(undefined, def.type));
+  if (leftToWrite) return undefined;
   return { picker: { object: catalogDef.reference as string }, linkField: catalogField };
+}
+
+/**
+ * The candidate rules a `lookup` relationship's own scope adds to the derived
+ * picker of children (`derivedAddOf`), seen from the parent: `[]` when the
+ * lookup is unscoped, `undefined` when the scope cannot be resolved here.
+ *
+ * Each `dependsOn` entry, read from the parent (`dependsOnFromParent`, the
+ * pairs a New on this tab also opens with, objectstack#37246), becomes
+ * `field equals <parent's param>`. With the parent's value empty or not read
+ * yet no child could name it: no picker, never an unscoped one. A
+ * `lookupFilters` comparand reading `$record` relates the parent's columns to
+ * the child's by any operator, and this side does not invert it: no picker
+ * either.
+ */
+function parentScopeOf(rel: RelationFieldDef, parentRecord: Record<string, unknown> | undefined): ViewFilterElement[] | undefined {
+  if (Array.isArray(rel.lookupFilters) && rel.lookupFilters.some(readsRecord)) return undefined;
+  return dependsOnFromParent(rel.dependsOn, parentRecord)?.map(
+    ([field, value]): ViewFilterElement => ({ field, operator: 'equals', value }),
+  );
+}
+
+/** Does this `lookupFilters` entry compare with a `{ $record }` value? */
+function readsRecord(entry: unknown): boolean {
+  const value = (entry as { value?: unknown } | null)?.value;
+  return !!value && typeof value === 'object' && '$record' in (value as object);
+}
+
+/**
+ * Does the insert fill this field when a create omits it — the engine's
+ * `applyFieldDefaults`: a non-null `defaultValue`, else a select option marked
+ * `default: true`?
+ */
+function insertDefaults(def: RelationFieldDef): boolean {
+  if (def.defaultValue != null) return true;
+  return Array.isArray(def.options) && def.options.some((o) => (o as { default?: unknown } | null)?.default === true);
+}
+
+/**
+ * Does this lookup's candidate set depend on the row it is written on — a
+ * `dependsOn` entry, or a `lookupFilters` comparand `{ $record }`? Such a
+ * lookup is no catalog (`derivedAddOf`).
+ */
+function scopedByRow(def: RelationFieldDef): boolean {
+  if (Array.isArray(def.dependsOn) && def.dependsOn.length > 0) return true;
+  return Array.isArray(def.lookupFilters) && def.lookupFilters.some(readsRecord);
 }
 
 /** One group of a stateful child list (`statusGroupsOf`). */
@@ -1200,6 +1288,22 @@ export function statusGroupsOf(
   ].filter((g) => g.rows.length > 0);
 }
 
+/**
+ * objectstack#35892 — the related tab's columns, with the footer calculations
+ * the reader picked: as field names while there is none (the node it always
+ * sent), as `{ field, summary }` once there is (`null` = None, no summary).
+ */
+export function tabSummaryColumns(
+  fields: readonly string[],
+  summaries: Readonly<Record<string, unknown>> | undefined,
+): string[] | Array<{ field: string; summary?: unknown }> {
+  if (!summaries || Object.keys(summaries).length === 0) return [...fields];
+  return fields.map((field) => {
+    const pick = summaries[field];
+    return pick ? { field, summary: pick } : { field };
+  });
+}
+
 /** The groups of `statusGroupsOf`, each collapsible under its header. */
 const RelatedStatusGroups: React.FC<{
   groups: readonly RelatedStatusGroup[];
@@ -1236,6 +1340,67 @@ const RelatedStatusGroups: React.FC<{
           </div>
         );
       })}
+    </div>
+  );
+};
+
+/**
+ * objectstack#35892 F1 — whether the related tab reads and writes the header
+ * sort the reader's record-page preferences remember (objectstack#35601).
+ * `false`: the card's rule, a sort holds for this visit to the record only,
+ * as the tab's filter and footer calculations do (`./relatedTabConditions`).
+ * The one place that decides it: `true` makes the remembered sort the tab's
+ * starting order again and writes a header sort back to it.
+ */
+const RELATED_TAB_REMEMBERS_SORT = false;
+
+/**
+ * objectstack#35892 — whether the related tab's column widths and order go to
+ * the reader's record-page preferences (objectstack#35601, on the server).
+ * `false`: the grid keeps them in this browser, as the list page does
+ * (objectstack#35955). The one place that decides it.
+ */
+const RELATED_TAB_COLUMNS_IN_PREFERENCES = false;
+
+/**
+ * objectstack#35892 — the rows the related tab reads per step as the reader
+ * scrolls: the first window, and each one after it. At least the list's own
+ * page size.
+ */
+export const RELATED_TAB_WINDOW = 50;
+
+/** How far below the view the next window is asked for, as the list page asks (`LOAD_MORE_THRESHOLD_PX`). */
+const RELATED_TAB_LOAD_AHEAD = '320px';
+
+/**
+ * objectstack#35892 — the end of the related tab's rows: in view (or within
+ * {@link RELATED_TAB_LOAD_AHEAD} of it), it asks for the next window. The
+ * record page scrolls as a whole, so the tab loads as the page does, with no
+ * scroll box of its own. Says 「加载中…」 while a window is on its way.
+ */
+const RelatedTabLoadMore: React.FC<{ loading: boolean; onLoadMore: () => void; label: string }> = ({
+  loading,
+  onLoadMore,
+  label,
+}) => {
+  const [end, setEnd] = React.useState<HTMLDivElement | null>(null);
+  const latest = React.useRef({ loading, onLoadMore });
+  latest.current = { loading, onLoadMore };
+  React.useEffect(() => {
+    if (!end || typeof IntersectionObserver === 'undefined') return undefined;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting) && !latest.current.loading) latest.current.onLoadMore();
+      },
+      { rootMargin: `0px 0px ${RELATED_TAB_LOAD_AHEAD} 0px` },
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+    // Re-observed after each window lands, so an end still in view asks again.
+  }, [end, loading]);
+  return (
+    <div ref={setEnd} className="flex min-h-6 items-center justify-center text-xs text-muted-foreground" data-related-load-more="">
+      {loading ? label : null}
     </div>
   );
 };
@@ -1293,6 +1458,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // `hasMore` keeps "Next" usable when a non-conforming backend omits `total`.
   const [total, setTotal] = React.useState<number | null>(null);
   const [hasMore, setHasMore] = React.useState(false);
+  // objectstack#35892 — the query behind the related tab's rows (set by the read).
+  const [tabFindParams, setTabFindParams] = React.useState<Record<string, unknown> | undefined>(undefined);
   /**
    * The child object's definition, and whether the read for THIS `api` has
    * SETTLED: one piece of state, through the shared hook (objectui#10690).
@@ -1336,6 +1503,15 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // value may itself be falsy. Cleared by every re-read (the fetch effect's
   // first statement) and by Retry.
   const [loadFailure, setLoadFailure] = React.useState<{ error: unknown } | null>(null);
+  // objectstack#36822 — whether `relatedData` holds the answer of a read this
+  // list actually issued, so the badge may keep drawing its count while a
+  // later read is in flight. Set only where an issued read resolves, cleared
+  // where one rejects (the rejection empties the rows, and 0 is not their
+  // count). A path that reads nothing (no scope yet, a refused filter, no
+  // adapter) never sets it, so the first real read still draws no count; one
+  // that empties the rows without reading (no scope, no adapter) clears it,
+  // so the next parent's read draws no count either.
+  const [countKnown, setCountKnown] = React.useState(false);
   // Per-lookup-field cache of resolved labels: fieldName -> Map<id, label>
   const [lookupLabels, setLookupLabels] = React.useState<Record<string, Record<string, string>>>({});
   const { t } = useDetailTranslation();
@@ -1350,7 +1526,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const perms = usePermissions();
 
   /**
-   * [ADR-0066 D4 / objectui#9782] The `list_toolbar` set this header may draw,
+   * [ADR-0066 D4 / objectui#9782] The `list` set this header may draw,
    * with `requiredPermissions` mirrored as a UI hide.
    *
    * `@objectstack/spec` declares the key as "enforced with 403 on every call the
@@ -1358,7 +1534,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * dispatches, and **mirrored as a UI hide**" — a declared same-origin
    * `type: api` action included (ADR-0066 D4 as amended). The
    * same bridge (`RelatedRecordActionsBridge.deriveActions`) feeds the child
-   * object's `list_item` actions and these header buttons, and it filters on
+   * object's `record_row` actions and these header buttons, and it filters on
    * `locations` alone — so before this the toolbar honoured `visible` and
    * nothing else, and an action declaring a capability the caller lacks
    * rendered one surface over from `EnvironmentListToolbar`, which hides it.
@@ -1398,9 +1574,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * and can only ever hide more than before.
    */
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action is absent where the provider has no
+  // in-app assistant.
+  const drawsAction = useDrawsAction();
   const permittedToolbarActions = React.useMemo(
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a)),
-    [toolbarActions, mayInvoke],
+    // [ADR-0160 D7] The toolbar holds no single record (a launch from it runs
+    // on the parent), so an `ask_ai` action is absent here; its rows draw it.
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a) && !isAskAiAction(a)),
+    [toolbarActions, mayInvoke, drawsAction],
   );
 
   // In the record page's related column (objectstack#26678) the list is a
@@ -1411,12 +1592,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // objectstack#27524 — drawn as the record page's active tab: the toolbar
   // face below (`RelatedListEnlargedContext`).
   const enlargedFace = React.useContext(RelatedListEnlargedContext) && !compact;
+  // objectstack#36149 — in a side preview (its header bar says so) the tab's
+  // rows are the phone's card rows, one per record: the title and one summary
+  // line, never a table cut off at the preview's edge.
+  const headerBar = React.useContext(RecordHeaderBarContext);
+  const previewFace = enlargedFace && !!headerBar?.preview;
   // objectstack#35601 — the related tab's add, decided by the relationship
   // when the page authored none (`derivedAddOf`). The rest of this component
   // reads `add` alone, so a derived add takes the authored one's path.
   const derivedAdd = React.useMemo(
-    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api) : undefined),
-    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api],
+    () => (enlargedFace && !authoredAdd && !schema ? derivedAddOf(objectSchema?.fields, referenceField, api, parentRecord) : undefined),
+    [enlargedFace, authoredAdd, schema, objectSchema, referenceField, api, parentRecord],
   );
   const add = authoredAdd ?? derivedAdd;
   // objectstack#27056 — the card's count, asked up front with the column's
@@ -1456,14 +1642,53 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   );
   // The remembered sort applies once, when it is first read; a header click
   // after that is the reader's and is written back.
+  // The tab's column widths and order, read and written here alone. Kept by
+  // the grid itself in this browser, under the node's `id`
+  // (`related-<relationship>`), as the list page keeps its own
+  // (objectstack#35892, objectstack#35955); no longer in the record-page
+  // preference (`RELATED_TAB_COLUMNS_IN_PREFERENCES`).
+  const tabColumnState = RELATED_TAB_COLUMNS_IN_PREFERENCES ? storedListPreference?.columnState : undefined;
+  const writeTabColumnState = React.useMemo(
+    () => (RELATED_TAB_COLUMNS_IN_PREFERENCES && preferenceKey
+      ? (columnState: RelatedListPreference['columnState']) => writeListPreference({ columnState })
+      : undefined),
+    [preferenceKey, writeListPreference],
+  );
   const storedSortApplied = React.useRef(false);
-  const storedSort = storedListPreference?.sort;
+  const storedSort = RELATED_TAB_REMEMBERS_SORT ? storedListPreference?.sort : undefined;
   React.useEffect(() => {
     if (storedSortApplied.current || !storedSort) return;
     storedSortApplied.current = true;
     setSortField(storedSort.field);
     setSortDirection(storedSort.order);
   }, [storedSort]);
+  // objectstack#35892 — the related tab is the child object's full list: the
+  // list page's condition row (sort and filter), its column menu, cell
+  // editing, selection and footer calculations, over the rows this list
+  // reads. What the reader changes there holds while they stay on this record
+  // (another tab, or the record's drawer, keeps it) and is gone on a reload or
+  // another record; 「Discard」 clears it (`./relatedTabConditions`). Keyed by
+  // the reader, the parent record and this list's relationship, as the list
+  // page's draft is keyed by its reader: another account signed in on the
+  // same tab starts from the default.
+  const readerScope = useFilterScope();
+  const tabRecord = enlargedFace && !schema && (type === 'grid' || type === 'table')
+    && ownRelationshipId && parentId !== undefined && parentId !== null && parentId !== ''
+    ? `${readerScope.currentUserId ?? ''}|${preferenceObject ?? ''}:${String(parentId)}`
+    : null;
+  const tabList = tabRecord !== null;
+  const {
+    conditions: tabConditions,
+    patch: patchTabConditions,
+    discard: discardTabConditions,
+  } = useRelatedTabConditions(tabRecord, tabList ? ownRelationshipId : null);
+  const tabChanged = tabList && relatedTabConditionsChanged(tabConditions);
+  // Supplied by the host (`plugin-list`'s row, which this package cannot
+  // import: it depends on this one): without it the tab draws no condition row.
+  const renderListConditions = React.useContext(RelatedListConditionsSlotContext);
+  // The filter the reader set on the tab, ANDed with the list's own scope.
+  const tabFilterNode = tabList ? tabConditions.filterNode : undefined;
+  const tabFilterKey = tabFilterNode === undefined ? null : JSON.stringify(tabFilterNode);
   // objectstack#35597 — a body table shows its first `pageSize` rows (ten by
   // default, the page may say otherwise) and 「显示全部 N 条」 expands it in
   // place: every row, one read, no pages. N is the server's count when the
@@ -1475,7 +1700,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     ? COMPACT_RELATED_ROWS
     : bodyTable && bodyTableShowAll && pagedSize > 0
       ? (total != null ? Math.max(pagedSize, total) : 0)
-      : pagedSize;
+      // objectstack#35892 — the tab reads window by window as it scrolls.
+      : tabList && pagedSize > 0
+        ? Math.max(pagedSize, RELATED_TAB_WINDOW)
+        : pagedSize;
   // The built-in contains-filter is a CLIENT-side sweep over the list's
   // unmasked columns (objectui#10728, `unmaskedColumnKeysKey`) — inexpressible
   // as a generic server filter. While the user is typing in it
@@ -1498,8 +1726,25 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // doesn't re-run (and re-download the full collection) on page clicks or
   // column sorts that the client pipeline already handles in memory.
   const fetchPage = windowed ? currentPage : 0;
-  const fetchSortField = windowed ? sortField : null;
-  const fetchSortDirection = windowed ? sortDirection : 'asc';
+  // The reader's sort: the related tab's levels (objectstack#35892), else the
+  // header's one field; `null` = the list's declared order.
+  const tabSort = tabList && tabConditions.sort.length > 0 ? tabConditions.sort : null;
+  const sortSpec = React.useMemo(
+    (): Array<{ field: string; order: 'asc' | 'desc' }> | null =>
+      tabSort
+        ? tabSort.map((item) => ({ field: item.field, order: item.order === 'desc' ? 'desc' : 'asc' }))
+        : sortField
+          ? [{ field: sortField, order: sortDirection }]
+          : null,
+    [tabSort, sortField, sortDirection],
+  );
+  const sortKey = sortSpec ? JSON.stringify(sortSpec) : null;
+  const fetchSortSpec = windowed ? sortSpec : null;
+  const fetchSortKey = windowed ? sortKey : null;
+  // objectstack#35892 — the tab grows ONE window from the first row as it
+  // scrolls (`$top` = every row loaded, `$skip` 0), so a re-read after an
+  // edit, a delete or an add answers every row on screen, in order.
+  const tabGrows = tabList && windowed;
   // Key the memo on content, not identity — inline `sort` arrays from schema
   // nodes would otherwise re-trigger the fetch effect every render.
   const defaultSortKey = JSON.stringify(defaultSort ?? null);
@@ -1732,6 +1977,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         if (declared && !readable(field)) continue;
         projection.add(field);
       }
+      // [ADR-0158] A drawn quantity's unit: a `record`-mode quantity's code
+      // field and the row's organization, which the number cell reads off the
+      // row. The code field passes the same declared and FLS gates;
+      // `organization_id` is a platform column every object carries.
+      const drawnDefs = Object.fromEntries(drawnKeys.map((key) => [key, parentRelationshipFieldDef(fields, key)]));
+      for (const field of shownQuantityUnitReads(drawnKeys, drawnDefs)) {
+        const declared = parentRelationshipFieldDef(fields, field) !== undefined;
+        if (!declared && !PLATFORM_RECORD_COLUMNS.has(field)) continue;
+        if (declared && !readable(field)) continue;
+        projection.add(field);
+      }
       // The mobile card gallery's cover: no column shows it, but the gallery
       // reads it off every row. Asked for when the child DECLARES it (either
       // container shape) and FLS allows it — on every viewport, not only on
@@ -1930,7 +2186,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     });
     return () => { cancelled = true; };
   }, [pickerOpen, pickerObject, pickerSchema, dataSource]);
-  const pickerDisplayField = add?.picker?.labelField || 'name';
+  // The label column is the picked object's name field (ADR-0079: declared
+  // `nameField`, else derived) when the add names no `labelField` — a derived
+  // add never does (objectstack#36707: a contract's 合同 tab picker led with an
+  // empty 「NAME」, the contract's name being `contract_number`). `name` only
+  // until the schema is read.
+  const pickerDisplayField = add?.picker?.labelField || resolveNameField(pickerSchema) || 'name';
   const pickerColumns = React.useMemo(() => {
     const derived = deriveLookupColumns(pickerSchema, { displayField: pickerDisplayField });
     return derived.length > 0 ? derived : undefined;
@@ -2001,6 +2262,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        // Nothing is read, and the emptied rows hold no count (objectstack#36822).
+        setCountKnown(false);
         setLoading(false);
         return;
       }
@@ -2009,7 +2272,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         compact
         && windowed
         && fetchPage === 0
-        && !fetchSortField
+        && !fetchSortSpec
         && refreshNonce === 0
       ) {
         const seedKey = JSON.stringify([api, referenceField, String(parentId), filter ?? null]);
@@ -2032,6 +2295,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData(result.rows as any[]);
               setTotal(result.total);
               setHasMore(result.total > result.rows.length);
+              setCountKnown(true);
               setLoading(false);
             },
             (err) => {
@@ -2039,6 +2303,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               setRelatedData([]);
               setTotal(null);
               setHasMore(false);
+              setCountKnown(false);
               setLoadFailure({ error: err });
               setLoading(false);
             },
@@ -2078,10 +2343,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // the untouched MongoDB-style object it has always been, rather than a
       // freshly lowered AST that means the same thing (the difference is
       // invisible on screen and visible to every caller pinning the wire).
+      // objectstack#35892 — and the filter the reader set on the related tab,
+      // which narrows further still.
       const queryFilter =
-        listFilterNode === undefined
+        listFilterNode === undefined && tabFilterNode === undefined
           ? parentScope
-          : mergeFilterNodes(parentScope, listFilterNode);
+          : mergeFilterNodes(parentScope, listFilterNode, tabFilterNode);
       if (dataSource && typeof dataSource.find === 'function') {
         const params: Record<string, any> = { $filter: queryFilter };
         // Resolve reference columns server-side, the way every other list in
@@ -2094,15 +2361,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // list — see `selectFields` for why that path sends no projection.
         if (wireSelect) params.$select = wireSelect;
         if (windowed) {
-          params.$top = effectivePageSize;
-          params.$skip = fetchPage * effectivePageSize;
+          params.$top = tabGrows ? (fetchPage + 1) * effectivePageSize : effectivePageSize;
+          params.$skip = tabGrows ? 0 : fetchPage * effectivePageSize;
           // A user column sort becomes a server $orderby so ordering stays
           // global across pages; otherwise the schema's declared `sort` wins.
-          const orderby = fetchSortField
-            ? [{ field: fetchSortField, order: fetchSortDirection }]
-            : defaultSortSpec;
+          const orderby = fetchSortSpec ?? defaultSortSpec;
           if (orderby.length > 0) params.$orderby = orderby;
         }
+        // The query behind the tab's rows, for the grid's whole-set footer
+        // and its 「select all N matching」 (objectstack#35892).
+        const asked = { $filter: queryFilter, ...(params.$orderby ? { $orderby: params.$orderby } : {}) };
         dataSource.find(api, params).then((result) => {
           if (cancelled) return;
           const isArrayResult = Array.isArray(result);
@@ -2112,6 +2380,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               ? (result as any).data
               : [];
           setRelatedData(items);
+          if (tabList) setTabFindParams(asked);
           if (windowed) {
             const reportedTotal = !isArrayResult && typeof (result as any)?.total === 'number'
               ? (result as any).total as number
@@ -2122,12 +2391,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setHasMore(
               !isArrayResult && typeof (result as any)?.hasMore === 'boolean'
                 ? (result as any).hasMore as boolean
-                : items.length === effectivePageSize,
+                : items.length === params.$top,
             );
           } else {
             setTotal(null);
             setHasMore(false);
           }
+          setCountKnown(true);
           setLoading(false);
         }).catch((err) => {
           console.error('Failed to fetch related data:', err);
@@ -2137,10 +2407,11 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           setRelatedData([]);
           setTotal(null);
           setHasMore(false);
+          setCountKnown(false);
           setLoadFailure({ error: err });
           setLoading(false);
         });
-      } else if (listFilterNode !== undefined) {
+      } else if (listFilterNode !== undefined || tabFilterNode !== undefined) {
         // No adapter — the legacy raw-URL path, whose query language is
         // `filter[<field>]=<value>` and cannot carry an operator, let alone a
         // rule array. Dropping the authored filter here would answer with MORE
@@ -2154,6 +2425,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else if (referenceFieldIsMultiValue) {
         // The same refusal as the arm above, one cause earlier: this path's
@@ -2180,6 +2452,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setRelatedData([]);
         setTotal(null);
         setHasMore(false);
+        setCountKnown(false);
         setLoading(false);
       } else {
         const qs = new URLSearchParams({
@@ -2199,6 +2472,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData(items);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(true);
           })
           .catch(err => {
             console.error('Failed to fetch related data:', err);
@@ -2206,6 +2480,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             setRelatedData([]);
             setTotal(null);
             setHasMore(false);
+            setCountKnown(false);
             setLoadFailure({ error: err });
           })
           .finally(() => { if (!cancelled) setLoading(false); });
@@ -2245,7 +2520,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // card's in-view / non-zero gate, a boolean. `compact` decides whether the
     // record page's payload may serve the read (objectstack#27627), a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortKey, tabGrows, tabFilterKey, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
@@ -2404,17 +2679,91 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     setDeleteTarget(row);
   }, []);
 
+  const { objectLabel } = useObjectLabel();
+  /**
+   * objectstack#36851 — a delete the server REFUSES (a hook, a record lock:
+   * `409 RECORD_LOCKED`) says so, in the toast the object's list page shows
+   * for the same refusal (`recordDelete` in `@object-ui/core`): "Failed to
+   * delete LABEL", described by the producer-marked `userMessage` when the
+   * refusal carries one (verbatim, `declaredUserMessage`), the read-only
+   * sentence for an external datasource (ADR-0015), else the server's own
+   * sentence with its machine prefix stripped. It used to reach the console
+   * only, so the dialog closed and the row simply stayed. The row stays and
+   * the dialog closes as before: the toast is the whole answer.
+   */
   const handleConfirmDelete = React.useCallback(async () => {
     if (deleteTarget) {
       try {
         await onRowDelete?.(deleteTarget);
         setRefreshNonce((n) => n + 1); // reflect the removal
       } catch (err) {
-        console.error('[RelatedList] remove failed', err);
+        const label = objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' });
+        const description =
+          declaredUserMessage(err)
+          ?? (isExternalWriteRefusal(err)
+            ? t('form.readOnlyExternalSource', { defaultValue: 'This table is read-only. Its records come from an external data source that does not accept changes.' })
+            : extractWriteErrorMessage(err));
+        toast.error(
+          t('objectActions.deleteFailed', { label, defaultValue: `Failed to delete ${label}` }),
+          description ? { description } : undefined,
+        );
       }
     }
     setDeleteTarget(null);
-  }, [deleteTarget, onRowDelete]);
+  }, [deleteTarget, onRowDelete, objectLabel, api, objectSchema, t]);
+  // objectstack#35892 — the related tab's floating bar deletes the selected
+  // rows (up to every matching row, with "select all"): one confirm that
+  // counts them, then the data source's batch delete in one call where it
+  // has one, else every row through the row delete this list was handed,
+  // settled together as the list page settles them. One re-read, and the
+  // outcome stays on screen: how many went, and how many did not, and why
+  // (objectstack#37816): each distinct reason on its own line, led by the
+  // names of the rows it refused, by the list page's rule (`bulkDeleteRefusalLines`).
+  const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<any[] | null>(null);
+  const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number; reasons: string[] } | null>(null);
+  const handleBulkDeleteRows = React.useCallback((rows: any[]) => {
+    if (rows.length > 0) setBulkDeleteTargets(rows);
+  }, []);
+  const handleConfirmBulkDelete = React.useCallback(async () => {
+    const rows = (bulkDeleteTargets ?? []).filter((row) => row?.id != null || row?._id != null);
+    setBulkDeleteTargets(null);
+    if (rows.length === 0) return;
+    const ids = rows.map((row) => String(row.id ?? row._id));
+    let succeeded = 0;
+    // Each refused row and what refused it: the ids the batch call names (a
+    // plain count names none), every row under a batch call that threw, each
+    // rejected row delete.
+    let refused: Array<{ record: any; err: unknown }> = [];
+    if (api && typeof dataSource?.bulkDelete === 'function') {
+      try {
+        const answer = await dataSource.bulkDelete(api, ids);
+        succeeded = Math.min(ids.length, typeof answer === 'number' ? answer : answer.succeeded);
+        if (typeof answer !== 'number') {
+          const byId = new Map(rows.map((row, i) => [ids[i], row]));
+          refused = (answer.errors ?? []).flatMap((rowError) => {
+            const record = byId.get(String(rowError.id));
+            return record ? [{ record, err: rowError.error }] : [];
+          });
+        }
+      } catch (err) {
+        console.error('[RelatedList] bulk delete failed', err);
+        refused = rows.map((record) => ({ record, err }));
+      }
+    } else if (onRowDelete) {
+      const settled = await Promise.allSettled(rows.map((row) => Promise.resolve(onRowDelete(row))));
+      succeeded = settled.filter((result) => result.status === 'fulfilled').length;
+      refused = settled.flatMap((result, i) =>
+        result.status === 'rejected' ? [{ record: rows[i], err: result.reason as unknown }] : [],
+      );
+    }
+    const failed = ids.length - succeeded;
+    setBulkDeleteOutcome({
+      succeeded,
+      failed,
+      reasons: failed > 0 ? bulkDeleteRefusalLines({ t, objectDef: objectSchema }, refused) : [],
+    });
+    setRefreshNonce((n) => n + 1);
+  }, [bulkDeleteTargets, onRowDelete, dataSource, api, t, objectSchema]);
 
   /**
    * May the caller Add existing here? The write's row of the affordance-to-grant
@@ -2498,18 +2847,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * opens it — the picker's first row is 「新建」 when New is offered too —
    * and with none it creates a new row directly (New). `null` when neither is
    * offered.
+   *
+   * objectstack#37251 — the entry is named for what it does: 「添加」 / Add
+   * (or the authored `add.label`) only where it opens a picker; where it can
+   * only create (a `master_detail` child with no catalog, since
+   * objectstack#36704) it reads 「新建」 / New, the create form's own name.
    */
   const pickerOffered = !!add && !!add.picker?.object && !!dataSource && addGranted && addBatchable;
-  const addFallbackLabel = t('detail.add', { defaultValue: 'Add' });
   const addEntry: { label: string; disabled: boolean; onClick: () => void } | null = pickerOffered
     ? {
-        label: add!.label || addFallbackLabel,
+        label: add!.label || t('detail.add', { defaultValue: 'Add' }),
         disabled: addBusy,
         onClick: () => { setAddError(null); setPickerOpen(true); },
       }
     : onNew
       ? {
-          label: addFallbackLabel,
+          label: t('detail.new', { defaultValue: 'New' }),
           disabled: !!newDisabled,
           onClick: () => onNew(),
         }
@@ -2722,6 +3075,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency in this list (objectui#12242).
         ...(def.currencyConfig && { currencyConfig: def.currencyConfig }),
+        // A quantity's unit (ADR-0158): the number cell draws its label and
+        // display decimal places from it.
+        ...((def as { unitConfig?: unknown }).unitConfig ? { unitConfig: (def as { unitConfig?: unknown }).unitConfig } : {}),
         // A formula's declared result type, which picks its face in the formula
         // cell: `currency` draws through the currency cell with the
         // `currencyConfig` above. Without it a money formula read as a bare
@@ -2776,6 +3132,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // its sibling code field, or, when it follows the parent, the record
           // this list hangs under, laid on the row by `withFollowedParent`.
           ...(recordCurrencyField(def) !== undefined && { dependentValues: withFollowedParent(row, def, parentRecord) ?? undefined }),
+          // A quantity reads its unit code and organization off the ROW (ADR-0158).
+          ...(recordCurrencyField(def) === undefined && declaresQuantityUnit(def as { type?: string; unitConfig?: unknown }) && { dependentValues: row }),
         });
       };
     };
@@ -3211,20 +3569,31 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // opaque id and reduced the second to "[object Object]", i.e. every row equal.
   // Feeding the resolved label map to `getSortValue` sorts by the string the
   // cell actually renders (objectui#3096).
+  //
+  // Level by level (the related tab sorts on several, objectstack#35892).
   const sortedData = React.useMemo(() => {
-    if (windowed || !sortField) return filteredData;
+    if (windowed || !sortSpec) return filteredData;
     // A masked column orders nothing (objectui#10728), including a sort set
     // before its column was stamped: rows ordered by a credential tell the
     // reader how it compares with every other row's.
-    if (!readColumnKeys(unmaskedColumnKeysKey).includes(sortField)) return filteredData;
-    const labels = lookupLabels[sortField];
-    const keyed = filteredData.map((row) => ({ row, key: getSortValue(row[sortField], { labels }) }));
+    const unmasked = readColumnKeys(unmaskedColumnKeysKey);
+    const levels = sortSpec.filter((level) => unmasked.includes(level.field));
+    if (levels.length === 0) return filteredData;
+    const keyed = filteredData.map((row) => ({
+      row,
+      keys: levels.map((level) => getSortValue(row[level.field], { labels: lookupLabels[level.field] })),
+    }));
     keyed.sort((a, b) => {
-      const cmp = compareSortValues(a.key, b.key);
-      return sortDirection === 'asc' ? cmp : -cmp;
+      for (let i = 0; i < levels.length; i += 1) {
+        const cmp = compareSortValues(a.keys[i], b.keys[i]);
+        if (cmp !== 0) return levels[i].order === 'asc' ? cmp : -cmp;
+      }
+      return 0;
     });
     return keyed.map((entry) => entry.row);
-  }, [filteredData, sortField, sortDirection, windowed, lookupLabels, unmaskedColumnKeysKey]);
+    // `sortKey` is the content of `sortSpec`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredData, sortKey, windowed, lookupLabels, unmaskedColumnKeysKey]);
 
   // Paginate data. Windowed mode already holds exactly one page; client mode
   // slices the in-memory collection as before.
@@ -3254,7 +3623,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // Reset to first page when filter/sort changes
   React.useEffect(() => {
     setCurrentPage(0);
-  }, [filterText, sortField, sortDirection]);
+  }, [filterText, sortKey, tabFilterKey]);
 
   const handleSort = React.useCallback((field: string) => {
     // A masked column is never sorted by (objectui#10728). The button row
@@ -3282,8 +3651,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * request `asc` on a list that is already `desc`.
    */
   const activeSort = React.useMemo(
-    () => (sortField ? [{ field: sortField, order: sortDirection }] : defaultSortSpec),
-    [sortField, sortDirection, defaultSortSpec],
+    () => sortSpec ?? defaultSortSpec,
+    // `sortKey` is the content of `sortSpec`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sortKey, defaultSortSpec],
   );
 
   /**
@@ -3302,12 +3673,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       if (!first) return;
       if (!readColumnKeys(unmaskedColumnKeysKey).includes(first.field)) return;
       setCurrentPage(0);
+      storedSortApplied.current = true;
+      if (RELATED_TAB_REMEMBERS_SORT) writeListPreference({ sort: { field: first.field, order: first.order } });
+      if (tabList) {
+        // objectstack#35892 — the tab's sort is the condition row's: a
+        // header pick leads the reader's levels, as on the list page
+        // (`withHeaderSortPick`).
+        const picked = withHeaderSortPick(tabConditions.sort, next.map((item) => ({ id: `sort-${item.field}`, ...item })));
+        patchTabConditions({ sort: picked });
+        return;
+      }
       setSortField(first.field);
       setSortDirection(first.order);
-      storedSortApplied.current = true;
-      writeListPreference({ sort: { field: first.field, order: first.order } });
     },
-    [unmaskedColumnKeysKey, writeListPreference],
+    [unmaskedColumnKeysKey, writeListPreference, tabList, tabConditions.sort, patchTabConditions],
   );
 
   // A `grid`/`table` list renders a real table, whose column headers carry the
@@ -3340,6 +3719,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // key, so a column left out is still counted when the box grows.
   const [bodyTableColumnCap, setBodyTableColumnCap] = React.useState<number | null>(null);
   const bodyTableColumnWidths = React.useRef(new Map<string, number>());
+  // objectstack#37212 — how many columns the table last drew as handed: a
+  // hand-over it has adopted. `null` until it has drawn one.
+  const bodyTableAdoptedCount = React.useRef<number | null>(null);
   const bodyTableColumnKeysKey = React.useMemo(
     () => JSON.stringify((tableColumns ?? []).map((col: any) => String(col?.accessorKey ?? ''))),
     [tableColumns],
@@ -3347,6 +3729,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // A different column set is measured afresh, every column drawn.
   React.useLayoutEffect(() => {
     bodyTableColumnWidths.current.clear();
+    bodyTableAdoptedCount.current = null;
     setBodyTableColumnCap(null);
   }, [bodyTableColumnKeysKey]);
   const bodyTableColumnsOmitted = bodyTable && bodyTableColumnCap !== null;
@@ -3376,13 +3759,25 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     refreshKey: `${refreshNonce}:${windowed && total != null ? total : relatedData.length}`,
   });
   const totalLabel = t('form.masterDetail.total', { defaultValue: 'Total' });
+  // objectstack#35831 — a summed column the table left out for width
+  // (`bodyTableColumnCap`) keeps its total on the Overview: the totals of the
+  // columns not drawn go on a line under the table, each labelled with its
+  // column's name (`BodyTableTotalsLine`). A table that leaves no column out
+  // has none, and the drawn columns keep theirs in the table's last row.
+  const bodyOmittedTotals = React.useMemo(() => {
+    if (!bodyTableColumnsOmitted || bodyTotals.length === 0) return [];
+    const omitted = new Set((tableColumns ?? []).slice(bodyTableColumnCap!).map((col: any) => String(col?.accessorKey ?? '')));
+    return bodyTotals.filter((entry) => omitted.has(entry.key));
+  }, [bodyTableColumnsOmitted, bodyTableColumnCap, tableColumns, bodyTotals]);
   // The totals as the table's own last row, each under its column
-  // (objectstack#35548's `summaryRow`): 「合计行，与列对齐」.
+  // (objectstack#35548's `summaryRow`): 「合计行，与列对齐」. Drawn only while
+  // a drawn column has a figure in it: with every summed column left out the
+  // line under the table carries them all, and an empty 「合计」 row says nothing.
   const bodySummaryRow = React.useMemo(
-    () => (bodyTotals.length > 0
+    () => (bodyTotals.length > bodyOmittedTotals.length
       ? { lead: totalLabel, cells: Object.fromEntries(bodyTotals.map((entry) => [entry.key, entry.text])) }
       : undefined),
-    [bodyTotals, totalLabel],
+    [bodyTotals, bodyOmittedTotals, totalLabel],
   );
 
   // The column headers an empty body table still draws (objectstack#35597).
@@ -3395,6 +3790,16 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     [bodyTable, tableColumns],
   );
 
+  // objectstack#35892 — the related tab edits cells where the list page
+  // would: the `listInlineEdit` row of the affordance-to-grant map, asked of
+  // the child object.
+  const tabInlineEdit = tabList
+    && resolveAffordance('listInlineEdit', { objectSchema, objectName: api, perms }).allowed;
+  // The bulk bar's delete is one batch call to the data source, so it reads
+  // the child object's `relatedRowDelete` row itself, beside the row delete
+  // the host hands in (objectstack#35892).
+  const tabBulkDelete = !!onRowDelete
+    && resolveAffordance('relatedRowDelete', { objectSchema, objectName: api, perms }).allowed;
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
 
@@ -3419,13 +3824,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         ...(ownRelationshipId ? { id: `related-${ownRelationshipId}` } : {}),
         objectName: api,
         data: { provider: 'value', items: paginatedData },
-        ...(storedListPreference?.columnState ? { columnState: storedListPreference.columnState } : {}),
-        columns: effectiveColumns
-          .map((c: any) => c.accessorKey || columnIdentity(c))
-          .filter(Boolean),
+        ...(tabColumnState ? { columnState: tabColumnState } : {}),
+        // objectstack#35892 — a footer calculation the reader picked on the
+        // tab rides back on its column, so it survives the grid remounting
+        // (another tab and back) until 「Discard」.
+        columns: tabSummaryColumns(
+          effectiveColumns.map((c: any) => c.accessorKey || columnIdentity(c)).filter(Boolean),
+          tabList ? tabConditions.summaries : undefined,
+        ),
         showSearch: false,
         showPagination: false,
-        // The host's row actions (`list_item`, and `record_related` inside a
+        // objectstack#35892 — cell editing as on the list page
+        // (objectstack#35683): where the reader may edit the child object.
+        ...(tabList ? { editable: tabInlineEdit } : {}),
+        // The host's row actions (`record_row`, and `record_related` inside a
         // parent record), already localized — the non-author host key the
         // console's object page hands the same grid. A dispatch from them is
         // routed back to `onRowAction` (`enlargedGridActions`).
@@ -3509,7 +3921,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           rowEditPredicates,
           rowDeletePredicates,
           onRowClick: handleRowClick,
-          // Child-object row actions (`list_item`, or `record_related` inside a
+          // Child-object row actions (`record_row`, or `record_related` inside a
           // parent record) rendered in the same overflow menu, dispatched with
           // the clicked row as target.
           rowActionDefs: hasCustomRowActions ? rowActions : undefined,
@@ -3523,9 +3935,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodyTableColumnsOmitted, bodyTableColumnCap, bodySummaryRow, ownRelationshipId, storedListPreference?.columnState]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort, bodyTable, bodyTableOverflows, bodyTableColumnsOmitted, bodyTableColumnCap, bodySummaryRow, ownRelationshipId, tabColumnState, tabList, tabConditions.summaries, tabInlineEdit]);
 
   const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
+
 
   /**
    * objectstack#28865 — the enlarged face's grid, driven by this list on the
@@ -3547,13 +3960,61 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    *    paints withheld while the grid reads its own (objectui#10657).
    *  - `onEdit` / `onDelete`: this list's row Edit and its confirm-then-delete.
    */
+  const tabShownFields = React.useMemo(
+    () => (tabList ? effectiveColumns.map((c: any) => c.accessorKey || columnIdentity(c)).filter(Boolean) as string[] : []),
+    [tabList, effectiveColumns],
+  );
+  const tabRecordCountLead = React.useCallback(
+    (count: number) => (count === 1 ? t('detail.relatedRecordOne', { count }) : t('detail.relatedRecords', { count })),
+    [t],
+  );
+  const tabSummaries = tabConditions.summaries;
+  const pickTabSummary = React.useCallback(
+    (field: string, summary: unknown) => {
+      const { [field]: _previous, ...rest } = tabSummaries;
+      // None on a column that declares nothing is the default, not a change.
+      patchTabConditions({ summaries: summary ? { ...rest, [field]: summary as never } : rest });
+    },
+    [tabSummaries, patchTabConditions],
+  );
   const enlargedGridHost = React.useMemo(() => {
     if (!enlargedGrid) return undefined;
     const heldBefore = currentPage * (effectivePageSize || 0);
     const rowCount = windowed
       ? total ?? heldBefore + relatedData.length + (hasMore ? 1 : 0)
       : sortedData.length;
+    // objectstack#35892 — the related tab is the list page's grid: its
+    // column menu, select-first cells, the resident footer row with the
+    // reader's calculations over every matching row (`findParams`, the
+    // tab's own query), and selection with the floating bar (bulk delete).
+    // One growing window, no pager: `data` is every row loaded so far and
+    // `rowCount` the match total, which the footer leads with.
+    const cardFace = previewFace ? { cardFace: true } : {};
+    if (tabList) {
+      return {
+        ...cardFace,
+        manualPagination: true,
+        rowCount: total ?? sortedData.length,
+        page: 1,
+        pageSize: Math.max(1, paginatedData.length),
+        onPageChange: () => {},
+        sort: activeSort,
+        onSortChange: handleTableSort,
+        headerMenu: true,
+        cellSelection: true,
+        residentSummaryRow: true,
+        summaryRowLead: tabRecordCountLead,
+        onColumnSummaryPick: pickTabSummary,
+        ...(tabFindParams ? { findParams: tabFindParams } : {}),
+        ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
+        ...(onRowEdit ? { onEdit: onRowEdit } : {}),
+        ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+        ...(tabBulkDelete ? { onBulkDelete: handleBulkDeleteRows } : {}),
+        ...(writeTabColumnState ? { onColumnStateChange: writeTabColumnState } : {}),
+      };
+    }
     return {
+      ...cardFace,
       manualPagination: true,
       rowCount,
       page: currentPage + 1,
@@ -3564,9 +4025,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
       ...(onRowEdit ? { onEdit: onRowEdit } : {}),
       ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
-      ...(preferenceKey ? { onColumnStateChange: (columnState: RelatedListPreference['columnState']) => writeListPreference({ columnState }) } : {}),
+      ...(writeTabColumnState ? { onColumnStateChange: writeTabColumnState } : {}),
     };
-  }, [preferenceKey, writeListPreference, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+  }, [writeTabColumnState, enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow, tabList, tabRecordCountLead, pickTabSummary, tabFindParams, handleBulkDeleteRows, tabBulkDelete, previewFace]);
 
   // objectstack#35601 — a stateful child (tasks) is grouped by its status on
   // the related tab: open groups first, completed last (`statusGroupsOf`).
@@ -3610,13 +4071,26 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
 
-  const SectionIcon = resolveIconComponent(icon);
+  // The section names the related object by its tile (objectstack#35985): the
+  // glyph is the list's own `icon`, else the object's; the colour is always
+  // the object's, so the list looks as the object does in the menu.
+  const SectionIcon = resolveIconComponent(icon ?? (typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined));
+  const sectionColor = typeof objectSchema?.color === 'string' ? objectSchema.color : undefined;
   // Badge shows the COLLECTION size: the server total in windowed mode (only
   // one page is in memory), the loaded row count otherwise.
   // objectstack#27056 — a compact card counted up front answers from that
   // count until its rows land (out of view, or counted at 0, they never do).
   const countAnswers = compact && cardCount !== null && !loadFailure && (loading || !rowsWanted);
   const recordCount = countAnswers ? cardCount! : windowed && total != null ? total : relatedData.length;
+  // objectstack#36235 — a count not known yet is drawn as nothing, never as
+  // the 0 an empty first read holds: while the first rows are in flight (or a
+  // card out of view has not asked) and no count answers for them, the badge
+  // waits. A refetch over rows already drawn keeps their count.
+  // objectstack#36822 — and so does a refetch over a list that already
+  // answered 0: once a read has answered, the count is known (`countKnown`),
+  // so a later read in flight keeps drawing the last answer.
+  const countPending =
+    !countAnswers && loading && !countKnown && relatedData.length === 0 && !(windowed && total != null);
   // In windowed mode an empty page beyond page 0 is a transient overflow (the
   // step-back effect above corrects it), not an empty collection.
   // A failed read is never empty: it draws its own line (objectstack#26415).
@@ -3639,7 +4113,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // reading, whose read failed, or whose filter was refused holds no number
   // yet, and says none.
   const reportTotal = React.useContext(RelatedListTotalReportContext);
-  const settledTotal = loading || loadFailure || filterRefusal ? null : recordCount;
+  // The related tab's own filter narrows its rows, never the number its tab
+  // title shows (objectstack#35892): every child, so a filtered read says none.
+  const settledTotal = loading || loadFailure || filterRefusal || tabFilterNode !== undefined ? null : recordCount;
   React.useEffect(() => {
     if (settledTotal !== null) reportTotal?.(settledTotal);
   }, [reportTotal, settledTotal]);
@@ -3663,6 +4139,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     const keys = readColumnKeys(bodyTableColumnKeysKey);
     const watch = (box: HTMLElement) => {
       const read = () => {
+        // objectstack#37212 — the table adopts the columns it is handed a
+        // render later. While it still draws the hand-over it adopted last (the
+        // same leading run of these columns), it is measured for that cap, not
+        // this one, and judging this cap by it flips the cap on every commit:
+        // skip that read; its re-draw reads again. A table that draws a run of
+        // its own choosing (a column hidden from its header menu) is read.
+        const drawn = Array.from(box.querySelectorAll('thead th[data-column-key]'), (th) => th.getAttribute('data-column-key'));
+        const handed = bodyTableColumnCap ?? keys.length;
+        const leadingRun = drawn.every((key, index) => key === keys[index]);
+        if (leadingRun && drawn.length === handed) bodyTableAdoptedCount.current = handed;
+        else if (leadingRun && drawn.length === bodyTableAdoptedCount.current) return;
         // objectstack#35742 — the columns that fit whole: the box's width
         // less the cells that are no column (the row actions), against the
         // width each column asks for.
@@ -3682,7 +4169,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         setBodyTableOverflows(box.scrollWidth - box.clientWidth > 1);
       };
       read();
-      // The table settles its columns a render after it is handed fewer:
+      // The table settles its columns a render after it is handed others:
       // read again when its cells change.
       if (typeof MutationObserver !== 'undefined') {
         cells = new MutationObserver(read);
@@ -3731,9 +4218,8 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     return (
       <Card className={cn('shadow-none border-border/60 bg-transparent', className)}>
         <CardHeader className="py-3 px-4 sm:py-3 min-h-12 sm:min-h-0">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-            {/* eslint-disable-next-line react-hooks/static-components -- resolveIconComponent returns a stable icon component from a static registry, not a component created during render */}
-            <SectionIcon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+          <CardTitle className="flex items-center gap-2 text-sm font-medium">
+            <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
             <span className="truncate">{title}</span>
           </CardTitle>
         </CardHeader>
@@ -3782,6 +4268,34 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <AlertDialogAction
                 onClick={handleConfirmDelete}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {t('detail.delete', { defaultValue: 'Delete' })}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {/* objectstack#35892 — the related tab's bulk delete, confirmed once. */}
+        <AlertDialog
+          open={bulkDeleteTargets !== null}
+          onOpenChange={(open) => { if (!open) setBulkDeleteTargets(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t('detail.deleteRowsTitle', { count: bulkDeleteTargets?.length ?? 0 })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('detail.deleteRowsConfirmation', { count: bulkDeleteTargets?.length ?? 0 })}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t('detail.cancel', { defaultValue: 'Cancel' })}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmBulkDelete}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                data-related-bulk-delete-confirm=""
               >
                 {t('detail.delete', { defaultValue: 'Delete' })}
               </AlertDialogAction>
@@ -3855,7 +4369,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         const date = new Date(row[key]);
         if (Number.isNaN(date.getTime())) return null;
         return (
-          <span className="shrink-0 text-[11px] text-muted-foreground" data-related-card-chip="date">
+          <span className="shrink-0 text-xs text-muted-foreground" data-related-card-chip="date">
             {date.toLocaleDateString(displayLocale, { month: 'short', day: 'numeric' })}
           </span>
         );
@@ -3863,7 +4377,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       const raw = row[key];
       const option = Array.isArray(def?.options) ? def.options.find((o: any) => o?.value === raw) : undefined;
       return (
-        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[11px] font-normal" data-related-card-chip="status">
+        <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-xs font-normal" data-related-card-chip="status">
           {option?.label ?? String(raw)}
         </Badge>
       );
@@ -3872,15 +4386,17 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // Rows still to come: one placeholder per row the count says the card
     // names, so the card does not grow when they land.
     const pendingRows = countAnswers && cardCount! > 0 ? Math.min(cardCount!, COMPACT_RELATED_ROWS) : 0;
-    const countChip = !loadFailure && (
+    const countChip = !loadFailure && !countPending && (
       <span
-        className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-[11.5px] font-normal text-foreground"
+        className="inline-flex h-5 shrink-0 items-center rounded bg-muted px-1.5 text-xs font-normal text-foreground"
         data-related-card-count=""
       >
         {recordCount}
       </span>
     );
-    const viewAll = t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
+    const viewAll = countPending
+      ? t('detail.viewAll')
+      : t('detail.relatedPanelViewAll', { count: recordCount, defaultValue: 'View all {{count}}' });
     return (
       <section
         ref={setCompactCard}
@@ -3891,7 +4407,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         aria-busy={pendingRows > 0 || undefined}
       >
         <div
-          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+          className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-sm font-medium"
           data-related-panel-head=""
         >
           {open ? (
@@ -3924,7 +4440,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             </>
           )}
           {cardChrome?.fresh && (
-            <Badge className="h-4 shrink-0 px-1 text-[10px] font-normal" data-related-card-new="">
+            <Badge className="h-4 shrink-0 px-1 text-xs font-normal" data-related-card-new="">
               {t('detail.relatedCardNew', { defaultValue: 'New' })}
             </Badge>
           )}
@@ -3989,7 +4505,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             return (
               <div
                 key={row?.id ?? index}
-                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-[12.5px]"
+                className="flex min-h-11 sm:h-8 sm:min-h-0 items-center justify-between gap-2 border-t border-border px-3 text-sm"
                 data-related-card-row=""
               >
                 {/* objectstack#27604 — hovering the name (or Space on it)
@@ -4025,58 +4541,87 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     );
   }
 
-  // objectstack#35601 — the record page's related tab: no filter, sort,
-  // options or condition row (sorting is the table header's, filtering is the
-  // list page's), and the count only in the tab title. Its right end carries
-  // two entries: 「↗」, the child object's list under this record's condition,
-  // drawn on an empty list too, and 「+ 添加」, the one add entry
-  // (`addEntry`). The child object's own toolbar actions stay beside them.
+  // objectstack#35892 — the record page's related tab is the child object's
+  // full list (it was objectstack#35601's bare table). Row one: the child
+  // list's tile and name on the left; the child object's toolbar actions and
+  // 「+ 添加」, the one add entry (`addEntry`), on the right. Row two: the list
+  // page's own condition row (the host's `RelatedListConditionsSlotContext`):
+  // 「排序」 and 「筛选」, no view switch, view settings or search, and 「放弃」
+  // at its end while the reader changed anything. The tab title keeps the
+  // count of every child; the table's footer counts the matching ones. No
+  // 「在列表中打开」. The rows load as the page scrolls.
   if (enlargedFace) {
+    const conditionRow = tabList && renderListConditions ? renderListConditions({
+      objectName: api,
+      objectDef: objectSchema,
+      shownFields: tabShownFields,
+      sort: tabConditions.sort,
+      onSortChange: (sort) => patchTabConditions({ sort }),
+      filters: tabConditions.filters,
+      onFiltersChange: (filters, filterNode) => patchTabConditions({ filters, filterNode }),
+      dataSource,
+      ...(tabChanged ? { onDiscard: discardTabConditions } : {}),
+    }) : null;
+    // A re-read after a new sort or filter dims the rows it replaces; the
+    // next window as the page scrolls does not.
+    const rereading = loading && !(tabGrows && currentPage > 0);
     return (
-      <section className={cn('flex min-w-0 flex-col gap-3', className)} data-related-enlarged-list="">
-        <div
-          role="toolbar"
-          aria-label={title}
-          className="flex flex-wrap items-center justify-end gap-1"
-          data-related-enlarged-toolbar=""
-        >
-          {onToolbarAction && permittedToolbarActions.map((a) => (
-            <RelatedToolbarButton key={a.name} action={a} onToolbarAction={onToolbarAction} />
-          ))}
-          {onViewAll && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-11 w-11 p-0 sm:h-8 sm:w-8 text-muted-foreground"
-              aria-label={t('detail.viewAll')}
-              title={t('detail.viewAll')}
-              data-related-open-list=""
-              onClick={() => onViewAll()}
-            >
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {addEntry && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={addEntry.disabled}
-              onClick={addEntry.onClick}
-              className="h-11 sm:h-8 gap-1 text-xs shadow-none"
-              data-related-add=""
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {addEntry.label}
-            </Button>
-          )}
+      <section className={cn('flex min-w-0 flex-col gap-2', className)} data-related-enlarged-list="">
+        <div className="flex min-w-0 items-center gap-2" data-related-enlarged-head="">
+          <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
+          <h3 className="min-w-0 flex-1 truncate text-sm font-medium" data-related-enlarged-title="">
+            {title}
+          </h3>
+          <div
+            role="toolbar"
+            aria-label={title}
+            className="flex shrink-0 flex-wrap items-center justify-end gap-1"
+            data-related-enlarged-toolbar=""
+          >
+            {onToolbarAction && permittedToolbarActions.map((a) => (
+              <RelatedToolbarButton key={a.name} action={a} onToolbarAction={onToolbarAction} />
+            ))}
+            {addEntry && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={addEntry.disabled}
+                onClick={addEntry.onClick}
+                className="h-11 sm:h-8 gap-1 text-xs shadow-none"
+                data-related-add=""
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {addEntry.label}
+              </Button>
+            )}
+          </div>
         </div>
+        {conditionRow && <div className="min-w-0" data-related-enlarged-conditions="">{conditionRow}</div>}
+        {bulkDeleteOutcome && (
+          <div
+            role="status"
+            data-related-bulk-delete-outcome=""
+            className={cn('min-w-0 text-xs', bulkDeleteOutcome.failed > 0 ? 'text-destructive' : 'text-muted-foreground')}
+          >
+            <p>
+              {bulkDeleteOutcome.failed > 0
+                ? t('objectActions.bulkDeletePartial', { succeeded: bulkDeleteOutcome.succeeded, failed: bulkDeleteOutcome.failed })
+                : t('objectActions.bulkDeleteSuccess', { count: bulkDeleteOutcome.succeeded, label: objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' }) })}
+            </p>
+            {bulkDeleteOutcome.reasons.length > 0 && (
+              <ul data-related-bulk-delete-reasons="" className="mt-0.5 [overflow-wrap:anywhere]">
+                {bulkDeleteOutcome.reasons.map((line) => <li key={line}>{line}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
         {loadFailure ? (
           <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
         ) : loading && relatedData.length === 0 ? (
           <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">{t('detail.loading')}</div>
         ) : isEmpty ? (
           <div className="py-6 text-center text-sm text-muted-foreground" data-related-enlarged-empty="">
-            {t('detail.noRelatedRecords')}
+            {tabFilterNode !== undefined ? t('detail.relatedNoMatches') : t('detail.noRelatedRecords')}
           </div>
         ) : (
           <>
@@ -4084,18 +4629,23 @@ export const RelatedList: React.FC<RelatedListProps> = ({
               <RelatedStatusGroups
                 groups={statusGroups}
                 renderRows={(rows) => (
+                  // A grouped tab draws no footer row (objectstack#35892 F5):
+                  // its groups already count their rows.
                   <SchemaRenderer
                     schema={{ ...viewSchema, data: { provider: 'value', items: rows } }}
                     {...enlargedGridHost}
                     rowCount={rows.length}
                     page={1}
                     pageSize={Math.max(1, rows.length)}
+                    residentSummaryRow={false}
+                    onColumnSummaryPick={undefined}
+                    findParams={undefined}
                   />
                 )}
                 actions={enlargedGridActions}
               />
             ) : (
-              <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
+              <div className={cn('min-w-0', rereading && 'pointer-events-none opacity-60 transition-opacity')}>
                 {enlargedGridActions ? (
                   <ActionCtxReact.Provider value={enlargedGridActions}>
                     <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
@@ -4105,7 +4655,14 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 )}
               </div>
             )}
-            {showPagination && (
+            {tabGrows && canGoNext && (
+              <RelatedTabLoadMore
+                loading={loading}
+                onLoadMore={() => setCurrentPage((p) => p + 1)}
+                label={t('detail.loading')}
+              />
+            )}
+            {showPagination && !tabGrows && (
               <div className="flex items-center justify-end gap-2">
                 <span className="mr-auto text-xs text-muted-foreground" data-related-enlarged-status="">
                   {t('detail.pageOf', { current: currentPage + 1, total: totalPages })}
@@ -4147,21 +4704,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         onClick={handleHeaderClick}
         data-related-list-head=""
       >
-        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-semibold', compact && 'flex-wrap')}>
+        <CardTitle className={cn('flex items-center justify-between gap-2 text-sm font-medium', compact && 'flex-wrap')}>
           <div className="flex items-center gap-2 min-w-0">
             {isCollapsible && (
               collapsed
                 ? (<ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
                 : (<ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />)
             )}
-            {/* eslint-disable-next-line react-hooks/static-components -- resolveIconComponent returns a stable icon component from a static registry, not a component created during render */}
-            <SectionIcon className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+            <ObjectIconTile glyph={SectionIcon} color={sectionColor} />
             <span className={cn('truncate', isEmpty && 'text-muted-foreground font-medium')}>
               {title}
             </span>
             {/* No count over a failed read: "0" would be the claim the
                 load-failed line exists to withdraw (objectstack#26415). */}
-            {!loadFailure && (
+            {!loadFailure && !countPending && (
               <Badge
                 variant="secondary"
                 className={cn(
@@ -4182,7 +4738,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {/* Child-object list_toolbar actions (e.g. Invite User) — the
+            {/* Child-object list actions (e.g. Invite User) — the
                 related-list equivalent of the object list's toolbar buttons.
                 Rendered before Add/New so the domain action leads. */}
             {onToolbarAction && permittedToolbarActions.map((a) => (
@@ -4422,6 +4978,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             <SchemaRenderer schema={viewSchema} />
           </div>
         )}
+        {/* objectstack#35831 — the totals of the summed columns left out for
+            width, each named, under the table that left them out. */}
+        {bodyTableDrawn && <BodyTableTotalsLine totals={bodyOmittedTotals} omitted />}
 
         {/* objectstack#35597 — a body table past its row cap offers
             「显示全部 N 条」, which expands it in place (no pages); a list

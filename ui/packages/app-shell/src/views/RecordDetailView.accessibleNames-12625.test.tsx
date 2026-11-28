@@ -14,7 +14,7 @@
  * - The page's regions are named by their labels: the right column, the 动态
  *   panel (Activity) and a related panel (Task). They were the Details and
  *   Related tabs until objectstack#27524 laid every width out as columns.
- * - A declared `record_header` action is named by its label (Log a Call).
+ * - A declared `record_page` action is named by its label (Log a Call).
  * - A collapsible field group's header is a button named by its label
  *   (Lead Information) that toggles `aria-expanded` — the half the card found
  *   really broken (`DetailSection`'s header was a div with no role).
@@ -26,7 +26,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen, cleanup, within } from '@testing-library/react';
+import { render, waitFor, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
@@ -73,7 +73,7 @@ const headerAction = (name: string, label: string) => ({
   label,
   type: 'api',
   target: '/api/v1/noop',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 const LEAD = {
@@ -173,14 +173,13 @@ afterEach(() => {
 });
 
 describe('objectui#12625 — the record page names its regions, header actions and section headers', () => {
-  it('the right column and its cards are named by their labels; the 动态 tab by its label', async () => {
+  it('the record\'s tabs are named by their labels: 详情, the related lists, 动态 (objectstack#35890: no right column)', async () => {
     await mountLeadPage();
-    const right = screen.getByRole('complementary', { name: 'Right column' });
-    expect(right).toBeInTheDocument();
-    // objectstack#35595 / #35596 — the stream is the Activity tab; the rail's
-    // cards are regions named by their titles.
+    // objectstack#35890 — the right rail is retired: no complementary region.
+    expect(screen.queryByRole('complementary', { name: 'Right column' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Details/ })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /^Activity/ })).toBeInTheDocument();
-    expect(await within(right).findByRole('region', { name: 'Task' })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /^Task/ })).toBeInTheDocument();
   });
 
   it('the header actions are named by their labels', async () => {
@@ -202,8 +201,8 @@ describe('objectui#12625 — the record page names its regions, header actions a
     expect(header).toHaveAttribute('aria-expanded', 'true');
     await user.click(header);
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    // CONTROL: the non-collapsible group shows its heading but is no button.
-    expect(screen.getByText('Address')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
+    // A group that declares no collapse folds on the default record page too,
+    // starting open (objectstack#36269).
+    expect(screen.getByRole('button', { name: 'Address' })).toHaveAttribute('aria-expanded', 'true');
   });
 });

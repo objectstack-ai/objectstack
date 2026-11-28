@@ -78,7 +78,13 @@ const { STORED, approvalsApiStub, ADAPTER, AUTH, I18N } = vi.hoisted(() => {
   };
   const ADAPTER = {
     find: async () => ({ data: [{ id: 'po_1' }] }),
-    getObjectSchema: async () => ({ fields: {} }),
+    // The queue row's figure is the object's first numeric `highlightFields`
+    // entry (ADR-0085), so the object declares `amount` as one; without the
+    // declaration the row shows no figure and there is nothing to format.
+    getObjectSchema: async () => ({
+      highlightFields: ['amount'],
+      fields: { amount: { type: 'number' }, quantity: { type: 'number' } },
+    }),
     getClient: () => client,
   };
   const AUTH = { user: { id: 'u_1', email: 'approver@example.com' } };
@@ -95,7 +101,10 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => {
-  const authFetch = async () => new Response('{}', { status: 200 });
+  // A case that stubs the wire (the audit log's ledger read, which goes through
+  // the authenticated fetch) is answered by its stub; every other read gets `{}`.
+  const authFetch = async (input: RequestInfo | URL, init?: RequestInit) =>
+    vi.isMockFunction(globalThis.fetch) ? globalThis.fetch(input, init) : new Response('{}', { status: 200 });
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     useAuth: () => AUTH,
@@ -169,6 +178,9 @@ const SURFACES: Surface[] = [
       );
       await screen.findAllByText('Purchase Approval');
       await screen.findAllByText(/Sam Submitter/);
+      // The figure renders once the object's metadata read answers; wait for
+      // it in either locale's spelling, then read the face.
+      await screen.findAllByText(/1[.,]234[.,]5/);
       const text = faceOf(document.body);
       cleanup();
       return text;

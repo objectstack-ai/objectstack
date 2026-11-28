@@ -25,6 +25,17 @@ const INVITATION_STATUS_LABELS: Record<InvitationStatus, string> = {
 };
 
 /**
+ * The badge colour each invitation status declares. A select option is
+ * coloured only when its author declares a colour (objectstack#36882), so the
+ * statuses that read as a state change carry one; the rest render neutral.
+ */
+const INVITATION_STATUS_COLORS: Partial<Record<InvitationStatus, string>> = {
+  pending: 'yellow',
+  rejected: 'red',
+  canceled: 'red',
+};
+
+/**
  * sys_invitation — System Invitation Object
  *
  * Organization invitation tokens for inviting users.
@@ -37,6 +48,7 @@ export const SysInvitation = ObjectSchema.create({
   label: 'Invitation',
   pluralLabel: 'Invitations',
   icon: 'mail',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
@@ -75,7 +87,7 @@ export const SysInvitation = ObjectSchema.create({
         'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       // Inviting/managing invitations is a multi-org-only flow (the
@@ -119,7 +131,7 @@ export const SysInvitation = ObjectSchema.create({
       icon: 'x-circle',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/cancel-invitation',
       recordIdParam: 'invitationId',
@@ -156,7 +168,7 @@ export const SysInvitation = ObjectSchema.create({
         'Resend the invitation to {{ record.email }}? The expiry date starts over, and an invitation that has already expired is replaced by a new one.',
       icon: 'send',
       variant: 'secondary',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       bodyExtra: { resend: true },
@@ -201,7 +213,7 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Copy Invite Link',
       icon: 'link',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'script',
       target: 'copy_invitation_link',
       // The gates of `resend_invitation` (the organization capability and the
@@ -209,7 +221,7 @@ export const SysInvitation = ObjectSchema.create({
       // invite mirrors are, and offered on a pending row only, before its
       // `expires_at`: a row can still read `pending` after it expires, and
       // its link admits no one (the handler refuses it too). `has()` opens
-      // each operand for the sparse `list_item` face (#8990), as on the
+      // each operand for the sparse `record_row` face (#8990), as on the
       // recipient-side actions below; `expires_at` is compared by ordering,
       // so it also needs its `!= null` half (`materializeDeclaredFields`).
       visible: "features.cloudManaged != true && has(record.status) && record.status == 'pending' && has(record.expires_at) && record.expires_at != null && datetime(record.expires_at) > now()",
@@ -237,7 +249,7 @@ export const SysInvitation = ObjectSchema.create({
     // them out of the admin org-management view.
     //
     // Both predicates open each operand with `has()` for the SPARSE action
-    // face (#8990): they reach `list_item`, so the bound record is the row the
+    // face (#8990): they reach `record_row`, so the bound record is the row the
     // inbox view projected, and an unprojected `email` / `status` aborts the
     // whole predicate at key resolution instead of reading null — fail-closed,
     // so the Accept/Decline pair vanishes with no way to tell that from the
@@ -250,7 +262,7 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Accept Invitation',
       icon: 'check',
       variant: 'primary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/organization/accept-invitation',
       recordIdParam: 'invitationId',
@@ -273,7 +285,7 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Decline Invitation',
       icon: 'x',
       variant: 'ghost',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/organization/reject-invitation',
       recordIdParam: 'invitationId',
@@ -416,7 +428,11 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Status',
       required: true,
       defaultValue: 'pending',
-      options: InvitationStatus.options.map((value) => ({ value, label: INVITATION_STATUS_LABELS[value] })),
+      options: InvitationStatus.options.map((value) => ({
+        value,
+        label: INVITATION_STATUS_LABELS[value],
+        ...(INVITATION_STATUS_COLORS[value] ? { color: INVITATION_STATUS_COLORS[value] } : {}),
+      })),
     }),
     
     inviter_id: Field.lookup('sys_user', {

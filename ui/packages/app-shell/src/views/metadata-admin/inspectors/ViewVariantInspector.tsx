@@ -43,6 +43,8 @@ import { IssuePrefixLines, issuesUnderPrefix, useIssuePrefixRegister, useSliceFo
 import { useObjectFields, type ObjectFieldInfo } from '../previews/useObjectFields.js';
 import { failed, loaded, type LoadState } from '../loadState.js';
 import type { ObjectFieldOption, WidgetContext } from '../widgets.js';
+import { useMetadataClient } from '../useMetadata.js';
+import { useCapabilityAudienceLoader } from '../useCapabilityAudienceLoader.js';
 
 /**
  * Object picker for the view's binding — a searchable dropdown over the live
@@ -281,6 +283,13 @@ export function ViewVariantInspector({
   // (e.g. CelPredicateField / ConditionalFormattingEditor).
   const tLocal = React.useCallback((k: string) => t(k, locale), [locale]);
   const fieldNames = React.useMemo(() => objectFields.map((f) => f.name), [objectFields]);
+  // Each field's `type` and `multiple`, so a formatting rule that compares a
+  // list field with a scalar is refused while typing. Memoized: the CEL editor
+  // re-derives its list-valued fields only when this identity changes.
+  const celFieldDefs = React.useMemo(
+    () => objectFields.map((f) => ({ name: f.name, type: f.type, multiple: f.multiple })),
+    [objectFields],
+  );
   const cfRules = Array.isArray(variant.conditionalFormatting)
     ? (variant.conditionalFormatting as unknown[])
     : [];
@@ -362,7 +371,16 @@ export function ViewVariantInspector({
       fieldCatalog = { status: 'loading' };
     } else {
       fieldCatalog = loaded(
-        objectFields.map((f) => ({ name: f.name, label: f.label, type: f.type })),
+        // `options` ride along for the filter's picklist value picker,
+        // `multiple` for its operator set: a list-valued column is offered
+        // membership and the empty checks only.
+        objectFields.map((f) => ({
+          name: f.name,
+          label: f.label,
+          type: f.type,
+          ...(f.options ? { options: f.options } : {}),
+          ...(f.multiple ? { multiple: true } : {}),
+        })),
       );
     }
     // objectui#8167 — `none`, and the reason is recorded here rather than
@@ -399,6 +417,17 @@ export function ViewVariantInspector({
         sectionTitle: t('engine.inspector.moreFields', locale),
       }),
     [isFormFamily, serverVariantSchema, locale],
+  );
+
+  // objectstack#34908 — the audience row (`requiredPermissions`) is the
+  // `ref-multi:capability` picker: it offers the capabilities the environment
+  // knows and previews the positions the picked set reaches. The picker reads
+  // the three registries through this loader once it is on screen.
+  const metadataClient = useMetadataClient();
+  const loadCapabilityAudience = useCapabilityAudienceLoader(metadataClient);
+  const formWidgetContext = React.useMemo<WidgetContext>(
+    () => ({ ...widgetContext, loadCapabilityAudience }),
+    [widgetContext, loadCapabilityAudience],
   );
 
   /** Shallow-write a curated patch onto the variant. */
@@ -537,6 +566,7 @@ export function ViewVariantInspector({
             rules={cfRules as any}
             objectName={binding.value || undefined}
             fieldNames={fieldNames}
+            fieldDefs={celFieldDefs}
             disabled={readOnly}
             t={tLocal}
             onChange={(rules) =>
@@ -555,7 +585,7 @@ export function ViewVariantInspector({
             value={variant}
             hiddenFields={['type', 'object', 'label']}
             readOnly={readOnly}
-            widgetContext={widgetContext}
+            widgetContext={formWidgetContext}
             issues={variantIssues}
             revealIssues={revealIssues}
             onInlineIssueFieldsChange={setFormIssueRows}

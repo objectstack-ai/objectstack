@@ -27,7 +27,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema, SpecifierSchema } from '@objectstack/spec/system';
-import { builtinSettingsManifests } from './manifests/index.js';
+import { builtinSettingsManifests, knowledgeSettingsManifest, withAiEmbedderSection } from './manifests/index.js';
 import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
 
 /** Wrap a predicate in the smallest specifier that carries one. */
@@ -50,11 +50,22 @@ const evaluatorParses = (visible: unknown): boolean => {
   }
 };
 
+/**
+ * The bundled corpus: every manifest declaration this package ships. #33933
+ * took the `knowledge` manifest and the `ai` embedder section out of the
+ * default aggregate; `@objectstack/service-knowledge` registers them from these
+ * same declarations, so they stay in the corpus the ruling measured.
+ */
+const corpus = [
+  ...builtinSettingsManifests.map((m) => (m.namespace === 'ai' ? withAiEmbedderSection(m) : m)),
+  knowledgeSettingsManifest,
+];
+
 describe('settings `visible` — declaration ⇄ evaluator', () => {
   it('the corpus: every bundled manifest parses against the narrowed declaration', () => {
     // The #7169 corpus, on the declaration side. Expected refusals: 0.
     const refusals: string[] = [];
-    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+    for (const manifest of corpus as Array<Record<string, any>>) {
       const parsed = SettingsManifestSchema.safeParse(manifest);
       if (!parsed.success) {
         refusals.push(`${manifest.namespace}: ${parsed.error.issues.map((i) => `${i.path.join('.')} — ${i.message}`).join(' | ')}`);
@@ -63,12 +74,12 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     expect(refusals).toEqual([]);
   });
 
-  it('the corpus is still the size the ruling measured — 10 manifests, 96 predicates', () => {
+  it('the corpus is still the size the ruling measured — 10 manifests, 110 predicates', () => {
     // If a bundled manifest gains or loses a `visible`, this number moves and
     // the reader is sent back to the measurement rather than trusting a stale
     // one. It is a tripwire on the premise, not a rule about how many
     // predicates a manifest may have — move it deliberately.
-    const predicates = (builtinSettingsManifests as Array<Record<string, any>>).flatMap((m) => [
+    const predicates = (corpus as Array<Record<string, any>>).flatMap((m) => [
       ...(typeof m.visible === 'undefined' ? [] : [m.visible]),
       ...(m.specifiers ?? []).filter((s: any) => typeof s.visible !== 'undefined').map((s: any) => s.visible),
     ]);
@@ -78,7 +89,10 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // policy, ADR-0069 TL;DR 6); it declares no `visible`, so the predicate
     // count does not move. `auth.mfa_grace_period_days` keeps its one
     // predicate, now over the three-level `mfa_required`.
-    expect(builtinSettingsManifests).toHaveLength(10);
+    // #33933: the aggregate is 9 now, and the corpus is still 10 with the
+    // `knowledge` manifest the knowledge service registers.
+    expect(builtinSettingsManifests).toHaveLength(9);
+    expect(corpus).toHaveLength(10);
     // 94 -> 96 at #11768: the `audience` group added two gated fields
     // (`audience_allowed_email_domains`, `audience_self_registration_permission_set`),
     // each with one `visible` predicate over `data.audience_posture`.
@@ -86,11 +100,25 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // `${data.provider !== 'memory'}` predicates on the generation-default and
     // title fields went with it (they now always show), and `title_max_length`
     // keeps only its `title_generation_enabled` term.
-    expect(predicates).toHaveLength(90);
+    // 90 -> 87 at #37098: `knowledge.chunk_overlap` was retired with its
+    // predicate, and the `indexing` group and `chunk_target` lost their
+    // `${data.adapter !== 'memory'}` terms — the in-memory adapter takes the
+    // service's passages too, so the target size applies to it.
+    // 87 -> 83 with the retired third `knowledge.adapter` option: its group and
+    // its three keys each carried one predicate over `data.adapter`.
+    // 83 -> 110 when `ai` took several providers at once: each of its nine
+    // providers gained an on/off toggle (shown beside the default provider), a
+    // model list and its own Test connection, each with one predicate; the
+    // existing per-provider predicates kept their count, now read as "the
+    // default provider or turned on".
+    // 110 -> 106 at #37104: `knowledge.adapter` itself was retired (nothing read
+    // it), so the four predicates over it went too: the `turso` group and its
+    // two keys now always show, and `over_fetch` was retired with its own.
+    expect(predicates).toHaveLength(106);
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {
-    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+    for (const manifest of corpus as Array<Record<string, any>>) {
       for (const spec of manifest.specifiers ?? []) {
         if (typeof spec.visible === 'undefined') continue;
         const where = `${manifest.namespace}.${spec.key ?? '(layout)'}: ${visibilitySource(spec.visible)}`;

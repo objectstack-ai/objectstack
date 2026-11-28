@@ -211,15 +211,35 @@
 
 import {
   API_TRIGGER_SECRET_REF_KEY,
+  FLOW_NODE_EXPRESSION_PATHS,
   TimeRelativeTriggerSchema,
   apiTriggerSecretRefOf,
   apiTriggerSignatureRefusals,
   apiTriggerVerifierOf,
+  collectFlowGraphs,
   resolveFlowTriggerKind,
+  type FlowEdgeParsed,
+  type FlowNodeParsed,
 } from '@objectstack/spec/automation';
 import { resolvePackageClosure } from '@objectstack/metadata-core';
-import { walkFlowNodes } from './flow-walk.js';
-import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import { flowNodeLabel, walkFlowNodes } from './flow-walk.js';
+import { collectFlowVariableNames, collectScreenFieldNames } from './flow-variable-scope.js';
+import {
+  closureDependencyRemedy,
+  indexServedObjectGraph,
+  packagesOf,
+  recordsOf,
+  suggestName,
+  type ObjectGraph,
+} from './object-graph.js';
+import {
+  TRIGGER_RECORD_READS,
+  indexSelectOptions,
+  optionLabelComparisons,
+  optionLabelOperands,
+  type FieldReads,
+  type SelectOptions,
+} from './flow-select-options.js';
 import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -389,6 +409,71 @@ export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing'
  * restates none of the declaration's grammar.
  */
 export const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE = 'flow-api-trigger-signature-unusable';
+/**
+ * #35143 — a record-change start (`triggerType: 'record-…'`) that names no
+ * `config.objectName`. The binding hands the record-change trigger
+ * `object: undefined`, and a hook registered with no object target runs on
+ * EVERY object's write (ObjectQL `registerHook`: an absent target is the
+ * whole collection). So the flow does not sit idle: it starts on a write to
+ * any object, with that row as `record`. `error`: the start node alone
+ * settles it, and no installed package changes the answer.
+ */
+export const FLOW_TRIGGER_OBJECT_MISSING = 'flow-trigger-object-missing';
+/**
+ * #35143 — a record-change start condition that compares a select field of
+ * the trigger object with an option's LABEL (`record.stage == 'Closed Lost'`)
+ * where the field stores the option's VALUE (`closed_lost`). The row holds
+ * the value, so the comparison is always false (or always true for `!=`) and
+ * the condition never tells one record from another.
+ *
+ * [#36964] One id for the one mistake wherever the flow compares the field,
+ * read by {@link optionLabelsBeyondStart}: an edge condition and a `decision`
+ * branch (on the trigger record, or on a row a `get_record` step bound to a
+ * variable), and a query filter's operand (`get_record` / `update_record` /
+ * `delete_record` `filter`, a time-relative sweep's `filter`). A flow filter
+ * is handed to the data engine as written, never resolved label → value
+ * (ADR-0061 D4 resolves labels for the query surfaces, not for an authored
+ * flow), so the label matches no row: the read finds nothing, the update or
+ * delete acts on nothing, the branch is never taken, and the run still
+ * reports success. Not the write rule's id (`flow-node-write-unknown-option`):
+ * that one's verdict is a write the record validator refuses, and a filter
+ * operand is refused by nothing.
+ *
+ * `error` at every position, the start condition's severity, on #5762's
+ * question: the label, the field's inline options and the object are all in
+ * this stack, and nothing installed changes what the row stores. A filter
+ * that means to find rows still holding a label (a clean-up after an options
+ * change) spells the operand as a CEL value envelope, which is not judged.
+ */
+export const FLOW_CONDITION_OPTION_LABEL = 'flow-condition-option-label';
+/**
+ * #35143 — a start node carrying BOTH a `record-*` `triggerType` and a
+ * `config.timeRelative` descriptor. The engine's binding resolver
+ * (`resolveFlowTriggerKind`) answers `record_change` first, so the sweep is
+ * never installed: the flow runs on record writes and never on the date.
+ */
+export const FLOW_TIME_RELATIVE_SHADOWED = 'flow-time-relative-shadowed';
+/**
+ * #35143 — `filter` or `maxRecords` written beside `config.timeRelative`
+ * instead of inside it. The sweep reads both from the descriptor only; the
+ * binding forwards `schedule` and `condition` from the start config and
+ * nothing else, so a sibling `filter` narrows nothing and a sibling cap caps
+ * nothing.
+ */
+export const FLOW_TIME_RELATIVE_KEY_MISPLACED = 'flow-time-relative-key-misplaced';
+/**
+ * #35143 — `config.timeRelative.dateField` names a field the swept object
+ * does not have, or one that is not a `date` / `datetime` field. The sweep
+ * builds its window as a range on that column, so it matches no record.
+ */
+export const FLOW_TIME_RELATIVE_DATE_FIELD_INVALID = 'flow-time-relative-date-field-invalid';
+/**
+ * #35143 — a schedule (or a time-relative sweep's cadence) written as a cron
+ * with no `timezone`. The trigger reads the cron in UTC
+ * (`schedule.timezone ?? 'UTC'`), so the hour fires at UTC, not at the hour
+ * of the zone the author had in mind. Advisory: a UTC hour may be the intent.
+ */
+export const FLOW_SCHEDULE_TIMEZONE_MISSING = 'flow-schedule-timezone-missing';
 
 type AnyRec = Record<string, unknown>;
 
@@ -624,6 +709,237 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /** The start node of a flow definition, if any. */
+/** [#35143] The field types a time-relative sweep's window can fall on. */
+const DATE_FIELD_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
+
+/** A start condition's CEL source: the bare string, or an envelope's `source`. */
+function conditionSourceOf(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object' && typeof (raw as AnyRec).source === 'string') return (raw as AnyRec).source as string;
+  return '';
+}
+
+/**
+ * [#36964] The node types whose `config.filter` is a query filter of the
+ * node's own object — read off the spec's expression ledger (the entries that
+ * declare `filterOperands`), so a node type that gains the filter shape there
+ * is read here without a second list.
+ */
+const FILTER_NODE_TYPES: ReadonlySet<string> = new Set(
+  FLOW_NODE_EXPRESSION_PATHS.filter((entry) => entry.filterOperands && entry.path === 'filter').map((entry) => entry.nodeType),
+);
+
+/** A literal, non-empty object name; a templated one (`{…}`) is resolved at run time. */
+function literalObjectName(raw: unknown): string | undefined {
+  return typeof raw === 'string' && raw.trim() !== '' && !raw.includes('{') ? raw : undefined;
+}
+
+/** A graph's key path in this file's path spelling: `['nodes', 1, 'config', 'body']` → `.nodes[1].config.body`. */
+function graphPathText(path: readonly (string | number)[]): string {
+  return path.map((segment) => (typeof segment === 'number' ? `[${segment}]` : `.${segment}`)).join('');
+}
+
+/** The object holding a graph's `nodes` / `edges` as AUTHORED, so an index names the author's list. */
+function graphHolder(flow: AnyRec, path: readonly (string | number)[]): AnyRec | undefined {
+  let at: unknown = flow;
+  for (const segment of path) {
+    if (!at || typeof at !== 'object') return undefined;
+    at = (at as Record<string | number, unknown>)[segment];
+  }
+  return at && typeof at === 'object' && !Array.isArray(at) ? (at as AnyRec) : undefined;
+}
+
+/**
+ * [#36964] `flow-condition-option-label` past the start condition (1-iv):
+ *
+ *  - a query FILTER's operand — every node in {@link FILTER_NODE_TYPES}, at any
+ *    region depth, against its own literal `objectName`, and a time-relative
+ *    start's `timeRelative.filter` against the swept object;
+ *  - an EDGE condition and a `decision` node's `conditions[].expression`, in
+ *    every graph of the flow, against the rows the condition can name: the
+ *    trigger record (`record.F`, `previous.F`, bare `F` unless a binding of the
+ *    same name shadows it) on a record-change or time-relative flow, and the
+ *    row a single-row `get_record` step bound to its `outputVariable`
+ *    (`deal.F`). A variable bound by anything else as well — another step, a
+ *    declared variable, a node id, a screen field — is not judged: which value
+ *    it holds when the condition runs is the run's. Likewise a `record` /
+ *    `previous` root the flow itself binds (a step's `outputVariable`, a loop's
+ *    `iteratorVariable`, an assignment target): after that binding `record.F`
+ *    is another row's field, so the root is not read as the trigger record.
+ */
+function optionLabelsBeyondStart(
+  flow: AnyRec,
+  flowIndex: number,
+  flowName: string,
+  start: { node: AnyRec; index: number } | undefined,
+  startConfig: AnyRec,
+  optionsIndex: () => ReadonlyMap<string, ReadonlyMap<string, SelectOptions>>,
+): FlowTriggerReadinessFinding[] {
+  const findings: FlowTriggerReadinessFinding[] = [];
+
+  const filterFindings = (filter: unknown, objectName: string, where: string, path: string): void => {
+    const options = optionsIndex().get(objectName);
+    if (!options) return;
+    for (const hit of optionLabelOperands(filter, options)) {
+      findings.push({
+        severity: 'error',
+        rule: FLOW_CONDITION_OPTION_LABEL,
+        where,
+        path: path + graphPathText(hit.path),
+        message:
+          `filters '${objectName}.${hit.field}' on '${hit.label}', which is that option's label; the field stores ` +
+          `the value '${hit.value}', so no record holds '${hit.label}' and the filter ` +
+          (hit.negated ? 'excludes no record' : 'matches no record'),
+        hint: `Filter on the option's value: write '${hit.value}' in place of '${hit.label}'`,
+      });
+    }
+  };
+
+  // Query filters: the CRUD nodes, nested regions included.
+  for (const { node, path, regionTrail } of walkFlowNodes(flow, `flows[${flowIndex}]`)) {
+    if (typeof node.type !== 'string' || !FILTER_NODE_TYPES.has(node.type)) continue;
+    const cfg = node.config;
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) continue;
+    const objectName = literalObjectName((cfg as AnyRec).objectName);
+    if (!objectName || (cfg as AnyRec).filter === undefined) continue;
+    const label = flowNodeLabel(node, Number(path.slice(path.lastIndexOf('[') + 1, -1)));
+    const where = `flow "${flowName}" › ${regionTrail ? `${regionTrail} › ` : ''}node "${label}"`;
+    filterFindings((cfg as AnyRec).filter, objectName, where, `${path}.config.filter`);
+  }
+
+  // The sweep's own filter, on the swept object.
+  const timeRelative = startConfig.timeRelative;
+  const sweptObject =
+    timeRelative && typeof timeRelative === 'object' && !Array.isArray(timeRelative)
+      ? literalObjectName((timeRelative as AnyRec).object)
+      : undefined;
+  if (start && sweptObject && (timeRelative as AnyRec).filter !== undefined) {
+    filterFindings(
+      (timeRelative as AnyRec).filter,
+      sweptObject,
+      `flow "${flowName}" › start node`,
+      `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.filter`,
+    );
+  }
+
+  // Conditions: which rows they can name, then every edge and decision branch.
+  const graphs = collectFlowGraphs({
+    ...flow,
+    nodes: recordsOf(flow.nodes) as unknown as FlowNodeParsed[],
+    edges: recordsOf(flow.edges) as unknown as FlowEdgeParsed[],
+  });
+  const triggerType = typeof startConfig.triggerType === 'string' ? startConfig.triggerType : undefined;
+  const triggerObject = triggerType?.startsWith('record-')
+    ? literalObjectName(startConfig.objectName)
+    : sweptObject;
+
+  // A single-row `get_record` binds its row to `outputVariable` (the `findOne`
+  // branch: `limit` absent or 1); a name bound by anything else as well is
+  // ambiguous and dropped.
+  const rowVariables = new Map<string, string | null>();
+  const rowReaders = new Set<unknown>();
+  for (const graph of graphs) {
+    for (const node of graph.nodes as unknown as AnyRec[]) {
+      if (node.type !== 'get_record' || !node.config || typeof node.config !== 'object') continue;
+      const cfg = node.config as AnyRec;
+      const variable = typeof cfg.outputVariable === 'string' && cfg.outputVariable ? cfg.outputVariable : undefined;
+      const objectName = literalObjectName(cfg.objectName);
+      if (!variable || !objectName || variable === 'record' || variable === 'previous') continue;
+      if (cfg.limit !== undefined && cfg.limit !== 1) continue;
+      rowReaders.add(node);
+      const prior = rowVariables.get(variable);
+      rowVariables.set(variable, prior === undefined || prior === objectName ? objectName : null);
+    }
+  }
+  const screenNames = collectScreenFieldNames(graphs);
+  const boundElsewhere = collectFlowVariableNames(
+    flow,
+    graphs.map((graph) => ({ nodes: graph.nodes.filter((node) => !rowReaders.has(node)) })),
+  );
+  const readers: Array<{ objectName: string; reads: FieldReads }> = [];
+  if (triggerObject) {
+    const shadowed = new Set([...collectFlowVariableNames(flow, graphs), ...screenNames]);
+    // A trigger root the flow rebinds names another row from then on: drop it.
+    const roots = TRIGGER_RECORD_READS.roots.filter((root) => !shadowed.has(root));
+    readers.push({ objectName: triggerObject, reads: { roots, bare: TRIGGER_RECORD_READS.bare, shadowed } });
+  }
+  for (const [variable, objectName] of rowVariables) {
+    if (objectName === null || boundElsewhere.has(variable) || screenNames.has(variable)) continue;
+    readers.push({ objectName, reads: { roots: [variable], bare: false } });
+  }
+  if (readers.length === 0) return findings;
+
+  const conditionFindings = (raw: unknown, where: string, path: string): void => {
+    const src = conditionSourceOf(raw);
+    if (!src) return;
+    for (const { objectName, reads } of readers) {
+      const options = optionsIndex().get(objectName);
+      if (!options) continue;
+      for (const hit of optionLabelComparisons(src, options, reads)) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_CONDITION_OPTION_LABEL,
+          where,
+          path,
+          message:
+            `compares '${objectName}.${hit.field}' with '${hit.label}', which is that option's label; the ` +
+            `field stores the value '${hit.value}', so the comparison never matches a record`,
+          hint: `Compare with the option's value: write '${hit.value}' in place of '${hit.label}'`,
+        });
+      }
+    }
+  };
+
+  for (const graph of graphs) {
+    const holder = graphHolder(flow, graph.path);
+    if (!holder) continue;
+    const base = `flows[${flowIndex}]${graphPathText(graph.path)}`;
+    const scope = graph.scope ? `${graph.scope} › ` : '';
+    if (Array.isArray(holder.edges)) {
+      holder.edges.forEach((edge: unknown, edgeIndex: number) => {
+        if (!edge || typeof edge !== 'object' || Array.isArray(edge)) return;
+        const e = edge as AnyRec;
+        const id = typeof e.id === 'string' && e.id ? e.id : `#${edgeIndex}`;
+        conditionFindings(e.condition, `flow "${flowName}" › ${scope}edge "${id}"`, `${base}.edges[${edgeIndex}].condition`);
+      });
+    }
+    if (Array.isArray(holder.nodes)) {
+      holder.nodes.forEach((node: unknown, nodeIndex: number) => {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+        const n = node as AnyRec;
+        const cfg = n.config as AnyRec | undefined;
+        if (n.type !== 'decision' || !cfg || typeof cfg !== 'object' || !Array.isArray(cfg.conditions)) return;
+        cfg.conditions.forEach((branch: unknown, branchIndex: number) => {
+          if (!branch || typeof branch !== 'object' || Array.isArray(branch)) return;
+          conditionFindings(
+            (branch as AnyRec).expression,
+            `flow "${flowName}" › ${scope}node "${flowNodeLabel(n, nodeIndex)}"`,
+            `${base}.nodes[${nodeIndex}].config.conditions[${branchIndex}].expression`,
+          );
+        });
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * [#35143] The cron expression of a `config.schedule` that names no
+ * `timezone`, read in the shapes the schedule trigger's `normalizeSchedule`
+ * reads: a bare cron string, or `{ type: 'cron', expression }` (`cron` is the
+ * older spelling of `expression`). Any other shape is no cron here.
+ */
+function cronWithoutZone(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw.trim() || undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const s = raw as AnyRec;
+  const isCron = s.type === 'cron' || (s.type === undefined && (typeof s.cron === 'string' || typeof s.expression === 'string'));
+  if (!isCron) return undefined;
+  const expression = (typeof s.expression === 'string' && s.expression) || (typeof s.cron === 'string' && s.cron) || '';
+  if (!expression.trim()) return undefined;
+  return typeof s.timezone === 'string' && s.timezone.trim() ? undefined : expression.trim();
+}
+
 function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined {
   const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
   const index = nodes.findIndex((n) => n?.type === 'start');
@@ -708,6 +1024,10 @@ export function validateFlowTriggerReadiness(
     };
   };
 
+  // [#35143] Built on first use: most stacks' flows never reach these reads.
+  let selectOptions: ReadonlyMap<string, ReadonlyMap<string, SelectOptions>> | undefined;
+  let servedGraph: ObjectGraph | undefined;
+
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
     const start = startNodeOf(flow);
@@ -756,7 +1076,53 @@ export function validateFlowTriggerReadiness(
           ),
         );
       }
+      // 1-ii. #35143 — no object at all. Not "binds to nothing": the trigger
+      //     registers its hook with no object target, which ObjectQL reads as
+      //     every object, so the flow starts on a write to any of them.
+      if (objectName === undefined || objectName.trim() === '') {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TRIGGER_OBJECT_MISSING,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
+          message:
+            objectName === undefined
+              ? `is a record-change flow ('${triggerType}') with no config.objectName, so its trigger watches every ` +
+                `object: it starts on a write to any object, with that row as \`record\``
+              : `is a record-change flow ('${triggerType}') whose config.objectName is blank; the engine refuses to ` +
+                `register a hook on an empty object name, so the trigger is never bound and the flow never starts`,
+          hint: `Set config.objectName to the object whose records should start this flow`,
+        });
+      } else {
+        // 1-iii. #35143 — the start condition compares a select field with an
+        //     option's label where the row holds the option's value.
+        selectOptions ??= indexSelectOptions(stack);
+        const options = selectOptions.get(objectName);
+        const src = conditionSourceOf(config.condition);
+        if (options && src) {
+          for (const hit of optionLabelComparisons(src, options)) {
+            findings.push({
+              severity: 'error',
+              rule: FLOW_CONDITION_OPTION_LABEL,
+              where: `flow "${flowName}" › start node`,
+              path: `flows[${flowIndex}].nodes[${start.index}].config.condition`,
+              message:
+                `compares '${objectName}.${hit.field}' with '${hit.label}', which is that option's label; the ` +
+                `field stores the value '${hit.value}', so the comparison never matches a record`,
+              hint: `Compare with the option's value: write '${hit.value}' in place of '${hit.label}'`,
+            });
+          }
+        }
+      }
     }
+
+    // 1-iv. [#36964] The same label, compared everywhere else the flow
+    //     compares a select field: a query filter's operand, an edge
+    //     condition, a `decision` branch. Built lazily: a flow with none of
+    //     them never pays for the options index.
+    findings.push(
+      ...optionLabelsBeyondStart(flow, flowIndex, flowName, start, config, () => (selectOptions ??= indexSelectOptions(stack))),
+    );
 
     // 1b. Two facts about the same `config.timeRelative` descriptor, from the two
     //     places that can decide them. The split is what keeps them from
@@ -888,6 +1254,98 @@ export function validateFlowTriggerReadiness(
           hint:
             `Remove config.objectName (the sweep never reads it), or set it to '${sweptObject}': conditions are then ` +
             `checked against the record each run holds`,
+        });
+      }
+
+      // 1b-iv. #35143 — a `record-*` token beside the descriptor. The resolver
+      //     answers `record_change` first, so the sweep is never installed.
+      if (isRecordTriggered) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_SHADOWED,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+          message:
+            `declares both config.triggerType '${triggerType}' and config.timeRelative; the record-change ` +
+            `trigger takes precedence, so the sweep is never installed and the flow never runs on the date`,
+          hint:
+            `Remove config.triggerType to keep the date sweep, or remove config.timeRelative to keep the ` +
+            `record-change trigger`,
+        });
+      }
+
+      // 1b-v. #35143 — `filter` / `maxRecords` beside the descriptor. The sweep
+      //     reads both from inside it only.
+      for (const key of ['filter', 'maxRecords'] as const) {
+        if (config[key] === undefined || tr[key] !== undefined) continue;
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_KEY_MISPLACED,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.${key}`,
+          message:
+            key === 'filter'
+              ? `sets config.filter beside config.timeRelative; the sweep reads its filter only from ` +
+                `config.timeRelative.filter, so this one is ignored and the flow runs for every record in the window`
+              : `sets config.maxRecords beside config.timeRelative; the sweep reads its cap only from ` +
+                `config.timeRelative.maxRecords, so this one is ignored and the default cap applies`,
+          hint: `Move it inside the descriptor: config.timeRelative.${key}`,
+        });
+      }
+
+      // 1b-vi. #35143 — the swept date field, against the swept object when
+      //     this stack declares it (an object it does not declare is 1b-i's).
+      const dateField = typeof tr.dateField === 'string' ? tr.dateField : undefined;
+      if (sweptObject && dateField) {
+        servedGraph ??= indexServedObjectGraph(stack);
+        const graphObject = servedGraph.get(sweptObject);
+        if (graphObject) {
+          const slice = graphObject.fields.get(dateField) ?? graphObject.injected.get(dateField);
+          const known = graphObject.names.has(dateField) || graphObject.injected.has(dateField);
+          const type = slice?.type;
+          if (!known || (type !== undefined && !DATE_FIELD_TYPES.has(type))) {
+            const dateFields = [...graphObject.fields, ...graphObject.injected]
+              .filter(([, f]) => f.type !== undefined && DATE_FIELD_TYPES.has(f.type))
+              .map(([n]) => n);
+            findings.push({
+              severity: 'error',
+              rule: FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+              where: `flow "${flowName}" › start node`,
+              path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.dateField`,
+              message: !known
+                ? `sweeps '${sweptObject}.${dateField}', and object '${sweptObject}' has no field '${dateField}', ` +
+                  `so the sweep's date window matches no record and the flow never runs` +
+                  suggestName(dateField, dateFields)
+                : `sweeps '${sweptObject}.${dateField}', a '${type}' field; the sweep's window is a date range, ` +
+                  `which a '${type}' field never falls in, so the flow never runs`,
+              hint:
+                dateFields.length > 0
+                  ? `Set config.timeRelative.dateField to a date or datetime field of '${sweptObject}' ` +
+                    `(${dateFields.join(', ')})`
+                  : `Add a date or datetime field to '${sweptObject}' and set config.timeRelative.dateField to it`,
+            });
+          }
+        }
+      }
+    }
+
+    // 1b-vii. #35143 — a cron cadence with no zone, on a flow the clock starts
+    //     (a schedule flow, or a sweep's cadence). The trigger reads it in UTC.
+    const clockKind = resolveFlowTriggerKind(flow);
+    if (start && (clockKind === 'schedule' || clockKind === 'time_relative')) {
+      const cron = cronWithoutZone(config.schedule);
+      if (cron !== undefined) {
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_SCHEDULE_TIMEZONE_MISSING,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.schedule`,
+          message:
+            `sets the cron '${cron}' with no timezone, so it fires at that hour in UTC, not in the zone ` +
+            `the hour was meant in`,
+          hint:
+            `Write the schedule as { type: 'cron', expression: '${cron}', timezone: 'Area/City' } with the zone ` +
+            `the hour is meant in, or set timezone: 'UTC' if UTC is the intent`,
         });
       }
     }
@@ -1454,4 +1912,62 @@ function signatureUnusableFinding(
       `Fix config.signature (its key named by config.secretRef only), or remove it to verify ` +
       `x-objectstack-signature`,
   };
+}
+
+/**
+ * #35143 — a `subflow` or `map` node whose `config.flowName` names no flow
+ * of this stack (nor of a package it carries in `packages[]`). The node asks
+ * the engine to run that flow by name, and the engine finds none, so the step
+ * fails every run (`subflow 'X' failed`).
+ *
+ * Its OWN exported rule, run on the CLI only, for the reason
+ * `flow-trigger-unknown-object` carries a hedge plus one more: the runtime
+ * publish gate judges a flow write over a snapshot whose `flows` holds only
+ * the written item, so a call to any other stored flow would read as unknown
+ * there. On the CLI the stack is one app; a flow another installed package
+ * ships is a legitimate target, so the finding is advisory, as that sibling's
+ * is without a stated closure.
+ */
+export const FLOW_SUBFLOW_UNKNOWN = 'flow-subflow-unknown';
+
+export function validateFlowSubflowTargets(stack: AnyRec): FlowTriggerReadinessFinding[] {
+  const findings: FlowTriggerReadinessFinding[] = [];
+  const flows = recordsOf(stack.flows);
+  if (flows.length === 0) return findings;
+  const known = new Set<string>();
+  for (const flow of flows) {
+    const name = nonEmptyString(flow.name);
+    if (name) known.add(name);
+  }
+  for (const entry of packagesOf(stack)) {
+    for (const flow of recordsOf(entry.flows)) {
+      const name = nonEmptyString(flow.name);
+      if (name) known.add(name);
+    }
+  }
+  flows.forEach((flow, flowIndex) => {
+    const flowName = nonEmptyString(flow.name) ?? `#${flowIndex}`;
+    for (const { node, path, regionTrail } of walkFlowNodes(flow, `flows[${flowIndex}]`)) {
+      if (node.type !== 'subflow' && node.type !== 'map') continue;
+      const config = node.config && typeof node.config === 'object' ? (node.config as AnyRec) : {};
+      const called = nonEmptyString(config.flowName)?.trim();
+      if (!called || known.has(called)) continue;
+      const nodeId = nonEmptyString(node.id) ?? String(node.type);
+      const nodeWhere = regionTrail ? `${regionTrail} › node "${nodeId}"` : `node "${nodeId}"`;
+      findings.push({
+        severity: 'warning',
+        rule: FLOW_SUBFLOW_UNKNOWN,
+        where: `flow "${flowName}" › ${nodeWhere}`,
+        path: `${path}.config.flowName`,
+        message:
+          `${String(node.type)} node '${nodeId}' calls flow '${called}', which this stack does not define; if ` +
+          `the name is wrong, the step fails on every run` +
+          suggestName(called, known),
+        hint:
+          `Set config.flowName to the exact name of a flow this app defines, or ignore this if another ` +
+          `installed package ships '${called}'`,
+      });
+    }
+  });
+  return findings;
 }

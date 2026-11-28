@@ -66,7 +66,7 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage, resolveBundleLocale } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -146,6 +146,17 @@ export interface MetaReadGateAudienceSources {
      * gated audiences DENY (ADR-0049).
      */
     resolveSecurityService(): Promise<MetaReadGatePermissionSetResolver | undefined>;
+    /**
+     * [ADR-0046 §6.7] The capabilities a `{ systemPermission }` book audience
+     * reads, when the transport's holdings caller is NOT the request's own
+     * caller (the MCP docs door's delegated agent envelope, whose audience
+     * reads the delegating person's grants). Absent: the caller's own
+     * `systemPermissions` ({@link resolveCaller}), the list every
+     * `requiredPermissions` arm of this gate reads. A rejection, or an answer
+     * that is not a list, is read as "holdings unresolvable", so those
+     * audiences DENY (ADR-0049).
+     */
+    resolveAudienceSystemPermissions?(): Promise<unknown>;
     /**
      * [#30126 row 12] The deployment's `errors.*` override lookup (an
      * `II18nService.t`-compatible function), or `undefined` when there is none —
@@ -412,11 +423,11 @@ export type NavServabilityGate = (objectName: string, entry: any, appName: strin
  * cannot drift apart — there is no second resolver to drift.
  */
 export interface DocsAudience {
-    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` book exists). */
+    /** The caller as the audience helpers see it (holdings resolved only when a `{ permissionSet }` or `{ systemPermission }` book exists). */
     readonly caller: AudienceCaller;
     /**
-     * The fast path: an authenticated caller and no `{ permissionSet }` book
-     * anywhere, so every doc's effective audience (`org` / `public`) admits
+     * The fast path: an authenticated caller and no `{ permissionSet }` or
+     * `{ systemPermission }` book anywhere, so every doc's effective audience (`org` / `public`) admits
      * them and no doc corpus is needed to say so.
      */
     readonly allReadable: boolean;
@@ -570,6 +581,14 @@ export function anyPermissionSetAudience(books: readonly any[]): boolean {
     );
 }
 
+/** Whether any of these books carries a `{ systemPermission }` audience (ADR-0046 §6.7). */
+export function anySystemPermissionAudience(books: readonly any[]): boolean {
+    return books.some(
+        (b) => b && typeof b === 'object' && b.audience && typeof b.audience === 'object'
+            && typeof b.audience.systemPermission === 'string',
+    );
+}
+
 /** Coerce a getMetaItems result (array | {items}) into an array. */
 export function metaItemsArray(raw: unknown): any[] {
     if (Array.isArray(raw)) return raw;
@@ -687,24 +706,45 @@ export async function fetchAudienceBooks(source: MetaReadGateListSource): Promis
  * permission-set-gated audiences (fail closed, ADR-0049). Resolution is
  * skipped unless `needPermissionSets` — callers pass true only when a
  * `{ permissionSet }` audience is actually in play.
+ *
+ * `systemPermissions` (asked only with `needSystemPermissions`, when a
+ * `{ systemPermission }` audience is in play) is the caller's own
+ * capability list — the one {@link holdsRequiredPermissions} reads for an
+ * app's `requiredPermissions`, so a manual gated on `setup.access` opens for
+ * exactly the callers the Setup app opens for — unless the transport names
+ * other holdings ({@link MetaReadGateAudienceSources.resolveAudienceSystemPermissions}).
+ * Not a list, or a rejecting read: undefined, and those audiences deny.
  */
 export async function resolveAudienceCaller(
     sources: MetaReadGateAudienceSources,
-    opts: { needPermissionSets: boolean },
-): Promise<{ authenticated: boolean; permissionSets?: string[] }> {
+    opts: { needPermissionSets: boolean; needSystemPermissions?: boolean },
+): Promise<{ authenticated: boolean; permissionSets?: string[]; systemPermissions?: string[] }> {
     const ctx = await sources.resolveCaller();
     const authenticated = !!ctx?.userId;
-    if (!authenticated || !opts.needPermissionSets) {
-        return { authenticated };
+    if (!authenticated) return { authenticated };
+    const caller: { authenticated: boolean; permissionSets?: string[]; systemPermissions?: string[] } = { authenticated };
+    if (opts.needSystemPermissions) {
+        try {
+            const held = sources.resolveAudienceSystemPermissions
+                ? await sources.resolveAudienceSystemPermissions()
+                : ctx?.systemPermissions;
+            if (Array.isArray(held)) {
+                caller.systemPermissions = held.filter((p): p is string => typeof p === 'string');
+            }
+        } catch {
+            // unresolved holdings → `{ systemPermission }` audiences deny
+        }
     }
+    if (!opts.needPermissionSets) return caller;
     try {
         const svc = await sources.resolveSecurityService();
-        if (!svc || typeof svc.resolvePermissionSetNames !== 'function') return { authenticated };
+        if (!svc || typeof svc.resolvePermissionSetNames !== 'function') return caller;
         const names = await svc.resolvePermissionSetNames(ctx);
-        return { authenticated, permissionSets: Array.isArray(names) ? names : [] };
+        caller.permissionSets = Array.isArray(names) ? names : [];
     } catch {
-        return { authenticated }; // unresolved holdings → gated audiences deny
+        // unresolved holdings → gated audiences deny
     }
+    return caller;
 }
 
 /**
@@ -718,11 +758,12 @@ export async function resolveAudienceCaller(
  * `resolveDocAudiences`, `docAudienceAllows`, `resolveBookTree`,
  * `deriveImplicitPackageBook`).
  *
- * Holdings are resolved only when a `{ permissionSet }` book exists, and
- * unresolvable holdings deny those audiences ({@link resolveAudienceCaller},
- * fail closed per ADR-0049). The fast path is the doc list's own: with no
- * such book, an authenticated caller reads every doc, so `docReader` needs
- * no corpus and `readableTree` filters nothing.
+ * Holdings are resolved only when a `{ permissionSet }` or
+ * `{ systemPermission }` book exists, and unresolvable holdings deny those
+ * audiences ({@link resolveAudienceCaller}, fail closed per ADR-0049). The
+ * fast path is the doc list's own: with no such book, an authenticated caller
+ * reads every doc, so `docReader` needs no corpus and `readableTree` filters
+ * nothing.
  */
 export async function resolveDocsAudience(
     sources: MetaReadGateAudienceSources,
@@ -732,8 +773,13 @@ export async function resolveDocsAudience(
         audienceAllows, docAudienceAllows, resolveDocAudiences, resolveBookTree, resolveBookClaimedDocs,
         deriveImplicitPackageBook,
     } = await import('@objectstack/spec/system');
-    const gated = anyPermissionSetAudience(books);
-    const caller = await resolveAudienceCaller(sources, { needPermissionSets: gated });
+    const setGated = anyPermissionSetAudience(books);
+    const capabilityGated = anySystemPermissionAudience(books);
+    const gated = setGated || capabilityGated;
+    const caller = await resolveAudienceCaller(sources, {
+        needPermissionSets: setGated,
+        needSystemPermissions: capabilityGated,
+    });
     const allReadable = caller.authenticated && !gated;
     const docReader = (corpus: ResolverDoc[]): ((docName: unknown) => boolean) => {
         if (allReadable) return () => true;
@@ -1815,6 +1861,23 @@ export function createMetaItemReadGate(
         };
     }
 
+    if (metaType === 'form') {
+        // [ADR-0159, card ② item 2] A `form` item's audience: the form's own
+        // `requiredPermissions` (a projected item carries its view item's gate
+        // too, `projectViewForms`). A caller refused a form's document at
+        // `/meta/view/NAME` is refused it at `/meta/form/NAME`, whole.
+        return async (document) => {
+            if (document == null) return serve(document);
+            const ctx = await resolveCallerOnce();
+            const sysPerms = callerSystemPermissions(ctx);
+            if (!sysPerms) return serve(document);
+            if (!holdsRequiredPermissions((document as any).requiredPermissions, sysPerms)) {
+                return refuse(await audienceRefusal(sources, ctx));
+            }
+            return serve(document);
+        };
+    }
+
     if (metaType === 'object') {
         // [#22639] An object's own `listViews` — see {@link filterObjectListViewsForUser}.
         return async (document) => {
@@ -1992,6 +2055,19 @@ export function createMetaListReadGate(
                 if (gated != null) out.push(gated);
             }
             return changed ? out : items;
+        };
+    }
+
+    if (metaType === 'form') {
+        // [ADR-0159] The list face of the `form` arm above: a form the caller
+        // does not hold is left out.
+        return async (items) => {
+            if (items.length === 0) return items;
+            const sysPerms = callerSystemPermissions(await sources.resolveCaller());
+            if (!sysPerms) return items;
+            const kept = items.filter((it: any) => !it || typeof it !== 'object'
+                || holdsRequiredPermissions(it.requiredPermissions, sysPerms));
+            return kept.length === items.length ? items : kept;
         };
     }
 
@@ -2228,7 +2304,7 @@ export function metaTypeReadRefusal(
  * each transport's `/meta` entry, before any handler resolves the protocol or
  * writes the store; never per document.
  *
- * ## The row, and why the capability
+ * ## The rows, and why each capability
  *
  *  - `datasource` → `manage_platform_settings`. The datasource family's own
  *    write doors — `POST /api/v1/datasources`, `PATCH` and `DELETE
@@ -2237,6 +2313,17 @@ export function metaTypeReadRefusal(
  *    create, update and remove the same stored definition a `/meta` write of
  *    this type persists, and admit only this capability. One operation reached
  *    through two mounted doors cannot admit two different sets of callers.
+ *  - `knowledge_source` → `manage_knowledge_sources` (ADR-0161 K4, guard one;
+ *    ruled on #37304, Q2 = B). Saving a knowledge source sends the fields it
+ *    lists, for every record it selects, to the embedding provider and starts
+ *    an index build that may be billed, so authoring one is granted on its
+ *    own: held by default by platform administrators only
+ *    (`ADMIN_FULL_ACCESS_CAPABILITIES`), and asked BESIDE `manage_metadata`,
+ *    which the door itself still asks. A grant on the indexed object's
+ *    records is not read here and implies nothing. This type has no write
+ *    door outside `/meta`, so the capability is the ruling's, and these doors
+ *    are where it is asked: REST and the dispatcher at their `/meta` entry,
+ *    and the MCP draft door (`mcp-authoring.ts`) with the human as the caller.
  *
  * ## Why `external_catalog` has no row here
  *
@@ -2246,8 +2333,10 @@ export function metaTypeReadRefusal(
  * `FEDERATION_WRITE_CAPABILITY` (`manage_metadata`, in
  * `./external-datasource-routes.ts`), which every `/meta` write door already
  * demands. ⛔ A row here names the capability the type's own WRITE door
- * requires FOR THE WRITE — matched, never minted; a type whose write door asks
- * nothing beyond the authoring admission for the write has no row.
+ * requires FOR THE WRITE — matched, never minted here (a capability no other
+ * door asks enters by a maintainer's ruling, as `knowledge_source`'s did); a
+ * type whose write door asks nothing beyond the authoring admission for the
+ * write has no row.
  *
  * That door also requires `manage_platform_settings` (the 2026-11-03 ruling:
  * seeing a datasource's remote structure needs the read capability on every
@@ -2271,6 +2360,7 @@ export function metaTypeReadRefusal(
  */
 export const META_TYPE_WRITE_CAPABILITIES: Readonly<Record<string, string>> = Object.freeze({
     datasource: 'manage_platform_settings',
+    knowledge_source: 'manage_knowledge_sources',
 });
 
 /** The verbs {@link metaTypeWriteRefusal} judges. */
@@ -3306,6 +3396,14 @@ export function translationBundleOf(i18n: unknown, reportFault?: (warning: strin
  * layer threads a declaration, it never invents one.
  * `RestServer.translateOptionsFor`, whose docblock carries the history,
  * delegates here.
+ *
+ * [#36466] `locale` is the request's tag NEGOTIATED against the locales the
+ * service holds ({@link negotiatedTranslationLocale}), the tag the server-side
+ * readers hand the same translators (objectql's `negotiatedMessageLocale`,
+ * plugin-approvals' `negotiatedReaderLocale`). Handed the raw tag, an `en-US`
+ * request in a deployment authored in `en` that holds an `en` pack was not the
+ * authored language, walked the chain to the default locale and read `客户`
+ * where those readers name the same object `Account`.
  */
 export function metaTranslateOptions(
     i18n: unknown,
@@ -3317,10 +3415,43 @@ export function metaTranslateOptions(
     const def = typeof source === 'string' && source.length > 0
         ? source
         : service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
-    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = {
+        locale: negotiatedTranslationLocale(service, locale),
+    };
     if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
     if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
     return opts;
+}
+
+/**
+ * [#36466] The locale `service` can ANSWER in, for the tag the request asked
+ * for: `resolveBundleLocale` (`@objectstack/spec/system`, the platform's one
+ * locale ladder) over what `getLocales()` reports — the question objectql's
+ * `negotiatedMessageLocale` and plugin-approvals' `negotiatedReaderLocale` ask,
+ * over the same set. ⛔ No rule of its own: neither of those is reachable from
+ * this package without a new export, so only the offered-set plumbing is
+ * repeated here.
+ *
+ * The requested tag passes through untouched when there is nothing to
+ * negotiate against (no service, no `getLocales`, a throwing, empty or
+ * non-array answer, or no match), so a request for a locale the deployment
+ * holds no pack for still walks the declared chain to the default locale.
+ */
+function negotiatedTranslationLocale(service: any, requested: string): string {
+    if (!service || typeof service.getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+        available = service.getLocales();
+    } catch {
+        // `translationBundleOf` reports the same fault; the request's tag stands.
+        return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+        if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
 }
 
 /**
@@ -3371,6 +3502,9 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
     ['mapping', 'getPackagedMappingBase'],
+    // [ADR-0159, ADR-0029 D9.2a] A `form` override's own changed text outranks
+    // its base's catalog, the base an authored `form` item or an old shape's projection.
+    ['form', 'getPackagedFormBase'],
 ]);
 
 /**
@@ -3608,6 +3742,53 @@ export interface MetaListTranslationSources {
      * for a door that says it on its answer. Optional: the server log says it either way.
      */
     reportTranslationFault?(warning: string): void;
+}
+
+/**
+ * The `/meta/types` listing in the request's locale: each entry's type label
+ * and description, its `form` labels, its `list` headers and its JSON Schema
+ * titles, all through the `metadataForms.<type>` group of the bundle.
+ *
+ * The one translation both doors run (objectstack#36886): `RestServer`'s
+ * `GET /meta/types` and the runtime dispatcher's `GET /metadata/types`, so a
+ * reader gets the same words whichever door their host serves.
+ *
+ * No bundle or no locale answers the listing as it came; an entry is never
+ * rewritten in place.
+ */
+export async function translateMetaTypesListing(
+    sources: Pick<MetaListTranslationSources, 'resolveI18nService' | 'requestLocale' | 'reportTranslationFault'>,
+    payload: unknown,
+): Promise<unknown> {
+    const listing: any = payload;
+    if (!listing || typeof listing !== 'object' || !Array.isArray(listing.entries)) return payload;
+    const i18n = await sources.resolveI18nService();
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
+    if (!bundle) return payload;
+    const locale = sources.requestLocale(i18n);
+    if (!locale) return payload;
+    const {
+        resolveMetadataTypeLabel,
+        resolveMetadataTypeDescription,
+        resolveMetadataFormLabels,
+        resolveMetadataFormSchemaTitles,
+        resolveMetadataListLabels,
+    } = await import('@objectstack/spec/system');
+    const opts = metaTranslateOptions(i18n, locale);
+    const entries = listing.entries.map((entry: any) => {
+        if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
+        const next: any = { ...entry };
+        next.label = resolveMetadataTypeLabel(bundle, entry.type, entry.label ?? entry.type, opts);
+        const desc = resolveMetadataTypeDescription(bundle, entry.type, entry.description, opts);
+        if (desc !== undefined) next.description = desc;
+        if (entry.form) next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
+        if (entry.list) next.list = resolveMetadataListLabels(entry.list, entry.type, bundle, opts);
+        if (entry.schema && typeof entry.schema === 'object') {
+            next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);
+        }
+        return next;
+    });
+    return { ...listing, entries };
 }
 
 /**
@@ -4426,6 +4607,45 @@ function withItems(raw: unknown, items: any[]): unknown {
     return Array.isArray(raw) ? items : { ...(raw as any), items };
 }
 
+/** How many items of each `name` a list holds. */
+function itemCountsByName(list: readonly unknown[] | null): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const it of list ?? []) {
+        const name = it && typeof it === 'object' ? (it as { name?: unknown }).name : undefined;
+        if (typeof name === 'string') counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+}
+
+/**
+ * [#36894] The list envelope `visible` with its `changedAt` (when the stored
+ * row each listed item serves last changed, keyed by name) keyed only by the
+ * names of which it still lists every item the store's answer `stored` listed,
+ * and without it when none is left. Anything else is answered as it is.
+ *
+ * The per-caller gate and the query filters leave items out. An entry for a
+ * name no item of which is listed tells the caller a name, and when it
+ * changed, that the answer does not list. And the store's entry for a name
+ * two or more items share is the latest of all of them, so once one of them
+ * is left out it may be that item's time, served under a name whose listed
+ * items have none or an older one: that entry is dropped too, never
+ * recomputed (the per-item times never leave the store).
+ */
+function withChangedAtOfListedNames(stored: unknown, visible: unknown): unknown {
+    const list = listItemsOf(visible);
+    if (!list || Array.isArray(visible)) return visible;
+    const changedAt = (visible as { changedAt?: unknown }).changedAt;
+    if (changedAt === undefined) return visible;
+    const { changedAt: _held, ...rest } = visible as Record<string, unknown>;
+    if (!changedAt || typeof changedAt !== 'object' || Array.isArray(changedAt)) return rest;
+    const before = itemCountsByName(listItemsOf(stored));
+    const after = itemCountsByName(list);
+    const kept = Object.entries(changedAt as Record<string, unknown>)
+        .filter(([name]) => (after.get(name) ?? 0) > 0 && (after.get(name) ?? 0) >= (before.get(name) ?? 0));
+    if (kept.length === Object.keys(changedAt).length) return visible;
+    return kept.length === 0 ? rest : { ...rest, changedAt: Object.fromEntries(kept) };
+}
+
 /**
  * [#25333, ADR-0131 D3/D4] The `position` list's `?include=grants` step: each
  * listed position gains, as served decorations beside `_packageId` and the
@@ -4536,6 +4756,11 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
+ *  8a. [#36894] The store's `changedAt` (`GetMetaItemsResponseSchema`) keeps
+ *     only the names of which every item the store listed is still listed
+ *     ({@link withChangedAtOfListedNames}): the gate and the filters above
+ *     leave items out, and the store's entry for a name is the latest of all
+ *     its items, so it may be the time of one left out.
  *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -4683,6 +4908,9 @@ export function createMetaListAnswer(
                 if (described !== list) visible = withItems(visible, described);
             }
         }
+
+        // 8a. [#36894] `changedAt` keys only the names no step above left an item of out.
+        visible = withChangedAtOfListedNames(raw, visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);

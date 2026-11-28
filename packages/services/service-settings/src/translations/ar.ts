@@ -463,12 +463,12 @@ export const ar: PlatformTranslationData = {
     },
     ai: {
       title: 'الذكاء الاصطناعي والتضمين (Embedder)',
-      description: 'مزوّد LLM والنموذج وبيانات الاعتماد وإعداد التضمين التي تستخدمها خدمات الذكاء الاصطناعي والمعرفة في المنصة.',
+      description: 'مزوّد LLM والنموذج وبيانات الاعتماد التي تستخدمها خدمة الذكاء الاصطناعي في المنصة.',
       groups: {
-        provider: {
-          title: 'المزوّد',
-          description: 'اختر الواجهة الخلفية لـ LLM.',
-        },
+        provider: { title: 'المزوّدون',
+          description: 'شغّل كل مزوّد يمكن استخدام نماذجه. المزوّد الافتراضي مشغّل دائمًا.' },
+        structured_output: { title: 'المخرجات المنظَّمة',
+          description: 'النموذج المستخدم للاستدعاءات التي يجب أن تجيب بشكل بيانات ثابت. اتركه فارغًا لاستخدام النموذج الافتراضي.' },
         gateway: {
           title: 'Vercel AI Gateway',
           description: 'موجّه متعدد المزوّدات. يُكتب النموذج بصيغة provider/model، مثل openai/gpt-4o.',
@@ -509,7 +509,8 @@ export const ar: PlatformTranslationData = {
       },
       keys: {
         provider: {
-          label: 'المزوّد',
+          label: 'المزوّد الافتراضي',
+          help: 'يخدم كل طلب لا يحدد نموذجًا.',
           options: {
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
@@ -595,8 +596,30 @@ export const ar: PlatformTranslationData = {
           label: 'تسجيل المطالبات كاملة',
           help: 'تضمين المطالبات المعروضة (لا البيانات الوصفية فقط) في صفوف التتبع.',
         },
+        default_model: { label: 'النموذج الافتراضي', help: 'أحد نماذج المزوّد الافتراضي. اتركه فارغًا لاستخدام نموذجه الأول.' },
+        gateway_enabled: { label: 'Vercel AI Gateway' },
+        openai_enabled: { label: 'OpenAI' },
+        anthropic_enabled: { label: 'Anthropic' },
+        google_enabled: { label: 'Google Generative AI' },
+        deepseek_enabled: { label: 'DeepSeek' },
+        dashscope_enabled: { label: '阿里通义 DashScope' },
+        cloudflare_enabled: { label: 'Cloudflare AI Gateway' },
+        siliconflow_enabled: { label: '硅基流动 SiliconFlow' },
+        openrouter_enabled: { label: 'OpenRouter' },
+        gateway_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        openai_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        anthropic_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        google_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        deepseek_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        dashscope_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        cloudflare_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        siliconflow_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        openrouter_models: { label: 'نماذج إضافية', help: 'معرّفات نماذج أخرى لهذا المزوّد، واحد في كل سطر. يأتي النموذج أعلاه أولاً.' },
+        structured_output_provider: { label: 'المزوّد', help: 'مزوّد مشغّل. اتركه فارغًا لاستخدام المزوّد الافتراضي.' },
+        structured_output_model: { label: 'النموذج', help: 'أحد نماذج ذلك المزوّد. اتركه فارغًا لاستخدام نموذجه الأول.' },
         embedder_provider: {
           label: 'المزوّد',
+          help: 'تُقرأ عند بدء تشغيل الخادم: يسري أي تغيير محفوظ على إعدادات التضمين بعد إعادة التشغيل التالية.',
           options: {
             none: 'معطّل (دون تضمينات)',
             openai: 'OpenAI',
@@ -633,6 +656,15 @@ export const ar: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'اختبار الاتصال' },
+        test_gateway: { label: 'اختبار الاتصال' },
+        test_openai: { label: 'اختبار الاتصال' },
+        test_anthropic: { label: 'اختبار الاتصال' },
+        test_google: { label: 'اختبار الاتصال' },
+        test_deepseek: { label: 'اختبار الاتصال' },
+        test_dashscope: { label: 'اختبار الاتصال' },
+        test_cloudflare: { label: 'اختبار الاتصال' },
+        test_siliconflow: { label: 'اختبار الاتصال' },
+        test_openrouter: { label: 'اختبار الاتصال' },
         test_embedder: { label: 'اختبار التضمين (Embedder)' },
         reset: { label: 'إعادة التعيين إلى افتراضيات البيئة' },
       },
@@ -647,64 +679,19 @@ export const ar: PlatformTranslationData = {
       title: 'المعرفة',
       description: 'الواجهة الخلفية لمخزن المتجهات لـ RAG ومصادر المعرفة.',
       groups: {
-        adapter: { title: 'الواجهة الخلفية', description: 'اختر مكان تخزين مقاطع المستندات ومتجهاتها.' },
-        turso: { title: 'Turso / libSQL', description: 'يعمل مع Turso المُدار أو ملف محلي أو في الذاكرة.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'نشر RAGFlow خارجي. راجع https://ragflow.io لتعليمات الاستضافة الذاتية.',
-        },
         indexing: {
           title: 'افتراضيات الفهرسة',
           description: 'القيمة المضبوطة على مصدر المعرفة نفسه تتقدّم على هذه الافتراضيات.',
         },
-        permissions: { title: 'الأذونات' },
       },
       keys: {
-        adapter: {
-          label: 'المحوّل',
-          options: {
-            memory: 'في الذاكرة (للتطوير / الاختبار فقط)',
-            turso: 'Turso / libSQL (سحابي أو محلي)',
-            ragflow: 'RAGFlow (خارجي)',
-          },
-        },
-        turso_url: {
-          label: 'عنوان URL للاتصال',
-          help: 'أمثلة: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
-        },
-        turso_auth_token: { label: 'رمز المصادقة', help: 'مطلوب فقط لعناوين Turso المُدارة.' },
-        ragflow_base_url: { label: 'Base URL', help: 'مثال: http://localhost:9380' },
-        ragflow_api_key: { label: 'مفتاح API' },
-        ragflow_default_dataset: {
-          label: 'معرّف مجموعة البيانات الافتراضية',
-          help: 'يُستخدم عندما لا يحدد مصدر المعرفة مجموعة بيانات RAGFlow الخاصة به.',
-        },
         chunk_target: {
           label: 'الحجم المستهدف للمقطع (أحرف)',
-          help: 'حد مرن لحجم المقطع قبل أن يبدأ التقسيم المراعي للرموز.',
+          help: 'أقصى طول للمقطع بالأحرف عند تقسيم خدمة المعرفة لمستند. تكون الأولوية للحجم المحدد في مصدر المعرفة نفسه، وقد يخفضه حد الإدخال الخاص بنموذج التضمين.',
         },
-        chunk_overlap: {
-          label: 'تداخل المقاطع (أحرف)',
-          help: 'الأحرف المحتفَظ بها من المقطع السابق كي يبقى السياق عبر الحدّ الفاصل.',
-        },
-        over_fetch: {
-          label: 'مضاعف الجلب الزائد',
-          help: 'يجلب البحث هذا المضاعف من عدد النتائج المطلوبة، حتى يبقى منها ما يكفي لإرجاعه بعد تصفيتها حسب تفاصيل المستند.',
-        },
-        enforce_rls: { label: 'فرض RLS عند البحث', help: 'إعادة فحص كل نتيجة وفق أذونات المستدعي على مستوى السجل.' },
       },
       actions: {
         test: { label: 'اختبار الاتصال' },
-      },
-      banners: {
-        adapter_switch_warning: {
-          title: 'لا تُنقل الفهارس الموجودة',
-          text: 'تبديل المحوّل لا ينقل الفهارس الموجودة — المستندات المفهرسة عبر المحوّل السابق يتعذّر الوصول إليها حتى تُعاد فهرستها.',
-        },
-        enforce_rls_warning: {
-          title: 'أبقِ RLS مفعّلًا في الإنتاج',
-          text: 'التعطيل يتخطى ضمانة المنصة الفريدة ضد تسرّب بيانات مخزن المتجهات — أبقِه مفعّلًا في الإنتاج.',
-        },
       },
     },
     lifecycle: {

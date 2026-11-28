@@ -21,6 +21,7 @@ import type { FeedItem } from '@object-ui/types';
 import {
   ACTIVITY_TYPE_TO_FEED_TYPE,
   DEFAULT_ACTIVITY_LIMIT,
+  activityFieldChangesOf,
   activityRowToFeedItem,
   activityTimestamp,
   applyFeedConfig,
@@ -654,7 +655,7 @@ describe('an unusable `types` filter narrows or refuses, never widens (objectui#
  * objectui#5877 — a declared feed kind with no producer must not render a
  * permanently empty tab in silence.
  *
- * `types: ['approval']` parses, typechecks, builds and renders nothing, and
+ * `types: ['note']` parses, typechecks, builds and renders nothing, and
  * before this suite nothing anywhere said why. Both directions are asserted,
  * because a warn-on-everything implementation satisfies the first one alone:
  * an unproduced kind MUST warn, and a produced kind MUST NOT. The populations
@@ -699,13 +700,15 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
    * turn this red: the census is the diagnostic's input, and it moving without
    * anyone noticing is exactly how the warn would start lying.
    */
-  it('the census — 5 produced kinds, the declared rest not', () => {
+  it('the census — 6 produced kinds, the declared rest not', () => {
     // The produced set is this package's and stays exact. The declared set is
     // the spec's, so it is held by name (#26238): a kind the spec adds lands on
     // the unproduced side, which is what the diagnostic warns about.
-    expect(produced.slice().sort()).toEqual(['comment', 'event', 'field_change', 'system', 'task']);
+    // `approval` joined in objectstack#35723: plugin-approvals writes one
+    // activity row per approval step, read as that kind.
+    expect(produced.slice().sort()).toEqual(['approval', 'comment', 'event', 'field_change', 'system', 'task']);
     for (const kind of [
-      'approval', 'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
+      'call', 'email', 'file', 'note', 'record_create', 'record_delete', 'sharing',
     ]) {
       expect(unproduced).toContain(kind);
     }
@@ -725,9 +728,9 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
 
   it('WARNS for a genuinely unproduced kind — the card\'s own example', () => {
     const warn = quiet();
-    normalizeFeedTypes(['approval'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(said(warn)).toContain('"approval"');
+    expect(said(warn)).toContain('"note"');
     expect(said(warn)).toContain('NO PRODUCER');
   });
 
@@ -772,13 +775,13 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
 
   it('keeps the two populations apart inside ONE diagnostic', () => {
     const warn = quiet();
-    normalizeFeedTypes(['sharing', 'approval'], 'record:activity');
+    normalizeFeedTypes(['sharing', 'note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
     const message = said(warn);
     expect(message).toContain('DELIBERATELY NOT ADOPTED');
     expect(message).toContain('"sharing"');
     expect(message).toContain('NO PRODUCER');
-    expect(message).toContain('"approval"');
+    expect(message).toContain('"note"');
     // The honest limitation, stated in the message rather than in a comment
     // nobody reads: an unproduced kind is not thereby known to be an oversight.
     expect(message).toContain('not recorded anywhere');
@@ -798,20 +801,20 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
     const warn = quiet();
     // Returned as authored, so nothing that renders changes: a declared kind is
     // still a legal filter, and the block still filters to it.
-    expect(normalizeFeedTypes(['approval'], 'record:activity')).toEqual(['approval']);
-    expect(normalizeFeedTypes(['approval', 'comment'], 'record:activity')).toEqual(['approval', 'comment']);
-    expect(warn).toHaveBeenCalledTimes(1); // deduped: `approval` named once
+    expect(normalizeFeedTypes(['note'], 'record:activity')).toEqual(['note']);
+    expect(normalizeFeedTypes(['note', 'comment'], 'record:activity')).toEqual(['note', 'comment']);
+    expect(warn).toHaveBeenCalledTimes(1); // deduped: `note` named once
   });
 
   it('dedupes per distinct kind, and names only the fresh ones', () => {
     const warn = quiet();
-    normalizeFeedTypes(['approval'], 'record:activity');
-    normalizeFeedTypes(['approval'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
+    normalizeFeedTypes(['note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(1);
-    normalizeFeedTypes(['approval', 'call'], 'record:activity');
+    normalizeFeedTypes(['note', 'call'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(2);
     expect(said(warn, 1)).toContain('"call"');
-    expect(said(warn, 1)).not.toContain('"approval"');
+    expect(said(warn, 1)).not.toContain('"note"');
   });
 
   it('is its OWN channel — the unrecognised warning does not silence it', () => {
@@ -819,21 +822,21 @@ describe('a `types` entry naming a kind nothing produces says so (objectui#5877)
     // whichever fired first swallow the other, and these two vocabularies meet
     // in one authored list all the time.
     const warn = quiet();
-    normalizeFeedTypes(['crm_task', 'approval'], 'record:activity');
+    normalizeFeedTypes(['crm_task', 'note'], 'record:activity');
     expect(warn).toHaveBeenCalledTimes(2);
     const messages = warn.mock.calls.map((c) => String(c[0]));
     expect(messages.some((m) => m.includes('unrecognised') && m.includes('"crm_task"'))).toBe(true);
-    expect(messages.some((m) => m.includes('NO PRODUCER') && m.includes('"approval"'))).toBe(true);
+    expect(messages.some((m) => m.includes('NO PRODUCER') && m.includes('"note"'))).toBe(true);
   });
 
   it('fires through applyFeedConfig — the path the block actually renders on', () => {
     // Asserting the sanitiser alone would leave the diagnostic unreachable from
     // the pipeline; this is the call `record:activity` makes on every render.
     const warn = quiet();
-    const applied = applyFeedConfig(feed, { types: ['approval'] }, 50, 'record:activity');
+    const applied = applyFeedConfig(feed, { types: ['note'] }, 50, 'record:activity');
     expect(applied.items).toEqual([]); // the permanently empty tab, unchanged
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(said(warn)).toContain('"approval"');
+    expect(said(warn)).toContain('"note"');
   });
 
   it('the produced set is DERIVED from the producers, not a second hand list', () => {
@@ -972,5 +975,56 @@ describe('an unrecognised `filterMode` still folds onto `all`, but says so (obje
     normalizeFeedTypes(['comments_only'], 'record:activity'); // a declared filter mode, not a feed type
     expect(warn).toHaveBeenCalledTimes(2);
     resetUnrecognisedFeedTypeWarnings();
+  });
+});
+
+describe('activityFieldChangesOf — the served field-change code as one entry per field (objectstack#36290)', () => {
+  const rowWith = (code: unknown, extra: Record<string, unknown> = {}) => ({
+    id: 'r1',
+    type: 'updated',
+    metadata: JSON.stringify({ summary_message: code, ...extra }),
+  });
+  const code = (changes: unknown) => ({ key: 'fieldChanges', object: 'crm_account', changes });
+
+  it('maps each change: text, option, yes/no, and the writer\'s empty mark', () => {
+    expect(
+      activityFieldChangesOf(
+        rowWith(
+          code([
+            { field: 'notes', from: { text: 'Old' }, to: { text: 'New' } },
+            { field: 'stage', from: { text: 'Prospect', option: 'prospect' }, to: { text: '∅' } },
+            { field: 'vip', from: { text: 'No', boolean: false }, to: { text: '' } },
+          ]),
+        ),
+      ),
+    ).toEqual([
+      { field: 'notes', oldValue: 'Old', newValue: 'New', oldDisplayValue: 'Old', newDisplayValue: 'New' },
+      { field: 'stage', oldValue: 'prospect', newValue: null, oldDisplayValue: 'Prospect', oldOption: 'prospect' },
+      { field: 'vip', oldValue: false, newValue: null },
+    ]);
+  });
+
+  it('rides onto the feed item, beside the summary', () => {
+    const fed = activityRowToFeedItem(
+      { ...rowWith(code([{ field: 'phone', from: { text: '1' }, to: { text: '2' } }])), summary: 'Phone: 1 → 2' },
+      'System',
+    );
+    expect(fed?.body).toBe('Phone: 1 → 2');
+    expect(fed?.fieldChanges).toEqual([
+      { field: 'phone', oldValue: '1', newValue: '2', oldDisplayValue: '1', newDisplayValue: '2' },
+    ]);
+  });
+
+  it('gives nothing for a row with no code, another code, or a code it cannot read whole', () => {
+    expect(activityFieldChangesOf({ id: 'r', type: 'updated' })).toBeUndefined();
+    expect(activityFieldChangesOf({ id: 'r', type: 'updated', metadata: 'not json' })).toBeUndefined();
+    expect(activityFieldChangesOf(rowWith({ key: 'activityUpdated', object: 'crm_account', label: 'A' }))).toBeUndefined();
+    expect(activityFieldChangesOf(rowWith(code([])))).toBeUndefined();
+    expect(
+      activityFieldChangesOf(
+        rowWith(code([{ field: 'a', from: { text: '1' }, to: { text: '2' } }, { field: 'b', from: { text: 1 }, to: { text: '2' } }])),
+      ),
+    ).toBeUndefined();
+    expect(activityRowToFeedItem({ id: 'r', type: 'updated', summary: 's' }, 'System')).not.toHaveProperty('fieldChanges');
   });
 });

@@ -155,6 +155,14 @@ interface MinimalEngine {
    * WORDING, never the lock.
    */
   getSchema?(objectName: string): any | undefined;
+  /**
+   * Has the unit of work `handle` names already closed? Read structurally —
+   * the predicate the engine's own write path reads before it writes into a
+   * threaded handle — so the detail-row lock's cascade yield asks exactly the
+   * question the write answers. Optional for the reason `getSchema` is; absent,
+   * the yield is withheld ({@link inOpenUnit}).
+   */
+  isClosedUnitHandle?(handle: unknown): boolean;
 }
 
 /**
@@ -509,6 +517,91 @@ export async function recordHeldByLockingApproval(
 }
 
 /**
+ * Is `recordId` of `objectName` a DETAIL row whose master is held by a LOCKING
+ * pending approval — would an ordinary write of it be refused `RECORD_LOCKED`
+ * by the detail-row lock ({@link bindDetailRowLockHook})?
+ *
+ * The record-anchored read's second half: a line of a locked record is locked
+ * with it, so the read that tells a client "this record is locked" says so of
+ * the line too, instead of offering an edit the hook then refuses. Asked as the
+ * hook asks it of an update or delete of the row: the masters the row stands
+ * under (every `master_detail` edge, {@link masterEdgesOf}), read off its FK
+ * columns as SYSTEM, each judged by the one lookup and judgement the hook uses
+ * ({@link lockingRequestsForRecords}). As with
+ * {@link recordHeldByLockingApproval}, what belongs to a WRITE (the opening
+ * run's own writes) is left out: it is not a property of the row.
+ *
+ * ⚠️ It answers for the row, not for a caller, and the FK read is SYSTEM.
+ * Whether the asker may learn the answer — may read the row at all — is the
+ * caller's question to settle first (`ApprovalService.getRecordLock`).
+ */
+export async function detailRowHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find' | 'getSchema'>,
+  objectName: string,
+  recordId: string,
+): Promise<boolean> {
+  // Asked of exactly one id, a non-empty answer is that row's: the set's member
+  // is the row's id as the engine spells it back, which need not be `recordId`'s
+  // spelling, so membership is never compared.
+  return (await detailRowsHeldByLockingApproval(engine, objectName, [recordId])).size > 0;
+}
+
+/**
+ * {@link detailRowHeldByLockingApproval} for many rows of one object at once:
+ * the ids among `recordIds` that are DETAIL rows of a master held by a LOCKING
+ * pending approval. One SYSTEM read of the rows' FK columns for the whole list,
+ * then one lookup per `master_detail` edge for every master those rows name —
+ * `1 + edges` reads whatever the list's length, never one per row — and the
+ * same judgement ({@link lockingRequestsForRecords}), so a page asked at once
+ * and a row asked alone cannot disagree. An object with no `master_detail`
+ * edge reads nothing.
+ *
+ * The join is not pushed down to the database: the judgement is made in-app
+ * over each request's `node_config_json` snapshot and must be the write hook's
+ * own ({@link lockingRequestsForRecords}), and the id list is bounded by the
+ * door's 200-id cap (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`), so `1 + edges`
+ * bounded reads is the whole cost.
+ *
+ * ⚠️ Like the one-row form, it answers for the rows, not for a caller, and the
+ * FK read is SYSTEM.
+ */
+export async function detailRowsHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find' | 'getSchema'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const held = new Set<string>();
+  if (recordIds.length === 0 || isApprovalBookkeepingObject(objectName)) return held;
+  const edges = masterEdgesOf(engine, objectName);
+  if (edges.length === 0) return held;
+  const rows = await engine.find(objectName, {
+    // One id keeps the by-id shape the one-row read always sent.
+    where: recordIds.length === 1 ? { id: recordIds[0] } : { id: { $in: [...recordIds] } },
+    fields: ['id', ...edges.map((e) => e.fk)],
+    limit: recordIds.length,
+    // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
+    context: { ...SYSTEM_CTX, positions: [], permissions: [] },
+  } satisfies EngineQueryOptions);
+  const found = (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>;
+  if (found.length === 0) return held;
+  for (const e of edges) {
+    const masterIds = Array.from(new Set(
+      found.map((row) => scalarFk(row[e.fk])).filter((id): id is string => id !== null),
+    ));
+    if (masterIds.length === 0) continue;
+    const heldMasters = new Set(
+      (await lockingRequestsForRecords(engine, e.master, masterIds)).map((p) => String(p?.record_id ?? '')),
+    );
+    if (heldMasters.size === 0) continue;
+    for (const row of found) {
+      const masterId = scalarFk(row[e.fk]);
+      if (masterId && heldMasters.has(masterId)) held.add(String(row.id));
+    }
+  }
+  return held;
+}
+
+/**
  * The pending requests that hold any of `recordIds` of `objectName` under a
  * LOCKING node — the rows {@link recordHeldByLockingApproval} answers from,
  * handed back whole so a write-side caller can apply the WRITE's exemptions
@@ -524,6 +617,23 @@ async function lockingRequestsForRecords(
   if (isApprovalBookkeepingObject(objectName)) return [];
   const gating = await pendingRequestsForRecords(engine, objectName, recordIds);
   return gating.filter((pending) => nodeConfigLocksRecord(parseJson<unknown>(pending?.node_config_json, {})));
+}
+
+/**
+ * {@link recordHeldByLockingApproval} for many records of one object at once:
+ * the ids among `recordIds` held by a LOCKING pending approval. One
+ * pending-request lookup for the whole list and the same judgement, so a page
+ * asked at once and a record asked alone cannot disagree.
+ *
+ * ⚠️ Like the one-record form, it answers for the records, not for a caller.
+ */
+export async function recordsHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const held = await lockingRequestsForRecords(engine, objectName, recordIds);
+  return new Set(held.map((pending) => String(pending?.record_id ?? '')));
 }
 
 /**
@@ -700,9 +810,10 @@ export function bindApprovalLockHook(
         : undefined;
       // The sentence is in the writer's locale, and so is the label it names:
       // the translated `objects.<object>.label` when the pack carries one, else
-      // the declared label. ⛔ Never the API name.
+      // the declared label. ⛔ Never the API name. [#35384] The engine hands
+      // the label its served definition and packaged base, as `/meta` reads them.
       const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const objectLabel = readerLabelsFor(service, locale)?.objectLabel(object) ?? declaredLabel;
+      const objectLabel = readerLabelsFor(service, locale, engine)?.objectLabel(object) ?? declaredLabel;
       // `previous` is the pre-image the engine already read for THIS row; it is
       // used only when it really is the row this pending request names, so a
       // dispatch that ever carried a different row cannot title the wrong
@@ -759,7 +870,7 @@ interface MasterEdge {
  * gives — a raw `registerObject` skips Zod, and an unread spelling here would
  * be a lock that silently does not apply.
  */
-function masterEdgesOf(engine: MinimalEngine, objectName: string): MasterEdge[] {
+function masterEdgesOf(engine: Pick<MinimalEngine, 'getSchema'>, objectName: string): MasterEdge[] {
   let schema: any;
   try { schema = engine.getSchema?.(objectName); } catch { return []; }
   const fields = schema?.fields;
@@ -774,6 +885,58 @@ function masterEdgesOf(engine: MinimalEngine, objectName: string): MasterEdge[] 
     edges.push({ fk: def.name ?? name, master });
   }
   return edges;
+}
+
+/**
+ * The one relation through which the engine's cascade can delete a row of
+ * `objectName`, when it is one of `edges` — else `undefined`.
+ *
+ * Cascade-capable as the engine's cascade planning resolves it: a
+ * `master_detail` field unless it declares `deleteBehavior: 'restrict'`, and
+ * any other field that declares `deleteBehavior: 'cascade'`. Counted wide on
+ * purpose: a field miscounted as cascade-capable only withholds the
+ * cascade-leg yield ({@link bindDetailRowLockHook}), so the error direction is
+ * a refusal, never a held line removed by another record's delete.
+ */
+function soleCascadeEdgeOf(
+  engine: Pick<MinimalEngine, 'getSchema'>,
+  objectName: string,
+  edges: ReadonlyArray<MasterEdge>,
+): MasterEdge | undefined {
+  let schema: any;
+  try { schema = engine.getSchema?.(objectName); } catch { return undefined; }
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const cascading = Object.entries(fields as Record<string, any>)
+    .filter(([, def]) => !!def && (def.type === 'master_detail'
+      ? def.deleteBehavior !== 'restrict'
+      : def.deleteBehavior === 'cascade'))
+    .map(([name, def]) => String(def.name ?? name));
+  if (cascading.length !== 1) return undefined;
+  return edges.find((e) => e.fk === cascading[0]);
+}
+
+/**
+ * Is `handle` the handle of a unit of work that is still OPEN — one the
+ * engine's write path would write a cascade leg into, and roll back with the
+ * record's own delete?
+ *
+ * The engine's write path treats the handle of a unit that has already closed
+ * (a run detached from its dispatch's unit — an `async: true` after-hook — or a
+ * caller holding a handle past its unit) as no handle at all, and writes
+ * unenrolled. So a handle present on the context is not enough: it must be one
+ * the engine does not report closed (`isClosedUnitHandle`, the predicate its
+ * write path reads). An engine that cannot answer the question answers "not
+ * open": the yield is withheld, never granted on a guess.
+ */
+function inOpenUnit(engine: Pick<MinimalEngine, 'isClosedUnitHandle'>, handle: unknown): boolean {
+  if (handle === undefined || handle === null) return false;
+  if (typeof engine.isClosedUnitHandle !== 'function') return false;
+  try {
+    return engine.isClosedUnitHandle(handle) === false;
+  } catch {
+    return false;
+  }
 }
 
 /** A scalar foreign-key value, or `null` for an empty or non-scalar one. */
@@ -831,6 +994,38 @@ function unscalarFk(value: unknown): boolean {
  * The status-mirror exemption has no analogue: it is about a field of the
  * master itself.
  *
+ * ## Deleting the locked master itself — the cascade leg yields
+ *
+ * Deleting a record while its approval is pending is not refused: the delete
+ * lands and its pending request is cancelled ({@link bindRecordDeleteCancelHook},
+ * #13568, whose ruling vetoed "forbid delete while pending"). A `master_detail`
+ * cascades, so that delete removes the lines too, as the CALLER, through this
+ * hook; refusing those legs would make a locked record with lines undeletable.
+ * So a delete the engine's cascade issued (`ctx.referentialCascadeDelete`, the
+ * declared marker) yields on the edge it can only have come through: when the
+ * detail object's ONE cascade-capable relation ({@link soleCascadeEdgeOf}) is
+ * the `master_detail` edge to the held master, the record being deleted is
+ * that master. Any other shape — a junction under two cascading masters, a
+ * `lookup` that also declares `cascade` — cannot name its cascade's source, so
+ * the leg is judged as a hand delete and refused: deleting a DIFFERENT record
+ * never takes a held record's line with it.
+ *
+ * The yield also needs the delete to run inside an OPEN unit of work: a
+ * `ctx.transaction` handle the engine does not report closed
+ * ({@link inOpenUnit}), such as the one its atomic cascade opens. Without one —
+ * a datasource that declares `supports.transactionsUnsupported`, a cascade the
+ * engine splits across datasources, or a handle whose unit already closed (an
+ * `async: true` after-hook's run) — each leg lands on its own, so
+ * a later refusal of the record's own delete (a `restrict` row met after the
+ * lines were removed) would leave the record held, its request pending and its
+ * lines gone. There the leg is refused, and so the held record's delete is
+ * refused `RECORD_LOCKED`, whole.
+ *
+ * One more shape is the yield's by construction: when the held record is itself
+ * a `master_detail` child, deleting ITS master removes the held record (its own
+ * edge is to an unheld master) and, through that record's own delete, its lines
+ * — and the delete-cancel linkage cancels its request.
+ *
  * ## The refusal
  *
  * The END-USER sentence of the record lock ({@link recordLockRefusal}), naming
@@ -881,9 +1076,18 @@ export function bindDetailRowLockHook(
         }
       }
       if (!previous) unresolved = true;
+      // A cascade leg of the held master's OWN delete yields on that one edge
+      // (see "Deleting the locked master itself" above); every other edge of the
+      // row is still judged. Only inside an OPEN unit: without one the legs land
+      // one by one, and a later refusal of the record's own delete would leave
+      // the record held with its lines gone.
+      const cascadeSource = event === 'delete' && ctx?.referentialCascadeDelete === true
+        && inOpenUnit(engine, ctx?.transaction)
+        ? soleCascadeEdgeOf(engine, object, edges)
+        : undefined;
       for (const e of edges) {
         const before = previous ? scalarFk(previous[e.fk]) : null;
-        if (before) touched.push({ master: e.master, id: before });
+        if (before && e !== cascadeSource) touched.push({ master: e.master, id: before });
         if (event === 'update' && Object.prototype.hasOwnProperty.call(data, e.fk)) {
           const after = scalarFk(data[e.fk]);
           if (after && after !== before) touched.push({ master: e.master, id: after });
@@ -904,7 +1108,7 @@ export function bindDetailRowLockHook(
         ? String((schema as any).label)
         : undefined;
       const { locale, service, translate } = refusalLocalization(ctx, i18nService);
-      const masterLabel = readerLabelsFor(service, locale)?.objectLabel(master) ?? declaredLabel;
+      const masterLabel = readerLabelsFor(service, locale, engine)?.objectLabel(master) ?? declaredLabel;
       return recordLockRefusal(masterLabel, undefined, locale, translate);
     };
 

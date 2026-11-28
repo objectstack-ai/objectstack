@@ -28,8 +28,9 @@ export function QuickActions() {
   const navigate = useNavigate();
   const { t } = useObjectTranslation();
 
-  // Manual "Create App" deprecated — the AI-first builder (Build with AI on
-  // /home) is the path to a new application. No "Manage Objects" card either
+  // Manual "Create App" deprecated — and no build entry of any kind: Home
+  // offers neither "Build with AI" nor "Build an app" (objectstack#37227); a
+  // new app starts from a template or in Studio. No "Manage Objects" card either
   // (objectstack ADR-0146 D1): objects are designed in Studio, which Home
   // opens from its own cover.
   const actions: QuickAction[] = [
@@ -82,7 +83,7 @@ export function QuickActions() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <h3 className="font-semibold text-base leading-tight">{action.label}</h3>
+                      <h3 className="font-medium text-base leading-tight">{action.label}</h3>
                       <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 -translate-x-1 transition-[opacity,transform] duration-200 group-hover:opacity-100 group-hover:translate-x-0" />
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">{action.description}</p>

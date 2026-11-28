@@ -1,5 +1,615 @@
 # @objectstack/plugin-audit
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 0296d97: feat(plugin-audit): the audit log is sealed by default, and sealed rows expire by whole checkpoints under a signed expiry amendment
+  
+  Clause-②: yes (narrowing) — narrowed: because `sys_audit_log` now declares `lifecycle.seal` on every deployment, `os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies` with `--apply` refuse on SQLite or Turso without `--sealer-stopped`, and on Postgres or MySQL take the audit seal lock and refuse when a sealer pass still holds it after ten minutes, where 18.6.0 ran them unlocked on a deployment that sealed nothing; `os audit verify` exits 1 on a row in a window at or before the newest window a trusted `window` checkpoint names that no checkpoint holds (`late`, unsealed), where it read the window unsealed and exited 0; `os audit verify` refuses with `archive_not_connected` and exits 2 wherever the `archive` datasource is declared and not connected on its own boot, where 18.6.0 printed that nothing is sealed and exited 0; `verifyAuditLedger` throws for `sys_audit_log` when the `archive` datasource it archives to is not connected and no `archive` is passed; and on an object whose packaged metadata declares `lifecycle.seal` and no `archive`, a `lifecycle` settings override of `retention.maxAge` or `ttl.expireAfter` below the declared window, global or for one organization, is rejected and reported at `error`, and the declared window applies, where 18.6.0 applied it. An object created at runtime is outside the override arm and outside signed expiry: it keeps the 18.6.0 row-cutoff retention sweep, and a settings override applies to it; the `os audit verify` arms hold for it as for any sealed object. This breaks the bound changeset `35c9a30` (#33675) set, "No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change": this release is the one that opts every deployment in. Widened: `@objectstack/objectql` `LifecycleService.registerExpiryPrefix` and the types `LifecycleExpiryPrefix`, `LifecycleExpiryPrefixRequest` (with its `tenants` windows and `tenantColumn`), `LifecycleExpiryPrefixRun`, the predicate `takesSignedExpiry` with its type `SignedExpiryRegistryLike`, and three optional owner reads on `LifecycleEngineLike.registry`; a sweep entry's `policy` gains `'expiry'` and `skipped[].reason` gains `seal-expiry-pending` and `seal-delete-unsupported`.
+  Metadata-protocol: semantic — on an object whose packaged metadata declares `lifecycle.seal`, the authored `retention.maxAge`, `ttl.expireAfter` and `archive.keep` no longer delete a row at its row cutoff: rows leave by whole checkpoints under a signed expiry amendment, counted to the start of a UTC day, at most 10,000 a sweep, and not at all while no sealer runs; an object created at runtime keeps its row cutoff
+  Skills-docs: follow-up owed — this claim's second PR (amendment 7193137455) rewrites `skills/objectstack-data/rules/lifecycle.md`, which still says the sweeper deletes sealed rows
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answers are whether an os migrate audit-* --apply run may proceed while a sealer could be sealing sys_audit_log, how os audit verify reads a lagging chain, and when a sealed row may be deleted. A declaration keeps its meaning as a lower bound, so no author's declaration needs rewriting. The one-line fix for each is in the body. -->
+  
+  **BREAKING** for operators and library callers, because the audit log is now sealed on every deployment:
+  
+  - **`os migrate audit-* --apply` on SQLite or Turso** stops before writing and names the flag. Fix: stop every server that seals the database, then run it again with `--sealer-stopped`.
+  - **The same run on Postgres or MySQL** waits up to ten minutes for a sealer pass in flight, then refuses having changed nothing. Fix: run it again once that pass has finished.
+  - **`os audit verify` exits 1** on a row it reads `late` and unsealed in a window another chain of the object already sealed. Fix: none is owed by the command; read the rows the report names (a chain a fault left behind), and run it again after the sealer's next pass.
+  - **`os audit verify` exits 2** (`archive_not_connected`) where the `archive` datasource is declared and the command's boot does not connect it. Fix: declare the datasource with `autoConnect: true`, or make it reachable from where the command runs.
+  - **`verifyAuditLedger`** (`@objectstack/plugin-audit`) throws for `sys_audit_log` when its `archive` datasource is not connected. Fix: pass `archive`, for example `archive: () => 'none'` where the deployment has no archive datasource.
+  - **On a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override cannot shorten the declared window.** An override below it is rejected at every sweep, reported at `error` (`floorViolations` on the sweep report), and the declared window applies. On an object that archives, an override still sets when rows move to the archive. Fix: remove the override or raise it to at least the declared window; to keep rows for less time, shorten the window the object declares.
+  
+  Every dry run is unchanged. A deployment's own objects that do not declare `lifecycle.seal` keep the row-cutoff retention they had.
+  
+  ADR-0154 D8 and D10 (#31908, slice P4c, the last one).
+  
+  - **`sys_audit_log` is sealed.** Its lifecycle declares `seal: { valueFields: ['old_value', 'new_value', 'metadata'] }`, so every deployment whose `AuditPlugin` has a crypto provider (`os serve` hands it one) signs each hour's audit rows into a per-organization checkpoint, and `os audit verify` checks them. The three value columns enter each checkpoint as salted commitments; every other column enters in clear.
+  - **Sealed rows leave only by whole checkpoints.** Signed expiry covers objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the 18.6.0 row-cutoff retention sweep, its rows then reading as missing. Extending signed expiry to runtime-created objects is a separate card. The LifecycleService no longer deletes a row of a sealed object whose lifecycle is declared in packaged metadata by a row cutoff (`retention.maxAge`, `ttl.expireAfter`, or the archive's `keep` prune). It hands each policy to the sealed expiry the audit sealer registers (`LifecycleService.registerExpiryPrefix`, `@objectstack/objectql`). Per chain, the sealer takes the consecutive checkpoints from the chain's first remaining one whose windows ended before the cutoff (aligned down to a UTC day, so once its backlog is drained a chain gains at most one expiry amendment a day), each admitted under a trusted signing key, at most 10,000 rows a sweep. It signs and stores the chain's `expiry` amendment first. The sweep then deletes exactly those rows, by id, from the hot store and the archive, and only after them the checkpoints and their seeds. A sweep stopped part way resumes under the stored amendment and signs no second one. A run a reap guard vetoes in part is not completed and is retried. The verifier reads an expired row as `expired` while its checkpoint stands, and after it is gone honours the range as before (D8).
+  - **`os migrate audit-* --apply` on SQLite or Turso now needs `--sealer-stopped` for the audit log.** The rule 18.6.0 set for a sealed object now holds on every deployment, since `sys_audit_log` is one: stop every server that seals the database, then run with the flag. That includes the `os migrate audit-side-copies --apply` an upgrade from 18.4.0 or earlier runs. Postgres and MySQL take the audit seal lock, and a dry run is unchanged.
+  - **No sealer, no deletion.** While no sealed expiry is registered (an `AuditPlugin` with no crypto provider, a one-shot boot), a sealed object's rows past their policy are kept, the archive copy still runs, the sweep reports `seal-expiry-pending`, and the lifecycle service says so once at `warn`; such a host keeps `sys_audit_log` past `archive.keep`, and its sealer reports the missing provider hourly at `error`. An archive store with no `bulkDelete` is never planned (`seal-delete-unsupported`), so no amendment is signed over rows it could not delete. A chain whose first remaining checkpoint does not follow its last expiry (a checkpoint removed outside the platform), or whose next checkpoint does not verify under a trusted key, is not expired past that point, and the sealer says so. An expiry acts only on the chain's own checkpoints and amendments, linked in order; a stopped expiry is resumed only over checkpoints that also each verify under a trusted key and run on to the amendment's last sequence and digest; otherwise nothing in its range is deleted, and the sealer says so. The verifier holds an expiry it honours to the same. An expiry deletes rows for good: a deleted row cannot be restored from the ledger.
+  - **On a sealed object with no `archive`, a retention override cannot shorten the declared window.** `AuditPlugin` registers a retention floor (the mechanism the job queue uses for its idempotency window) for every object whose packaged metadata declares `lifecycle.seal` and no `archive`, at its declared `retention.maxAge` and `ttl.expireAfter`, refreshed before every sealer pass so it follows the declaration. An override, global or for one organization, may lengthen the window; one below it is rejected and the declared window applies. `archive.keep` takes no override. A lifecycle service that takes a sealed expiry but no retention floors is given no expiry, so its sealed rows are kept, and the plugin says so at `error`.
+  - **A tenant-scoped retention override applies to its organization's chain where it is set on the chain column.** Tenant windows are set on the object's `organization_id` column, so this holds on an object chained by it (`seal.chainField: 'organization_id'`). The lifecycle service hands each tenant's window, through the same floors, to the sealed expiry (`LifecycleExpiryPrefixRequest.tenants`), with the column the windows are set on (`LifecycleExpiryPrefixRequest.tenantColumn`). Where that is the object's chain column, an organization's chain expires under its own window and its amendment signs that value. Every other chain expires under the longest window configured: the chain of rows about no organization, and every chain of an object whose windows are set on another column than its chain column, which may hold rows of several organizations. On such an object a shorter tenant window has no effect on its sealed rows: they are kept to the longest. No row expires under a window shorter than one set for it.
+  - **A fully expired chain continues.** Its next checkpoint chains onto the expiry: sequence after the expiry's last, linked to its `last_removed_digest`.
+  - **`os audit verify` stays loud for a chain a fault left behind** (seat ruling 6885452378, ADR-0154 D3 as amended): a window that starts at or before the newest window a trusted `window` checkpoint names is sealed, so a row there that no checkpoint holds reads `late` and unsealed, and the check fails.
+  - **The verify harness hands its crypto provider to `AuditPlugin`.** `bootStack` gives an `AuditPlugin` it mounts (an `extraPlugins` entry, a stack `plugins` entry, or the provider `requires: ['audit']` constructs) the same `harnessCryptoProvider()` instance that settings and the engine get, never a bare `LocalCryptoProvider`; an instance composed with its own provider keeps it.
+  - The `lifecycle.seal` description no longer says the retention sweeper deletes sealed rows.
+
+### Patch Changes
+
+- 9b99640: feat(spec,plugin-audit): an activity milestone's timeline row reads in the reader's language — `objects.<object>._milestones.<field>.<value>.summary`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37585
+  
+  - **Translation slot.** An object translation accepts `_milestones`, keyed by an `activityMilestones` entry's watched `field` and then the `value` it fires on, each carrying `summary`: the milestone's template in that language, with the same `{field}` tokens. `milestones` and `activityMilestones` are refused, and the refusal names `_milestones` as the key to write. `resolveObjectMilestoneSummary` (`@objectstack/spec/system`) reads it along the locale chain.
+  - **Timeline rows.** A fired milestone's `sys_activity` row now stores a summary code (`metadata.summary_message`, `key: 'activityMilestone'`): the pair, and each interpolated token's value with the select option it matched. On a read whose caller has a locale, a language that translates the milestone serves the row's `summary` composed from its template, a select token named by the option label in that language. The stored `summary` is unchanged — the authored sentence — and a language with no entry, a read with no locale, and every row written before this change read it as stored. A tenant that reworded a packaged milestone's `summary` keeps its words. The field redaction still judges the composed text by the fields the row was composed from.
+  - **Extraction and references.** `os i18n extract` scaffolds the key for each milestone pair (the first entry of a repeated pair, the one that fires), and the translation-reference rule flags a `_milestones` key over a pair no milestone of the object declares.
+  - **Docs.** `content/docs/ui/translations.mdx` and the i18n standard's reference table name the key.
+- 44ccf94: fix(plugin-audit): a milestone row written before its template gained a token reads its stored sentence, not a translation with a hole
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A fired milestone's activity row now also stores the names of every `{token}` its template held (`names` in the row's summary code). A reader whose language translates the milestone composes the translation only when each token it names either has the row's stored value or was in the template and empty; a token the app added to the template after the row was written, or one only the translation names, leaves the row's stored sentence in place, which has no hole. A row written before this change carries no names, so it composes only when every token of the translation has a stored value.
+  
+  Also: the `{token}` pattern has one exported definition (`milestoneTokenRe`, `activity-summary-message.ts`) that the writer and the reader share; a read answers each milestone's translation once and reads each object's packaged base once, instead of once per row; and two `@objectstack/spec` doc comments on `scalarOverridesPackagedBase` now name the five scalars it is asked about.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+
+### Patch Changes
+
+- ef39b2c: fix(objectql, plugin-audit): a database session lock whose connection stalls no longer hangs the audit sealer, `os migrate audit-* --apply` or a migrator's release
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A held database session lock (the audit seal lock, and the schema-migration lock) used to wait for its connection with no limit when it checked or let go of the lock. A connection stalled half-open, with no reply and no reset, never fails a statement, so the liveness probe (`select 1`), the unlock statement and the close of the raw connection could each wait for good. That hung a sealer pass checking its lock before a checkpoint, the `finish()` of an `os migrate audit-* --apply` run, and a migrator's release.
+  
+  Each of the three steps now gives up after 10 seconds (`DATABASE_SESSION_LOCK_ANSWER_MS`). A live session answers each one in milliseconds and waits exactly as before.
+  
+  - A probe the session does not answer in time reads as a lost lock. The session is not probed again, and the release sends it no unlock: it closes the connection, which releases the lock.
+  - An `--apply` run whose lock's session stopped answering reports the lock lost, as for a session that ended: it prints the line at error, names `os audit verify` and exits non-zero. The line now reads `(its database session ended, or stopped answering)`.
+  - A sealer pass whose lock's session stops answering reports that the audit seal lock lapsed and writes no checkpoint. The next pass tries again.
+  - The schema-migration lock runs the same statements. A release on a session that has stopped answering returns after the bound instead of hanging the migration or the boot. The lock then stays with the database session until that connection dies, as it would if the process had been killed.
+  
+  Nothing an author writes, no exported signature and no statement changes.
+- 2a0cd20: feat(plugin-audit): export the readers that rebuild a stored checkpoint or amendment row into its signed body
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `@objectstack/plugin-audit` now exports `checkpointBodyFromRow` and `amendmentBodyFromRow` from its package entry, with the two body types they answer, `CheckpointSignedBody` and `AmendmentSignedBody` (ADR-0154 D11).
+  
+  A checkpoint sink (`audit.checkpointSink`) is handed each signed checkpoint and amendment once, and re-delivers what a failed call missed by re-reading the stored records. Read from an unaltered stored `sys_audit_checkpoint` or `sys_audit_amendment` row, these readers answer the body the sink was handed: its RFC 8785 serialization is the bytes the row's `signature` covers, so a sink outside the package can rebuild and re-send a record without copying the body's shape or its parsing. A malformed row is refused with an error whose `name` is `SignedBodyError` and whose message names the field.
+  
+  The readers validate and normalize; they never verify the signature. A row whose signed columns were rewritten reads back into a body that fails verification (a rewrite of an unsigned column, `id`, `chain_key` or a checkpoint's `leaf_hashes`, reads back into the same body, and a malformed one is refused with a `SignedBodyError`). A row rewritten and re-signed under a key planted on the host fails under a key the sink trusts itself. A row rewritten and re-signed by whoever holds the genuine signing key verifies, and only the copies already off the host can catch it: a later checkpoint's signed `previous_digest` no longer matches a rewritten checkpoint, while no later record carries an amendment's digest at all. So a sink verifies the row's `signature` over the rebuilt body, under a key it trusts itself, before it treats the row as delivered.
+  
+  A sink assembles the entry it re-delivers itself: `kind` is `checkpoint` or `amendment`, from the table it read; `keyId` is `body.signing_key_id`; and `signature` is the row's `signature` column. The signed bytes are the body's RFC 8785 (JCS) serialization, which the sink computes with its own serializer: this package does not export one.
+- cceb5c6: fix(audit): the action invocation row of an aggregate bulk call records how many selected rows succeeded, failed or were not confirmed
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An `execution: 'aggregate'` bulk action is one call for the whole selection, with the ids in `params._selectedIds`. When its handler moved some rows and failed others, it resolves with a `BulkActionResult` (`{ succeeded: [ids], failed: [{ id, message }] }`, `@objectstack/spec/ui`) and does not throw. The `action_invocation` row in `sys_audit_log` recorded only `outcome: 'succeeded'` for that call, so the audit trail said a partly failed run fully succeeded.
+  
+  The outcome stays `succeeded`. When the call carried `_selectedIds` and its resolve value carries a `succeeded` or `failed` member, the row's `metadata` now also records what that value reads as under `BulkActionResultSchema`, counted by the rules the console's bulk dialog counts with: an id outside the selection is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither list is not confirmed.
+  
+  - `bulk_selected`, `bulk_succeeded`, `bulk_failed` and `bulk_unconfirmed`, where `bulk_selected = bulk_succeeded + bulk_failed + bulk_unconfirmed`;
+  - or, when the value carries a member but does not parse, `bulk_unreadable: true` alone and no succeeded count.
+  
+  A handler that resolves with nothing, or with a value that has neither member (a summary, a download link), records the row as before. A call with no `_selectedIds`, a failed call and a `resume_run` add no bulk key. Both the REST `POST /actions/:object/:action` door (and a host's `dispatchAction`) and the MCP `run_action` tool record the counts.
+  
+  `ActionInvocationAuditEvent` gains an optional `bulk` member in both packages, and `@objectstack/plugin-audit` exports its type, `ActionInvocationBulkReading`. A reader of the ledger that lists `metadata` keys sees the new keys on these rows only.
+- 4db08d5: fix(audit): a search the server widens never names a column the caller may not query (#34700)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no skill or docs page teaches this search set.
+  
+  - The server-chosen search set of an object now leaves out every column the object's own query guard would refuse this caller, as it already leaves out a field the caller may not query (#25672). A column the caller names in `searchFields` is not left out: the guard judges it as before.
+  - `registerMiddleware(fn, { object, withholdSearchFields })`: a guard middleware names those columns in its own registration (`EngineMiddlewareOptions.withholdSearchFields`, asked for the reads the middleware runs on). plugin-audit's guards on `sys_audit_log` and `sys_activity` declare one, answered by the guard's own rule.
+- 4b1eb0e: fix(plugin-audit): the platform's own audit and activity rows are no longer judged as an automation's insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The audit writer records every audited write with a `sys_audit_log` row and its `sys_activity` mirror. It wrote both through the `sudo()` of the hook api it is handed, and `sudo()` spreads the audited write's context. When that write was made by app-authored automation, the elevation kept the automation's provenance: an action body's or a system hook's app-automation elevation mark, or a flow run's `flowRunId`. plugin-security therefore read the platform's own ledger rows as the automation inserting into an append-only object. Today that logged the "Deprecated: inserting into 'sys_audit_log'" (and `'sys_activity'`) warning on the first such write. Once the announced refusal of those inserts ships, it would have refused the rows and lost the audit trail of every action-body, system-hook and flow write.
+  
+  - The audit writer now writes both rows through the platform's own system api. `platformSystemApi(api)` is a new export of `@objectstack/objectql` and `@objectstack/objectql/core`. It derives from a hook's api the same elevated context `sudo()` gives, minus the app-automation mark and minus `flowRunId`. Every other key is kept, so the rows stay in the write's transaction, organization and attribution. On an app-authored hook's api it sheds nothing: there it returns what that api's `sudo()` returns, the mark and `flowRunId` kept.
+  - `withoutAppAutomationElevation(context)` is a new export of `@objectstack/core`. It returns the context without the mark.
+  - What an automation writes itself is unchanged. An action body's or a hook's insert into `sys_activity` or `sys_audit_log`, through its `ctx.api` or its `ctx.api.sudo()`, still carries the mark and still logs the deprecation. `sudo()` itself is unchanged too: it never sheds the mark.
+- aff34ba: fix(approvals,audit): an approval's flow and position labels, and a renamed object's label in approvals and activity summaries, read as the metadata translators serve them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese, say), the approvals door still looked up a request's flow label (`flows.<flow>.label`) and a position's label (`positions.<name>.label`) through `II18nService.t()`, which falls back to the `defaultLocale` row when the reader's locale has no entry. So an `en` or `en-US` reader saw the Chinese flow name on the inbox, the request page and the generic data door's request rows, and the Chinese position name in a timeline note, where the authored text was expected. Both labels now resolve through the spec translators of their types (`translateFlow`, `translatePosition` from `@objectstack/spec/system`) over every locale the i18n service holds. They use the resolve options the metadata route builds: the reader's locale, the declared fallback chain, and the authored language (the declared `sourceLocale`, else `defaultLocale`). A reader in the authored language now reads the label as written, and every other reader reads the same row as before.
+  
+  A packaged object renamed by a code extension was named in the reader's language by the bundle's translation of its OLD label. This hit the approvals inbox, request page and object-naming refusals, and the object label inside an activity summary, where `GET /meta/object` serves the rename. Both readers now hand `translateObject` the object's served definition and its packaged base (`packagedBase`, read off the engine's registry through `getPackagedObjectBase`, the base `/meta` reads). So the rename stands in every locale, as on `/meta`, and an unrenamed object reads its translation as before.
+  
+  An approval step's label (`flows.<flow>.approvals.<node_id>.label`) is still read through `t()`: no spec translator reads that key yet.
+- 6d0089c: fix(objectql,approvals,audit): an authored rule message, an approval's object label and an activity summary's labels read as `/meta` serves them in a declared `i18n.sourceLocale`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese, say), three readers still looked metadata text up through `II18nService.t()`, which falls back to the `defaultLocale` row when the reader's locale holds no entry. An `en` reader was shown the Chinese text where `GET /meta` and every other refusal label showed the English one as authored:
+  
+  - objectql: the author-written message of a validation rule (`objects.<object>._validations.<rule>.message`) in a `400 VALIDATION_FAILED` refusal;
+  - plugin-approvals: the object label on the approvals inbox, the request page, the generic data door's request rows and the approval refusals that name an object;
+  - plugin-audit: the object, field and select-option labels inside an activity summary composed in the reader's language.
+  
+  Each now resolves through `translateObject` (`@objectstack/spec/system`) over every locale the i18n service holds, with the resolve options the metadata route builds: the reader's locale, the declared fallback chain and the authored language (the declared `sourceLocale`, else `defaultLocale`). A reader in the authored language reads the text as written; every other reader reads the same row as before. `t()` keeps carrying the catalog sentences.
+  
+  An i18n service that cannot hand its translations over (no `getLocales()` / `getTranslations()`) no longer has these labels and rule messages translated through `t()`: the authored text stands. Every service the platform ships implements both.
+- 5827212: feat(plugin-audit): a comment thread can be marked resolved and reopened
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `sys_comment` gains three columns on the top-level comment of a thread: `is_resolved` (boolean, default `false`), `resolved_by` (the user who resolved it) and `resolved_at` (when). A thread is a top-level comment together with its replies.
+  
+  - **Resolve and reopen** by updating `is_resolved` on the top-level comment through the data API. An update that names `is_resolved` on a reply is refused, `VALIDATION_ERROR` / 400.
+  - **Who may.** Anyone who may comment on the record (who can read it) may resolve and reopen its threads (maintainer ruling record 7063285032, option A). This is the one widening: an update that changes nothing but `is_resolved` is admitted without the author-or-record-editor rule. Any other change to a comment still needs its author or an editor of the record. Resolving is an update, so a permission set that grants `create` but not `edit` on `sys_comment` can post comments but cannot resolve or reopen threads. A caller who cannot read the record gets the not-visible refusal, on a reply too.
+  - **Platform-written.** `resolved_by` and `resolved_at` are stamped by the platform when `is_resolved` turns `true` and cleared when it turns `false`; both are read-only, so a client's value is replaced by the stamp or dropped and reported in `droppedFields`. A new comment is always unresolved.
+  - **A reply reopens.** A reply posted into a resolved thread sets the thread back to unresolved.
+  - **Reading.** Unresolved threads of one record: `object_name = OBJECT`, `record_id = ID`, `parent_id = null`, `is_resolved: { $ne: true }`; count the same filter for the record's unresolved-thread count.
+  - **Stored rows** need no migration: the SQL column default is `false`, and `$ne: true` also matches a row that carries no value.
+  
+  Resolving or reopening writes no entry on the record's activity tab; the comment's own write is recorded in the audit ledger as every comment write is.
+- 00ae570: feat(plugin-audit): a reply in a comment thread notifies the thread's starter and the people who replied in it before
+  
+  Clause-②: yes (widening) — `@objectstack/plugin-audit` emits a new notification topic, `collab.reply` (inbox and e-mail), and loads three new `messages.*` keys (`repliedToYourComment`, `repliedInYourThread`, `repliedAnonymous`) in all eleven locales into the host i18n service; `@objectstack/service-messaging` offers `collab.reply` in its platform topic list; nothing removed or refused
+  Metadata-protocol: none
+  
+  Before, only an `@mention` notified anyone about a comment. Someone who started a thread, or replied in it, heard nothing when another person answered.
+  
+  - **Who is notified.** When a comment is written as a reply (`parent_id` set), the writer finds the thread: it follows `parent_id` up to the top-level comment (whose author is the starter), then reads every distinct author of a reply to that comment in one grouped query (`author_id … WHERE parent_id = ? GROUP BY author_id`). Each of them is notified, except the reply's author and anyone this reply mentions (they get the mention notification, not two).
+  - **Who is not.** Each participant passes the same recipient gate as a mention: they are notified only when they can read the record and the reply itself, judged with their own permissions. A starter who has since lost access to the record gets nothing. Editing a reply, or writing a top-level comment, notifies no participant.
+  - **What arrives.** A new topic, `collab.reply`, through the same `messaging.emit` ingress as `collab.mention`: an inbox notice per reply and person, and an e-mail with the comment preview and a link that opens the record. The title says who replied, in the recipient's language: "Bob replied to your comment" for the starter, "Bob replied in a comment thread you are in" for the others. The e-mail templates are the mention e-mail's, registered under `collab.reply` in every catalog locale.
+  - **E-mail rate.** At most one reply e-mail per person per 10-minute window, the mention e-mail's window under its own key. In one window a person can therefore get one mention e-mail and one reply e-mail. Inbox notices are not limited.
+  - **Preferences.** Nothing new to set. A `sys_notification_preference` row `(collab.reply, email, enabled: false)`, or `(*, email)`, mutes the reply e-mail and keeps the inbox notice, as for any topic.
+  - **The topic list offers it.** `@objectstack/service-messaging` lists `collab.reply` among the platform's fixed topics (`PLATFORM_NOTIFICATION_TOPICS`), so `GET /api/v1/messaging/preference-options` offers it in the preference and template topic pickers even in an organization that has not received a reply notice yet.
+  
+  Mention notifications are unchanged.
+- d12ac84: feat(comments): a member resolves and reopens any thread they can read, and deletes their own comments
+  
+  Clause-②: yes (widening) — `@objectstack/plugin-audit`'s `AuditPlugin` mounts two new HTTP routes, `PUT /api/v1/comments/:id/resolution` and `DELETE /api/v1/comments/:id`, and the stamp of who resolved a thread now reads a system write's `provenance.attributedUserId`. `@objectstack/core`'s `OwnRowDeleteDoor` adds an optional member, `refuseRemoval(row, engine, context)`, asked after the owner check. `@object-ui/react`'s `DiscussionContextValue` adds the optional `ownCommentDeletesOnly`; `@object-ui/plugin-detail`'s `RecordCommentsData` adds the optional `ownDeletesOnly`, and `RecordCommentThreadProps['comments']` may carry it; `@object-ui/core`'s affordance-to-grant map adds the row `feedCommentDeleteOwn`. Nothing existing is removed or re-typed.
+  Metadata-protocol: none
+  
+  Two server doors carry the maintainer's comment permission rulings past the platform's row floor (`owner_only_writes`, which lets a rank-and-file member update only the rows they created) and past the delete grant no every-member set may hold (ADR-0090 D5). Neither changes the floor, `sys_comment_moderation` or any permission set, and the data API answers exactly what it answered before.
+  
+  - **Resolve and reopen: `PUT /api/v1/comments/:id/resolution`** with the body `{ "resolved": true }` or `{ "resolved": false }` and nothing else. Whoever can read the thread and may post a comment on it may, external members included (ruling record 7063285032, option A: anyone who can see the record, the same gate as posting a comment): the door reads the comment as the caller (a comment they cannot read answers `404 RECORD_NOT_FOUND`, as an unknown id does), refuses a caller who reads comments but may not post one (`403 PERMISSION_DENIED`), refuses a reply (`400 VALIDATION_ERROR`) and then writes `is_resolved` alone, attributed to the caller. `resolved_by` names the caller. It answers `200` with `{ id, is_resolved, resolved_by, resolved_at }`. Any other query parameter or body is `400 VALIDATION_ERROR`; a signed-out request is `401`.
+  - **Delete your own comment: `DELETE /api/v1/comments/:id`.** It removes a comment the caller wrote (`author_id`), with no delete grant needed, on the platform's shared own-row delete door. Another member's comment is `403 PERMISSION_DENIED` and stays, even for a record editor: moderating someone else's comment stays the data API's, behind the delete grant. A comment that has replies stays too, whoever wrote them, `409 DELETE_RESTRICTED`, because removing it would turn each reply into a thread of its own (ruling record 7069889899: no one deletes or rewrites someone else's comment); its author may still edit its text. It answers `200` with `{ id, deleted: true }`.
+  - **Unchanged:** comment text stays its author's alone; a member's data-API update of a colleague's comment, `is_resolved` included, and a member's data-API delete are still `403`; administrators keep the data API for resolving, editing and deleting anyone's comment.
+  
+  The desktop comment panel follows the doors:
+  
+  - ✓ is on every thread, the viewer's and anyone else's, for a viewer holding the `sys_comment` create grant, and writes through the resolution door. It no longer asks the explain engine; that probe now gates only Edit on someone else's comment.
+  - A viewer without the `sys_comment` delete grant (an ordinary member) is offered Delete on their own comments that have no reply, and it goes through the own-comment delete door; a viewer with the grant deletes through the data API as before, others' comments included where they may edit the record.
+  
+  Corrections to two earlier notes of this release, which stay as written:
+  
+  - A rank-and-file member now resolves and reopens a colleague's thread through the resolution door; this replaces the #36071 note's line "This is the one widening: an update that changes nothing but `is_resolved` is admitted without the author-or-record-editor rule", because the platform's row floor (`owner_only_writes`) runs first, so through the data API such a member still resolves only the threads they started and an administrator resolves any.
+  - The desktop comment panel offers ✓ on every thread to a viewer who may post a comment and writes it through the resolution door; this replaces the #36075 note's line "✓ is offered under the `sys_comment` update grant: on a thread the viewer started, and on anyone's only where the explain engine admits …", and its "Unchanged" line's "a deployment without the explain service shows ✓ and Edit on the viewer's own rows only" now holds for Edit alone.
+- 53733c1: fix: a comment notification opens the record with its comments at that comment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening an @mention or reply notification used to land on the record page with the comments closed (or, on a phone, with no comments page), so the reader had to find the comment they were told about.
+  
+  - **`@objectstack/plugin-audit`**: the `collab.mention` and `collab.reply` inbox notices now link `/{object}/{id}?comments={rootCommentId}`, plus `&comment={commentId}` when the comment is a reply. A reply's thread is found from `parent_id`; a mention inside a reply links that reply's thread. The mention and reply e-mails carry the same link. Notices already in an inbox keep their old record link: nothing is backfilled. Other notifications are unchanged.
+  - **`@object-ui/plugin-detail`**: `CommentsPanel` takes `focusThreadId` / `focusCommentId`. With them, it shows that thread even when the filter hides it, opens its replies, marks the comment and scrolls the list to it. `CommentsPage` takes `focusCommentId`, and the thread opens scrolled to that comment, marked. `CommentThread` takes `openSignal` / `targetId`, and `CommentItem` takes `targeted`.
+  - The Console's record page reads the link: on desktop, `?comments=` (a thread id) opens the comment panel at that thread without changing the stored open or closed choice, and closing the panel drops the link. On a phone, the existing `?comments=` page opens the thread scrolled to `?comment=`.
+- d463c46: fix(comments): unreact, resolve and own-comment delete work on a kernel with no `http.server` (a hosted tenant kernel) instead of answering 404
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The three comment doors, `DELETE /api/v1/comments/reactions/:id`, `PUT /api/v1/comments/:id/resolution` and `DELETE /api/v1/comments/:id`, were mounted by `AuditPlugin` only on the kernel's `http.server`. A hosted tenant kernel owns no socket and registers no `http.server`, so the host's `createHonoApp` catch-all handed each of them to the runtime dispatcher, which had no domain for them and answered `404 ROUTE_NOT_FOUND`, and removing a reaction, resolving or reopening a thread and deleting your own comment failed there.
+  
+  - `@objectstack/spec/contracts` declares `ICommentDoorsService` with one optional, transport-neutral member, `handleCommentDoor(request: Request): Promise<Response>`, and types the `comments` service slot with it (`ServiceSlotContracts.comments`). A service without the member still satisfies the contract.
+  - `AuditPlugin` registers the `comments` service with that member. It runs the same registrars over the same dependencies the `http.server` mount runs, on a private route table that never listens, so every answer is the mount's own. The `http.server` mount is unchanged, and no path is mounted twice. `@objectstack/plugin-audit` now depends on `@objectstack/plugin-hono-server` at runtime (the private table is a `HonoHttpServer`), and the `comments` service name is now taken: a composition that registers its own `comments` service alongside `AuditPlugin` fails to boot with a duplicate-service error.
+  - The runtime dispatcher gains a `/comments` domain that claims exactly the three method and path shapes and forwards the request, body unread, to the request kernel's `comments` service. Every other `/comments` shape keeps the dispatcher's `404 ROUTE_NOT_FOUND`. With no `comments` service, or one without `handleCommentDoor`, the doors answer `501 NOT_IMPLEMENTED` naming `@objectstack/plugin-audit`. The doors stay behind the dispatcher's authentication and project-membership gates.
+- 7501d0c: feat(studio): the Field History setting offers Default, On and Off, and Default says what it resolves to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Field History setting on the field form, on each row of the object form's field list, and in the object's capabilities is now a three-way choice instead of a switch. Default leaves the setting unset, so the field (or object) follows the platform, and it names what that means for the row: "Default (On)" for most field types, "Default (Off)" for a media or JSON field unless the field opts in with Track History, and for a credential field always. On and Off write `true` and `false` as before. A setting turned off can now be returned to Default, which removes the key.
+  
+  `@objectstack/spec/data` exports `resolveFieldHistory(field, object)` and `FIELD_HISTORY_DEFAULT_OFF_TYPES`: whether a changed field's old → new values show on the activity timeline, and the types that are off by default. The activity writer in `@objectstack/plugin-audit` now asks this predicate instead of its own copy of the type list, so the default the form shows and what the writer keeps cannot disagree. Behaviour of the writer is unchanged.
+- 24ff03c: feat(plugin-audit): the audit log carries a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. The audit log is now `amber` (audit).
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [a73edb3]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [4db08d5]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [9062756]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [61722e9]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [6d0089c]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [c59ee99]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [50d6da8]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [7dd1a2f]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [a7292a5]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [756df0a]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [4101f1f]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/objectql@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+  - @objectstack/plugin-hono-server@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

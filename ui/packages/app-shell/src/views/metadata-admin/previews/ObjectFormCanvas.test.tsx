@@ -13,11 +13,11 @@ import { useAiSurfaceEnabled } from '../../../hooks/useAiSurface';
 // up a discovery data source; every test starts with AI enabled (see
 // beforeEach), and the Community-Edition case overrides it to disabled.
 vi.mock('../../../hooks/useAiSurface', () => ({
-  useAiSurfaceEnabled: vi.fn(() => ({ enabled: true, isLoading: false })),
+  useAiSurfaceEnabled: vi.fn(() => ({ enabled: true, isLoading: false, buildServed: true, focusServed: false })),
 }));
 
 beforeEach(() => {
-  vi.mocked(useAiSurfaceEnabled).mockReturnValue({ enabled: true, isLoading: false });
+  vi.mocked(useAiSurfaceEnabled).mockReturnValue({ enabled: true, isLoading: false, buildServed: true, focusServed: false });
 });
 afterEach(cleanup);
 
@@ -359,7 +359,7 @@ describe('ObjectFormCanvas — Ask AI entry point', () => {
   });
 
   it('hides both Ask AI affordances when AI is unavailable (Community Edition)', () => {
-    vi.mocked(useAiSurfaceEnabled).mockReturnValue({ enabled: false, isLoading: false });
+    vi.mocked(useAiSurfaceEnabled).mockReturnValue({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
 
     // Populated canvas: the toolbar "Ask AI" is gone, but the rest of the
     // toolbar (Add field / Add section) stays.

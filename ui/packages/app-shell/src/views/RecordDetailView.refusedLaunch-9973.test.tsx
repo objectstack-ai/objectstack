@@ -133,7 +133,7 @@ function recordPageProps() {
 }
 
 /** Mount the record page, then launch the flow action through a real runner. */
-async function launch(data: Record<string, unknown>) {
+async function launch(data: Record<string, unknown>, callContext?: Record<string, unknown>) {
   render(
     <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}`]}>
       <MetadataCtx.Provider value={METADATA}>
@@ -168,7 +168,7 @@ async function launch(data: Record<string, unknown>) {
 
   let result: any;
   await act(async () => {
-    result = await runner.execute({ ...ACTION } as any);
+    result = await runner.execute({ ...ACTION } as any, callContext as any);
   });
   unsubscribe();
   expect(String(authFetchSpy.mock.calls[0][0])).toContain('/api/v1/automation/check_dup/trigger');
@@ -196,7 +196,9 @@ describe('objectui#9973 — record-page flow launch that ends refused', () => {
   it("does NOT toast the action's successMessage, does not invalidate the record, and returns silent success", async () => {
     const { result, changes } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The refusal also rides on the result (objectstack#36915), for a caller
+    // that counts outcomes; the notice above is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: SENTENCE } });
     expect((toast as any).success).not.toHaveBeenCalled();
     expect((toast as any).error).not.toHaveBeenCalled();
     expect(changes).toEqual([]);
@@ -227,10 +229,70 @@ describe('objectui#11092 — a paused record-page launch names the flow by its s
       screen: { nodeId: 'confirm', title: 'Confirm', fields: [] },
     });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Confirm' })).toBeTruthy();
     expect(within(dialog).getByText('Duplicate Screening')).toBeTruthy();
     expect(within(dialog).queryByText('check_dup')).toBeNull();
+  });
+});
+
+// objectstack#36915 — a list embedded on a record page runs its per-record bulk
+// flow through THIS page's runtime, whose ActionProvider replaces the
+// console's. Each record is dispatched with `reportsRefusal` (the runner's
+// `callContext`): the page's flow handler then opens no notice, and the
+// refusal comes back on the result for the bulk result to list.
+describe('objectstack#36915 — record-page flow handler honours reportsRefusal', () => {
+  it('a dispatch with reportsRefusal opens no notice and answers the refusal on the result', async () => {
+    const { result } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE }, { reportsRefusal: true });
+
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: SENTENCE } });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.body.textContent).not.toContain(SENTENCE);
+  });
+
+  it('control: the same dispatch without the flag still opens the notice', async () => {
+    const { result } = await launch({ success: true, status: 'refused', refusalMessage: SENTENCE });
+
+    expect(result.refusal).toEqual({ message: SENTENCE });
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('alert').textContent).toContain(SENTENCE);
+  });
+});
+
+// objectstack#36931 — a list on a record page runs its per-record bulk flow
+// through THIS page's runtime too, so two records whose runs pause must both
+// reach a screen. The page queues paused runs: the first screen shows, and
+// closing it shows the next, where it used to keep only the last one.
+describe('objectstack#36931 — the record page shows every paused run in turn', () => {
+  it('two paused dispatches each come back paused, and both screens can be reached', async () => {
+    const paused = (id: string, title: string) => ({
+      success: true,
+      status: 'paused',
+      runId: id,
+      flowLabel: 'Duplicate Screening',
+      screen: { nodeId: 'confirm', title, fields: [] },
+    });
+    // The first launch goes through the shared helper; the second reuses the
+    // page's handlers with a new answer, as the bulk fan-out's next record does.
+    const first = await launch(paused('run-a', 'Confirm Ann'), { reportsRefusal: true });
+    const props = recordPageProps();
+    authFetchSpy.mockReset();
+    authFetchSpy.mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, data: paused('run-c', 'Confirm Cy') }) });
+    const runner = new ActionRunner(props.context);
+    for (const [type, handler] of Object.entries(props.handlers)) runner.registerHandler(type, handler as any);
+    let second: any;
+    await act(async () => {
+      second = await runner.execute({ ...ACTION } as any, { reportsRefusal: true } as any);
+    });
+
+    expect(first.result.paused).toEqual({ runId: 'run-a' });
+    expect(second.paused).toEqual({ runId: 'run-c' });
+    const heading = () => screen.queryByRole('heading', { name: /^Confirm / })?.textContent ?? null;
+    await waitFor(() => expect(heading()).toBe('Confirm Ann'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(heading()).toBe('Confirm Cy'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(heading()).toBeNull());
   });
 });

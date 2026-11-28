@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { GET_RECORD_CONTEXT_TOOL_NAME } from './record-context-tools.zod';
 
 // ==========================================
 // Trigger Condition
@@ -206,6 +207,51 @@ export type SkillTriggerCondition = z.input<typeof SkillTriggerConditionSchema>;
 // ==========================================
 // Skill Schema
 // ==========================================
+
+/**
+ * [ADR-0160 D8] Whether a skill's `tools` binding binds `get_record_context`:
+ * an entry that is the name itself, or a trailing wildcard whose stem the name
+ * starts with (`get_record*`, `get_*`) — the matching rule `SkillSchema.tools`
+ * documents. The one predicate the parse refusal below and the authoring
+ * advisory (`@objectstack/lint`, `ai-skill-context-omitted`) both ask.
+ */
+export function skillBindsRecordContextTool(tools: unknown): boolean {
+  if (!Array.isArray(tools)) return false;
+  return tools.some((entry) => typeof entry === 'string' && (
+    entry === GET_RECORD_CONTEXT_TOOL_NAME
+    || (entry.endsWith('*') && GET_RECORD_CONTEXT_TOOL_NAME.startsWith(entry.slice(0, -1)))
+  ));
+}
+
+/**
+ * [ADR-0160 D8] A skill that declares `context` binds `get_record_context` in
+ * `tools`, by name or by a wildcard that matches it; one that does not is
+ * refused here, at parse.
+ *
+ * The binding is what every reader of `context` relies on. A runtime that
+ * filters tools per skill needs it for the first read and for an `anchor`
+ * re-read, and the MCP prompt surface reads it to withhold the skill on a
+ * connection that does not serve the tool (`skillBindingServed`,
+ * `@objectstack/mcp`); the long-lived stdio server, which has no binding
+ * filter, offers the record argument only where it registers the tool. A
+ * prompt that tells the model to call a tool the server lacks is never
+ * offered.
+ */
+function refuseUnboundRecordContext(
+  skill: { context?: unknown; tools?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (skill.context === undefined) return;
+  if (skillBindsRecordContextTool(skill.tools)) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['tools'],
+    message:
+      `A skill with \`context\` names a context pack, and the model reads that pack only through the `
+      + `\`${GET_RECORD_CONTEXT_TOOL_NAME}\` tool, which this skill does not bind. Add `
+      + `"${GET_RECORD_CONTEXT_TOOL_NAME}" to \`tools\` (or a wildcard that matches it), or remove \`context\`.`,
+  });
+}
 
 /**
  * Skill Schema
@@ -421,7 +467,7 @@ export const SkillSchema = lazySchema(() => strictObject({
    * MCP has no server-side activation step: a client lists every projected
    * prompt and decides for itself which to fetch.
    */
-  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions — evaluated by the cloud agent runtime only'),
+  triggerConditions: z.array(SkillTriggerConditionSchema).optional().describe('Programmatic activation conditions — evaluated by the cloud agent runtime only. The context fields a condition reads are reported by the client: a condition is routing, never access control'),
 
   /**
    * Whether the skill is enabled. Honoured in both distributions: an inactive
@@ -457,6 +503,39 @@ export const SkillSchema = lazySchema(() => strictObject({
   mcpPrompt: z.boolean().optional().describe(
     'Whether this skill is offered as an MCP prompt. false = written for the in-product agents only: never listed by prompts/list and unknown to prompts/get on any MCP connection, whatever its tools binding. Absent or true = offered where the server serves its tools',
   ),
+
+  /**
+   * [ADR-0160 D8] The context pack (`ai_context`) this skill works from: the
+   * pack's machine name, a bare name.
+   *
+   * A skill that declares it binds `get_record_context` in `tools`, by name or
+   * by a wildcard that matches it; one that does not is refused at parse.
+   *
+   * It is a reference between items (ADR-0150's addendum of 2026-11-25,
+   * reader 2): resolved by ADR-0150 D3 from the skill's own package — its own
+   * pack, else the one holder in its declared dependency closure — and, for a
+   * skill authored in the environment, as for a caller with no package. It
+   * takes no qualified spelling: a pack face (`NS-NAME`) is the AI face's
+   * spelling, never an authored one.
+   *
+   * Its reader in this repository is the MCP skill prompt
+   * (`@objectstack/mcp`, `skillPromptRecordContext`). When the name resolves
+   * to a pack, the prompt lists one optional argument, the record id. Given,
+   * the prompt's one message carries the skill's instructions, one fixed
+   * platform line telling the model to call `get_record_context` with the
+   * arguments that follow, and those arguments as one JSON object:
+   * `objectName` (the pack's root), `recordId` and `context` (the pack's
+   * face). The record id is only ever a JSON string value there, and the pack
+   * itself is never inlined: it reaches the model as the tool's answer. Not
+   * given, or a name that resolves to no pack, and the prompt is exactly what
+   * it is without the key.
+   *
+   * A name that resolves to no pack is an authoring error, reported where
+   * skills are validated (`ai-skill-context-unknown`, `os validate`).
+   */
+  context: z.string().regex(ROUTER_ADDRESSABLE_NAME_PATTERN, { message: ROUTER_ADDRESSABLE_NAME_MESSAGE }).optional().describe(
+    'The context pack (ai_context, by its bare name) this skill works from. Requires get_record_context in tools. Over MCP the skill\'s prompt then takes an optional record id and asks the model to read that record through the pack',
+  ),
   /**
    * ADR-0010 §3.7 — Package-level protection envelope. Package
    * authors declare lock policy here, in a code package's source;
@@ -473,7 +552,7 @@ export const SkillSchema = lazySchema(() => strictObject({
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
-}));
+}).superRefine(refuseUnboundRecordContext));
 
 export type Skill = z.input<typeof SkillSchema>;
 /** Post-parse shape of {@link Skill} — defaults applied, transforms run (ADR-0122). */

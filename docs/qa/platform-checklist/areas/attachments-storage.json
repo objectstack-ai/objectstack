@@ -255,7 +255,7 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
@@ -282,7 +282,7 @@
         "GET the same routes as the uploader/admin and follow the signed URL",
         "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
         "flip one file to acl='public_read' — a plain admin PATCH /api/v1/data/sys_file/ID {acl:'public_read'} answers 200 (acl is a writable select, packages/services/service-storage/src/objects/system-file.object.ts; a member's PATCH of the same column answers 403 PERMISSION_DENIED, on its own file or another's) — and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
-        "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), find its attachments panel and confirm the file is listed. Where the panel sits depends on the record page's width tier, measured on the page's container, not the viewport (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor): at a 1600px window with the sidebar expanded the page is three-column and the panel closes the resident related column; at 1280px it is two-column, the related column is a rail behind the 'Related' toggle above the columns (data-testid record-related-rail-toggle), closed by default with its panels unmounted, so open the rail first; narrower than the two-column floor, the panel closes the Related tab. There is no separate Attachments tab. Use 1600px, or open the rail, and record which; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), open the listed file's row menu (the ⋮ button at the row's end, labelled 'More for FILE_NAME') and choose Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
+        "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), find its attachments panel and confirm the file is listed. The panel is the face of the record's Attachments (附件) tab (ui/packages/plugin-detail/src/RecordPageColumns.tsx). On a full page with at least 744 px of content (a 1440×900 window with the comment panel closed) the details are pinned in a left column and the tabs beside them open on the row's first tab; narrower, or in the drawer, the row starts on 详情 (Details) (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890). Either way select 附件 on the tab row, and record whether the page was pinned; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), open the listed file's row menu (the ⋮ button at the row's end, labelled 'More for FILE_NAME') and choose Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
       ],
       "acceptance": [
         {
@@ -390,6 +390,12 @@
           "date": "2026-11-20",
           "change": "steps[6] re-pointed for the dense attachments panel (#35602): each file is one row and Download sits in the row's ⋮ menu (ui/packages/app-shell/src/views/RecordAttachmentsPanel.tsx), not as a button on the row. No clause changed. Read at base d44b5e3d",
           "ref": "#35602"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-22",
+          "change": "steps[6] re-pointed after #35890: the width tiers, the related column and its 'Related' rail toggle are gone; the attachments panel is the face of the record's 附件 tab, beside the pinned details on a wide full page (recordPagePinsDetails) or on the one-column tab row otherwise. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },

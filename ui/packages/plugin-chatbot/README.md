@@ -124,12 +124,10 @@ neither of the two message contracts nearby, because neither is true of both
 modes (objectui#4424):
 
 - **Not `@object-ui/types`' authoring `ChatMessage`.** In API mode the values
-  come from the runtime mapper and carry `buildProgress`, `blueprintProgress`,
-  `charts`, and `pendingActionId` / `draftReview` / `proposedPlan` /
-  `proposedChanges` / `builderHandoff` on each tool invocation — the approval
-  card, the "Review N changes" affordance, the plan card, the build panel and
-  the inline charts. The authoring contract declares none of them, so rebuilding
-  a message field-by-field from it deletes all of them, and the compiler agrees.
+  come from the runtime mapper and carry `charts`, and `pendingActionId` on
+  each tool invocation — the inline charts and the approval card. The
+  authoring contract declares neither, so rebuilding
+  a message field-by-field from it deletes both, and the compiler agrees.
   API mode also produces the AI SDK's three approval states
   (`'approval-requested'` / `'approval-responded'` / `'output-denied'`), which
   the authoring contract refuses — they are runtime-only (objectui#10018).
@@ -201,18 +199,6 @@ The floating panel is responsive by default. On desktop it uses the configured
 safe side gutters, stays above the mobile bottom navigation area, and hides the
 FAB while open so the close button in the panel header is the only active
 dismiss control.
-
-A host that wants to signal a waiting approval outside the chat can pass
-`ChatbotEnhanced` the optional `onPlanApprovalPendingChange(pending, count)`
-callback. `pending` is `true` while the thread's newest proposal still waits
-for the user: a proposed plan that offers "Build it", or a change plan whose
-card still offers its confirm button. It is `false` otherwise: no proposal,
-the user approved or confirmed it, or its build or confirm landed. `count` is
-how many items that proposal asks the user to confirm: the rows of a change
-plan, 1 for a proposed plan, 0 when nothing is pending. It fires once on mount
-and again on every change of either value. The console uses it to put a
-marker on its chat launchers while the chat is closed (objectui#11666), and
-Studio's right slot shows the count beside the folded copilot.
 
 During a conversation, the chat surface renders an inline assistant responding
 indicator while the backend is streaming, keeps message actions quiet until
@@ -309,8 +295,7 @@ import { AIElements } from '@object-ui/plugin-chatbot';
 `<ChatbotEnhanced>` renders and the mappers below produce. On top of the core
 `id` / `role` / `content` / `timestamp` / `avatar` / `avatarFallback` fields it
 carries the streaming and agent-process keys (`streaming`, `toolInvocations`,
-`reasoning`, `sources`, `traceId`, `buildProgress`, `blueprintProgress`,
-`charts`), all optional.
+`reasoning`, `sources`, `traceId`, `charts`), all optional.
 
 ```tsx
 import type { ChatbotEnhancedMessage } from '@object-ui/plugin-chatbot';
@@ -470,11 +455,137 @@ the grouping, the aggregations, how many records the figures cover, and whether
 only the reader's visible records were read. It draws that block alone, never
 the rest of the tool payload.
 
+When an answer carries a verified record-citations part (the
+`data-record-citations` part, `RecordCitationsSchema` in `@objectstack/spec/ai`),
+the console draws it beside that block, one chip per citation showing the quoted
+passage, and verifies nothing again; a part that does not parse draws nothing.
+The chips appear on a live answer whose stream carries the part, and are drawn
+again when the conversation is reloaded or reopened: the history rebuild, the
+display cache and the `useObjectChat` store rebuild keep the data parts one
+allow-list names (`STORED_ANSWER_DATA_PARTS`: charts and record citations). A
+chip calls
+`onOpenRecord({ objectName, recordId, anchor })`, and the console opens the
+record at the cited body section (`?section=ANCHOR`).
+
 Console hosts also keep a sanitized browser-side display cache for the active
 conversation. If the backend conversation record is available but returns no
 message rows on refresh, the UI can restore user/assistant text plus grouped
 tool names and states. The cache intentionally omits reasoning, tool
 parameters, and raw tool results.
+
+### Question card
+
+`QuestionCard` is the card an AI's clarifying question is answered on. It is a
+pure component: pass the questions you parsed and handle the two events. It
+does not detect the question or send anything itself.
+
+```tsx
+import { QuestionCard } from '@object-ui/plugin-chatbot';
+
+export function PendingQuestion({ messageId, onSend, onDismiss }: {
+  messageId: string;
+  onSend: (text: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+<QuestionCard
+  key={messageId}            // a new question is a new card
+  questions={[
+    {
+      header: 'Region',
+      question: 'Which region should the total cover?',
+      options: [
+        { label: 'All regions', description: 'Every region added together', recommended: true },
+        { label: 'East only' },
+      ],
+    },
+  ]}
+  announce                   // "A question is waiting for your answer" in a polite live region
+  onAnswer={onSend}
+  onSkip={onDismiss}
+/>
+  );
+}
+```
+
+- One question: a click on an option calls `onAnswer` with its label at once.
+- Two questions: an option on the first moves to the second; the second waits
+  on Send with a one-line summary, and Back keeps both choices. The answer is
+  one `header: answer` line per question; the question text stands in for a
+  missing `header`.
+- The last row, "Type something else…", takes a one-line answer; typing clears
+  the picked option and Enter moves on or sends.
+- Keys act only while focus is inside the card, which never takes focus on its
+  own: 1–4 pick, ↑/↓ move, Ctrl/⌘+Enter moves on or sends.
+- Choices survive a re-render, so after a failed send the user can press Send
+  again; remount the card with a new `key` for a new question.
+- Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
+  card is right-to-left in Arabic.
+
+`ChatbotEnhanced` draws the card itself. When a turn ends on a question tool's
+result that `parseAskQuestionEnvelope` (`@objectstack/spec/ai`) reads — the
+question envelope, or a legacy `ask_which` result — and the envelope's `reply`
+is the turn's last text, the card takes the composer's place:
+
+- It shows only once the stream has ended, and never while a typed message is
+  queued, while a write approval waits in the same turn, after a skip, or on a
+  `readOnly` transcript.
+- The composer is not unmounted: it is hidden and `inert`, so a draft and its
+  attachments come back after Skip or an answer.
+- An answer is sent through `onSendMessage` as the next user message. If the
+  send fails and the message is rolled back, the card returns with its choice.
+- Skip is remembered on this device, per conversation, when the host passes
+  `conversationId`: the key is `QUESTION_SKIP_STORAGE_PREFIX` followed by
+  `:` and the conversation id. A host's sign-out cleanup should clear that
+  prefix.
+- The conversation draws the question from its envelope: pending, the question
+  alone; answered or skipped, a collapsed "AI asks: …" that expands to its
+  options. Copy still copies the full reply, and a pending question has no
+  Regenerate.
+
+### Draft review card
+
+`DraftReviewCard` lists the drafts an ask turn saved, under the answer. A host
+whose admin skill saves metadata drafts from the chat ends such a turn with one
+`data-draft-review` part (`DRAFT_REVIEW_PART_TYPE`, whose data is a
+`DraftReviewListSchema` list from `@objectstack/spec/ai`). `ChatbotEnhanced`
+reads the part through that schema (`extractDraftReview`) and draws the card
+itself; a part the schema refuses draws nothing.
+
+```tsx
+import { DraftReviewCard } from '@object-ui/plugin-chatbot';
+import type { DraftReviewListParsed } from '@objectstack/spec/ai';
+
+export function TurnDrafts({ review, navigate }: {
+  review: DraftReviewListParsed;
+  navigate: (path: string) => void;
+}) {
+  return (
+    <DraftReviewCard
+      review={review}
+      onOpenReviewLink={navigate}                     // in-app navigation keeps the live conversation
+      reviewLinkHref={(path) => `/_console${path}`}  // the router's basename, for a new tab
+    />
+  );
+}
+```
+
+- One row per draft: its label (or name), its type, the verdict as a badge
+  ("Will publish", "N problems", or "Verdict withheld" when no verdict was
+  read) and a Review link to the draft's own review in Studio. A verdict read
+  by the save rather than at the turn's end says "checked when saved".
+- Rows are grouped by package, in save order; each package has one "Review and
+  publish" link to its Changes drawer. `omitted` shows as "+N more".
+- The card has no publish and no discard control: a person publishes or
+  discards in Studio, through the links.
+- A plain click on a link calls `onOpenReviewLink` with the Console path; a
+  modified or middle click keeps the browser's own behaviour, on the href
+  `reviewLinkHref` returns. Without either prop the links are ordinary anchors
+  on the path itself.
+- The card is drawn on a live answer only: the part is not one of
+  `STORED_ANSWER_DATA_PARTS`, so a conversation reloaded from history shows no
+  card.
+- Strings come from the `chatbot.draftReview.*` keys of `@object-ui/i18n`.
 
 ## Bundle considerations
 

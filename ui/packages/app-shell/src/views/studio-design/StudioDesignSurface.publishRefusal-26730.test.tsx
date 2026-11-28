@@ -53,6 +53,9 @@ const ENTRIES = vi.hoisted(() => [
   { type: 'object', name: 'invoice', packageId: 'com.acme.app' },
 ]);
 
+/** Whether the pending feed still lists the flow's draft: its own publish takes it off (objectstack#36511). */
+const feed = vi.hoisted(() => ({ flowListed: true }));
+
 const mockClient = vi.hoisted(() => ({
   list: vi.fn(async () => [{ name: 'approval', label: 'Approval', _packageId: 'com.acme.app' }]),
   listDrafts: vi.fn(async () => []),
@@ -66,7 +69,10 @@ const mockClient = vi.hoisted(() => ({
   save: vi.fn(async () => ({})),
   publishDraft: vi.fn(async () => ({ success: true })),
   publishPackageDrafts: vi.fn(async () => ({ success: true, failed: [] }) as Record<string, unknown>),
-  publish: vi.fn(async () => ({ success: true })),
+  publish: vi.fn(async (type: string, name: string) => {
+    if (type === 'flow' && name === 'approval') feed.flowListed = false;
+    return { success: true };
+  }),
   reset: vi.fn(async () => ({})),
 }));
 
@@ -91,7 +97,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 // The sheet: each pending entry with the note the surface gives it.
 vi.mock('../../preview/DraftChangesPanel', () => ({
@@ -112,13 +117,20 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -130,7 +142,7 @@ vi.stubGlobal(
       return new Response(
         JSON.stringify({
           drafts: [
-            { type: 'flow', name: 'approval', packageId: PKG },
+            ...(feed.flowListed ? [{ type: 'flow', name: 'approval', packageId: PKG }] : []),
             { type: 'objects', name: 'invoice', packageId: PKG },
           ],
         }),
@@ -187,6 +199,7 @@ const EXPECTED_SENTENCE = tFormat('engine.studio.refusal.publishWhere', 'en', {
 });
 
 beforeEach(() => {
+  feed.flowListed = true;
   panel.props = null;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   mockClient.layered.mockImplementation(async () => ({
@@ -211,9 +224,11 @@ afterEach(() => {
 
 async function openFlow(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+    <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/approval`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        {/* objectstack#36903 — the flow designer, full-screen on the flow's address. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -258,16 +273,17 @@ describe('a refused publish stays on its Pending changes entry (objectstack#2673
     expect(options.description).not.toMatch(/notify\.ts|flows\[|`/);
   });
 
-  it('saving the draft again clears it', async () => {
+  it('saving the flow again clears it: once published, its draft is no longer pending', async () => {
     await openFlow();
     await publish(REFUSED);
     expect(noteOf('approval')).not.toBeNull();
 
-    // The header switch saves the flow at once.
+    // The header switch saves the flow and publishes it at once (objectstack#36511).
     const toggle = await screen.findByRole('switch', undefined, { timeout: 8000 });
     await waitFor(() => expect(toggle).not.toBeDisabled());
     fireEvent.click(toggle);
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled());
+    await waitFor(() => expect(mockClient.publish).toHaveBeenCalledWith('flow', 'approval', { packageId: PKG }));
     await waitFor(() => expect(noteOf('approval')).toBeNull());
   });
 

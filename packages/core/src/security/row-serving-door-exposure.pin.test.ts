@@ -32,8 +32,12 @@
  * `find`, or one that reads as the system behind its own token. Read on
  * `origin/main` at cb3bb933, the doors of that kind are the share-link door
  * (`plugin-sharing`, gated by its own opt-in public-sharing policy) and
- * knowledge retrieval (`service-knowledge`, an admin-declared source with no
- * HTTP door in this repository). They are named here, not held.
+ * knowledge retrieval (`service-knowledge`). The share-link door is named
+ * here, not held. Knowledge retrieval is HELD, by name, in
+ * {@link HELD_BY_NAME}: its passages are built under a system context and
+ * served to any caller of the knowledge search (the MCP door's
+ * `search_knowledge` will be one once it serves the tool), so it asks the exposure decision and the
+ * caller's queryable fields per source itself (`knowledge-source-admission.ts`).
  *
  * The scan surface and its prefilter follow
  * `operation-private-keys.pin.test.ts` in this directory: git's authored-file
@@ -136,6 +140,26 @@ const CALLERS: Record<string, Classification> = {
   },
 };
 
+/**
+ * Doors of the family the discriminator cannot see — they re-check rows through
+ * the engine middleware with the caller's context and never call
+ * `canReadObject` themselves — held BY NAME: the door file must import its
+ * decision site, the decision site must ask the exposure decision and the
+ * caller's queryable fields, and the behaviour pin must exist.
+ */
+const HELD_BY_NAME: Record<string, Extract<Classification, { kind: 'door' }>> = {
+  'packages/services/service-knowledge/src/knowledge-service.ts': {
+    kind: 'door',
+    door: 'knowledge retrieval (`IKnowledgeService.search`, which every door serving `search_knowledge` will build on)',
+    operation: 'search',
+    decisionSite: 'packages/services/service-knowledge/src/knowledge-source-admission.ts',
+    pin: 'packages/services/service-knowledge/src/__tests__/knowledge-source-admission.test.ts',
+  },
+};
+
+/** A CALL of the query-side field answer, `svc.getQueryableFields(`. */
+const queryableFieldsCall = (): RegExp => /\.getQueryableFields!?\s*\(/;
+
 const SCAN_TIMEOUT_MS = 60_000;
 
 function git(args: string[]): string[] {
@@ -223,6 +247,32 @@ describe('[#22640] every row-serving door outside the data routes asks the expos
           readFileSync(join(REPO_ROOT, door.decisionSite), 'utf8'),
           `${door.decisionSite} does not import the decision from the spec`,
         ).toMatch(/from '@objectstack\/spec\/data'/);
+        expect(existsSync(join(REPO_ROOT, door.pin)), `the behaviour pin of ${door.door} is missing: ${door.pin}`).toBe(true);
+      }
+    },
+    SCAN_TIMEOUT_MS,
+  );
+
+  it(
+    'each door held by name imports its decision site, which asks the decision and the queryable fields, and its pin exists',
+    () => {
+      expect(Object.keys(HELD_BY_NAME).filter((file) => file in CALLERS)).toEqual([]);
+      for (const [file, door] of Object.entries(HELD_BY_NAME)) {
+        expect(existsSync(join(REPO_ROOT, file)), `the door file of ${door.door} is missing: ${file}`).toBe(true);
+        const site = door.decisionSite.slice(door.decisionSite.lastIndexOf('/') + 1).replace(/\.ts$/, '.js');
+        expect(
+          codeLines(file).some((line) => line.includes(`from './${site}'`)),
+          `${file} does not import its decision site ${door.decisionSite}`,
+        ).toBe(true);
+        expect(calls(door.decisionSite, decisionCall), `${door.door} does not ask the exposure decision in ${door.decisionSite}`).toBe(true);
+        expect(
+          readFileSync(join(REPO_ROOT, door.decisionSite), 'utf8'),
+          `${door.decisionSite} does not import the decision from the spec`,
+        ).toMatch(/from '@objectstack\/spec\/data'/);
+        expect(
+          calls(door.decisionSite, queryableFieldsCall),
+          `${door.door} does not ask the caller's queryable fields in ${door.decisionSite}`,
+        ).toBe(true);
         expect(existsSync(join(REPO_ROOT, door.pin)), `the behaviour pin of ${door.door} is missing: ${door.pin}`).toBe(true);
       }
     },

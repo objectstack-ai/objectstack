@@ -6,11 +6,13 @@
  * (`@objectstack/service-ai`) backend.
  *
  * The hook hits `GET {apiBase}/agents` (the canonical endpoint exposed by
- * `buildAgentRoutes`) and returns a normalized list. It is intentionally
- * dependency-free (uses `fetch`) so the chatbot package can stay light.
+ * `buildAgentRoutes`) and returns a normalized list. It asks through the host's
+ * `apiFetch`, else the global `fetch` (see {@link useAgents}), and imports no
+ * HTTP client, so the chatbot package can stay light.
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import { resolveAgentParam, isBuildAgent } from './agentAliases';
 
 /**
@@ -29,6 +31,13 @@ export interface AgentCapabilities {
   debug: boolean;
   /** Turns resume durable multi-step runs. */
   resume: boolean;
+  /**
+   * Honours a conversation focus — the chat request's `context.focus`, the
+   * record the user pinned the conversation to (`AiAgentCapabilitiesSchema`
+   * in `@objectstack/spec`). Hosts draw the pin and send the key only when it
+   * is true; a server that omits it does not honour it.
+   */
+  focus: boolean;
 }
 
 export interface AgentDescriptor {
@@ -65,6 +74,14 @@ export interface UseAgentsReturn {
   isLoading: boolean;
   error: Error | undefined;
   refetch: () => void;
+  /**
+   * True once a catalog read for the current `apiBase` has answered or failed,
+   * in this mount; false while disabled and before the first answer. Unlike
+   * `isLoading`, it cannot be missed: a read the module cache answers at once
+   * sets `isLoading` true and false in one render, so no render ever sees it
+   * loading, while `settled` turns true in that same render.
+   */
+  settled: boolean;
 }
 
 interface RawAgent {
@@ -85,15 +102,29 @@ function normalizeCapabilities(raw: RawAgent['capabilities']): AgentCapabilities
     canvas: raw.canvas === true,
     debug: raw.debug === true,
     resume: raw.resume === true,
+    focus: raw.focus === true,
   };
 }
+
+/**
+ * The capabilities a build agent had before the server declared any — the
+ * ones the legacy name check stands in for. A capability declared later
+ * (`focus`) has no such history: undeclared, it is off.
+ */
+const NAME_IMPLIED_CAPABILITIES: ReadonlySet<keyof AgentCapabilities> = new Set([
+  'authoring',
+  'canvas',
+  'debug',
+  'resume',
+]);
 
 /**
  * Whether `name`'s agent declares `cap` (cloud#816). Falls back to the legacy
  * `isBuildAgent(name)` name check when the catalog entry carries no
  * `capabilities` (older server) or the agent isn't in the list yet — so
  * behavior is unchanged until the server ships the field, and degrades the
- * same way afterwards.
+ * same way afterwards. The fallback covers only the capabilities that check
+ * stood in for; any other one reads false until the server declares it.
  */
 export function agentHasCapability(
   agents: readonly AgentDescriptor[],
@@ -103,7 +134,7 @@ export function agentHasCapability(
   if (!name) return false;
   const found = agents.find((a) => a.name === name);
   if (found?.capabilities) return found.capabilities[cap];
-  return isBuildAgent(name);
+  return NAME_IMPLIED_CAPABILITIES.has(cap) && isBuildAgent(name);
 }
 
 /**
@@ -220,6 +251,7 @@ function fetchAgentsCached(
   apiBase: string,
   headers: Record<string, string> | undefined,
   force: boolean,
+  doFetch: ApiFetch,
 ): Promise<AgentDescriptor[]> {
   if (force) {
     agentsCache.delete(apiBase);
@@ -234,7 +266,7 @@ function fetchAgentsCached(
   if (inFlight && !force) return inFlight;
 
   const url = `${apiBase.replace(/\/$/, '')}/agents`;
-  const promise = fetch(url, {
+  const promise = doFetch(url, {
     method: 'GET',
     headers: { Accept: 'application/json', ...(headers ?? {}) },
     credentials: 'include',
@@ -313,6 +345,13 @@ export function __resetAgentsCatalog(): void {
 /**
  * Fetches the active agent catalog from the backend.
  *
+ * Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+ * `apiFetch`), the channel the renderers' own reads use: a session held by its
+ * bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+ * global fetch read as anonymous, and a `401` never reached the host's
+ * session-ended check. A host that mounts no provider keeps the global fetch,
+ * cookies included.
+ *
  * The request leaves after the first frame has painted (objectui#12980), not
  * in the mounting commit — see {@link afterCatalogFrame}.
  *
@@ -326,11 +365,19 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [reloadToken, setReloadToken] = useState(0);
+  // The `apiBase` whose read last answered or failed (`settled`).
+  const [settledFor, setSettledFor] = useState<string | undefined>(undefined);
 
   // Stash latest headers in a ref so consumers can pass inline objects without
   // triggering a refetch on every render.
   const headersRef = useRef(headers);
   headersRef.current = headers;
+  // The host's authenticated fetch, or the global one with no provider: read
+  // directly (not `useSchemaContext`, which throws with no provider). Held in a
+  // ref like the headers: the catalog is one answer per `apiBase`.
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const fetchRef = useRef<ApiFetch>(apiFetch ?? fetch);
+  fetchRef.current = apiFetch ?? fetch;
 
   useEffect(() => {
     if (!enabled || !apiBase) return;
@@ -341,7 +388,7 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
       setIsLoading(true);
       setError(undefined);
 
-      fetchAgentsCached(apiBase, headersRef.current, reloadToken > 0)
+      fetchAgentsCached(apiBase, headersRef.current, reloadToken > 0, fetchRef.current)
         .then((normalized) => {
           if (cancelled) return;
           setAgents(normalized.length > 0 ? normalized : fallback);
@@ -352,7 +399,9 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
           setAgents(fallback);
         })
         .finally(() => {
-          if (!cancelled) setIsLoading(false);
+          if (cancelled) return;
+          setIsLoading(false);
+          setSettledFor(apiBase);
         });
     });
 
@@ -366,5 +415,5 @@ export function useAgents(options: UseAgentsOptions = {}): UseAgentsReturn {
 
   const refetch = useCallback(() => setReloadToken((n) => n + 1), []);
 
-  return { agents, isLoading, error, refetch };
+  return { agents, isLoading, error, refetch, settled: enabled && !!apiBase && settledFor === apiBase };
 }

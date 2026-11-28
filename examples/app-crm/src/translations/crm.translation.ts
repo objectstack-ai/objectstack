@@ -91,6 +91,10 @@ export const CrmTranslationBundle = defineTranslationBundle({
   },
 
   'zh-CN': {
+    // The package's own name, keyed by its manifest id (objectstack#35513).
+    packages: {
+      'com.example.crm': { name: 'CRM（最小示例）', description: '框架用来端到端验证元数据加载流程的最小 CRM 工作区。' },
+    },
     objects: {
       // The inline product grid's heading on the opportunity form. The field
       // lives on the line item, so the key is the line item's.
@@ -127,6 +131,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           annual_revenue: { label: '年营收' },
           website: { label: '官网' },
           owner_id: { label: '负责人' },
+        },
+        // The account's field groups, keyed by `fieldGroups[].key`.
+        _sections: {
+          basic: { label: '基本信息' },
+          financials: { label: '财务信息' },
         },
       },
       crm_contact: {
@@ -413,6 +422,12 @@ export const CrmTranslationBundle = defineTranslationBundle({
         label: '将线索转化为客户和商机',
         successMessage: '🎉 线索已转化 — 已创建客户和商机。',
         errorMessage: '线索转化未完成 — 请检查线索后重试。',
+        // Each step's name where a manual draws the flow.
+        nodes: {
+          start: { label: '开始' },
+          check_converted: { label: '已转化？' },
+          end: { label: '结束' },
+        },
         screens: {
           screen_already_converted: { title: '已转化', description: '该线索已转化为商机。' },
           screen_account: {

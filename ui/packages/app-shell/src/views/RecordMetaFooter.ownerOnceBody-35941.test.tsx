@@ -25,6 +25,10 @@
  * is read from the sections the block actually mounts, and the owner is
  * counted over the whole page.
  *
+ * On the laid-out page the meta line is the details column's last group,
+ * 「系统信息」 (objectstack#36147), folded until opened: the owner the line
+ * kept is that group's Owner row, read here with the group opened.
+ *
  * The strip half of the rule (a highlight strip that draws the owner) is
  * pinned in `@object-ui/plugin-detail`'s `RecordMetaFooter.ownerOnce-28868`
  * and `RecordMetaFooter.drawnStrip-28909`, unchanged.
@@ -95,7 +99,18 @@ function renderDefaultPage(objectDef: ObjectDef) {
 
 const footerOf = (container: HTMLElement) =>
   container.querySelector('[data-testid="record-meta-footer"]') as HTMLElement | null;
-const footerOwner = (container: HTMLElement) => footerOf(container)?.querySelector('[data-record-meta-owner]') ?? null;
+/** Open the 「系统信息」 group the meta line is on the laid-out page (objectstack#36147). */
+function openSystemInfo(container: HTMLElement) {
+  const toggle = within(footerOf(container)!).getByRole('button', { name: 'System information' });
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+/** The system group's Owner row, or `null` when it has none. */
+const footerOwner = (container: HTMLElement) => {
+  const footer = footerOf(container);
+  if (!footer) return null;
+  const label = Array.from(footer.querySelectorAll('[data-detail-field-label]')).find((el) => el.textContent === 'Owner');
+  return (label?.closest('[data-detail-field-row]') as HTMLElement | null) ?? null;
+};
 const detailsColumn = (container: HTMLElement) =>
   container.querySelector('[data-record-column="details"]') as HTMLElement;
 /** How many times the owner's name is painted on the whole page. */
@@ -136,7 +151,8 @@ describe('the body draws owner_id: the meta line leaves the owner out (objectsta
     });
     // Live control: the body and the meta line both drew.
     expect(within(detailsColumn(container)).getByText('grace@example.com')).toBeTruthy();
-    expect(footerOf(container)!.querySelector('[data-record-meta-id]')!.textContent).toBe('C-35941');
+    openSystemInfo(container);
+    expect(within(footerOf(container)!).getByText('C-35941')).toBeTruthy();
 
     expect(footerOwner(container)).toBeNull();
     expect(ownerCount(container)).toBe(1);
@@ -149,6 +165,7 @@ describe('the body draws owner_id: the meta line leaves the owner out (objectsta
     const { container } = renderDefaultPage({ name: OBJECT, fields: FIELDS });
     expect(within(detailsColumn(container)).getByText('grace@example.com')).toBeTruthy();
     expect(footerOf(container)).not.toBeNull();
+    openSystemInfo(container);
 
     expect(footerOwner(container)).toBeNull();
     expect(ownerCount(container)).toBe(1);
@@ -166,6 +183,7 @@ describe('the body draws owner_id: the meta line leaves the owner out (objectsta
       },
     });
     expect(within(detailsColumn(container)).getByText('Other')).toBeTruthy();
+    openSystemInfo(container);
 
     expect(footerOwner(container)).toBeNull();
     expect(ownerCount(container)).toBe(1);
@@ -185,6 +203,7 @@ describe('the body does not draw owner_id: the meta line keeps the owner (object
       },
     });
     expect(within(detailsColumn(container)).getByText('grace@example.com')).toBeTruthy();
+    openSystemInfo(container);
 
     expect(footerOwner(container)).not.toBeNull();
     expect(footerOwner(container)!.textContent).toContain(OWNER_NAME);
@@ -206,6 +225,7 @@ describe('the body does not draw owner_id: the meta line keeps the owner (object
       },
     });
     // Collapsed, the group draws its heading and no rows.
+    openSystemInfo(container);
     expect(footerOwner(container)).not.toBeNull();
     expect(ownerCount(container)).toBe(1);
 

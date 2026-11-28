@@ -226,7 +226,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Resumo",
-        help: "Reúne estas notificações em um único resumo em vez de enviar cada uma ao chegar: daily envia à meia-noite, weekly na segunda-feira à meia-noite e none envia cada uma na hora. Notificações críticas são sempre enviadas na hora. Vale para uma preferência cujo canal é * (todos os canais).",
+        help: "Reúne estas notificações em um único resumo em vez de enviar cada uma ao chegar: daily envia à meia-noite, weekly na segunda-feira à meia-noite e none envia cada uma na hora. Notificações críticas são sempre enviadas na hora. Vale para uma preferência cujo canal é * (todos os canais). Se ficar vazio, a próxima preferência decide: o padrão para todos os usuários e, depois, none.",
         options: {
           none: "nenhum",
           daily: "diário",
@@ -235,7 +235,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Horário silencioso",
-        help: "Uma janela diária em que as notificações ficam retidas e são entregues quando ela termina, por exemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Os horários são HH:MM nesse fuso (UTC quando tz é omitido), e a janela pode passar da meia-noite. Notificações críticas não ficam retidas. Vale para uma preferência cujo canal é * (todos os canais)."
+        help: "Uma janela diária em que as notificações ficam retidas e são entregues quando ela termina, por exemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Os horários são HH:MM nesse fuso (UTC quando tz é omitido), e a janela pode passar da meia-noite. Notificações críticas não ficam retidas. Vale para uma preferência cujo canal é * (todos os canais). { \"off\": true } significa sem horário de silêncio; se ficar vazio, a próxima preferência decide: o padrão para todos os usuários e, depois, nenhum."
       },
       created_at: {
         label: "Criado em"

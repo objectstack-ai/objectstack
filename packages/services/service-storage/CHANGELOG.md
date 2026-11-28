@@ -1,5 +1,401 @@
 # @objectstack/service-storage
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/observability@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/service-cluster@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [7e638ba]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/observability@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+  - @objectstack/service-cluster@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 7878cf0: fix(service-storage): translate the built-in `storage_attachment_member` permission set
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The permission set this service contributes to every member's baseline ("Attachments: read and attach (every member)") now ships its label and description in every locale the platform's other built-in sets ship (zh-CN, ja-JP, es-ES, zh-Hant, ar, fr, pt-BR, ru, de, ko). Setup's permission-set lists in a translated Console no longer show it as the one English row. What the set grants, and when it is contributed, is unchanged.
+- c9b0a23: feat(service-storage): rename an attachment through a door by the attachment delete rule, and the Attachments tab names the uploader of other people's files
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Two additions, no answer narrowed:
+  
+  - **The rename door.** `PATCH /api/v1/attachments/:id` with `{ "file_name": "..." }` sets the name one `sys_attachment` row is listed under, by the attachment delete rule: the caller who uploaded it, or a caller the attachment update gate admits as an editor of the record it is attached to. The door reads the row as the caller first, so every attachment read rule applies; the uploader's rename is written on the caller's behalf with no edit grant, as the uploader's removal door does; anyone else's goes through the data engine as the caller, so the object's edit grant and the update gate judge it. It answers `{ id, file_name }` (200), and refuses `UNAUTHENTICATED` (401), `VALIDATION_ERROR` (400: a query parameter, a blank name, or any body key besides `file_name`), `RECORD_NOT_FOUND` (404: an attachment the caller cannot read answers as one that does not exist) and the update gate's `RECORD_NOT_ACCESSIBLE` (403) for a caller who can read the record but not edit it. Only the attachment row's name changes: the stored file, its bytes and the name a download carries are untouched. The package's exports are unchanged; `StorageServicePlugin` mounts the door beside the removal door.
+  - **The uploader, expanded.** The record page payload's `attachments` part (`POST /api/v1/data/:object/:id/page`) now asks its `sys_attachment` read with `uploaded_by` expanded, as the `activity` part expands its actor, and the Attachments panel's own list read does the same. The expansion is a read of `sys_user` as the caller: a reader who may read the uploader gets that user's row (its name), and a reader who may not keeps the stored id. A consumer of that part that compared `uploaded_by` with a user id now reads `uploaded_by.id` where the reader may read the user.
+  
+  The record Attachments tab shows the uploader's name on every row whose uploader the reader may read, and never shows a bare id. Its row menu offers Rename beside Delete, on the reader's own uploads and, to a reader who also holds the edit grant on `sys_attachment`, on every row, opening a name prompt; the new name is the one the list shows after a reload.
+  
+  `@object-ui/core`: the affordance-to-grant map gains the `attachmentRename` row (the edit grant on `sys_attachment`), which the panel asks for a row the caller did not upload.
+- cbc06ff: fix(hosted): deleting a personal view and removing or renaming an attachment work on a kernel with no `http.server` (a hosted tenant kernel) instead of answering 404
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `DELETE /api/v1/personal-views/:id` (plugin-auth) and `DELETE` / `PATCH /api/v1/attachments/:id` (service-storage) were mounted only on the kernel's `http.server`. A hosted tenant kernel owns no socket and registers no `http.server` (and runs `AuthPlugin` with `registerRoutes: false`), so the host's `createHonoApp` catch-all handed each request to the runtime dispatcher, which had no domain for them and answered `404 ROUTE_NOT_FOUND`: a member could not delete a personal view, or remove or rename an attachment, there.
+  
+  - `@objectstack/spec/contracts` declares `IPersonalViewDoorsService` (one optional, transport-neutral member, `handlePersonalViewDoor(request: Request): Promise<Response>`) and types the new `personal-views` service slot with it, and declares `IAttachmentDoorsService` (`handleAttachmentDoor`), which the existing `file-attachments` service implements beside `IFileAttachmentService`. A service without the member still satisfies either contract.
+  - `AuthPlugin` registers the `personal-views` service in `init()`, whatever `registerRoutes` says, and `StorageServicePlugin`'s `file-attachments` service gains `handleAttachmentDoor`. Each member runs the same registration over the same dependencies the `http.server` mount runs, on a private route table that never listens, so every answer is the mount's own. The `http.server` mounts are unchanged, and no path is mounted twice. The `personal-views` service name is now taken: a composition that registers its own `personal-views` service alongside `AuthPlugin` fails to boot with a duplicate-service error. `@objectstack/plugin-auth` and `@objectstack/service-storage` now depend on `@objectstack/plugin-hono-server` at runtime (the private table is a `HonoHttpServer`; plugin-auth previously listed it as a dev dependency only).
+  - `@objectstack/plugin-hono-server` exports `createDoorTableMember(routes, mount)`, the private never-listening table both members are built on, and `matchDoorTableRoute`.
+  - The runtime dispatcher gains `/personal-views` and `/attachments` domains that claim exactly the door shapes and forward the request, body unread, to the REQUEST kernel's member (never the host kernel's scoped fallback). Every other shape under those prefixes keeps the dispatcher's `404 ROUTE_NOT_FOUND`. With no slot, or one without the member, the doors answer `501 NOT_IMPLEMENTED` naming the package that registers it. The doors stay behind the dispatcher's authentication and project-membership gates.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- d59d875: fix(service-storage): stored bytes are previewed in place only when they begin with their type's signature
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The local adapter's byte route now answers a file on the inline allow-list inline only when its stored bytes begin with the leading signature of that type: PNG, JPEG, GIF, WebP, AVIF and BMP images, PDF, and each of the 13 allow-listed audio and video types. Plain text has no signature, so it is judged on its first 1445 bytes: it is previewed when they open with a byte-order mark or carry no binary data byte (the WHATWG MIME Sniffing standard's text-or-binary rule). Every type is judged on that same leading window of the body. Any other body, an empty one included, is answered as an `attachment` under the default sandbox policy, with `nosniff` as before. The type and the file name answered are unchanged.
+  
+  The fix for a host: nothing to change. A file whose bytes are what its type says previews as before; one that is not still downloads under its own name and type.
+- 20d025f: fix(service-storage)!: stored bytes outside the inline allow-list are served as attachments, and every stored-bytes answer carries nosniff and a sandbox CSP
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or re-shaped, and no stored row, registry key or authored value changes. What moves is the response headers a downloaded file is answered with; there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** — how a downloaded file is answered to a browser. One rule, stated once in the storage service and applied by every door that answers stored bytes:
+  
+  - FROM: a file was answered under the type recorded for it, and rendered in place by default, whatever that type was.
+  - TO: only a type on the inline allow-list is rendered in place: raster images (PNG, JPEG, GIF, WebP, AVIF, BMP), PDF, plain text, and common audio and video types. Every other type, SVG and HTML included, and a missing or malformed type, is answered as an `attachment`, which the browser saves rather than opens. The type is judged by its essence, and the answered `Content-Type` is that essence: case is folded and parameters are dropped (a `charset` is kept on `text/plain` only), so neither changes the verdict.
+  - FROM: the local adapter's byte route sent no `X-Content-Type-Options` and no `Content-Security-Policy`.
+  - TO: every answer from it carries `X-Content-Type-Options: nosniff` and a sandbox `Content-Security-Policy` that lets no script run, inline or not. Allow-listed audio and video answered inline carry a media variant of it, `sandbox allow-same-origin; default-src 'none'; media-src 'self'; style-src 'unsafe-inline'`, so the browser's player can load the file's own URL. Every other answer carries `sandbox; default-src 'none'; style-src 'unsafe-inline'`, which asks the browser for a sandboxed document that runs no script and loads no subresource.
+  - Measured in Chromium (the Console's download in a new tab, and direct navigation): PNG, PDF and plain text render in place; HTML and SVG are saved. WAV, Ogg, MP3, WebM and MP4 open in the browser's player, which loads the file and starts playback when the user presses play; before this change the player started playback on its own. Firefox and Safari were not measured.
+  - The S3 adapter's signed download URL always carries the same type and disposition; a call that names no type is signed as `application/octet-stream`, an attachment. A caller's `disposition: 'inline'` no longer overrides the list. A signed `GetObject` URL can set no other response header, so `nosniff` and the CSP are the bucket's to send there.
+  
+  The fix for a host: nothing to change. A file outside the list still downloads under its own name and type; open it from the saved copy. An `<img>` that shows a stored SVG keeps showing it: an image element ignores the disposition.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/plugin-hono-server@19.0.0-next.0
+  - @objectstack/observability@19.0.0-next.0
+  - @objectstack/service-cluster@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

@@ -1,5 +1,767 @@
 # @objectstack/plugin-security
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Major Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+
+### Patch Changes
+
+- 58570d8: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  perf(sharing): a predicate update or delete asks record sharing for the write verdict of all its candidate rows at once, so its store reads no longer grow per row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ISharingService` (`@objectstack/spec/contracts`) gains two optional members, `checkEditMany(object, recordIds, context)` and `checkDeleteMany(object, recordIds, context)`. Each answers, for every id it is handed and in the same order, the tri-state verdict `checkEdit` / `checkDelete` answer for that id (`allow`, `abstain` or `deny`), with the same bases, the same order and the same verb boundary: an `edit` share answers `allow` to `checkEditMany` and `deny` to `checkDeleteMany`. A chunk whose lookup fails answers `deny` for each of its records, as `checkEdit` answers `deny` for a record whose lookup fails.
+  
+  `SharingService` (`@objectstack/plugin-sharing`) implements both, and `checkEdit` / `checkDelete` are now the one-record case of the same implementation. A list is read in chunks of 1,000 ids: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them. The caller's owner set, each queue membership and the Modify All probe are resolved at most once per call. A single record costs the reads it always did, except that an update of a record on an object with an ownership queue column now reads the row once instead of twice.
+  
+  `SecurityPlugin` (`@objectstack/plugin-security`) asks the set form on a predicate (`multi: true`) update or delete, for the matched rows the platform ownership floor does not already admit, where the kernel's `sharing` service serves it, and asks `checkEdit` / `checkDelete` per row, 25 at a time as before, where it does not. Which rows are written is unchanged either way. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update went from 20,004 store reads and 6.6 s to 24 reads and 0.27 s, the same delete from 10,003 reads to 13, and a Modify All holder's update of all 10,000 rows from 10,004 reads to 14.
+  
+  Nothing to migrate. An `ISharingService` implementation that does not add the two members keeps working: callers ask it per record, with the same answers.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+- 78437e2: feat(security): the read-only `viewAllFields` object-permission bit
+  
+  Clause-②: yes (widening) — @objectstack/spec adds the optional `viewAllFields` key to `ObjectPermissionSchema` (and so to the wire `EffectiveObjectPermissionSchema`) and the optional `viewAllFields` column to `AccessMatrixEntrySchema`; nothing removed or narrowed
+  Metadata-protocol: added
+  
+  A permission set can now say "this role reads every field of this object" on its own: `objects: { crm_account: { allowRead: true, viewAllFields: true } }`. The bit casts a read vote on every field of the object, fields added later included, and never an edit vote: an edit still comes from the default (a field no set names follows the object grant) or from an explicit `editable: true` field row. Inside one set the specific row beats the general bit, so a set's own `readable: false` row on a field keeps that field hidden for that set. It is allowed on the `'*'` wildcard entry. It is a field vote only: it grants no object access and widens no record, so pair it with `allowRead`, and use `viewAllRecords` for records.
+  
+  Nothing behaves differently yet. Today `viewAllRecords` and `modifyAllRecords` also vote on every field, so on a set that carries either bit the new key duplicates a vote already cast. The built-in `organization_admin` set carries it on its wildcard entry, so its holders keep their field visibility when a later major release stops those two bits voting on fields; the wall-less `organization_admin_no_bypass` variant drops it together with the two record bits, as it never held that field vote.
+  
+  Every reader of the super-user bits reads the new one too:
+  
+  - both field merges (`PermissionEvaluator.getFieldPermissions` and the `fields` slot of `/auth/me/permissions`) apply it through the one shared vote, `superuserFieldVote` in `@objectstack/core`;
+  - the agent ceiling clears it on every object entry, as it clears View All and Modify All;
+  - an organization administrator cannot distribute a set whose `'*'` entry carries it (the organization boundary, condition (a));
+  - a set carrying it on any object is high-privilege, so it is not bound to the `everyone` or `guest` audience;
+  - the access-matrix snapshot gains a `viewAllFields` column, written only when `true`, so the `access-matrix.json` of a stack that does not author the bit is byte-identical, and the semantic diff names it ("gains View All Fields on …").
+
+### Patch Changes
+
+- 7a3f86c: fix: four refusals say what the author can act on — the clone control by its console label, an empty or short unknown key, and an unknown CLI command
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Nothing new is accepted or refused; only the words change.
+  
+  - **Packaged permission sets.** The `ITEM_LOCKED` save refusal and the `NOT_OVERRIDABLE` lock refusals sent the admin to a "Clone" action. Studio's Access pillar and Setup label that control "New similar" ("新建类似" in a Chinese session), so the diagnostic and both end-user messages, in every language they ship, now name it that way.
+  - **Unknown keys.** A refusal naming an empty key printed it as empty backticks; it now says "an empty key (`""`)" and offers no rename. On a key of five characters or fewer, a "Did you mean" rename is offered only when the declared key is one edit away, counting a swap of two adjacent letters as one: `lable` → `label` is still offered, while a removed `aria` is no longer answered with `areas`.
+  - **CLI.** `os <topic> <unknown>` and `os <unknown>` still exit 2 without running anything, and now name the command as typed (`command environments frobnicate not found`) and end with the help that lists the real ones (`See more help with \`os environments --help\``).
+- 52a2398: fix(plugin-sharing)!: every share grant counts; the sharing scopes carry the share-grant leaf instead of a list capped at 5,000 grants (ADR-0155 plan step 6)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is how the sharing scopes count share grants (every grant, through a subquery, where a read of at most 5,000 used to stand), that grants stop counting on objects whose storage cannot evaluate that subquery, and that a host registering a narrowing of sys_record_share reads by name no longer boots. There is nothing for a migration to rewrite and no tombstone; each host-side remedy is one line, below. -->
+  
+  **What was wrong.** The read scope of a sharing-scoped object read the caller's share grants into an id list first, at most 5,000 of them, and dropped the rest without a word: a member holding 6,000 grants on one object saw 6,000 rows of 7,000 (1,000 owned plus 5,000 of the 6,000 shared), and a GET of an unread grant answered 404. The predicate-update scope had the same cap on edit-level grants.
+  
+  **Now.** `buildReadFilter` and `buildWriteFilter` carry the share arm as the share-grant leaf, `{ id: { $in: SharedRecordIds.read(object, user) } }` (the update scope carries `.write(object, user, ['edit', 'full'])`), which the SQL driver compiles as a subquery over `sys_record_share` inside the same statement. Every grant counts, at any number; no grant is read into memory and nothing binds one parameter per grant. The pending-approval ids stand as a disjunct of their own. `delete` scopes to the owner match alone, as before.
+  
+  **BREAKING**, in three places, each a tightening that lands here, where it takes effect:
+  
+  - **Share grants stop counting on objects whose storage cannot evaluate them** (ADR-0155 R2). An object stored on another datasource than `sys_record_share`, or by a driver that does not evaluate the leaf (`supports.fixedReadLeaves` without `SharedRecordIds`: today the MongoDB, in-memory and OData drivers), keeps its owner, queue and pending-approval access unchanged, but its share rows are no longer consulted: no scope carries the share arm, the edit gate reads no grant, and a new grant or a new sharing rule on it is refused `SHARING_NOT_ENABLED` (422 at the REST doors). The boot names, once at `warn`, every such object that holds `sys_record_share` rows, with the reason. `security/explain` reports each share on such a record as evaluated and not granting, and says why.
+    The fix for a host: to share such an object's records again, store it on the datasource of `sys_record_share`, on a driver that evaluates share grants (the SQL drivers do).
+  - **A narrowing of `sys_record_share` reads registered BY NAME refuses the boot** (ADR-0155 R1 at boot, D4). A host that registers an object-scoped middleware, or a `beforeFind` / `afterFind` hook, for `sys_record_share` (an opt-in of that table into plugin-audit's record-view auditing included) no longer starts: the boot fails at `kernel:bootstrapped`, before any request is served, with `INTERNAL_ERROR` / 500 naming the registration. No registration is exempt, one whose handler skips system reads included. A registration made after boot is refused at read by the engine, with the same envelope.
+    The fix for a host: remove that registration for `sys_record_share`. A host that opted the table into record-view auditing gives up that auditing of share rows.
+  - **A narrowing that names NO object is not run on the share arm.** A middleware or a find hook registered for no object, or for `'*'`, ran on today's grant read, which went through the engine as a system read. The share arm now makes no engine read of `sys_record_share`, so such a registration does not run on it, and nothing refuses, reports or logs that. On a host where such a registration changes a system read of `sys_record_share`, the share arm's rows can differ from what they were. This paragraph is the telling (ADR-0155 D4's boundary; `ISharingService`'s contract says the same). The repository's own registrations of that kind were read before this change, and none changes that read.
+  
+  **Preconditions this step inherits from the PostgreSQL key-type change** (ADR-0155 O2):
+  
+  1. On PostgreSQL, a statement holding the leaf whose catalog read fails, or finds no such relation, answers `INTERNAL_ERROR` / 500, where an uncast statement would have run.
+  2. Each transaction pays one savepoint and one catalog read per table it compares a leaf against, when the table has no pooled reading.
+  3. A failed catalog read inside that savepoint rolls back the caller's concurrent statements on the same transaction. The sharing plugin issues no statement of its own that carries the leaf, and none of its reads runs inside a caller's transaction or concurrently with another on one: its own reads are sequential system reads.
+  
+  **What it costs, quoted no wider than ADR-0155 quotes it.** For the scope statements alone (an account page, its total and the two grant reads), at 1M rows and 5,000 grants, the id-list scope against the subquery scope read PostgreSQL 21.6 → 7.0 ms and SQLite 18.3 → 12.1 ms. It is not a whole-request figure. For a caller holding no grant, whose scope was the bare owner match and is now an `$or` with the subquery, SQLite still serves the page and its total from the owner index; PostgreSQL 16 serves the page as before but plans the total as a sequential scan, which grows with the table: measured, that caller's total went from 1.46 to 7.29 ms at 100k rows and from 7.88 to 42.21 ms at 1M, the page flat at both. SQLite keeps the owner index. Follow-up #36034 measures `id = ANY(ARRAY(SELECT …))` against the subquery for that caller on PostgreSQL.
+- 93fa4f9: fix(i18n)!: a refusal names fields, options and objects in the declared `sourceLocale` as authored
+  
+  Clause-②: yes (narrowing) — `ValidationMessageContext.labelTranslation` is a new optional member (a widening), and `ValidationMessageContext.translate` no longer translates the labels a refusal names (a narrowing): a direct caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` that passes `messages: { locale, objectName, translate }` now gets the declared labels until it also passes `labelTranslation`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md, evals
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/objectql/src/validation/record-validator.ts#ValidationMessageContext) the narrowed behaviour belongs to an input member of a runtime TypeScript interface, the messages option of the published validators; no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, and no key, value or default a metadata author can write changes, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` (`@objectstack/objectql`) that passes its own `messages`. Engine writes are not affected: the engine builds `labelTranslation` itself from the i18n service.
+  
+  The labels a write refusal names are now resolved the way `GET /meta` serves them: `translateObject` over the deployment's translations, with the request's locale, the declared fallback chain and the authored language (`i18n.sourceLocale`, else `defaultLocale`). They are no longer looked up through `II18nService.t()`. Before this, an app authored in English that defaults its users to Chinese (`sourceLocale: 'en'`, `defaultLocale: 'zh-CN'`) answered an `en` request with the Chinese row in its validation, duplicate-record, delete-restricted and restore refusals, and in the security layer's master-detail and field-write `userMessage`. `/meta` answered the same request with the English label.
+  
+  This covers a field label, a choice option label (field entry, then the shared picklist's), an object label, the master object named by the master-detail write gate and the fields named by the field-write gate. Message templates and authored rule messages still go through `t()`.
+  
+  What follows from it:
+  
+  - In the declared `sourceLocale`, a refusal names labels exactly as declared. In every other locale it follows the same chain `/meta` does.
+  - The labels come from `getLocales()` and `getTranslations()`. An i18n double that implements only `t()` no longer translates labels and leaves the declared ones in place, as `/meta` already did.
+  - On the in-memory i18n fallback (`@objectstack/core`), which reports no `getFallbackLocale()`, a request in a locale with no bundle now gets the declared label, as `/meta` does. Before, it got the default locale's row.
+  - A platform-injected system field (`owner_id`, `created_at`, …) that keeps its English default label is named by the built-in translation of that label, as `/meta` names it.
+  - The security layer's labels now negotiate the request locale the way `/meta` does, so a `zh-TW` request reads the `zh-CN` rows, in step with its `zh-CN` sentence.
+  
+  ## What a direct validator caller sees
+  
+  | `messages` passed to `validateRecord` / `validateInsertValues` / `evaluateValidationRules` | was | now |
+  |:---|:---|:---|
+  | `{ locale, objectName, translate }` | field, option and object labels translated through `translate` | declared labels in every locale; `translate` renders message templates only |
+  | `{ locale, objectName, translate, labelTranslation }` | not a member of the type | labels translated through `labelTranslation`, the way `GET /meta` serves them |
+  
+  What to do on upgrade: add `labelTranslation: () => ({ bundle, options })` to the `messages` you pass, where `bundle` is a `TranslationBundle` keyed by locale and `options` is a `ResolveOptions` (both from `@objectstack/spec/system`). The pair is typed `ValidationLabelTranslation`, now exported as a type from `@objectstack/objectql` and `@objectstack/objectql/core`. Nothing else changes: the call compiles as before, and no verdict, code or status moves.
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 6ffa816: feat(security): an unmanaged install copies an app's capabilities, renamed with the copy
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An app that gates an action on its own capability can now install as an unmanaged copy (`installModes: ['unmanaged']`). Before, `capability` was code-only (`allowRuntimeCreate: false`), so the validator refused the mode for any app that declared one, and the install door had no channel to write the copy's capabilities.
+  
+  - **`capability` is runtime-creatable.** Its `DEFAULT_METADATA_TYPE_REGISTRY` entry is now `allowRuntimeCreate: true`, and overlays stay closed (`supportsOverlay: false`, `allowEnvironmentOverlay: false`). A body is judged by `CapabilityDeclarationSchema`, as before.
+  - **The save door refuses two names.**
+    - A platform capability's name (`manage_users`, `setup.access`, every name in `PLATFORM_CAPABILITIES`) answers `422 NAMESPACE_CONFLICT`. An environment item under that name would shadow the platform's definition, because the registry answers its bare slot first.
+    - A name an installed package's capability holds answers `422 NAMESPACE_CONFLICT`, naming the holder. A capability holds one name per deployment, the same rule permission sets and positions follow.
+  - **The environment catalog holds capabilities.** `ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES` is `['position', 'permission', 'capability']`. A package that ships a capability name the environment already authored is refused at boot, as a position or permission-set name is. `os migrate security-catalog-overlays`, the remedy that refusal names, lists and deletes such a capability row too (`capability` and `capabilities` spellings).
+  - **An unmanaged copy renames its capabilities.** When the copy takes a new namespace, a capability whose name starts with the source namespace (`<ns>.` or `<ns>_`) is renamed into the copy's namespace. Every reference is rewritten with it: a permission set's `systemPermissions` (list or per-operation map), an object's or action's `requiredPermissions`, and a quoted `current_user.hasCapability('<name>')` in a predicate. There the object-name rename never touches a name the package declares, so a capability named after a renamed object has one name in the copy; a token the package does not declare follows a renamed object as before. An unprefixed capability keeps its name. A renamed capability that collides with another package's capability refuses the install, naming both. Install again under another namespace.
+  - **Duplicating a package refuses a shared gate.** `duplicatePackage` keeps its source installed, so a capability it cannot rename (no source prefix, or a copy name the package already declares) is refused, and so is every copied item that grants, requires or tests for it, each at its own name in `failed[]`.
+  - **The `everyone` anchor excuses only a declaration that carries a package.** The check that refuses a high-privilege permission set bound to `everyone` excuses the tokens an app declared itself. It now counts only declarations bound to a package (`_packageId`), as ADR-0090 D5 rules: an app's shipped capabilities, an unmanaged copy's, and one saved into a writable package. A capability saved with no package excuses nothing. What bounds a saved declaration is the two refusals above: a platform capability is never excused, and a name a package declares cannot be declared again. A name nobody declares can be declared once, by a `manage_metadata` holder, inside a writable package.
+  - **The gate is unchanged.** It still matches capability names. The copy's action is gated on the copy's capability: a holder of the copy's permission set passes, and a holder of only the source's set does not.
+- 7411f9b: feat(spec, platform-objects): the standard unit table and the organization unit object `sys_unit` (ADR-0158 U1–U3)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Units of measure, first release (ADR-0158 U7 R1). Nothing reads these tables yet: the unit declaration on a `number` field, the write-time membership check and the display of a quantity with its unit ship with their own cards. No field key ships here.
+  
+  - **`@objectstack/spec`** (`@objectstack/spec/data`) exports `STANDARD_UNITS`, a closed table of 41 UN/ECE Recommendation 20 codes. Each code carries its dimension (`UNIT_DIMENSIONS`: `mass`, `length`, `area`, `volume`, `time`, `count`, `package`) and its ratio to the dimension's base unit (`UNIT_DIMENSION_BASE_CODES`: `KGM`, `MTR`, `MTK`, `MTQ`, `SEC`, `H87`), as an exact decimal string: `1 CODE = ratio × BASE`. Package codes (`XBX`, `XCT`, `XPX`, …) carry no ratio. The piece is `H87`; `C62` and `EA` are not members. `ORGANIZATION_UNIT_CODE_PATTERN` is the namespace of an organization's own codes (uppercase letters, digits and underscores, at least 4 characters or containing an underscore), which no standard code can match. `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` gains `sys_unit`. The table is not a value domain: `ValueDomainSchema` keeps its three members.
+  - **`@objectstack/platform-objects`** registers `sys_unit` (Setup → Configuration → Units of Measure), an organization's own units: `code`, `label`, `dimension`, `ratio` (scale 12; required on every dimension but `package`, refused on `package`), `decimal_places` (a display default) and `retired`. It is organization-owned behind the tenant wall and ships no rows. A code outside the organization namespace is refused, the code is unique within the organization, and the code and dimension cannot change after create. A unit is retired instead of deleted, and retiring cannot be undone, so a code is never created again with another meaning; the data API serves no delete on it. Every column carries field history.
+  - **`@objectstack/plugin-security`**: `member_default` reads `sys_unit`, so a unit's label displays to every member; organization administrators write it through their existing grant.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_unit` as attributed to its organization.
+- a0b01fa: feat(platform-objects): an organization sets how many decimal places each standard unit of measure displays with (`sys_standard_unit_setting`, ADR-0158 U6)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization administrator can now give any standard unit of measure (UN/ECE Recommendation 20 codes such as `KGM` or `H87`) its own display decimal places, for example 3 for grams at a jeweller or 0 for kilograms at a gravel yard. The value lives in the new organization-owned object `sys_standard_unit_setting` (Setup → Configuration → Standard Unit Settings): one row per standard code, `decimal_places` a whole number from 0 to 12. Deleting the row clears the setting. The organization's own units keep their decimal places on their own `sys_unit` row.
+  
+  - Every member reads the settings (`member_default`, read only); organization administrators and owners create, edit and delete them (`organization_admin`). External members get no read, as with `sys_unit`.
+  - `organization_id` is injected and stamped on every row. Under the `isolated` tenancy posture the tenant wall (ADR-0095 D1) confines every read and write to the caller's organization, so another organization's setting is never read. As with every organization-owned object (ADR-0105 D1), the `single` posture raises no wall, and the `group` posture walls by membership, so a member of several organizations can read each one's settings.
+  - Every set, change and clear is written to `sys_audit_log`, with field history on both columns.
+  - The value is a display default only (ADR-0158 L4): a field's own `scale` stays the storage ceiling, and nothing is rounded at write by it. No reader ships in this change; the quantity display card (#35490) will read it.
+  - Like an exchange rate, a setting is a record the organization owns, so an organization delete is refused (`DELETE_RESTRICTED`) until its settings are deleted.
+- ed33f8a: fix(plugin-security)!: a predicate update or delete of a `controlled_by_parent` detail now writes every row its caller may write by id, the rows other users created included, instead of stopping at the platform's creator-only floor
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is which rows one predicate update or delete of a controlled_by_parent detail writes, and whether such a write is refused whole: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING: an existing flow now changes or deletes detail rows its caller did not create.** A flow's bulk update or bulk delete node, a server-side script or a hook that runs a predicate write (`update(object, data, { where, multi: true })`, `delete(object, { where, multi: true })`) on a `controlled_by_parent` detail, as an organization member who may edit the master record (or read it, where the detail declares `sharing.controlledByParent.writeRequiresMasterRead`), used to change or delete only the detail rows that member had created and answer success. It now changes or deletes every row its predicate matches that the member can read, within any row-level `update` or `delete` policy the app authored on the detail. Review any such flow that deletes by predicate before upgrading: it will delete more rows than it did.
+  
+  It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no schema, key or stored value moves, so `Metadata-protocol` is `none`.
+  
+  - FROM: on a `controlled_by_parent` detail the predicate write kept the platform ownership floor (`owner_only_writes` / `owner_only_deletes` in `member_default`, `created_by == current_user.id`) after its master check had passed. It matched only the rows the caller created, answered success, and never judged the other rows. Measured on a 4-row detail under one master: the master's owner changed 2 rows by predicate and all 4 by id; a member holding an `edit` share on the master, and a manager holding `modifyAllRecords`, changed 0 by predicate and all 4 by id.
+  - TO: once the master check has passed for every master the write reaches, the write is no longer held to that floor. It changes the rows a write of each row by id would change for the same caller, and it applies to all of its matched rows or to none: a newly matched row refused by a row-level `check`, a validation rule, a hook or a `restrict` relation refuses the whole write with that refusal, and nothing is written.
+  
+  **A detail that carries its own row-level write policy now writes fewer of the caller's own rows by predicate.** Where an app authors an `update` or `delete` policy with a `using` on a `controlled_by_parent` detail, a predicate write used to compose the platform floor beside that policy as one more OR term, so it also wrote the rows the caller created that the policy does not admit. The floor is no longer a term of that write, so the authored policy alone bounds it: those rows are left unwritten and the write answers success for the rows the policy admits. A by-id write of such a row was already refused, so the two now agree. A write made on another user's behalf keeps the floor and is not changed.
+  
+  The fix for a caller that must keep the old outcome: narrow the predicate to the rows it means to write (add `created_by` to the `where` to keep writing only the caller's own rows), or write the rows by id to get an outcome per row. To forbid a caller from writing rows other users created on a detail, author a row-level policy on the detail; it binds every row, by id and by predicate.
+  
+  This is the `controlled_by_parent` half of the predicate-write change shipped beside it: see the note "a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id" for every other object. It follows the maintainer's ruling that a predicate write and a by-id write of such a detail agree (ADR-0055 §3 as amended 2026-11-22).
+  
+  What does not change:
+  
+  - A predicate write reaches only the rows its predicate matches that the caller can read, and a predicate matching more than 10,000 of them is refused before anything is written.
+  - It is refused whole, with `PERMISSION_DENIED` / 403 and nothing written, when it reaches a detail row under a master the caller may not edit (or may not read, where the detail declares `writeRequiresMasterRead`).
+  - A detail row that names no master (an optional master) is written by its owner or a Modify All holder; a predicate write that reaches such a row the caller can read and may not write is refused whole.
+  - A write made on another user's behalf keeps the floor for both principals, as its by-id write does.
+  - `sharing.controlledByParent.ownerMayEdit` widens a by-id update only: a predicate update still needs edit on the master.
+  - A by-id write is unchanged, and so is every predicate write on an object that is not a `controlled_by_parent` detail.
+  - No key, option or response member is added.
+  
+  A predicate write on such a detail also asks the read door for its rows once where it asked twice: the write is scoped to the rows its master check judged, so a row that starts matching the predicate while the write is being authorized is not written.
+- 1c4db09: fix(plugin-security)!: a predicate update or delete now writes the rows a Modify All holder, a non-creator owner or an edit-share target can write by id, instead of stopping at the platform's creator-only floor
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is which rows one predicate update or delete by an organization member writes, and whether such a write is refused whole: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a predicate update or delete (`update(object, data, { where, multi: true })`, `delete(object, { where, multi: true })`) by an organization member, whose predicate now matches a row the member did not create because the record-sharing service answers `allow` for a write of that row by id (ownership at the member's write depth or Modify All, and, for an update, an `edit` share or the row sitting in a queue the member belongs to), when that row is refused: on an update, by a row-level `check`, a validation rule or a hook; on a delete, by a `beforeDelete` hook or a `restrict` relation. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no schema, key or stored value moves, so `Metadata-protocol` is `none`.
+  
+  - FROM: the write matched only the rows the member created. It answered success and changed those, and the other row was never judged.
+  - TO: that row is matched and judged too, and the write applies to all of its matched rows or to none. An update whose new image of that row fails a row-level `check` is refused whole with `PERMISSION_DENIED` / 403 and writes nothing. A validation rule or hook that refuses that row refuses the whole update too, with its own code, and a `readonlyWhen` lock on that row strips the field from the whole write. A delete is refused whole, and deletes nothing, when a `beforeDelete` hook or a `restrict` relation refuses that row, with that hook's or relation's own refusal. A write of that row by id is refused too, alone.
+  
+  The fix for a caller: write those rows by id to get an outcome per row, or narrow the predicate to the rows that are not refused.
+  
+  A predicate write (`update(object, data, { where, multi: true })`, `delete(object, { where, multi: true })`) by an organization member held the platform's own ownership floor (`owner_only_writes` / `owner_only_deletes` in `member_default`, `created_by == current_user.id`) as an unconditional condition, where record sharing enforces writes. Unless an app-authored write policy admitted a row, the write matched only the rows that member had created, even when the same user could update or delete the other matching rows one at a time by id. This affected a manager holding `modifyAllRecords` on the object, a row's owner who did not create it, and, for an update, the target of an `edit`-level record share or a member of the queue a row sits in. The write answered success and changed fewer rows than its predicate matched. A write by id lets the record-sharing service's `allow` verdict replace the floor.
+  
+  The predicate write now makes the by-id decision for each matched row the floor would refuse. Such a row is written when a write of that row by id would be, because the sharing service answers `allow` for it: ownership at the caller's write depth, Modify All, or, for an update only, an `edit` share or the row's queue. A row the service abstains on keeps the floor: on an object with no `owner_id`, and on a delete under `public_read_write` (an update there has no floor to keep, because that OWD opens row updates). A row it denies keeps the floor too. The row-level `check` on each updated row follows the same decision.
+  
+  The by-id decision is one sharing verdict for each matched row the floor does not already admit. The bundled sharing service (`@objectstack/plugin-sharing`) answers all of them through its set form, `checkEditMany` / `checkDeleteMany`, in chunks of 1,000 rows: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them, so the store reads grow per 1,000 rows rather than per row. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update takes 24 store reads and about 0.27 s, the same delete 13 reads, and a Modify All holder's update of all 10,000 rows 14 reads, and it now writes those rows.
+  
+  A sharing service that does not implement the set form is asked `checkEdit` / `checkDelete` once per row, 25 at a time, with the same answers, and then each verdict costs a few store reads. Measured on SQLite in memory with the per-row form:
+  
+  - A member's predicate update matching 1,000 readable rows owned by other people, every verdict `deny`: 1,000 verdicts and 2,004 store reads, about 1.1 s, against 44 ms and 3 reads before.
+  - The same at 10,000 rows: 10,000 verdicts and 20,004 store reads, about 5.3 s, against 47 ms before.
+  - A Modify All holder at 10,000 rows: 10,000 verdicts and 10,003 store reads, about 1.8 s, and it now writes the 10,000 rows. Before, it took 47 ms and wrote none of them.
+  - Where an app-authored `using` policy for the write applies to the caller: 0 verdicts, because a row the floor refuses fails that policy too (10,000 matched rows the floor refuses, 45 ms).
+  
+  What does not change:
+  
+  - The rows a predicate write can reach are still only the rows its predicate matches that the caller can read. A predicate matching more than 10,000 of them is still refused before anything is written.
+  - The sharing service's own bulk write scope still bounds a predicate write: the owner set at the caller's depth, plus the edit shares (at most 5,000 of them) and the queue on an update. A row that only a read share and an app `update` policy together make writable is still written by id alone.
+  - An app-authored row-level policy still binds every row, and Modify All still does not bypass row-level security on an ordinary business object.
+  - An `edit` share still widens update and never delete.
+  - The tenant wall is unchanged.
+  - A write made on another user's behalf keeps the floor for both principals, as its by-id write does.
+  - A `controlled_by_parent` detail is not decided by this composition. Its predicate write, like its by-id write, is decided by its master gate instead of the floor: see the note "a predicate update or delete of a `controlled_by_parent` detail now writes every row its caller may write by id".
+  
+  A flow, script or server-side bulk update or delete that relied on a predicate write skipping the rows its caller did not create now changes those rows too, when the caller may write them by id, and is refused whole when one of them is refused. The fix is the one above.
+- 17ed9e7: fix(objectql): deleting an organization also deletes its units of measure, the one exemption from the `sys_unit` delete refusal
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization that had ever created a unit of measure could not be deleted: the delete was refused with 409 `DELETE_RESTRICTED` naming `sys_unit`, and the units could not be removed first, because the engine refuses every delete of a unit (405 `ERR_UNIT_DELETE_REFUSED`). Now the organization delete's own cascade removes that organization's `sys_unit` rows, retired ones included, through the engine's delete path, after the delete has been admitted, so no unit row is left naming a deleted organization. `organizationOwnedRowCounts` (the question plugin-auth's organization delete asks first) and the engine's own refusal no longer count units as records the organization still owns.
+  
+  **Declared behaviour change.** A delete door widens, in one place only. A delete of an organization that holds units and no other record now succeeds and removes the units; before, it was refused. An organization that owns any other record is still refused, and none of its units is removed. Every other delete of a unit is still refused with 405 `ERR_UNIT_DELETE_REFUSED`, by id and batched, for a user, a system writer and an automation run, including a delete issued by a hook while the organization's delete is running: the exemption is recognised from the engine's own cascade, never from anything a caller passes. Retire a unit (`retired: true`) to stop its use, as before.
+- 0a3dd40: feat: analytics compiles the `SharedRecordIds` fixed-read leaf, the access explainer resolves it at the record, and OData refuses it (ADR-0155, step 5 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **Analytics, the native SQL path** (`@objectstack/service-analytics`). A read scope carrying `{ id: { $in: SharedRecordIds.read(object, user) } }` compiles to one subquery in the list's own position, `id IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ? AND "record_id" IS NOT NULL AND "record_id" <> '')`, with every value bound and no tenant scope on the subquery (ADR-0155 ① ruled A). The native strategy takes such a scope only when the host answers `AnalyticsServiceConfig.fixedReadLeafClassOf` with `null` for each leaf (outside both classes ADR-0155 D4 recognises: the object on another datasource than `sys_record_share`, or a middleware or `beforeFind` / `afterFind` hook registered for `sys_record_share` by name) and the dialect is SQLite, PostgreSQL, MySQL or SQL Server. Otherwise it declines, and the ObjectQL engine path answers. A host that wires no answer keeps today's behaviour: the native path declines every scope that carries the leaf. This change ships the hook unwired: `AnalyticsServicePlugin` passes no answer, so the native path declines a scope carrying the leaf and the engine path answers, until #35946 wires it.
+  - **Analytics, the ObjectQL path.** The read-scope merges (`withReadScope`, the related-object scope, the label read) admit a placed read-form leaf and hand it to the engine by reference. The dry-run SQL echo prints the subquery. A leaf in any other position, under `$nin`, on another object or in its write form is refused, `INTERNAL_ERROR` / 500, logged at `error` once per service logger.
+  - **Analytics, the query's `where`.** A leaf reaches analytics only in the read scope. A leaf anywhere in a query's `where`, in either spelling, is now refused before either strategy runs, with `INTERNAL_ERROR` / 500. The message names the leaf and its table, not the recipient. Before this release `{ id: { $in: leaf } }` there answered `INVALID_FILTER` / 400, with a message that printed the recipient. A bare `{ id: leaf }`, or an array-form `=`, was read as a relation condition on `id`. No request can spell the leaf, so only in-process code could reach this.
+  - **The access explainer** (`@objectstack/plugin-security`). `ISecurityService.explain` resolves each leaf in the sharing read filter at the record it judges, with one read of `sys_record_share` under the leaf's own predicate, keyed by the record ids (one read for a whole batch). The sharing layer's `rowFilter` then has the two shapes it has today: `{ id: { $in: [recordId] } }` in the share arm for a caller with a grant on the record, and the share arm left out for a caller without one. The published `rowFilter` never carries the leaf. A leaf it cannot resolve is refused, `INTERNAL_ERROR` / 500, logged at `error` once. That includes a leaf anywhere but `{ id: { $in: leaf } }` in the object's own filter, such as one inside a relation condition or a composed `ReadableIds` scope, as the engine and the analytics compiler refuse it.
+  - **OData** (`@objectstack/driver-odata`). `find` and `count` refuse a `where` carrying the leaf before any request is sent, `INTERNAL_ERROR` / 500. An OData `$filter` has no form of the subquery, and the driver declares no `fixedReadLeaves`. Before this release a direct `find` left the leaf's predicate out of the `$filter` it sent. The engine already refused the leaf before calling this driver.
+  - **The array form** (`@objectstack/spec`). `parseFilterAST` now refuses a leaf in the array form with `INTERNAL_ERROR` / 500 wherever it answered `INVALID_FILTER` / 400: as an `in` / `nin` comparand, as a member of an `in` / `nin` list, or as the comparand of a scalar operator (`!=`, `>` and the rest). The old messages printed the leaf's inputs, the recipient among them. The new message names the leaf and its table only. An unbranded copy that crossed JSON is still `INVALID_FILTER` / 400. An array-form `=` is passed on by reference and refused by the engine, as before.
+  - **New exports** (`@objectstack/objectql`). `fixedReadLeafClassOfEngine(engine, leaf)` answers which ADR-0155 D4 class, if any, keeps the engine from handing a leaf to a driver. `driverEvaluatesFixedReadLeaf` answers whether a driver declares the leaf. Neither reads or writes anything.
+- 4dbee9f: fix(plugin-security): a record sharing `allow` no longer takes the ownership floor out of an OR an authored write policy stands in, so a creator can still edit or delete their own row by id beside an authored widener
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a by-id update or delete, when the sharing service answered `allow` for the row, the platform's own ownership floor (`created_by == current_user.id`, from `member_default` and `external_default`) was removed from the row-level filter. The sharing service answers `allow` when the caller owns the row or holds write depth over its owner, holds Modify All, or, for an update, holds an `edit` share on it or belongs to the queue it sits in. That filter is an OR of permissive policies. Where an app-authored update or delete policy applied to the caller as well, for example "any open deal" (`stage == 'open'`), removing the floor left that policy as the only term. A row the floor alone admitted, such as the caller's own closed deal, was then refused with 403 `PERMISSION_DENIED`. A predicate write (`multi: true` update, delete by `where`) over the same row wrote it.
+  
+  The maintainer ruled option A on #35917 (ruling comment 7063130499, 2026-11-21): under a sharing `allow`, the creator and owner floor stays an OR term beside an authored update or delete `using` policy, so a by-id write gives the answer a predicate write already gave for those rows.
+  
+  The floor is now dropped only where it is the filter's last term. Beside an authored write policy with a `using` it stays one term of the OR, both in the row gate before the write and in the defaulted check on the new image. What changes:
+  
+  - On an object where an authored update or delete policy applies to the caller, a by-id update or delete of a row the caller created, where record sharing answers `allow`, is admitted again, as it was before the sharing service could replace the floor. That covers a creator who owns the row, who holds write depth over its owner, who holds Modify All, and, for an update, who holds an `edit` share or queue membership. A creator with none of these is still refused by record sharing on a row the authored policy does not admit. The lifecycle verbs move with their write class: `transfer` with update, `purge` with delete (`restore` addresses no single row id, so it does not meet this gate).
+  - By id and by predicate now agree on the rows the floor admits. They do not agree on every row: an open row the caller neither owns nor holds a share on, which an authored policy admits, is written by id (the authored policy lifts the sharing refusal) and left out of a predicate write (the sharing bulk scope stays owner and shares). That divergence is older than this change and is not touched here.
+  - `security/explain` reports the same record verdict for these rows.
+  - The master check a `controlled_by_parent` detail write asks about its master row moves the same way: a master's creator, where record sharing allows the master, can now insert, update and delete its details beside the master's authored update policy.
+  - An authored write policy that cannot enforce (a missing column, an unresolved membership key) used to deny every such by-id write under `allow`. The creator's own rows now pass by the floor, as they already did under `abstain` and by predicate.
+  - A write on another user's behalf (ADR-0090 D10) follows the delegator: a by-id update or delete, by the delegator or on its behalf, of a row the delegator created beside its authored policy is now admitted. Before, both were refused. The suite pinned those refusals in 22 tests. Those tests now use rows the delegator did not create, so they still refuse with every assertion kept, and new tests pin the admission of a row, and of a master, the delegator created: `delegated-write-never-exceeds-delegator.test.ts` (the five held-row cells and the post-image store test, under both tenancy postures, 12 tests) and `explain-enforce-parity.test.ts` (the five #24746 held rows, under both postures, 10 tests). An agent still never writes a row its delegator's own write refuses; on a `controlled_by_parent` object that rests on the delegator's own composition, which new cells pin at the row gate, the stored row and the master gate.
+  
+  Removed capability: a `using` write policy no longer stops a row's own creator once record sharing says `allow`, and a master's authored update policy no longer stops the master's creator from writing its details. Where to put such a limit now:
+  
+  - A `check` on the update policy judges the stored image of every row, so it can refuse what a row becomes. It does not see the row as it stood before the write, so it cannot hold a row in a state: a creator can still edit a closed deal into one the check accepts.
+  - A `beforeUpdate` lifecycle hook sees the row as it stood before the write (`ctx.previous`), so a limit on the prior state goes there, and a delete has no new image, so a limit on deleting one's own rows goes in a `beforeDelete` hook.
+  - For a master's details, the master gate reads the master's row filter, not its `check`, and a hook on the master does not run for a detail write: the limit goes in a hook on the detail object.
+  
+  What does not change:
+  
+  - Where no authored write policy with a `using` applies, an `allow` still replaces the floor completely, as before.
+  - An authored policy still bounds every row the floor does not admit. Modify All does not lift an authored write policy on an ordinary business object (ADR-0066 ①), and an owner or `edit`-share target who did not create the row is still held to the authored policy.
+  - A `check` an author wrote still refuses the new image, the tenant wall still applies, and an `edit` share still widens update and never delete.
+  - Where record sharing abstains (no owner field), the floor still applies.
+  - Reads are not affected: the floor is a write-side policy.
+  - `ISecurityService.checkAuthoredRowWrite` still judges the authored policies alone, without the floor.
+- e17c2ae: Clause-②: no
+  Metadata-protocol: none
+  
+  A security refusal's `userMessage` (the master-detail write gate and the field-write gate) now negotiates the label locale against the locales the i18n service holds before it translates the object or field label, the way objectql's refusals and the metadata route do. A request in a regional tag such as `en-US`, in a deployment authored in `en` that defaults to another language, now names the master object by its authored label (`Contract`) instead of the default language's row.
+- 24ff03c: feat(plugin-security): position and permission-set assignments carry a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. User positions and user permission-set assignments are now `purple` (security and access).
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 8b1841f: feat(platform-objects): built-in tasks and notes, `sys_task` and `sys_note`, in every environment
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `PlatformObjectsPlugin` now registers two ordinary, customizable objects on their own manifest
+  (`com.objectstack.platform-objects.work`), so any application can put tasks and notes in its menu
+  without declaring its own:
+  
+  - `sys_task` — title (required), description (rich text), status (To Do / In Progress / Done,
+    default To Do), due time, assignee (a user, defaulting to the creator) and a read-only completion
+    time the platform writes when the status becomes Done and clears when it leaves Done.
+  - `sys_note` — an optional title and a rich-text body; lists show a read-only heading that is the
+    title, or the body's first line when the title is empty.
+  
+  Each keeps its own sharing: `sharingModel: 'private'` over a declared `owner_id` (the creator), and a
+  task is also shared, with edit access, with its assignee through the declared `sys_task_assignee`
+  sharing rule. Neither links to, grants access to, or derives access from any other record. Default
+  views: tasks Assigned to Me (open, by due time), Created by Me and All Tasks (a board by status);
+  notes My Notes and All Notes. Attachments are on for both.
+  
+  Both names join `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec`, so
+  validation treats them as platform-provided: an app's navigation entry reaches them with
+  `requiresObject` beside `objectName` (`{ type: 'object', objectName: 'sys_task', requiresObject:
+  'sys_task' }`), which `defineStack` accepts and the console hides on a kernel without the object.
+  Their labels ship in the platform's eleven locales (zh-CN 任务 / 备忘).
+  
+  `@objectstack/plugin-security`: the member baseline `member_default` grants `sys_task` and
+  `sys_note` read, create and edit, with no delete (maintainer ruling 7131539862, option A). It opens
+  the objects only: which rows a member sees stays with each object's private sharing, so a task is
+  read by its creator and its assignee and a note by its creator.
+  
+  `@objectstack/cli`: the organization-ownership inventory (ADR-0131 D10) gives `sys_task` and
+  `sys_note` the `attribution` fate, so `os migrate organization-ownership` and the `os dev` upgrade
+  plan databases that hold them instead of refusing an object with no fate.
+  
+  Clause-② reads `yes (widening)`: `defineStack` now accepts a top-level action whose `objectName` is
+  `sys_task` or `sys_note`, and the public surface grows. `Metadata-protocol: none` follows the
+  `sys_unit` roster-addition precedent: no metadata key, type or schema value is added, and a
+  reference that already parsed now resolves.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- 695b9db: fix(plugin-security)!: an app-authored elevation's reads and writes are judged by its caller's organization wall
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer a data operation gets when it runs under an action body's, a system hook's or a system flow's elevation, and three schema descriptions that state it: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  The rule: elevation lifts a caller's business rules, never the organization wall. An action body, a hook that runs as system (`runAs: 'system'`, a system context it inherits, its `ctx.api.sudo()`) and a flow that runs as system have their reads and writes judged by the organization wall of the caller they run for (ADR-0095 D1, ADR-0123 D1/D2), under every tenancy posture and on every object, a federated one included.
+  
+  **BREAKING** for an action body, a system hook or a system flow run for a signed-in caller.
+  
+  - FROM: the elevation, not the caller's organization wall, decided what such a context reached of a tenant-scoped object.
+  - TO: the caller's own organization wall decides it:
+    - with no active organization under `isolated`, an empty membership set under `group`, or no membership at all under `single`: its reads of a tenant-scoped object resolve to nothing (zero rows, no error); its delete and purge are answered by that read rule (a predicate delete matches nothing, a by-id delete answers `404 RECORD_NOT_FOUND`); and its other writes (insert, update, transfer, and the recycle bin's restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization or membership;
+    - under `group`, a member reads and writes the union of the organizations they hold a membership in, with or without an active organization;
+    - on a federated object it reads only rows of the caller's organization scope, and a by-id write of a row outside it answers `404 RECORD_NOT_FOUND`, as a row that is not there;
+    - an insert with no active organization on a walled tenant object is refused with `403 PERMISSION_DENIED`;
+    - for every caller, an active organization included: a write whose own data names an organization outside the caller's wall, and an update whose own data empties a row's organization, are refused with `403 PERMISSION_DENIED`;
+    - the check of the row a by-id write names is read inside the transaction the write carries, so a row the body's own transaction wrote is the caller's to write again in it;
+    - a system flow started by a record change, and every system run whose own user is its caller, carries that user's membership set and posture rung from run setup: under `group` it reads the union of the user's memberships, with or without an active organization. The set and rung are those of run setup: a membership the user gains or loses while the run waits is read by the next run. A decided segment, a run that began for no caller and a child run of either carry neither: a decided segment's caller's facts are resolved for it again.
+  
+  **Not moved.** A caller with an active organization keeps exactly that organization's reach. Objects outside tenancy, objects with no organization column, and a platform operator crossing the wall on an object whose posture permits it are answered as the caller's own requests answer them. System work that runs for no caller (a scheduled run, a platform plugin's own system context, the seeders) is unchanged, and so is a system flow that began for no caller after an approval decision: the decider is its attribution user, not its caller. A run that a write of such a segment starts begins for no caller too, and carries neither the writer's membership set nor its posture rung; its trigger user stays the writer, so an approval's submitter exclusion, who may read the run's state, and the run's history answer as before. A run that a write of a decided segment of a run that began for a caller starts begins for the decider, as before. A system flow that began for a caller is judged by that caller after a decision, not by the decider.
+  
+  The fix for a caller: select an active organization before running the action, or start the run from a session that has one. A body that must place a row in another organization does so as a member of that organization, through its own request. The `runAs` descriptions of flows and hooks and the `body` description of actions now state this limit beside the other two.
+  
+  Also in this change:
+  - `@objectstack/core` exports `RUN_CALLER`, `markRunCaller` and `runCallerOf`: the server-constructed mark a flow run's data context carries wherever the run's own user is not its caller (a decided segment, a run recorded as begun for no caller in every segment, and a child run of either), naming the user its run began for, or that it began for none.
+  - `@objectstack/service-automation`: a `runAs: 'system'` run's data context carries the run user's membership set (`accessible_org_ids`) and posture rung, seeded once at run setup; it carries no grants. A run context may record `beganForNoCaller: true`. A run whose own user is not its caller is seeded with neither, and its data context carries neither.
+  - `@objectstack/objectql`: the hook session of a write made under that mark, for a run that began for no caller, carries it; `@objectstack/trigger-record-change` records that the run such a write fires began for no caller, and keeps the writer as its trigger user.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

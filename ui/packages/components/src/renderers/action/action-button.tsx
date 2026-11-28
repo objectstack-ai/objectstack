@@ -21,7 +21,7 @@ import React, { forwardRef, useCallback, useState } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema } from '@object-ui/types';
-import { useAction, useRecordContext } from '@object-ui/react';
+import { useAction, useDrawsAction, useRecordContext } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { Button } from '../../ui';
 import { cn } from '../../lib/utils';
@@ -31,6 +31,7 @@ import { resolveIcon } from './resolve-icon';
 import { hasDeclaredVisibilityGate } from './visibility-gate';
 import { useAutoTriggerOnce } from './auto-trigger';
 import { readStaticParamValues } from './static-params';
+import { renderableLabel } from './renderable-label';
 import { toButtonVariant, toRunnerVariant } from './runner-variant';
 import { DisabledReasonTrigger, describedByWithReason, useDisabledReason } from './disabled-reason';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
@@ -156,6 +157,16 @@ const ActionButtonRenderer = forwardRef<
 
     const { execute } = useAction();
     const [loading, setLoading] = useState(false);
+    // Every read of the label below goes through this guard (see `renderableLabel`);
+    // `data-obj-id` is the component id `SchemaRenderer` hands down.
+    const label = renderableLabel(schema.label, dataObjId ?? schema.name ?? 'action:button');
+    // The auto-trigger reads the label for its refusal notice, so it is handed
+    // the guarded one too. Memoized for cost only: the hook's once-only refs
+    // make a fresh object harmless.
+    const autoTriggerSubject = React.useMemo(
+      () => (label === schema.label ? schema : { ...schema, label }),
+      [schema, label],
+    );
 
     // Record data may be passed from SchemaRenderer (e.g. DetailView passes
     // record data), bound the three canonical ways — `record.status`, bare
@@ -179,7 +190,7 @@ const ActionButtonRenderer = forwardRef<
     // hide the action, not silently show one whose guard is broken.
     const isVisible = useCondition(toPredicateInput(schema.visible), recordData, {
       throwOnError: true,
-      label: `action "${schema.name ?? schema.label ?? 'action:button'}" (visible)`,
+      label: `action "${schema.name ?? label ?? 'action:button'}" (visible)`,
     });
     // Spec field is `disabled` (boolean | CEL predicate — disabled when TRUE).
     // It previously had zero consumers (the renderer only read a non-spec
@@ -292,7 +303,7 @@ const ActionButtonRenderer = forwardRef<
           // Forward the human label/description so a param-collection dialog
           // can title itself as the action ("Create Environment") instead of a
           // generic "Action parameters" prompt.
-          label: schema.label,
+          label,
           description: (schema as any).description,
           // The param dialog's submit-button verb, read by the same dialog.
           submitText: schema.submitText,
@@ -411,7 +422,7 @@ const ActionButtonRenderer = forwardRef<
       } finally {
         setLoading(false);
       }
-    }, [schema, execute, loading, localContext, recordInScope]);
+    }, [schema, label, execute, loading, localContext, recordInScope]);
 
     // Client-side auto-trigger (#844): a caller (e.g. a welcome-page CTA that
     // deep-links into "create") can mark an action `autoTrigger: true` to run
@@ -425,14 +436,17 @@ const ActionButtonRenderer = forwardRef<
     // It is handed this button's own `visible` verdict — the one the early
     // return below consults — because the action's declared gate outranks the
     // flag (objectui#4191): a hidden action is refused and reported, not run.
-    useAutoTriggerOnce(schema, isVisible, handleClick);
+    useAutoTriggerOnce(autoTriggerSubject, isVisible, handleClick);
 
     // A declared boolean `visible: false` is a verdict, not a missing gate —
     // truthiness classified it as "ungated" and rendered the action for
     // everyone (objectui#3823). Reachable because `action:bar` bypasses
     // `SchemaRenderer` and spreads the whole member action onto this schema, so
     // this gate is the only one on that path. See `hasDeclaredVisibilityGate`.
+    // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
+    const drawsAction = useDrawsAction();
     if (hasDeclaredVisibilityGate(schema.visible) && !isVisible) return null;
+    if (!drawsAction(schema)) return null;
 
     const button = (
       <Button
@@ -482,8 +496,8 @@ const ActionButtonRenderer = forwardRef<
         {...{ 'data-obj-id': dataObjId, 'data-obj-type': dataObjType, style }}
       >
         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-        {!loading && Icon && <Icon className={cn('h-4 w-4', schema.label && 'mr-2')} />}
-        {schema.label}
+        {!loading && Icon && <Icon className={cn('h-4 w-4', label && 'mr-2')} />}
+        {label}
       </Button>
     );
     // A predicate-disabled button is wrapped in the trigger that carries its
@@ -633,7 +647,7 @@ ComponentRegistry.register('button', ActionButtonRenderer, {
       type: 'array',
       of: 'string',
       description:
-        'The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
+        'The placements the action declares (`list`, `record_row`, `record_page`, …). A `script` or `flow` action declared record-scoped (`record_row`, `record`, `record_page` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
     },
     {
       name: 'toast',

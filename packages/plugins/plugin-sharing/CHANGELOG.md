@@ -1,5 +1,471 @@
 # @objectstack/plugin-sharing
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 58570d8: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  perf(sharing): a predicate update or delete asks record sharing for the write verdict of all its candidate rows at once, so its store reads no longer grow per row
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ISharingService` (`@objectstack/spec/contracts`) gains two optional members, `checkEditMany(object, recordIds, context)` and `checkDeleteMany(object, recordIds, context)`. Each answers, for every id it is handed and in the same order, the tri-state verdict `checkEdit` / `checkDelete` answer for that id (`allow`, `abstain` or `deny`), with the same bases, the same order and the same verb boundary: an `edit` share answers `allow` to `checkEditMany` and `deny` to `checkDeleteMany`. A chunk whose lookup fails answers `deny` for each of its records, as `checkEdit` answers `deny` for a record whose lookup fails.
+  
+  `SharingService` (`@objectstack/plugin-sharing`) implements both, and `checkEdit` / `checkDelete` are now the one-record case of the same implementation. A list is read in chunks of 1,000 ids: one read of the chunk's rows and, for an update, one read of the caller's write-level shares on them. The caller's owner set, each queue membership and the Modify All probe are resolved at most once per call. A single record costs the reads it always did, except that an update of a record on an object with an ownership queue column now reads the row once instead of twice.
+  
+  `SecurityPlugin` (`@objectstack/plugin-security`) asks the set form on a predicate (`multi: true`) update or delete, for the matched rows the platform ownership floor does not already admit, where the kernel's `sharing` service serves it, and asks `checkEdit` / `checkDelete` per row, 25 at a time as before, where it does not. Which rows are written is unchanged either way. Measured on SQLite over 10,000 rows owned by another user: a member's predicate update went from 20,004 store reads and 6.6 s to 24 reads and 0.27 s, the same delete from 10,003 reads to 13, and a Modify All holder's update of all 10,000 rows from 10,004 reads to 14.
+  
+  Nothing to migrate. An `ISharingService` implementation that does not add the two members keeps working: callers ask it per record, with the same answers.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 9abc732: fix(share-links): the share-link page names the shared object by its label in the reader's language and no longer lists the fields the object hides
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/share-links/{token}/resolve` answers two more facts, on both of its mounts (the sharing plugin's route and the runtime dispatcher's `/share-links` domain):
+  
+  - `link.object_label` — the shared object's label in the request's locale: the request's `Accept-Language` top tag, else the i18n service's default locale, translated the way `GET /meta/object/NAME` translates it: the translation bundle over the served `label`, with the deployment's fallback locale and authored language, and the object's packaged declaration read through the metadata protocol. A renamed object therefore keeps its rename and is not given the bundle's translation of its old label. With no i18n service, or no bundle entry for that locale, the served label is served. An object that declares no label carries no `object_label`.
+  - `fields[NAME].hidden: true` — for a field the object declares hidden, including the injected scope and queue columns, which are hidden at their source. A field that is not hidden carries no `hidden` key.
+  
+  Both public share-link routes (`/resolve` and `/messages`), on both mounts, now answer `Vary: X-Share-Password, X-Share-Password-Encoding, Accept-Language` (the new `SHARE_LINK_PUBLIC_VARY` in `@objectstack/types`). Before, they sent only the two password headers. They still send `Cache-Control: no-store`.
+  
+  `ShareLinkResolvedLink` and `ShareLinkFieldDisplay` (`@objectstack/types`) gain the two optional keys, and `buildShareLinkResolveAnswer` takes an optional fourth argument with the request's `Accept-Language` value, the i18n service and the metadata protocol. `registerShareLinkRoutes` (`@objectstack/plugin-sharing`) takes optional `i18n` and `protocol` resolvers, which `SharingServicePlugin` wires to the kernel's `i18n` and `protocol` services.
+  
+  The console's share-link page (`@object-ui/console`) titles the page with the label ("Shared Client Brief"), falling back to the object's name from a server that does not send one, and leaves off every field the answer marks hidden, as the record page does. Its resolve and messages requests state the console's UI language as `Accept-Language`, so the label arrives in the language the rest of the page is in.
+  
+  Nothing to migrate: a caller that reads neither key is unaffected.
+- 52a2398: fix(plugin-sharing)!: every share grant counts; the sharing scopes carry the share-grant leaf instead of a list capped at 5,000 grants (ADR-0155 plan step 6)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is how the sharing scopes count share grants (every grant, through a subquery, where a read of at most 5,000 used to stand), that grants stop counting on objects whose storage cannot evaluate that subquery, and that a host registering a narrowing of sys_record_share reads by name no longer boots. There is nothing for a migration to rewrite and no tombstone; each host-side remedy is one line, below. -->
+  
+  **What was wrong.** The read scope of a sharing-scoped object read the caller's share grants into an id list first, at most 5,000 of them, and dropped the rest without a word: a member holding 6,000 grants on one object saw 6,000 rows of 7,000 (1,000 owned plus 5,000 of the 6,000 shared), and a GET of an unread grant answered 404. The predicate-update scope had the same cap on edit-level grants.
+  
+  **Now.** `buildReadFilter` and `buildWriteFilter` carry the share arm as the share-grant leaf, `{ id: { $in: SharedRecordIds.read(object, user) } }` (the update scope carries `.write(object, user, ['edit', 'full'])`), which the SQL driver compiles as a subquery over `sys_record_share` inside the same statement. Every grant counts, at any number; no grant is read into memory and nothing binds one parameter per grant. The pending-approval ids stand as a disjunct of their own. `delete` scopes to the owner match alone, as before.
+  
+  **BREAKING**, in three places, each a tightening that lands here, where it takes effect:
+  
+  - **Share grants stop counting on objects whose storage cannot evaluate them** (ADR-0155 R2). An object stored on another datasource than `sys_record_share`, or by a driver that does not evaluate the leaf (`supports.fixedReadLeaves` without `SharedRecordIds`: today the MongoDB, in-memory and OData drivers), keeps its owner, queue and pending-approval access unchanged, but its share rows are no longer consulted: no scope carries the share arm, the edit gate reads no grant, and a new grant or a new sharing rule on it is refused `SHARING_NOT_ENABLED` (422 at the REST doors). The boot names, once at `warn`, every such object that holds `sys_record_share` rows, with the reason. `security/explain` reports each share on such a record as evaluated and not granting, and says why.
+    The fix for a host: to share such an object's records again, store it on the datasource of `sys_record_share`, on a driver that evaluates share grants (the SQL drivers do).
+  - **A narrowing of `sys_record_share` reads registered BY NAME refuses the boot** (ADR-0155 R1 at boot, D4). A host that registers an object-scoped middleware, or a `beforeFind` / `afterFind` hook, for `sys_record_share` (an opt-in of that table into plugin-audit's record-view auditing included) no longer starts: the boot fails at `kernel:bootstrapped`, before any request is served, with `INTERNAL_ERROR` / 500 naming the registration. No registration is exempt, one whose handler skips system reads included. A registration made after boot is refused at read by the engine, with the same envelope.
+    The fix for a host: remove that registration for `sys_record_share`. A host that opted the table into record-view auditing gives up that auditing of share rows.
+  - **A narrowing that names NO object is not run on the share arm.** A middleware or a find hook registered for no object, or for `'*'`, ran on today's grant read, which went through the engine as a system read. The share arm now makes no engine read of `sys_record_share`, so such a registration does not run on it, and nothing refuses, reports or logs that. On a host where such a registration changes a system read of `sys_record_share`, the share arm's rows can differ from what they were. This paragraph is the telling (ADR-0155 D4's boundary; `ISharingService`'s contract says the same). The repository's own registrations of that kind were read before this change, and none changes that read.
+  
+  **Preconditions this step inherits from the PostgreSQL key-type change** (ADR-0155 O2):
+  
+  1. On PostgreSQL, a statement holding the leaf whose catalog read fails, or finds no such relation, answers `INTERNAL_ERROR` / 500, where an uncast statement would have run.
+  2. Each transaction pays one savepoint and one catalog read per table it compares a leaf against, when the table has no pooled reading.
+  3. A failed catalog read inside that savepoint rolls back the caller's concurrent statements on the same transaction. The sharing plugin issues no statement of its own that carries the leaf, and none of its reads runs inside a caller's transaction or concurrently with another on one: its own reads are sequential system reads.
+  
+  **What it costs, quoted no wider than ADR-0155 quotes it.** For the scope statements alone (an account page, its total and the two grant reads), at 1M rows and 5,000 grants, the id-list scope against the subquery scope read PostgreSQL 21.6 → 7.0 ms and SQLite 18.3 → 12.1 ms. It is not a whole-request figure. For a caller holding no grant, whose scope was the bare owner match and is now an `$or` with the subquery, SQLite still serves the page and its total from the owner index; PostgreSQL 16 serves the page as before but plans the total as a sequential scan, which grows with the table: measured, that caller's total went from 1.46 to 7.29 ms at 100k rows and from 7.88 to 42.21 ms at 1M, the page flat at both. SQLite keeps the owner index. Follow-up #36034 measures `id = ANY(ARRAY(SELECT …))` against the subquery for that caller on PostgreSQL.
+- d99b746: fix(plugin-sharing): a hierarchy scope that falls back to owner-only for want of a resolver now says so once per boot
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a permission set grants a hierarchy scope (`own_and_reports`, `unit`, `unit_and_below`) and no `hierarchy-scope-resolver` service is registered (the `hierarchy-security` capability, provided by `@objectstack/security-enterprise`), the sharing layer fails closed to owner-only. It used to do so without a word, so a runtime booted without the CLI gave an operator nothing to explain why every user saw only their own records.
+  
+  - The first time the fallback is taken, the sharing service logs one `warn` naming the capability, its provider and the owner-only consequence. It is logged once per service instance, which is once per boot, never once per request.
+  - Nothing is logged for an app that never asks for a hierarchy scope, or when a resolver is registered.
+  - The answer does not change: the scope still resolves to the caller alone.
+  - `os validate`, `os verify` and `os serve` no longer end the `hierarchy-security` advisory with "and no log line says so": for that token they now say the runtime logs one warning, opening `[sharing] hierarchy scope NOT widened`, the first time it falls back. Other enterprise tokens keep their wording.
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+- 24ff03c: feat(plugin-sharing): sharing rules, record shares, queues and assignment rules carry a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. Sharing rules and record shares are now `purple` (security and access); queues, queue members and assignment rules `orange` (approvals and work routing).
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 30778f3: fix(sharing): a declared sharing rule grants in an organization created after boot, without a restart
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A package-declared sharing rule now grants in an organization created after the server booted.** The per-record rule hooks bound once at boot on the objects of the rules served then, and under a walled posture a declared rule is served once per organization that exists. A server that booted with no organization (a fresh environment, before its first sign-up) bound no hook on a declared rule's object, so a record written in the organization created afterwards got no `sys_record_share` grant and its recipient could not read it until the next restart. The hooks now bind on every object an active declaration names, whatever organizations serve it at that moment; the organization is resolved when a record is evaluated, so each grant stays inside its own organization.
+  - **The same binding covers a declared rule switched off at boot and on again later** through the activation ledger: its object stays bound, and records written after the switch are evaluated.
+  - Boot and the `sys_sharing_rule` data-change rebind bind through one function (`rebindRuleHooks`, reading `SharingRuleService.listRuleHookObjects()`), so the two cannot derive different object sets. `bindRuleHooks` now accepts any rows carrying `object_name` and `active` (a widening; existing callers are unaffected).
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [cc03bdc]
+- Updated dependencies [ef39b2c]
+- Updated dependencies [a73edb3]
+- Updated dependencies [93fa4f9]
+- Updated dependencies [1c05546]
+- Updated dependencies [9fea316]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [e6e5224]
+- Updated dependencies [94a2d8b]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [4db08d5]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [d5ece3e]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [d17adf5]
+- Updated dependencies [9c29d73]
+- Updated dependencies [bf69cb4]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [a6cf988]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [c480f33]
+- Updated dependencies [9062756]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [5cd2b54]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [43639a6]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [c321914]
+- Updated dependencies [61722e9]
+- Updated dependencies [37f7814]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [6d0089c]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [4890cd0]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [c59ee99]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [50d6da8]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [7dd1a2f]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [a7292a5]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [756df0a]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [4101f1f]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/objectql@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

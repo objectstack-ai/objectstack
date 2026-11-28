@@ -8,21 +8,21 @@
 
 /**
  * objectstack#27524, Target 7 — the record's top bar on each face, from a real
- * `RecordDetailView` mount (the `panelToggles-27052` harness).
+ * `RecordDetailView` mount (the retired `panelToggles-27052` harness).
  *
  * Two rows on a desktop since objectstack#35853 (figure 40): the navigation
  * row over the record row.
  *
- *  - the page opened directly: the navigation row names the object (a link to
- *    the object's list) and ends in ✕, which goes there too; no counter, no
- *    ↑ ↓; the record row holds the header's name and ⊟;
+ *  - the page opened directly: the navigation row starts with ✕ (objectstack#36557),
+ *    then names the object (a link to the object's list), where ✕ goes too; no counter, no
+ *    ↑ ↓; the record row holds the header's name (its ⊟ retired with the
+ *    right rail, objectstack#35890);
  *  - the page the list's record name opened (objectstack#35854): ↑ ↓ and
  *    「N of M · view」 over the list's matched total — a step replaces the page
  *    with the sibling's, `j` / `k` step too — and ✕ or the view's name back to
  *    the list as it was left; no ⤡ (the 「Collapse to drawer」 hop retired);
  *  - the page under a `?from=` trail: ← and the path, each ancestor a link;
- *  - the record in a pane: the pane's bar names it at the root, and its ⊟ sits
- *    in that bar, not in the header's action row.
+ *  - the record in a pane: the pane's bar names it at the root.
  */
 
 import * as React from 'react';
@@ -66,12 +66,14 @@ vi.mock('./MetadataInspector', () => ({
 
 import { RecordDetailView } from './RecordDetailView';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack';
+import { ShellPageActionsScope } from '../layout/ShellPageActions';
 
 const APP = 'demo';
 const LEAD = 'crm_lead';
 const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
 const OBJECTS = [
-  { name: LEAD, label: 'Lead', pluralLabel: 'Leads', fields: BASE_FIELDS },
+  // objectstack#35985 — a coloured object, so the record row's tile is pinned below.
+  { name: LEAD, label: 'Lead', pluralLabel: 'Leads', icon: 'user', color: 'orange', fields: BASE_FIELDS },
   { name: 'crm_task', label: 'Task', pluralLabel: 'Tasks', fields: { ...BASE_FIELDS, lead: { type: 'lookup', reference: LEAD, label: 'Lead' } } },
 ];
 const ROWS = ['r-1', 'r-2', 'r-3'];
@@ -157,9 +159,9 @@ afterEach(() => {
 });
 
 describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objectstack#35853)', () => {
-  it('opened directly: the navigation row names the object, ✕ at its right; the record row holds the name and ⊟', async () => {
+  it('opened directly: ✕ first in the navigation row, then the object\'s name; the record row holds the name, no ⊟ (objectstack#35890)', async () => {
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     const bar = pageBar()!;
     expect(bar).not.toBeNull();
     // objectstack#35853 — two rows: navigation over the record.
@@ -174,10 +176,15 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
     expect(bar.querySelector('[data-record-top-bar-step]')).toBeNull();
     expect(bar.querySelector('[data-record-top-bar-position]')).toBeNull();
     expect(bar.querySelector('[data-record-bar-separator]')).toBeNull();
-    // ✕ is the navigation row's last control, and goes to the object's list.
-    const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
-    expect(frame.lastElementChild?.getAttribute('data-testid')).toBe('record-page-close');
-    expect(record.querySelector('[role="group"][aria-label="Panels"]')).not.toBeNull();
+    // objectstack#36557 — ✕ is the navigation row's first control, before the
+    // host's left end, keeps its name, and goes to the object's list.
+    const close = screen.getByTestId('record-page-close');
+    expect(nav.querySelector('button')).toBe(close);
+    expect(nav.firstElementChild?.contains(close)).toBe(true);
+    expect(close.getAttribute('aria-label')).toBe('Close');
+    expect(nav.querySelector('[data-record-top-bar-frame]')?.contains(close)).toBe(false);
+    // objectstack#35890 — the rail and its ⊟ are retired: the record row draws no 「Panels」 group.
+    expect(record.querySelector('[role="group"][aria-label="Panels"]')).toBeNull();
     expect(document.querySelector('[data-record-crumb-row]')).toBeNull();
     fireEvent.click(screen.getByTestId('record-page-close'));
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}`));
@@ -186,7 +193,7 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
   it('opened by the list\'s record name: 「N of M · view」 over the list\'s matched total, ↑ ↓ and j / k over its rows', async () => {
     const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS, total: 40 };
     mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-2`, state: { from } });
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     const nav = () => pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
     const position = () => nav().querySelector('[data-record-top-bar-position]');
     expect(position()?.textContent).toBe('2 of 40');
@@ -213,7 +220,7 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
   it('control: with no total reported the counter counts the rows handed along; the first has no ↑', async () => {
     const from = { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads', siblings: ROWS };
     mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from } });
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     const position = () => pageBar()!.querySelector('[data-record-top-bar-position]');
     expect(position()?.textContent).toBe('1 of 3');
     expect(position()?.getAttribute('title')).toBe('1 of 3 in All leads');
@@ -230,7 +237,7 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
 
   it('control: a list\'s origin without its rows draws no counter', async () => {
     mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}`, label: 'All leads' } } });
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
     expect(pageBar()!.querySelector('[data-record-top-bar-position]')).toBeNull();
     expect(pageBar()!.querySelector('[data-record-top-bar-step]')).toBeNull();
   });
@@ -239,7 +246,7 @@ describe('the page\'s top bar (objectstack#27524, Target 7; two rows since objec
     '%s returns to the list the page came from, as it was left, with no record open',
     async (_name, control) => {
       mountPage({ pathname: `/apps/${APP}/${LEAD}/record/r-1`, state: { from: { pathname: `/apps/${APP}/${LEAD}?view=all`, label: 'All leads', siblings: ROWS } } });
-      await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+      await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
       const target = control === 'scope'
         ? pageBar()!.querySelector('[data-record-top-bar-scope]') as HTMLElement
         : screen.getByTestId('record-page-close');
@@ -303,9 +310,9 @@ describe('the breadcrumb while the record is read (objectstack#35412)', () => {
 });
 
 /** The list host's pane, drawing the record embedded (`objectViewRecordOverlay.tsx`'s shape). */
-function PaneHost({ dataSource }: { dataSource: unknown }) {
+function PaneHost({ dataSource, objectName = LEAD }: { dataSource: unknown; objectName?: string }) {
   const [recordId, setRecordId] = React.useState('r-1');
-  const root = React.useMemo(() => ({ objectName: LEAD, recordId, siblings: ROWS }), [recordId]);
+  const root = React.useMemo(() => ({ objectName, recordId, siblings: ROWS }), [objectName, recordId]);
   const stack = useRecordDrawerStack({ root, onRootStep: setRecordId });
   return (
     <RecordStackDrawer
@@ -359,5 +366,141 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
     // The step keys stay: j names the next record once its header draws.
     fireEvent.keyDown(document.body, { key: 'j' });
     await waitFor(() => expect(paneTitle()).toBe('Record r-2'), { timeout: 5000 });
+  });
+});
+
+describe('the pane\'s bar while the record is read (objectstack#36235)', () => {
+  it('holds a placeholder in the record row until the read lands, never the record\'s id', async () => {
+    const read = deferredRead('r-1');
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <PaneHost dataSource={read.dataSource} />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(read.dataSource.findOne).toHaveBeenCalled(), { timeout: 5000 });
+    const bar = () => document.querySelector('[data-record-top-bar]') as HTMLElement | null;
+    expect(bar()).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
+    expect(bar()!.textContent).not.toMatch(/#r-1/);
+    read.answer();
+    await waitFor(() => expect(document.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'), { timeout: 5000 });
+    expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull();
+  });
+});
+
+describe('the pane\'s bar once the read settles without a record (objectstack#36235)', () => {
+  const failing = (answer: () => Promise<unknown>) => {
+    const dataSource = makeDataSource();
+    dataSource.findOne = vi.fn(answer) as never;
+    return dataSource;
+  };
+  const mountPane = (dataSource: unknown, objectName?: string) => render(
+    <MemoryRouter initialEntries={[`/apps/${APP}/${objectName ?? LEAD}?recordId=r-1`]}>
+      <MetadataCtx.Provider value={metadata}>
+        <PaneHost dataSource={dataSource} objectName={objectName} />
+      </MetadataCtx.Provider>
+    </MemoryRouter>,
+  );
+  const barText = () => (document.querySelector('[data-record-top-bar]') as HTMLElement | null)?.textContent ?? '';
+  const settledTitle = () => document.querySelector('[data-record-drawer-title]')?.textContent ?? null;
+
+  // `missing` (a null answer) and `accessEnded` (a null answer for a record
+  // the page already decided) are one branch of the read; a record a write
+  // deleted and the named page refused report through the same
+  // `settledWithoutRecord` → `recordCrumbName` path as the cases below.
+  const settledCases: ReadonlyArray<readonly [string, () => Promise<unknown>, string]> = [
+    ['not found', async () => null, 'record-not-found'],
+    ['forbidden', async () => { throw Object.assign(new Error('Forbidden'), { httpStatus: 403 }); }, 'record-access-denied'],
+    ['failed', async () => { throw Object.assign(new Error('Boom'), { httpStatus: 500 }); }, 'record-load-failed'],
+  ];
+  it.each(settledCases)('%s: the placeholder ends with the read and the row names the object, never the id', async (_name, answer, stateId) => {
+    mountPane(failing(answer));
+    await screen.findByTestId(stateId, undefined, { timeout: 5000 });
+    await waitFor(() => expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull(), { timeout: 5000 });
+    expect(settledTitle()).toBe('Lead');
+    expect(barText()).not.toMatch(/#r-1/);
+  });
+
+  it('an object the console does not know: the placeholder ends too, and no id is drawn', async () => {
+    mountPane(makeDataSource(), 'crm_ghost');
+    await screen.findByTestId('object-not-found', undefined, { timeout: 5000 });
+    await waitFor(() => expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull(), { timeout: 5000 });
+    expect(settledTitle()).toBeTruthy();
+    expect(barText()).not.toMatch(/#r-1/);
+  });
+});
+
+describe('the record row leads with the object\'s colour tile (objectstack#35985)', () => {
+  it('on the page: the tile in the object\'s colour, before the record\'s name', async () => {
+    mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
+    const record = pageBar()!.querySelector('[data-record-top-bar-record]') as HTMLElement;
+    const tiles = record.querySelectorAll('[data-object-icon-tile]');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].getAttribute('data-object-icon-tile')).toBe('orange');
+  });
+
+  it('in a pane: the pane\'s record row draws the same tile', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <PaneHost dataSource={makeDataSource()} />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(document.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'), { timeout: 5000 });
+    const tiles = document.querySelectorAll('[data-record-top-bar] [data-object-icon-tile]');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].getAttribute('data-object-icon-tile')).toBe('orange');
+  });
+});
+
+describe('the shell\'s top-right button group on the record page (objectstack#36111)', () => {
+  function mountUnderShell(on: boolean | undefined) {
+    const dataSource = makeDataSource();
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}/record/r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <ShellPageActionsScope on={on}>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={<RecordDetailView dataSource={dataSource as never} objects={OBJECTS} onEdit={() => {}} />}
+              />
+            </Routes>
+          </ShellPageActionsScope>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('turned on: the group sits at the right of the navigation row; ✕ stays its first control', async () => {
+    mountUnderShell(true);
+    await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
+    const nav = pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+    const frame = nav.querySelector('[data-record-top-bar-frame]') as HTMLElement;
+    const group = within(frame).getByTestId('shell-page-actions');
+    expect(within(frame).queryByTestId('record-page-close')).toBeNull();
+    expect(nav.querySelector('button')).toBe(screen.getByTestId('record-page-close'));
+    // Help is always in it; the record row carries none of it.
+    expect(within(group).getByTestId('shell-page-actions-help')).toBeTruthy();
+    const record = pageBar()!.querySelector('[data-record-top-bar-record]') as HTMLElement;
+    expect(within(record).queryByTestId('shell-page-actions')).toBeNull();
+  });
+
+  it('turned off (a shell that draws its own buttons elsewhere): no group, the right end empty, ✕ still first', async () => {
+    for (const on of [false] as const) {
+      mountUnderShell(on);
+      await screen.findByTestId('record-page-close', undefined, { timeout: 5000 });
+      const frame = pageBar()!.querySelector('[data-record-top-bar-frame]') as HTMLElement;
+      expect(within(frame).queryByTestId('shell-page-actions')).toBeNull();
+      expect(frame.children).toHaveLength(0);
+      const nav = pageBar()!.querySelector('[data-record-top-bar-nav]') as HTMLElement;
+      expect(nav.querySelector('button')).toBe(screen.getByTestId('record-page-close'));
+      cleanup();
+    }
   });
 });

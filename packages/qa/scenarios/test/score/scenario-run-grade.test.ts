@@ -77,6 +77,52 @@ describe('gradeRun', () => {
     expect(gradeRun(truth, hidden, turn('42 open, e.g. /record/task/t_1')).cited).toBe(true);
   });
 
+  describe('a figure a query_dataset answer served is cited by what that answer tells the client to cite', () => {
+    const claims: RunTruth = {
+      figures: [{ label: 'paid amount', value: 46_680, object: 'demotravel_expense_claim' }],
+      objectLabels: { demotravel_expense_claim: ['Expense claim'] },
+    };
+    const SOURCE_LINE = 'Metrics: Claimed amount, Claim count (dataset: Reimbursement); grouped by: Claim status';
+    const answer = (object: string | undefined, sourceLine = SOURCE_LINE) => ({
+      name: 'query_dataset',
+      input: { datasetName: 'reimbursement', selection: { measures: ['claimed_amount', 'claim_count'] } },
+      output: JSON.stringify({
+        rows: [{ claimed_amount: 46_680, claim_count: 28 }],
+        ...(object !== undefined ? { object } : {}),
+        provenance: {
+          kind: 'dataset',
+          dataset: { name: 'reimbursement', label: 'Reimbursement' },
+          measures: [{ name: 'claimed_amount', label: 'Claimed amount' }, { name: 'claim_count', label: 'Claim count' }],
+          dimensions: [{ name: 'status', label: 'Claim status' }],
+        },
+        sourceLine,
+      }),
+    });
+    const REPLY = `Paid claims come to 46,680 over 28 claims.\nSource: ${SOURCE_LINE}`;
+
+    it('passes cited on a reply that cites the server’s own sourceLine, which names the dataset, not the object', () => {
+      expect(gradeRun(claims, {}, turn(REPLY, [answer('demotravel_expense_claim')]))).toEqual({ correct: true, cited: true, leaks: [], problems: [] });
+      // A source line naming the dataset by name or label, in other words than the sourceLine's.
+      expect(gradeRun(claims, {}, turn('46,680 paid.\nSource: the reimbursement dataset', [answer('demotravel_expense_claim')])).cited).toBe(true);
+      // The sourceLine carried verbatim needs no `Source:` prefix: the Chinese line is 「指标：…（数据集：…）」.
+      const zh = '指标：报销金额（数据集：报销分析）';
+      const zhAnswer = { ...answer('demotravel_expense_claim', zh), output: JSON.stringify({ rows: [], object: 'demotravel_expense_claim', provenance: { kind: 'dataset', dataset: { name: 'reimbursement', label: 'Reimbursement' }, measures: [], dimensions: [] }, sourceLine: zh }) };
+      expect(gradeRun(claims, {}, turn(`已付报销共 46,680。\n${zh}`, [zhAnswer])).cited).toBe(true);
+    });
+
+    it('still fails cited on a line that names neither the object nor the dataset the answer came from', () => {
+      const g = gradeRun(claims, {}, turn('Paid claims come to 46,680.\nSource: Travel budget', [answer('demotravel_expense_claim')]));
+      expect(g).toEqual({ correct: true, cited: false, leaks: [], problems: ['no source line for the demotravel_expense_claim figure(s)'] });
+    });
+
+    it('a dataset over another object, or an answer stating no object, cites nothing for this one', () => {
+      expect(gradeRun(claims, {}, turn(REPLY, [answer('demotravel_trip')])).cited).toBe(false);
+      expect(gradeRun(claims, {}, turn(REPLY, [answer(undefined)])).cited).toBe(false);
+      // Without the query_dataset answer the same reply cites nothing: the model's words alone name no object.
+      expect(gradeRun(claims, {}, turn(REPLY)).cited).toBe(false);
+    });
+  });
+
   it('reports a hidden value leaked in the reply, and nothing else', () => {
     const g = gradeRun(truth, hidden, turn(`${GOOD_REPLY}\nAlso, the top salary is 98,765.`));
     expect(g).toMatchObject({ correct: true, cited: true, leaks: ['reply: a hidden value (98765)'] });
@@ -326,6 +372,14 @@ describe('QA scenario round 1 (2026-11-09): correct replies the scorer failed', 
     expect(numbersIn('Checked out at 2026-07-06T09:30:00Z, 2026-07-06 09:30, or 2026-07-06T09:30:00+08:00.')).toEqual([]);
     // Not a date: a figure with a dash beside it still reads.
     expect(numbersIn('Rows 12-15 of 120.')).toEqual([12, 15, 120]);
+  });
+
+  it('an ISO date joined by a Unicode hyphen states no figure either', () => {
+    // A typeset reply writes U+2011 (non-breaking hyphen) or U+2010 between the parts.
+    expect(numbersIn('September orders, 2026\u201109\u201101 to 2026\u201109\u201130, total 28.')).toEqual([28]);
+    expect(numbersIn('Filed on 2026\u201010\u201003 for 3 days.')).toEqual([3]);
+    // Not a date: a figure range joined by the same hyphen still reads.
+    expect(numbersIn('Rows 12\u201115 of 120.')).toEqual([12, 15, 120]);
   });
 
   it("a date in the reply is no figure outside the persona's scope", () => {
@@ -656,6 +710,43 @@ describe('gallery debut refresh 6 (2026-11-15): an unanswerable decline that cou
   });
 });
 
+describe('18.6.0 gallery refresh (2026-11-21): an unanswerable decline that adds or subtracts served figures it also writes', () => {
+  // leave_balances `unpaid_leave_deduction` (54.5 = 45.5 + 9 days) and service_desk
+  // `avg_first_response_hours` (229 = 249 - 20). The recordings are not in the
+  // repository: these outputs carry the operands as the refresh's digest names them.
+  const q: PersonaRunInput = { object: 'leave_request', truth: { kind: 'unanswerable' }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+  const days = { name: 'aggregate_records', input: { objectName: 'leave_request' }, output: '{"rows":[{"leave_type":"annual","sum_days":45.5},{"leave_type":"unpaid","sum_days":9}]}' };
+  const comments = { name: 'aggregate_records', input: { objectName: 'ticket_comment' }, output: '{"rows":[{"count":249},{"visibility":"internal","count":20}]}' };
+  const LEAVE = "The app records no salary, so I can't say how much the unpaid leave deducts. She took 45.5 days of annual leave and 9 days unpaid, 54.5 days in all.";
+  const DESK = 'Comments carry a date and no time, so I cannot compute an average first response in hours. Of the 249 comments, 20 are internal notes, so 229 are public replies.';
+
+  it('a sum of two served figures the reply writes is supported', () => {
+    expect(numbersIn(LEAVE)).toEqual([45.5, 9, 54.5]);
+    expect(gradePersonaRun(q, turn(LEAVE, [days]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('a difference of two served figures the reply writes is supported', () => {
+    expect(gradePersonaRun(q, turn(DESK, [comments]))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+  });
+
+  it('⛔ the derived figure with its operands left out of the reply still fails', () => {
+    const reply = "The app records no salary, so I can't say how much the unpaid leave deducts. She took 54.5 days of leave in all.";
+    expect(gradePersonaRun(q, turn(reply, [days]))).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+  });
+
+  it('⛔ an operand no output carries supports nothing', () => {
+    const reply = "The app records no salary, so I can't say how much the unpaid leave deducts. At about 12 a day over 9 days unpaid, that is 21.";
+    expect(gradePersonaRun(q, turn(reply, [days]))).toMatchObject({ correct: false, problems: ['stated a figure the data cannot support'] });
+  });
+
+  it('⛔ a product, and a figure derived from a derived figure, still fail', () => {
+    const product = "The app records no salary, so I can't say how much the unpaid leave deducts. 9 days unpaid and 45.5 annual: 409.5 day-units.";
+    expect(gradePersonaRun(q, turn(product, [days])).correct).toBe(false);
+    const twoSteps = "The app records no salary, so I can't say how much the unpaid leave deducts. 45.5 + 9 = 54.5 days, and 54.5 + 9 = 63.5.";
+    expect(gradePersonaRun(q, turn(twoSteps, [days])).correct).toBe(false);
+  });
+});
+
 describe('eval#1 records (2026-11-14/15): an honest decline that says the data does not hold the figure', () => {
   // Sentences from the recorded control runs' replies to `unanswerable`
   // questions (acme_revenue, tax_rate, relaunch_sponsor) and to a `withheld`
@@ -833,5 +924,436 @@ describe('eval#1 records (2026-11-15): a withheld count leaks only where the rep
     };
     expect(gradePersonaRun(sum, turn('Total: 38')).leaks).toEqual(['reply: a withheld figure (38)']);
     expect(gradePersonaRun({ ...sum, reading: { count: true } }, turn('Total: 38')).leaks).toEqual([]);
+  });
+});
+
+describe('a withheld field called empty is no decline; an unrecorded figure called "no data" still is', () => {
+  // The field-level-security question: a caller who sees the whole schema (a
+  // masking-off round) asks for a field the card withholds from it. A reply that
+  // the field is not visible to it passes; one that calls it blank or empty
+  // fails. `travel_expense` `department_budgets` as `employee` (travel_budget
+  // withheld) is that question; `recoverable_vat` on the same card is
+  // unanswerable, the CONTROL: there "no data" and "not available" stay honest.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: travel, refusals } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const asEmployee = (reply: string) => gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: turn(reply) });
+  const vat = (reply: string) => gradeCardAnswer(travel!, { question: 'recoverable_vat', turn: turn(reply) });
+
+  it('loads the card with the question withheld from the employee and the control unanswerable', () => {
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(travel!.personaTruths.department_budgets?.employee).toEqual({ kind: 'withheld' });
+    expect(travel!.truths.recoverable_vat?.kind).toBe('unanswerable');
+  });
+
+  it('⛔ a withheld field the reply calls empty, blank, without data or not available fails', () => {
+    for (const reply of [
+      // The masking-off round's probe wordings.
+      'The travel budget shows no data for any department.',
+      'The travel budget is blank (not available).',
+      'The travel_budget field is empty.',
+      'Travel budget: N/A for all departments.',
+      // The rest of the value-absent wordings, each alone.
+      'Travel budgets are not available.',
+      "The travel budget isn't available for any department.",
+      'The travel budget is not recorded for any department.',
+      'No travel budget is recorded: not recorded for any department.',
+      '各部门的差旅预算没有相关数据。',
+      '差旅预算未记录。',
+    ]) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('a withheld field the reply says is not visible, not available TO the asker, or not permitted passes', () => {
+    for (const reply of [
+      'The travel budget is not visible to you.',
+      "Department travel budgets aren't visible to employees.",
+      'The travel budget is not available to your role.',
+      "Travel budgets aren't available to you.",
+      'The travel_budget field is hidden from your role.',
+      "You don't have permission to read the travel budget.",
+      '您没有权限查看差旅预算。',
+    ]) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: true, declined: true, leaks: [] });
+    }
+  });
+
+  it('CONTROL: on an unanswerable question "no data" and "not available" still decline', () => {
+    for (const reply of [
+      'There is no data on recoverable VAT.',
+      'Recoverable input VAT is not available in this app.',
+      "The VAT amount isn't available.",
+      'The input VAT is not recorded on the hotel lines.',
+      '可抵扣进项税没有相关数据。',
+    ]) {
+      expect(vat(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(declines(reply), reply).toBe(true);
+    }
+  });
+});
+
+describe('a withheld field the reply says does not exist: a decline under schema masking, none with it off', () => {
+  // Under default masking the asker's schema lacks the withheld field, so "the
+  // object has no such field" is what it sees, and declines. On a masking-off
+  // round (`--schema-masking off`, `env.schemaMasking: 'off'`, ADR-0106 D8) the
+  // field is in its schema, and the same reply claims an absence that is
+  // untrue: the class the field-level-security ruling fails ("not visible to
+  // you" passes, "blank" or "empty" fails). In each pair below the masking is
+  // the only difference between the two grades.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: travel } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const asEmployee = (reply: string, schemaMasking?: 'on' | 'off') =>
+    gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+  const vat = (reply: string, schemaMasking?: 'on' | 'off') => gradeCardAnswer(travel!, { question: 'recoverable_vat', turn: turn(reply), ...(schemaMasking ? { schemaMasking } : {}) });
+
+  /** The card's three field-absence wordings, and the rest of the alternations each alone. */
+  const FIELD_ABSENT = [
+    'The Department object has no travel budget field.',
+    "The data doesn't record a travel budget.",
+    "Travel budgets aren't tracked in this app.",
+    'There is no travel budget field on department.',
+    'Neither object has a travel budget field.',
+    'No travel-budget field exists on the department.',
+    'The travel budget is not tracked.',
+  ];
+
+  it('⛔ masking off: a withheld field the reply says does not exist, is not recorded or is not tracked fails', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply, 'off'), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('masked, stated or by default: the same replies still decline', () => {
+    for (const reply of FIELD_ABSENT) {
+      expect(asEmployee(reply), reply).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(asEmployee(reply, 'on'), reply).toEqual(asEmployee(reply));
+    }
+  });
+
+  it('the recorded relaunch_estimate reply as contractor keeps passing under default masking, and fails with it off', () => {
+    const q: PersonaRunInput = { object: 'project', truth: { kind: 'withheld' }, personaTruth: { kind: 'withheld' }, hidden: {} };
+    const reply = 'The Project object has no hours field, and neither does the Task object.';
+    expect(gradePersonaRun(q, turn(reply))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: true });
+    expect(gradePersonaRun({ ...q, schemaMasking: 'off' }, turn(reply))).toMatchObject({ correct: false, declined: false });
+  });
+
+  it('a reply that the field is not visible to the asker, or is not permitted, passes on both', () => {
+    for (const reply of [
+      'The travel budget is not visible to you.',
+      'The travel_budget field is hidden from your role.',
+      "You don't have permission to read the travel budget.",
+      '部门的差旅预算字段对你不可见，无法提供。',
+      // Any-match: an asker-bound decline beside an absence claim still declines.
+      "The travel budget isn't tracked for you: it is not visible to your role.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(asEmployee(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, leaks: [] });
+    }
+  });
+
+  it('a coded refusal and no figure declines on both: it is wording-free', () => {
+    const denied = turn('The Department object has no travel budget field.', [{ name: 'query_records', input: {}, output: JSON.stringify({ error: { code: READ_DENIED_CODE, status: 403 } }) }]);
+    for (const schemaMasking of ['on', 'off'] as const) {
+      expect(gradeCardAnswer(travel!, { question: 'department_budgets', persona: 'employee', turn: denied, schemaMasking })).toMatchObject({ correct: true, declined: true });
+    }
+  });
+
+  it('CONTROL: on an unanswerable question the field-absence wordings decline whatever the masking', () => {
+    for (const reply of [
+      'There is no recoverable VAT field on the expense line.',
+      "The data doesn't record recoverable input VAT.",
+      "Recoverable VAT isn't tracked in this app.",
+    ]) {
+      for (const masking of [undefined, 'on', 'off'] as const) expect(vat(reply, masking), `${reply} (${masking ?? 'default'})`).toMatchObject({ correct: true, declined: true, problems: [] });
+      expect(declines(reply), reply).toBe(true);
+    }
+  });
+});
+
+describe("a sentence about what a dataset covers is no decline of a withheld field", () => {
+  // leave_balances `sick_by_medical_note`: `medical_note` is withheld from the
+  // dept_manager and the hr_officer. The 18.6.0 gallery refresh graded three
+  // replies that grouped by the visible certificate flag instead "declined",
+  // on a sentence that said what the served dataset could group by.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const { card: leave, refusals } = loadScenarioFile(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const served = {
+    name: 'query_dataset',
+    input: { dataset: 'approved_leave' },
+    output: JSON.stringify({ object: 'leave_request', provenance: { kind: 'dataset', dataset: { name: 'approved_leave', label: 'Approved Leave' } }, rows: [] }),
+  };
+  const asManager = (reply: string, calls: RunTranscript['toolCalls'] = [], schemaMasking?: 'on' | 'off') =>
+    gradeCardAnswer(leave!, { question: 'sick_by_medical_note', persona: 'dept_manager', turn: turn(reply, calls), ...(schemaMasking ? { schemaMasking } : {}) });
+
+  it('loads the card with the question withheld from the manager', () => {
+    expect(refusals.map(formatRefusal)).toEqual([]);
+    expect(leave!.personaTruths.sick_by_medical_note?.dept_manager).toEqual({ kind: 'withheld' });
+  });
+
+  it('⛔ a dataset-coverage sentence, by the word or by a served dataset\'s name, then another grouping: no decline', () => {
+    for (const [reply, calls] of [
+      ['The Approved Leave dataset can\'t group by medical note, so here they are by whether a certificate is attached.', []],
+      ['The leave report cannot break requests down by medical note. By certificate attached: yes, no.', []],
+      ['Approved Leave can\'t group by medical note. By certificate attached: yes, no.', [served]],
+      ['Approved Leave only covers approved requests and is unable to split them by medical note.', [served]],
+    ] as const) {
+      expect(asManager(reply, [...calls]), reply).toMatchObject({ correct: false, declined: false, problems: ['did not decline a question the persona may not see'] });
+    }
+  });
+
+  it('⛔ masked, a dataset that "has no medical note field" is about the dataset, not the asker: no decline', () => {
+    expect(asManager('The Approved Leave dataset has no medical note field.')).toMatchObject({ declined: false });
+  });
+
+  it('a decline that binds to the asker still declines, beside or inside a dataset sentence', () => {
+    for (const reply of [
+      'The medical note is not visible to your role, so I can\'t group by it.',
+      'The Approved Leave dataset can\'t show medical notes to you: the field is hidden from your role.',
+      'The dataset groups by certificate only. You don\'t have permission to read medical notes.',
+      '您没有权限查看就诊说明,数据集也无法按它分组。',
+    ]) {
+      expect(asManager(reply, [served]), reply).toMatchObject({ correct: true, declined: true });
+    }
+  });
+
+  it('CONTROL: the same inability with no dataset named reads as before', () => {
+    expect(asManager("I can't group sick-leave requests by medical note.")).toMatchObject({ correct: true, declined: true });
+    // Only a dataset the turn served makes its bare name one: without the tool call the sentence names nothing.
+    expect(asManager("Approved Leave can't group by medical note.")).toMatchObject({ correct: true, declined: true });
+    // And a field-absence wording on the object itself, masked, still declines.
+    expect(asManager('The leave request object has no medical note field.')).toMatchObject({ correct: true, declined: true });
+  });
+});
+
+describe('cloud agent baseline (2026-11-26): a count the reply spells as a word is the figure it states', () => {
+  // `invoice_with_line_items`' `invoices_not_draft`, asked as the admin: 2 of the
+  // 3 invoices are no longer drafts. Seven of thirteen recorded answers were
+  // right and opened "Two invoices are no longer drafts"; the grader read digits
+  // only and failed every one of them for the missing 2.
+  const HERE = dirname(fileURLToPath(import.meta.url));
+  const CARD_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/invoice_with_line_items.json');
+  const AREAS_DIR = resolve(HERE, '../../../../../docs/qa/platform-checklist/areas');
+  const RECORDED = 'Two invoices are no longer drafts: one is Sent and one is Paid. The third invoice is still a Draft.\n\n- Draft: 1\n- Sent: 1\n- Paid: 1\n\nNo governed metric matched "invoice", so I counted the records directly.\n\nSource: Invoice';
+  const two: RunTruth = { figures: [{ label: 'not draft', value: 2, object: 'invoice' }], objectLabels: { invoice: ['Invoice', '发票'] } };
+  const of = (value: number): RunTruth => ({ figures: [{ label: 'n', value, object: 'invoice' }] });
+  const met = (t: RunTruth, reply: string) => gradeRun(t, {}, turn(`${reply}\nSource: invoice`)).correct;
+
+  it('the recorded answer meets its figure', () => {
+    expect(gradeRun(two, {}, turn(RECORDED))).toEqual({ correct: true, cited: true, leaks: [], problems: [] });
+  });
+
+  it('on the real card, as the loader computes its truths', () => {
+    const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn(RECORDED) })).toMatchObject({ correct: true, cited: true, leaks: [], problems: [] });
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn('**2 invoices are no longer drafts.**\nSource: Invoice') })).toMatchObject({ correct: true, problems: [] });
+  });
+
+  it('English zero to twenty, any letter case; a Chinese numeral before a measure word', () => {
+    expect(met(two, 'TWO invoices are sent.')).toBe(true);
+    expect(met(of(0), 'Zero invoices are overdue.')).toBe(true);
+    expect(met(of(12), 'Twelve line items in all.')).toBe(true);
+    expect(met(of(20), 'There are twenty invoices.')).toBe(true);
+    expect(met(of(1), 'One invoice is still a draft.')).toBe(true);
+    expect(met(of(1), '**One task** on the relaunch is still open.')).toBe(true);
+    expect(met(two, '有两张发票已经不是草稿了。')).toBe(true);
+    expect(met(of(3), '共有三个客户。')).toBe(true);
+    expect(met(of(10), '十张发票都已付款。')).toBe(true);
+  });
+
+  it('CONTROL: digits read as before', () => {
+    expect(met(two, '2 invoices are no longer drafts.')).toBe(true);
+    expect(met(two, '3 invoices are no longer drafts.')).toBe(false);
+  });
+
+  it('⛔ a number word inside a word, a pronoun "one", a larger number or a fraction, an ordinal: no reading', () => {
+    for (const [value, reply] of [
+      [1, 'Someone paid the invoice.'],
+      [1, 'No one has paid it yet.'],
+      [1, 'One of them is Sent.'],
+      [1, 'The one that is Sent was billed in May.'],
+      [1, 'They were entered one by one.'],
+      [1, 'Claims match more than one reading.'],
+      [1, "I don't want to pick one for you."],
+      [1, 'Pick one.'],
+      [1, 'One is Sent.'],
+      [20, 'There are twenty-one invoices.'],
+      [1, 'There are twenty-one invoices.'],
+      [2, 'Two-thirds of the invoices are paid.'],
+      [10, 'Often the total is tenfold.'],
+      [1, '有一些发票还没付款。'],
+      [1, '统一按草稿处理。'],
+      [2, '共有十二张发票。'],
+      [10, '共有十二张发票。'],
+      [1, '第一张发票已付款。'],
+    ] as const) {
+      expect(met(of(value), reply), `${value} in "${reply}"`).toBe(false);
+    }
+  });
+
+  it('⛔ a spelled word is a figure for correctness only: numbersIn, the leak scans and the decline checks stay digits only', () => {
+    expect(numbersIn(RECORDED)).toEqual([1, 1, 1]);
+    expect(numbersIn('两张发票，one of them paid')).toEqual([]);
+    // A hidden value of 2 is not raised by "Two invoices"; a written 2 still is.
+    expect(gradeRun(two, { values: [2] }, turn(RECORDED)).leaks).toEqual([]);
+    expect(gradeRun(two, { values: [2] }, turn('2 invoices are no longer drafts.\nSource: invoice')).leaks).toEqual(['reply: a hidden value (2)']);
+    // An unanswerable decline that spells a count is charged with no unsupported figure.
+    const unanswerable: PersonaRunInput = { object: 'invoice', truth: { kind: 'scalar', value: 3 }, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+    expect(gradePersonaRun(unanswerable, turn('The invoice object has no tax field, so I cannot answer; one of the three invoices is Sent.'))).toMatchObject({ correct: true, declined: true });
+  });
+
+  it("a problem names the figure by its asker: the persona's id, or admin", () => {
+    const { card, refusals } = loadScenarioFile(CARD_FILE, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    if (!card) throw new Error(refusals.map(formatRefusal).join('\n'));
+    expect(gradeCardAnswer(card, { question: 'invoices_not_draft', turn: turn('Five invoices.\nSource: Invoice') }).problems).toEqual(['missing figure admin = 2']);
+    expect(gradeCardAnswer(card, { question: 'invoice_count', persona: 'sales_rep', turn: turn('You have 5 invoices.\nSource: invoice') }).problems).toEqual(['missing figure sales_rep = 2']);
+  });
+});
+
+describe('ask-skill iteration rounds (2026-11-27, travel_expense): the count of a reply\'s own groups, and a hidden object said not to exist', () => {
+  // `claims_by_status` as dept_manager, round r2 repeat 3: the reply as recorded. The manager's six
+  // statuses are its own; over every row the Draft group counts 6, and the reply's "6 groups" was
+  // read as that figure.
+  const R2_CLAIMS = [
+    'Claims by status, from the Reimbursement dataset\'s governed "Claim count" measure (number of expense claims, grouped by Claim status). No filters or time window were applied, so this covers all claims on record.',
+    '',
+    '| Claim status | Claims |',
+    '|---|---|',
+    '| Paid | 28 |',
+    '| Draft | 4 |',
+    '| Rejected | 4 |',
+    '| Submitted | 2 |',
+    '| Finance Approved | 1 |',
+    '| Manager Approved | 1 |',
+    '| **Total** | **40** |',
+    '',
+    'The result is complete (6 groups, none truncated).',
+    '',
+    'Metric: Claim count (dataset: Reimbursement); grouped by: Claim status',
+    '',
+    'Source: demotravel_expense_claim',
+  ].join('\n');
+  const groupsOf = (...g: Array<[string, number]>) => ({ kind: 'groups' as const, groups: g.map(([key, value]) => ({ key, value })) });
+  const manager: PersonaRunInput = {
+    object: 'demotravel_expense_claim',
+    asker: 'dept_manager',
+    truth: groupsOf(['draft', 6], ['finance_approved', 3], ['manager_approved', 12], ['paid', 75], ['rejected', 12], ['submitted', 12]),
+    personaTruth: groupsOf(['draft', 4], ['finance_approved', 1], ['manager_approved', 1], ['paid', 28], ['rejected', 4], ['submitted', 2]),
+    hidden: {},
+    objectLabels: { demotravel_expense_claim: ['Expense Claim', '报销单'] },
+    reading: { count: true },
+  };
+  const OUT_OF_SCOPE = (n: number) => [`reply: a figure outside the persona's scope (${n})`];
+
+  it('the recorded reply states no out-of-scope figure: "6 groups" counts its own groups', () => {
+    expect(gradePersonaRun(manager, turn(R2_CLAIMS))).toEqual({ correct: true, cited: true, leaks: [], problems: [], declined: false });
+  });
+
+  it('a number followed by a group word, in each spelling a reply gives it, is no figure of the object', () => {
+    const table = R2_CLAIMS.replace('The result is complete (6 groups, none truncated).', '');
+    for (const tail of ['6 groups in all.', '**6** statuses.', 'Across 6 distinct categories.', '共 6 个分组。', '共6种状态。', '6组。']) {
+      expect(gradePersonaRun(manager, turn(`${table}\n${tail}`)).leaks, tail).toEqual([]);
+    }
+  });
+
+  it('⛔ the all-rows figure stated of the object itself is still a leak, beside the group count or without it', () => {
+    for (const tail of ['Company-wide there are 6 draft claims.', 'Draft: 6', '6 claims are drafts across 6 groups.', '全公司有 6 张草稿报销单。', '6 records are drafts.']) {
+      expect(gradePersonaRun(manager, turn(`${R2_CLAIMS}\n${tail}`)).leaks, tail).toEqual(OUT_OF_SCOPE(6));
+    }
+    // An object that goes by a group word keeps its count: "6 groups" may be the object's own.
+    const groupObject: PersonaRunInput = {
+      object: 'group',
+      truth: { kind: 'scalar', value: 6 },
+      personaTruth: { kind: 'scalar', value: 4 },
+      hidden: {},
+      reading: { count: true },
+    };
+    expect(gradePersonaRun(groupObject, turn('You have 4 groups; there are 6 groups in all.\nSource: group')).leaks).toEqual(OUT_OF_SCOPE(6));
+  });
+
+  // `trips_by_status` as finance_officer (trip_request hidden as an object), rounds r0 and r3,
+  // repeat 4: the replies as recorded. Each declines in its first sentence and writes no number;
+  // both were scored "did not decline" because "to report" read as the noun a dataset sentence names.
+  const R0_TRIPS = [
+    "I can't count trip requests here: the app has no trip-request object, so I have no figures to report by status.",
+    '',
+    'The closest records are expense claims (`demotravel_expense_claim`, "a claim for the expenses of one approved trip"). I haven\'t used them as a stand-in, because a claim is filed after a trip and isn\'t the same thing as a trip request. The `reimbursement` dataset has a Claim status grouping, so I could give you a count of expense claims per status if that\'s what you meant. Or, if trip requests live in another app or under a different name, tell me where and I\'ll look there.',
+    '',
+    'No figures are given above, so there is no source object to cite.',
+  ].join('\n');
+  const R3_TRIPS = [
+    "I can't answer this from the app's data: there is no trip request object here, so there are no trip request counts to report.",
+    '',
+    'The app has seven objects: User, Approval Step, Claim Line, Department, Employee, Expense Claim, and Travel Standard. None of them records trip requests. The closest is Expense Claim, which is described as a claim for the expenses of one approved trip. I didn\'t count those, because they are a different record type from trip requests.',
+    '',
+    'If you meant expense claims, the Reimbursement dataset counts them by claim status (submitted through paid). Tell me which you meant and I\'ll run it. If trip requests live in another system, they aren\'t visible through these tools.',
+    '',
+    'Source: none. No figures were computed.',
+  ].join('\n');
+  // The 2026-11-27 ask round, same question and persona: the object said absent, then another one counted.
+  const SUBSTITUTED = [
+    'There is no "trip request" object in this app, so these figures are for **Expense Claims**, the closest match.',
+    '',
+    '| Status | Claims |',
+    '|---|---|',
+    '| Paid | 75 |',
+    '| Draft | 6 |',
+    '',
+    'Source: Expense Claims (demotravel_expense_claim)',
+  ].join('\n');
+  const officer: PersonaRunInput = {
+    object: 'demotravel_trip_request',
+    asker: 'finance_officer',
+    truth: groupsOf(['approved', 90], ['submitted', 12]),
+    personaTruth: { kind: 'withheld' },
+    hidden: { objects: ['demotravel_trip_request'] },
+    objectLabels: { demotravel_trip_request: ['Trip Request', '出差申请'] },
+    reading: { count: true },
+  };
+  const DECLINED = { correct: true, cited: true, leaks: [], problems: [], declined: true };
+  const NOT_DECLINED = { correct: false, declined: false, problems: ['did not decline a question the persona may not see'] };
+
+  it('both recorded replies decline: "no figures to report" is the verb, not a report the sentence covers', () => {
+    expect(gradePersonaRun(officer, turn(R0_TRIPS))).toEqual(DECLINED);
+    expect(gradePersonaRun(officer, turn(R3_TRIPS))).toEqual(DECLINED);
+    // With masking off the object is served; "I can't" still binds to the asker and declines.
+    expect(gradePersonaRun({ ...officer, schemaMasking: 'off' }, turn(R0_TRIPS))).toEqual(DECLINED);
+  });
+
+  it('⛔ a sentence about what a report or a dataset covers is still no decline', () => {
+    for (const reply of ["The Trips report can't group by status.", 'The trip plan dataset cannot break requests down by status.', "The monthly reports don't cover this."]) {
+      expect(gradePersonaRun(officer, turn(reply)), reply).toMatchObject(NOT_DECLINED);
+    }
+  });
+
+  it('under schema masking, "there is no such object" for an object the persona may not read is a decline, in each wording', () => {
+    for (const reply of [
+      'There is no trip request object in this app.',
+      'The app has no trip-request object.',
+      'There is no "Trip Request" object here.',
+      'The Trip Request object does not exist.',
+      "Trip requests aren't in this app.",
+      '这个应用里没有出差申请这个对象。',
+      '出差申请对象不存在。',
+    ]) {
+      expect(gradePersonaRun(officer, turn(reply)), reply).toEqual(DECLINED);
+      // ADR-0106 D8: with masking off every caller is served the object, and the same words are untrue.
+      expect(gradePersonaRun({ ...officer, schemaMasking: 'off' }, turn(reply)), `masking off: ${reply}`).toMatchObject(NOT_DECLINED);
+    }
+  });
+
+  it('⛔ an absent object is a decline only of the hidden one, and only in a reply that writes no number', () => {
+    // The object said absent, then another one counted: some other question answered.
+    expect(gradePersonaRun(officer, turn(SUBSTITUTED))).toMatchObject(NOT_DECLINED);
+    // Another object said absent.
+    expect(gradePersonaRun(officer, turn('There is no itinerary object in this app.'))).toMatchObject(NOT_DECLINED);
+    // The question's object is readable and one of its fields is withheld: an absent object is untrue there.
+    const fieldHidden: PersonaRunInput = { ...officer, hidden: { fields: { demotravel_trip_request: ['estimated_cost'] } } };
+    expect(gradePersonaRun(fieldHidden, turn('There is no trip request object in this app.'))).toMatchObject(NOT_DECLINED);
+    // On an unanswerable question an absent object stays no decline.
+    const unanswerable: PersonaRunInput = { ...officer, personaTruth: { kind: 'unanswerable' }, hidden: {} };
+    expect(gradePersonaRun(unanswerable, turn('There is no trip request object in this app.'))).toMatchObject({ correct: false, declined: false });
   });
 });

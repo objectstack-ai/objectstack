@@ -15,6 +15,7 @@ import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNa
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
+import { isRecordPageBuiltinTab, relatedListEntryName } from './data/related-list-entry';
 import { TranslationBundleSchema, TranslationConfigSchema } from './system/translation.zod';
 import { StackServerConfigSchema } from './system/stack-server.zod';
 import { StackEmailConfigSchema } from './system/email-config.zod';
@@ -39,7 +40,11 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 
 // Data Protocol
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
-import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  controlledByParentMasterRefusal,
+  type ControlledByParentMasterIssueParams,
+} from './data/controlled-by-parent-master';
 import { recordMasterDetailRequiredOmissions } from './data/master-detail-required-omission';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
@@ -58,7 +63,7 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { ViewSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
+import { ViewSchema, FormSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
 import { deriveViewContainerObject } from './ui/view-container-object';
 import { defaultRecordPageObject } from './ui/default-record-page';
 import { PageSchema } from './ui/page.zod';
@@ -95,6 +100,8 @@ import { retiredKey } from './shared/retired-key';
 // AI Protocol
 import { AgentSchema } from './ai/agent.zod';
 import { SkillSchema } from './ai/skill.zod';
+import { AiContextSchema } from './ai/ai-context.zod';
+import { KnowledgeSourceSchema } from './ai/knowledge-source.zod';
 import { ToolSchema } from './ai/tool.zod';
 
 // Data Protocol (additional)
@@ -382,6 +389,10 @@ function applyCollectionItemOwnerStampGate(
  * that no body declares is registered under `manifest.id` and its stamp is
  * judged at both doors, like every other residual item.
  * A package BODY's items of these collections are still judged, at both doors.
+ * This is the owner-stamp mirror only: the composition still judges the
+ * residual's `jobs` — two of one name as one package's pair, and one sharing
+ * an enabled name with a body's job — ({@link composedJobDeclarations}), since
+ * the boot's job binder schedules neither of two enabled jobs of one name.
  *
  * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
  * `@objectstack/metadata` test holds the two equal, collection by collection.
@@ -513,7 +524,8 @@ interface VisibleObjectExtension {
  * target's declaration or in the merged set. That is the line that introduced
  * the second master, or that demoted the one. The message is the per-object
  * refinement's own ({@link controlledByParentMasterRefusal}), naming the
- * target and the merged fields — one rule, one wording.
+ * target and the merged fields — one rule, one wording — and so are its
+ * `params` (`{ code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`).
  *
  * On the SCHEMA, for the reason {@link applyApiEndpointGates} gives:
  * `defineStack`, `os validate`, `os build`, the lint scorer and an artifact
@@ -611,6 +623,10 @@ function applyControlledByParentExtensionGate(
 
     const refusal = controlledByParentMasterRefusal(target, base.sharingModel, merged);
     if (refusal === undefined) continue;
+    const params: ControlledByParentMasterIssueParams = {
+      code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+      shape: refusal.shape,
+    };
     const isMaster = (field: unknown): boolean => asRecord(field)?.type === 'master_detail';
     const blamed = new Set<VisibleObjectExtension>();
     for (const [key, extension] of writers) {
@@ -618,7 +634,7 @@ function applyControlledByParentExtensionGate(
     }
     for (const extension of ordered) {
       if (!blamed.has(extension)) continue;
-      ctx.addIssue({ code: 'custom', path: [...extension.path, 'fields'], message: refusal.message });
+      ctx.addIssue({ code: 'custom', path: [...extension.path, 'fields'], message: refusal.message, params });
     }
   }
 }
@@ -894,6 +910,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     + '(standalone ViewItems, flattened overlays) — written by package export and artifact '
     + 'factories, refused in authored stack sources.',
   ),
+  forms: z.array(FormSchema).optional().describe('Data-entry forms, one object each (ADR-0159): `defineForm` items named `OBJECT.KEY`'),
   pages: z.array(PageSchema).optional().describe('Custom Pages'),
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
@@ -1085,7 +1102,11 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
     enableProjectScoping: z.boolean().optional(),
     /** Environment id resolution strategy when scoping is on. */
     projectResolution: z.enum(['required', 'optional', 'auto']).optional(),
-    /** Per-environment membership 403 gate (dispatcher). Undefined → default. */
+    /**
+     * The environment-membership 403 gate on every data door — the runtime
+     * dispatcher and the REST server alike. `false` turns it off at every door
+     * (ADR-0135 D9). Undefined → on exactly when `enableProjectScoping` is.
+     */
     enforceProjectMembership: z.boolean().optional(),
   }).optional().describe('Server-facing API config consumed by objectstack serve/dev'),
 
@@ -1201,6 +1222,17 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   agents: z.array(AgentSchema).optional().describe('AI Agents — platform-internal (ADR-0063 §2): the kernel ships exactly two (ask/build); third parties extend via skills, not agents'),
   tools: z.array(ToolSchema).optional().describe('AI Tool metadata records — optional refinement layer, never required: the default path is skills referencing platform tools or materialised action_<name> tools (ADR-0109)'),
   skills: z.array(SkillSchema).optional().describe('AI Skills (reusable capability bundles — the third-party AI extension primitive, ADR-0063)'),
+  /**
+   * [ADR-0160 D1] Context packs: which of one record's fields, related lists
+   * and body text are handed to a model, read as the caller by
+   * `get_record_context` (`@objectstack/service-record-context`). The tool
+   * exists on a host that mounts that service, by either door: the CLI mounts
+   * it where `requires` includes `record-context`, and a host that composes
+   * its own kernel lists `RecordContextServicePlugin` in `plugins`. A host
+   * that does neither serves no such tool, whatever packs it holds.
+   */
+  aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
+  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it, with the deployment\'s store, where the stack holds a source or `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
@@ -1649,6 +1681,7 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // manifests are not `composeStacks` inputs today; if two ever were, their
   // non-container view artifacts would concatenate like every other collection.
   viewItems: 'concat',
+  forms: 'concat',
   pages: 'concat',
   dashboards: 'concat',
   reports: 'concat',
@@ -1672,6 +1705,8 @@ export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   agents: 'concat',
   tools: 'concat',
   skills: 'concat',
+  aiContexts: 'concat',
+  knowledgeSources: 'concat',
   hooks: 'concat',
   mappings: 'concat',
   analyticsCubes: 'concat',
@@ -3284,6 +3319,12 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * - `docs`: `os validate` and `os build` refused the pair (`docs/duplicate-name`)
  *   while a source boot kept the last.
  *
+ * `jobs` left the first bullet since: the boot's job binder now refuses a name
+ * two enabled jobs share and schedules none of them (re-measured on main
+ * `c30ce97cd7` through `os serve`, two `'preserve'` inputs with no manifest:
+ * `NOT SCHEDULED` at `error`, neither job armed; a stack without `packages[]`
+ * takes the same binder judgement), so its row says that.
+ *
  * The identity is the string the registrars key an entry by: `name` for 26
  * collections, the `(name, locale)` pair for `emailTemplates` (an i18n bundle
  * is one name across several locales), the extended object (`extend`) for
@@ -3307,7 +3348,10 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * collide here too. Cross-package reuse of a name is untouched (ADR-0048 §3.4):
  * a multi-package project (`composeStacks(…, { manifest: 'preserve' })`)
  * carries each package's collections in its own `packages[i]` body, and each
- * body is judged on its own, never against another. The same-package case is
+ * body is judged on its own, never against another (an enabled job name is the
+ * one exception, judged across a composition's packages by
+ * {@link collectComposedJobNameErrors}: the boot schedules a job by its bare
+ * name, whichever package declares it). The same-package case is
  * the one §3.4 leaves to authoring-time hygiene (`os lint`'s duplicate-name
  * advisory); it is refused here at the contract, as the action-key check
  * already does for actions.
@@ -3342,7 +3386,7 @@ function readEntryName(entry: unknown): string | undefined {
 
 const RENAME_OR_MERGE = (): string => 'Rename one of them, or merge them into a single entry.';
 
-/** The 23 collections whose boot keeps the last entry under a name, on both paths. */
+/** The 22 collections whose boot keeps the last entry under a name, on both paths. */
 function lastWinsByName(noun: string, plural: string): SameStackEntryIdentity {
   return {
     identity: readEntryName,
@@ -3365,12 +3409,20 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
       "one's configuration.",
     remedy: RENAME_OR_MERGE,
   },
+  forms: lastWinsByName('Form', 'forms'),
   pages: lastWinsByName('Page', 'pages'),
   dashboards: lastWinsByName('Dashboard', 'dashboards'),
   reports: lastWinsByName('Report', 'reports'),
   datasets: lastWinsByName('Dataset', 'datasets'),
   flows: lastWinsByName('Flow', 'flows'),
-  jobs: lastWinsByName('Job', 'jobs'),
+  jobs: {
+    identity: readEntryName,
+    subject: (name) => `Job '${name}'`,
+    consequence: () =>
+      'The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job ' +
+      'scheduler refuses a name two enabled jobs share, so when both are enabled neither runs.',
+    remedy: RENAME_OR_MERGE,
+  },
   // An i18n bundle is one `name` across several `locale` tags, so the identity
   // is the pair — the registry's `ITEM_KEY_DISCRIMINATORS` entry, keyed as
   // `name@locale` with an untagged entry keyed as the floor tag (the schema's
@@ -3417,6 +3469,8 @@ const SAME_STACK_ENTRY_IDENTITY = Object.freeze({
   docs: lastWinsByName('Doc', 'docs'),
   tools: lastWinsByName('Tool', 'tools'),
   skills: lastWinsByName('Skill', 'skills'),
+  aiContexts: lastWinsByName('AI context pack', 'aiContexts'),
+  knowledgeSources: lastWinsByName('Knowledge source', 'knowledge sources'),
   views: {
     identity: (entry) =>
       isAggregatedViewContainer(entry)
@@ -3465,7 +3519,8 @@ interface PackageCollectionEntry {
  * ONE package: `entriesOf(key)` lists that package's entries of `key`, each
  * labelled with where it sits, or `undefined` when the package carries none.
  * Every door below hands it one package and nothing else, so cross-package
- * reuse of a name is never read here (ADR-0048 §3.4). The finding's wording is
+ * reuse of a name is never read here (ADR-0048 §3.4); a job name enabled in two
+ * packages of a composition is {@link collectComposedJobNameErrors}'s. The finding's wording is
  * the same at every door; only the origins differ.
  */
 function duplicateEntryFindings(
@@ -3524,7 +3579,8 @@ function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
  * `registerApp` exactly as a single-package stack's top level is, so two
  * entries under one identity in one body lose one entry at the boot just the
  * same. Each body is judged alone: two bodies reusing a name is the
- * cross-package reuse ADR-0048 §3.4 allows, and two bodies under ONE package id
+ * cross-package reuse ADR-0048 §3.4 allows (except an enabled job name, which
+ * the boot schedules by its bare name: {@link collectComposedJobNameErrors}), and two bodies under ONE package id
  * are the boot's own `DUPLICATE_ARTIFACT_PACKAGE` refusal, not this one.
  * `label(i)` spells where body `i` sits for the finding's origins.
  */
@@ -3563,7 +3619,19 @@ function collectPackageBodyDuplicateEntryErrors(
  *   (ADR-0048 §3.4). What is left — a manifest-less input's entries, and the
  *   own collections of an input that carries `packages[]` — is one package,
  *   and two of its entries under one identity are refused with the one-stack
- *   wording.
+ *   wording. That includes two of its `jobs` of one name: the boot reads jobs
+ *   off the stack whole and its binder schedules neither. The residual's jobs
+ *   are read by count beyond the bodies' copies
+ *   ({@link composedJobDeclarations}); one sharing an enabled name with a
+ *   body's job is {@link collectComposedJobNameErrors}'s.
+ *
+ * The residual registers under `manifest.id`, and under `'preserve'` that id
+ * is also a body's: the last input with a manifest. The registry keeps one
+ * extension of a target per package, so a residual `objectExtensions` entry
+ * for a target THAT body extends too shares its slot, and that body's entries
+ * for the target are judged here with the residual's, first, in the order the
+ * boot registers them ({@link ownerBodyExtensionEntries}): only the last
+ * entry's fields register, as the finding says.
  *
  * `objects` is skipped: two inputs declaring one object name is the
  * `objectConflict` strategy's to refuse or fold, and what that step composed
@@ -3579,16 +3647,27 @@ function collectPackageBodyDuplicateEntryErrors(
  * (`collectBundleHooks` collects by identity), but a built artifact carries two
  * equal hook entries, and the table's `hooks` line records that every entry's
  * handler is bound and runs — so a hook reached twice is counted twice and
- * refused. Two distinct entries count however alike they are, as in a single
- * stack.
+ * refused. `jobs` are counted the same way, per place reached
+ * ({@link composedJobDeclarations}): the job binder schedules every copy an
+ * artifact carries by its name, so a job reached twice is two enabled jobs of
+ * the name and neither runs. Two distinct entries count however alike they
+ * are, as in a single stack.
  */
 function collectComposedResidualDuplicateEntryErrors(
   stacks: readonly ObjectStackDefinition[],
   composedPackages: unknown,
+  ownerId: unknown,
+  preserve: boolean,
 ): string[] {
   const isResidual = residualEntryPredicate(composedPackages);
   return duplicateEntryFindings(
     (key) => {
+      // The residual's jobs are read where every holder's jobs are read, by
+      // count beyond the bodies' copies ({@link composedJobDeclarations}).
+      if (key === 'jobs') {
+        const residual = composedJobDeclarations(stacks, preserve).filter((d) => d.holder === RESIDUAL_JOB_HOLDER);
+        return residual.length > 0 ? residual : undefined;
+      }
       const entries: PackageCollectionEntry[] = [];
       const seen = new Set<unknown>();
       let declared = false;
@@ -3605,6 +3684,18 @@ function collectComposedResidualDuplicateEntryErrors(
           entries.push(item);
         }
       }
+      // An extension registers under its package id, and the residual's id is
+      // the body that carries `manifest.id` when one does: that body's entries
+      // for a target the residual extends too come first, as the boot
+      // registers that body before the residual. Only those: the body's own
+      // pairs are its own door's.
+      if (key === 'objectExtensions' && entries.length > 0) {
+        const identity = SAME_STACK_ENTRY_IDENTITY.objectExtensions.identity;
+        const targets = new Set(entries.map((e) => identity(e.entry)));
+        const owned = ownerBodyExtensionEntries(stacks, composedPackages, ownerId, preserve)
+          .filter((e) => identity(e.entry) !== undefined && targets.has(identity(e.entry)));
+        entries.unshift(...owned);
+      }
       return declared ? entries : undefined;
     },
     new Set(['objects']),
@@ -3612,23 +3703,77 @@ function collectComposedResidualDuplicateEntryErrors(
 }
 
 /**
+ * The `objectExtensions` entries of the package body that carries the composed
+ * artifact's `manifest.id` — the id the boot registers the residual under —
+ * labelled as the input that carries the body: a body a nested artifact
+ * carries at its `packages[p].manifest`, or, under `manifest: 'preserve'`, the
+ * body assembled from an input with that manifest and no `packages[]`. The
+ * registry keeps one extension of a target per package, so a residual entry
+ * for a target that body extends shares its slot. Empty when the artifact
+ * carries no body, or none under that id.
+ */
+function ownerBodyExtensionEntries(
+  stacks: readonly ObjectStackDefinition[],
+  composedPackages: unknown,
+  ownerId: unknown,
+  preserve: boolean,
+): PackageCollectionEntry[] {
+  if (typeof ownerId !== 'string' || composedPackageBodies(composedPackages).length === 0) return [];
+  for (const [i, stack] of stacks.entries()) {
+    const label = stackLabel(stack, i);
+    const carried: unknown = (stack as Record<string, unknown>).packages;
+    if (Array.isArray(carried)) {
+      for (const [p, entry] of carried.entries()) {
+        const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+        if (isRecord(body) && body.id === ownerId) {
+          return labelledCollection(body, 'objectExtensions', `${label} packages[${p}].manifest.`) ?? [];
+        }
+      }
+      continue;
+    }
+    if (preserve && stack.manifest?.id === ownerId) {
+      return labelledCollection(stack as Record<string, unknown>, 'objectExtensions', `${label} `) ?? [];
+    }
+  }
+  return [];
+}
+
+/** The `packages[i].manifest` bodies a composed artifact carries, in order. */
+function composedPackageBodies(composedPackages: unknown): Record<string, unknown>[] {
+  return Array.isArray(composedPackages)
+    ? composedPackages.flatMap((p: unknown) => (isRecord(p) && isRecord(p.manifest) ? [p.manifest] : []))
+    : [];
+}
+
+/**
  * Whether a top-level entry of a composed artifact is in the package the boot
  * registers under the artifact's `manifest.id`. With no `packages[]` (or an
  * empty one) every entry is. With bodies, the boot's residual rule decides
  * ({@link isResidualTopLevelItem}, the mirror of `unclaimedTopLevel`), for the
- * collections that rule walks by slot. The two table collections it does not
- * walk by a slot of its own — `datasources` and `objectExtensions` (an
- * extension is keyed by `extend`) — count an entry as claimed when a body
- * carries one under the same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so
- * a body's flattened copy is never read as a second entry of the residual.
+ * collections that rule walks by slot. `objectExtensions` mirrors that rule's
+ * own reading of an extension, which has no slot: an entry is claimed when a
+ * body carries an entry EQUAL to it ({@link deepEqualAuthored}) — the copy a
+ * body's flattened top level repeats — so an entry extending a target some body
+ * also extends, with other fields, is the residual's own and registers under
+ * `manifest.id`. `datasources`, the table collection judged here that the rule
+ * does not walk by a slot, counts an entry as claimed when a body carries one
+ * under the same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so a body's
+ * flattened copy is never read as a second entry of the residual.
+ *
+ * `jobs` is not read here: the rule never files a job as residual
+ * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}) because the boot reads jobs off
+ * the stack whole, and a claim by name read a residual job sharing a body job's
+ * name as that body's copy. The residual's jobs are read input by input, by
+ * count beyond the bodies' copies ({@link composedJobDeclarations}).
  */
 function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
-  const bodies: Record<string, unknown>[] = Array.isArray(composedPackages)
-    ? composedPackages.flatMap((p: unknown) => (isRecord(p) && isRecord(p.manifest) ? [p.manifest] : []))
-    : [];
+  const bodies = composedPackageBodies(composedPackages);
   if (bodies.length === 0) return () => true;
   const bySlot = isResidualTopLevelItem(bodies);
-  const walkedBySlot: ReadonlySet<string> = new Set(OWNER_STAMP_JUDGED_COLLECTIONS);
+  const walkedBySlot: ReadonlySet<string> = new Set(
+    OWNER_STAMP_JUDGED_COLLECTIONS.filter((key) => !TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL.has(key)),
+  );
+  const bodyExtensions = bodies.flatMap((body) => (Array.isArray(body.objectExtensions) ? body.objectExtensions : []));
   const claimedByIdentity = new Map<string, Set<string>>();
   const claimed = (key: keyof typeof SAME_STACK_ENTRY_IDENTITY): Set<string> => {
     let set = claimedByIdentity.get(key);
@@ -3647,11 +3792,147 @@ function residualEntryPredicate(composedPackages: unknown): (key: string, entry:
   };
   return (key, entry) => {
     if (walkedBySlot.has(key)) return bySlot(key, entry);
+    if (key === 'objectExtensions') return !bodyExtensions.some((held) => held === entry || deepEqualAuthored(held, entry));
     if (!(key in SAME_STACK_ENTRY_IDENTITY)) return true;
     const typed = key as keyof typeof SAME_STACK_ENTRY_IDENTITY;
     const identity = SAME_STACK_ENTRY_IDENTITY[typed].identity(entry);
     return identity === undefined || !claimed(typed).has(identity);
   };
+}
+
+/** The holder {@link composedJobDeclarations} files a residual job under. */
+const RESIDUAL_JOB_HOLDER = 'residual';
+
+/** One job a composed artifact declares, where it sits, and which holder declares it. */
+interface ComposedJobDeclaration extends PackageCollectionEntry {
+  /** A package body (`body:INPUT` or `body:INPUT:INDEX`) or {@link RESIDUAL_JOB_HOLDER}. */
+  readonly holder: string;
+}
+
+/**
+ * Every job a composed artifact declares, each once, with its holder: the
+ * reading the boot's job binder makes of the artifact (`jobNameCollisions`,
+ * `@objectstack/runtime`), taken input by input.
+ *
+ * - An input that carries `packages[]` (a nested artifact): each carried body's
+ *   jobs are that body's (`INPUT packages[P].manifest.jobs[J]`). Its own
+ *   top-level jobs are the flattened copies of those bodies' jobs plus its own
+ *   residual: a top-level job beyond the copies is the residual's. By COUNT,
+ *   as the binder counts (the artifact holds more jobs of the name than its
+ *   bodies declare), never by content, since a conversion replays a body under
+ *   its own version window and a genuine copy need not stay equal to it. A
+ *   top-level job that IS a body's job object is matched to it first, so the
+ *   residual's own job is the one named, whatever the order.
+ * - Under `manifest: 'preserve'`, an input with a manifest is assembled into a
+ *   body, so its jobs are that body's (`INPUT jobs[J]`).
+ * - Any other input's jobs reach the artifact's top level and no body: the
+ *   residual's. With no body anywhere (a flat composition) that is every job.
+ *
+ * A job is counted once per place it is reached, the same job OBJECT reached
+ * through two inputs included (a built stack shared by two compositions, or
+ * passed twice): the boot binds every copy an artifact carries — the binder
+ * reads the bodies' jobs with no dedupe between them, and the top level's
+ * twice when it lists one twice — so two places are two jobs of the name, as
+ * `hooks` are counted at {@link collectComposedResidualDuplicateEntryErrors}.
+ * Only a nested input's flattened copies of its own bodies' jobs are not
+ * counted again, matched as above.
+ */
+function composedJobDeclarations(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): ComposedJobDeclaration[] {
+  const declarations: ComposedJobDeclaration[] = [];
+  const declare = (entry: unknown, origin: string, holder: string): void => {
+    declarations.push({ entry, origin, holder });
+  };
+  for (const [i, stack] of stacks.entries()) {
+    const label = stackLabel(stack, i);
+    const own: unknown = (stack as Record<string, unknown>).jobs;
+    const carried: unknown = (stack as Record<string, unknown>).packages;
+    if (Array.isArray(carried)) {
+      const copies = new Map<string, number>();
+      const bodyJobs = new Set<unknown>();
+      for (const [p, entry] of carried.entries()) {
+        const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+        if (!isRecord(body) || !Array.isArray(body.jobs)) continue;
+        for (const [j, job] of body.jobs.entries()) {
+          declare(job, `${label} packages[${p}].manifest.jobs[${j}]`, `body:${i}:${p}`);
+          bodyJobs.add(job);
+          const name = readEntryName(job);
+          if (name !== undefined) copies.set(name, (copies.get(name) ?? 0) + 1);
+        }
+      }
+      if (!Array.isArray(own)) continue;
+      const consume = (name: string | undefined): boolean => {
+        const left = name === undefined ? 0 : copies.get(name) ?? 0;
+        if (left === 0) return false;
+        copies.set(name as string, left - 1);
+        return true;
+      };
+      const unmatched = own.flatMap((job, j) => (bodyJobs.has(job) && consume(readEntryName(job)) ? [] : [j]));
+      for (const j of unmatched) {
+        if (!consume(readEntryName(own[j]))) declare(own[j], `${label} jobs[${j}]`, RESIDUAL_JOB_HOLDER);
+      }
+      continue;
+    }
+    if (!Array.isArray(own)) continue;
+    const holder = preserve && stack.manifest ? `body:${i}` : RESIDUAL_JOB_HOLDER;
+    own.forEach((job, j) => declare(job, `${label} jobs[${j}]`, holder));
+  }
+  return declarations;
+}
+
+/**
+ * [#36431] One job name ENABLED in more than one holder of a composed
+ * artifact — two package bodies, or a body and the residual — one refusal line
+ * per name, naming every enabled job of it.
+ *
+ * The boot's job binder schedules every job of an artifact under the
+ * artifact's id, keyed by its bare name whichever package declares it, and
+ * refuses a name two enabled jobs share: neither is scheduled
+ * (`jobNameCollisions`, `@objectstack/runtime`, ADR-0150 D3). The install-local
+ * door refuses such a package by the same judge (`collectJobNameCollisions`),
+ * so the door and the binder cannot disagree about a shared name; this is that
+ * judge at composition, over {@link composedJobDeclarations}, so a composition
+ * never builds an artifact whose boot silently schedules none of the name.
+ * Its reading is the binder's: enabled jobs only (a disabled job is scheduled
+ * by nothing, so a disabled twin composes), counted by name and per place
+ * reached, the residual by count beyond the bodies' copies. Cross-package reuse of a name (ADR-0048
+ * §3.4) does not reach jobs: nothing resolves a bare job name to a package.
+ *
+ * Only names that span two holders: two jobs of one name in one holder are
+ * that package's pair, refused by its own door
+ * ({@link collectComposedPackageBodyDuplicateEntryErrors},
+ * {@link collectComposedResidualDuplicateEntryErrors}). An artifact no
+ * composition built (hand-written, or built before this) still meets the
+ * binder's refusal at boot.
+ */
+function collectComposedJobNameErrors(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): string[] {
+  const enabledByName = new Map<string, ComposedJobDeclaration[]>();
+  for (const declaration of composedJobDeclarations(stacks, preserve)) {
+    const name = readEntryName(declaration.entry);
+    if (name === undefined || (declaration.entry as { enabled?: unknown }).enabled === false) continue;
+    enabledByName.set(name, [...(enabledByName.get(name) ?? []), declaration]);
+  }
+  const errors: string[] = [];
+  for (const [name, declared] of enabledByName) {
+    if (new Set(declared.map((d) => d.holder)).size < 2) continue;
+    const origins = declared.map((d) =>
+      d.holder === RESIDUAL_JOB_HOLDER ? `${d.origin} (the top level, outside every package body)` : d.origin,
+    );
+    const many = declared.length > 2;
+    errors.push(
+      `Job '${name}' is declared enabled ${many ? `${declared.length} times` : 'twice'} across the packages of one composed artifact: ` +
+        `${joinDeclarationOrigins(origins)}. The runtime schedules an artifact's jobs by their bare name, ` +
+        'whichever package declares them, and the job scheduler refuses a name two enabled jobs share, so none ' +
+        `of them runs. Rename ${many ? 'all but one' : 'one'} of them, or disable ${many ? 'all but one' : 'one'} ` +
+        '(`enabled: false`).',
+    );
+  }
+  return errors;
 }
 
 /**
@@ -4604,7 +4885,13 @@ function collectRelatedListNameErrors(
       );
     };
     if (Array.isArray(parent.relatedLists)) {
-      parent.relatedLists.forEach((entry: unknown, i: number) => judge(entry, `relatedLists[${i}]`));
+      // [#35897 · #35899] An entry is a bare name or `{ list, … }`; the three
+      // built-in tab names name the record page's own tabs, not a child.
+      parent.relatedLists.forEach((entry: unknown, i: number) => {
+        const name = relatedListEntryName(entry);
+        if (isRecordPageBuiltinTab(name)) return;
+        judge(name, `relatedLists[${i}]`);
+      });
     }
     if (Array.isArray(parent.fieldGroups)) {
       parent.fieldGroups.forEach((group: unknown, i: number) => {
@@ -4616,6 +4903,147 @@ function collectRelatedListNameErrors(
         if (refusal !== undefined) errors.push(refusal);
       });
     }
+  }
+  return errors;
+}
+
+/**
+ * [#35901] An object extension places only what its own package brings
+ * (`ObjectExtensionSchema.place`). The parse judges fields and the entry's
+ * shape; the two questions that need the package's OBJECTS are judged here,
+ * per package body (the top level is one package, each
+ * `packages[i].manifest` another, ADR-0130 D4):
+ *
+ *  - a list placement (`{ list }`), and a placed group's `relatedList`, must
+ *    name a child object THIS body defines that points at the extended
+ *    object (a `lookup` / `master_detail` field whose `reference` is it, or
+ *    the one `object.field`). A child the body does not define belongs to the
+ *    extended object's package or to another one, and is that owner's to
+ *    arrange;
+ *  - a placed group's `key` must not be one of the extended object's own
+ *    group keys, where this stack defines that object: the group would be
+ *    the owner's, which an extension does not arrange.
+ *  - a placed field (and a placed group's `fields`) must not be a field the
+ *    extended object declares, where this stack defines that object: an
+ *    extension may redeclare an owner field for its display properties
+ *    (ADR-0146 D10), which does not make the field the extension's to move.
+ *
+ * Anchors are not judged here: a missing anchor puts the item at the end and
+ * is a `@objectstack/lint` warning, never a refusal, so removing a field from
+ * the extended object never makes its extensions unbuildable.
+ */
+function collectExtensionPlacementErrors(config: ObjectStackDefinition): string[] {
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    isRecord(value) ? value : undefined;
+  const top = config as { objects?: unknown; objectExtensions?: unknown; packages?: unknown };
+  const bodies: Array<{ body: { objects?: unknown; objectExtensions?: unknown }; at: string }> = [
+    { body: top, at: '' },
+    ...(Array.isArray(top.packages)
+      ? (top.packages as unknown[]).map((entry, i) => ({
+        body: (asRecord(asRecord(entry)?.manifest) ?? {}) as { objects?: unknown; objectExtensions?: unknown },
+        at: `packages[${i}].manifest.`,
+      }))
+      : []),
+  ];
+  // Every object this stack defines, by name: the extended object's own group keys are read here.
+  const definedAnywhere = new Map<string, Record<string, unknown>>();
+  for (const { body } of bodies) {
+    if (!Array.isArray(body.objects)) continue;
+    for (const obj of body.objects) {
+      const record = asRecord(obj);
+      if (record && typeof record.name === 'string' && !definedAnywhere.has(record.name)) {
+        definedAnywhere.set(record.name, record);
+      }
+    }
+  }
+
+  const errors: string[] = [];
+  for (const { body, at } of bodies) {
+    if (!Array.isArray(body.objectExtensions)) continue;
+    // This body's own objects, with the fields its own extensions add to them.
+    const own = new Map<string, Record<string, unknown>>();
+    if (Array.isArray(body.objects)) {
+      for (const obj of body.objects) {
+        const record = asRecord(obj);
+        if (record && typeof record.name === 'string') {
+          own.set(record.name, { ...own.get(record.name), ...asRecord(record.fields) });
+        }
+      }
+    }
+    for (const ext of body.objectExtensions) {
+      const record = asRecord(ext);
+      if (!record || typeof record.extend !== 'string' || !own.has(record.extend)) continue;
+      own.set(record.extend, { ...own.get(record.extend), ...asRecord(record.fields) });
+    }
+
+    body.objectExtensions.forEach((ext: unknown, j: number) => {
+      const record = asRecord(ext);
+      if (!record || typeof record.extend !== 'string' || !Array.isArray(record.place)) return;
+      const target = record.extend;
+      const targetGroups = new Set(
+        (Array.isArray(definedAnywhere.get(target)?.fieldGroups) ? definedAnywhere.get(target)!.fieldGroups as unknown[] : [])
+          .map((g) => asRecord(g)?.key)
+          .filter((key): key is string => typeof key === 'string'),
+      );
+      const judgeList = (name: string, where: string): void => {
+        const dot = name.indexOf('.');
+        const child = dot === -1 ? name : name.slice(0, dot);
+        const field = dot === -1 ? undefined : name.slice(dot + 1);
+        const fields = own.get(child);
+        if (!fields) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') ${where} names '${name}', which is not a child ` +
+              'object this package defines: an extension places only a child list its own package brings. The ' +
+              `lists of '${target}' and of other packages are arranged by their owners. Define '${child}' in this ` +
+              'package, or remove the placement.',
+          );
+          return;
+        }
+        const points = Object.entries(fields).some(([fieldName, def]) => {
+          const fieldDef = asRecord(def);
+          return (field === undefined || fieldName === field) && fieldDef !== undefined
+            && (fieldDef.type === 'lookup' || fieldDef.type === 'master_detail') && fieldDef.reference === target;
+        });
+        if (!points) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') ${where} names '${name}', but ` +
+              `${field === undefined ? `'${child}' has no` : `'${child}.${field}' is not a`} lookup / master_detail ` +
+              `field whose reference is '${target}', so it is no child list of '${target}'. Point a field of ` +
+              `'${child}' at '${target}', or remove the placement.`,
+          );
+        }
+      };
+      const targetFields = asRecord(definedAnywhere.get(target)?.fields) ?? {};
+      const judgeOwnerField = (name: unknown, where: string): void => {
+        if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(targetFields, name)) return;
+        errors.push(
+          `${at}objectExtensions[${j}] (extending '${target}') ${where} places field '${name}', which ` +
+            `'${target}' declares itself: an extension places only a field it adds, and redeclaring an owner ` +
+            'field (for its display properties) does not make it the extension\'s. The owner arranges it; ' +
+            'remove the placement.',
+        );
+      };
+      (record.place as unknown[]).forEach((entry: unknown, k: number) => {
+        const placement = asRecord(entry);
+        if (!placement) return;
+        if (typeof placement.list === 'string') judgeList(placement.list, `place[${k}].list`);
+        judgeOwnerField(placement.field, `place[${k}]`);
+        const group = asRecord(placement.group);
+        if (!group) return;
+        if (Array.isArray(group.fields)) {
+          group.fields.forEach((name: unknown, f: number) => judgeOwnerField(name, `place[${k}].group.fields[${f}]`));
+        }
+        if (typeof group.relatedList === 'string') judgeList(group.relatedList, `place[${k}].group.relatedList`);
+        if (typeof group.key === 'string' && targetGroups.has(group.key)) {
+          errors.push(
+            `${at}objectExtensions[${j}] (extending '${target}') place[${k}] adds group '${group.key}', which is ` +
+              `a group '${target}' declares itself: an extension adds a group of its own and never rearranges the ` +
+              `owner's. Give the group another key, or place the fields into '${group.key}' with ` +
+              `{ field, group: '${group.key}' } entries.`,
+          );
+        }
+      });
+    });
   }
   return errors;
 }
@@ -6012,6 +6440,9 @@ function validateCrossReferences(
     config,
     artifactObjects && artifactObjects.size > 0 ? new Set([...objectNames, ...artifactObjects]) : objectNames,
   ));
+  // Same placement: an extension's `place` resolves against its own package
+  // body's objects, whether or not the stack defines the extended object (#35901).
+  errors.push(...collectExtensionPlacementErrors(config));
 
   if (objectNames.size === 0) return errors;
 
@@ -6163,8 +6594,19 @@ function validateCrossReferences(
             // hides the entry when the object isn't in the SchemaRegistry,
             // and stack-level cross-ref validation must skip it.
             if (!nav.requiresObject) {
+              // A platform-prefixed name is still refused: the prefix test
+              // cannot tell an object every environment carries from one a
+              // plugin contributes, so exempting it would let a menu point at
+              // an object that is absent. The message names the fix instead —
+              // `requiresObject` — because "not defined in objects" alone
+              // invites declaring a package copy of a platform object.
+              const base = `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`;
               errors.push(
-                `App '${appName}' navigation references object '${nav.objectName}' which is not defined in objects.`,
+                isPlatformObjectName(nav.objectName)
+                  ? `${base} '${nav.objectName}' is provided by the platform or a plugin, not by this stack: `
+                    + `add requiresObject: '${nav.objectName}' to the entry (the menu then hides it wherever the object `
+                    + `is not registered), and do not declare a copy of the object in this package.`
+                  : base,
               );
             }
           }
@@ -6396,7 +6838,7 @@ function validateCrossReferences(
  * - The sort is STABLE (`Array.prototype.sort` is stable since ES2019), so
  *   actions that tie on `order` — including the overwhelmingly common case where
  *   NOBODY sets `order` — keep their original registration order. This is what
- *   lets `order` promote a `record_header` action into the primary-button slot
+ *   lets `order` promote a record page action into the primary-button slot
  *   without disturbing everything else.
  * - Returns the SAME array reference untouched when no action opts in, so callers
  *   pay zero allocation on the common path and can cheaply detect "unchanged".
@@ -6442,7 +6884,7 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
  * compatible — arrays with no `order` keep their exact registration order and
- * reference. Renderers that pick a single primary action from `record_header`
+ * reference. Renderers that pick a single primary action from the record page header
  * (objectui) therefore see approve/reject-style actions in their declared
  * priority rather than in fragile cross-file registration order.
  *
@@ -9574,6 +10016,9 @@ function composeBuiltStacks(
   //     manifest strategy, and every package body the artifact carries, each on
   //     its own — see {@link collectComposedResidualDuplicateEntryErrors} and
   //     {@link collectComposedPackageBodyDuplicateEntryErrors}.
+  //     [#36431] …and one job name enabled in two holders of the result (two
+  //     package bodies, or a body and the residual): the boot's job binder
+  //     schedules none of the name — see {@link collectComposedJobNameErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
@@ -9584,8 +10029,9 @@ function composeBuiltStacks(
     ...collectComposedExternalBindingDatasourceErrors(stacks, objects),
     ...collectComposedDatasourceConnectorErrors(stacks, opts.manifest === 'preserve'),
     ...collectArtifactFlowClaimErrors(stacks),
-    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages),
+    ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages, (composed.manifest as { id?: unknown } | undefined)?.id, opts.manifest === 'preserve'),
     ...collectComposedPackageBodyDuplicateEntryErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedJobNameErrors(stacks, opts.manifest === 'preserve'),
   ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;

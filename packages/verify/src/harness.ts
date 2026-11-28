@@ -34,16 +34,25 @@
 // A declared MANAGED datasource (or one that declares no `schemaMode`) is NOT
 // connected to the database it names. Ruling A of the composition rule
 // (`bootStack`, #22301) already swaps the app's own default store for an
-// ephemeral one; the same swap now covers every declared managed store:
-// verify's driver factory builds it as a fresh in-memory store of the default
-// store's engine (`managed-datasource-stand-in.ts`), so every write that
-// reaches it — verify's derived writes, a REST create, the app's seed — lands
-// in memory and dies with the kernel. A managed datasource whose engine has no
-// faithful stand-in (`mongodb`, or a driver a plugin supplies) keeps its real
-// driver, and every derived write family leaves its objects out and names
-// them, as for an external one; the app's seed, hooks and flows still write to
-// that real store. Only the local flow run refuses a write to any
-// object routed away from the default store (`flow-run.ts`).
+// ephemeral one; the same swap covers every declared managed store on an
+// engine the platform ships, `mongodb` included: verify's driver factory
+// builds it as a fresh in-memory store (`managed-datasource-stand-in.ts`), so
+// every write that reaches it — verify's derived writes, a REST create, the
+// app's seed, hooks and flows — lands in memory and dies with the kernel, and
+// its objects are exercised by every derived family. A managed datasource on a
+// driver id the platform does not ship (a plugin's) cannot be stood in: the
+// plugin registers its own driver, which the boot would then write through, so
+// `bootStack` refuses to boot while one is declared, naming the datasource and
+// the driver id, before it composes anything. The same holds by NAME: a
+// plugin that registers a driver under a managed datasource's name would be
+// kept by the connection service whatever driver id the datasource declares,
+// so a guard started before every other plugin refuses that boot too, and,
+// for a driver registered after that, the engine's `registerDriver` refuses
+// any driver under that name verify's factory did not build while verify's
+// stand-in does not hold the name (once it does, the engine keeps it and
+// discards the newcomer, and the boot runs on the stand-in). There is no
+// switch around either refusal. Only the local flow run refuses a write to any object routed away
+// from the default store (`flow-run.ts`).
 // `verify.external-datasource-no-writes.test.ts` pins the external half and
 // `verify.managed-datasource-stand-in.test.ts` the managed one.
 
@@ -67,13 +76,20 @@ import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service
 import { AnalyticsServicePlugin } from '@objectstack/service-analytics';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
 import { MetadataPlugin } from '@objectstack/metadata';
+import { AuditPlugin } from '@objectstack/plugin-audit';
 // Node-only subpath (#4700). Optional packages supplied by the app under
 // verification — `@objectstack/organizations` above all — must be resolved from
 // THAT app, not from `packages/verify`'s own realpath inside this workspace.
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
-import { createVerifyDatasourceDriverFactory } from './managed-datasource-stand-in.js';
+import {
+  createManagedDatasourceDriverGuard,
+  createManagedStandInLedger,
+  createVerifyDatasourceDriverFactory,
+  unstandableManagedDatasourceRefusal,
+  unstandableManagedDatasources,
+} from './managed-datasource-stand-in.js';
 import { constructServedProviders } from './required-providers.js';
 import { registryLevelFor, resolveBootLogLevel, scopeRegistryLogLevel } from './boot-log-level.js';
 
@@ -183,6 +199,21 @@ let processCryptoProvider: LocalCryptoProvider | undefined;
 function harnessCryptoProvider(): LocalCryptoProvider {
   processCryptoProvider ??= new LocalCryptoProvider({ key: randomBytes(32) });
   return processCryptoProvider;
+}
+
+/**
+ * [ADR-0154 D2, D6; seat ruling 6884540128 item 4] Hand {@link harnessCryptoProvider}
+ * — the one provider settings and the engine get — to an `AuditPlugin` this
+ * boot mounts: a caller's `extraPlugins` entry, a stack `plugins` entry, or the
+ * provider `requires: ['audit']` constructs. Its sealer then seals, and expires
+ * sealed rows, under the boot's own key, as `objectstack serve` hands its host
+ * provider over. ⛔ Never a bare `new LocalCryptoProvider()`, which would read
+ * the host key or mint a key file (#21499 custody). Only an instance of the
+ * real class is handed anything, and only one composed with no provider of its
+ * own (`adoptHostCryptoProvider` decides that); anything else is untouched.
+ */
+function handHarnessCryptoToAuditPlugin(plugin: unknown, provider: LocalCryptoProvider): void {
+  if (plugin instanceof AuditPlugin) plugin.adoptHostCryptoProvider(() => provider, { armSealer: true });
 }
 
 /** This process's auth signing secret; created on the first boot, never persisted. */
@@ -987,6 +1018,12 @@ async function bootClaimed(
   opts: BootOptions,
   claim: ConfigurationClaim,
 ): Promise<VerifyStack> {
+  // A declared managed datasource on a driver id the platform does not ship
+  // (a plugin's) cannot be stood in, so the boot is refused before anything is
+  // composed, naming each one (`./managed-datasource-stand-in.ts`). No switch.
+  const unstandable = unstandableManagedDatasources(config);
+  if (unstandable.length > 0) throw new Error(unstandableManagedDatasourceRefusal(unstandable));
+
   process.env.NODE_ENV = 'development';
 
   // [#7762] `orgContext` and `multiTenant` are two owners of one invariant —
@@ -1069,6 +1106,16 @@ async function bootClaimed(
   // so the dogfood gate exercises the real declared-default connect path (the
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
+  // Mounted FIRST so its start() runs before any other plugin's: it refuses
+  // the boot when a plugin registered a driver under a declared managed
+  // datasource's name, which the connection service would keep in place of
+  // verify's stand-in, and from then on refuses any registration under such a
+  // name of a driver verify's factory did not build while the stand-in does
+  // not hold that name — the ledger below, shared with that factory
+  // (`./managed-datasource-stand-in.ts`). No switch.
+  const managedStandIns = createManagedStandInLedger();
+  const managedDriverGuard = createManagedDatasourceDriverGuard(config, managedStandIns);
+  if (managedDriverGuard) await kernel.use(managedDriverGuard as never);
   await kernel.use(new ObjectQLPlugin());
   const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({
@@ -1189,6 +1236,7 @@ async function bootClaimed(
         driverFactory: createVerifyDatasourceDriverFactory({
           real: createDefaultDatasourceDriverFactory(),
           defaultStore: databaseDriver,
+          standIns: managedStandIns,
         }),
       }));
     }
@@ -1308,6 +1356,7 @@ async function bootClaimed(
   // Caller-supplied optional service pairs (see BootOptions.extraPlugins).
   // Before SecurityPlugin, mirroring the CLI's ordering for service pairs.
   for (const plugin of opts.extraPlugins ?? []) {
+    handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
     await kernel.use(plugin as any);
   }
 
@@ -1355,6 +1404,7 @@ async function bootClaimed(
       packageRoot: hostRoot,
     });
     for (const plugin of servedProviders) {
+      handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
       await kernel.use(plugin as any);
     }
   } catch (e) {
@@ -1387,6 +1437,7 @@ async function bootClaimed(
   // boot that went on without a plugin the app declares would pass green on a
   // composition production never runs, so here the boot stops, with the remedy.
   for (const { plugin, label } of appPlugins) {
+    handHarnessCryptoToAuditPlugin(plugin, cryptoProvider);
     try {
       await kernel.use(plugin as any);
     } catch (e) {
@@ -1413,8 +1464,32 @@ async function bootClaimed(
   const restoreRegistryLogLevel = scopeRegistryLogLevel(registryLevelFor(bootLogLevel));
   try {
     await kernel.bootstrap();
+  } catch (e) {
+    // The kernel wraps a failed start() in its rollback message, and names the
+    // plugin whose code made the call: ObjectQL's, for a registration the guard
+    // refused inside its start(). When the guard's refusal is what failed the
+    // boot, its own sentence is the answer; any other failure keeps its error.
+    const refusal = managedDriverGuard?.refusalIn(e);
+    if (refusal !== undefined) throw Object.assign(new Error(refusal), { cause: e });
+    throw e;
   } finally {
     restoreRegistryLogLevel();
+  }
+  // A refusal the caller of `registerDriver` caught and carried on from: the
+  // driver never took the name, and the boot is refused all the same.
+  if (managedDriverGuard?.refusal !== undefined) {
+    try {
+      await (await kernel.getServiceAsync<{ close?(): Promise<void> }>('http-server')).close?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await (kernel as any).shutdown?.();
+    } catch {
+      /* best-effort */
+    }
+    restoreTenancyPosture();
+    throw new Error(managedDriverGuard.refusal);
   }
 
   // Secret fields (Field.secret) refuse to persist without a crypto provider —

@@ -41,7 +41,7 @@
  *   - 查看全部  → the child object's list page scoped to this parent
  *                 (`onViewAll`, the related list's "View all" link,
  *                 objectui#12741)
- *   - 子对象 action → the child object's `list_item` actions, and its
+ *   - 子对象 action → the child object's `record_row` actions, and its
  *                 `record_related` ones when a parent record is in scope,
  *                 executed against the clicked row through the page's shared
  *                 ActionRunner
@@ -95,6 +95,8 @@ import {
 import { evalRowPredicate, isMultiValueRelationship, resolveAffordance, type ActionDef, type RowCrudPredicates } from '@object-ui/core';
 import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import { usePermissions } from '@object-ui/permissions';
+import { relatedCreateSeedOf } from '@object-ui/plugin-detail/core';
+import { createKeepsField } from '@object-ui/plugin-form/core';
 import { servesRecordRead, type RecordReadPrincipal } from '../utils/recordReadServed.js';
 import { RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_LINK_PARAM, RECORD_TRAIL_PARAM, appendRecordTrail } from '../urlParams.js';
 import { documentHref } from './documentHref.js';
@@ -268,17 +270,17 @@ export interface RelatedRecordActionsBridgeProps {
  * The locations a related list places on each ROW, by whether a parent record
  * is in scope (objectui#11270).
  *
- * `list_item` places an action on the child's rows wherever the child is
+ * `record_row` places an action on the child's rows wherever the child is
  * listed. `record_related` places it on them only inside a parent record's
  * related-list section: objectstack-ai/objectstack#20937's enforce answer
  * (triage `5919625056`) read the spec's "actions on a related list section
  * inside a record" as row placement, and the runtime counts the location among
  * those that require a record. The child object's own list view reads
- * `list_item` alone, in `ObjectView`.
+ * `record_row` alone, in `ObjectView`.
  */
-const ROW_LOCATIONS_IN_RECORD = ['list_item', 'record_related'] as const;
-const ROW_LOCATIONS = ['list_item'] as const;
-const TOOLBAR_LOCATIONS = ['list_toolbar'] as const;
+const ROW_LOCATIONS_IN_RECORD = ['record_row', 'record_related'] as const;
+const ROW_LOCATIONS = ['record_row'] as const;
+const TOOLBAR_LOCATIONS = ['list'] as const;
 
 /**
  * Derive the child object's actions for a related-list surface (the row menu
@@ -460,7 +462,11 @@ export function RelatedRecordActionsBridge({
   // object that is the full-page create route `AppContent`'s `handleEdit`
   // navigates to (`resolveRecordFormTarget`), not the overlay.
   const openChildForm = useCallback(
-    (opts: { objectName: string; recordId?: string; link?: { field: string; parentId: string | number } }) => {
+    (opts: {
+      objectName: string;
+      recordId?: string;
+      link?: { field: string; parentId: string | number; seed?: Record<string, string> };
+    }) => {
       if (opts.recordId == null && !opts.link) {
         const target = resolveRecordFormTarget({
           objectDef: objects.find((o: any) => o?.name === opts.objectName),
@@ -475,8 +481,16 @@ export function RelatedRecordActionsBridge({
       const sp = new URLSearchParams(window.location.search);
       sp.set(RECORD_FORM_PARAM, opts.recordId ?? 'new');
       sp.set(RECORD_FORM_OBJECT_PARAM, opts.objectName);
-      if (opts.link) sp.set(RECORD_FORM_LINK_PARAM, `${opts.link.field}:${opts.link.parentId}`);
-      else sp.delete(RECORD_FORM_LINK_PARAM);
+      sp.delete(RECORD_FORM_LINK_PARAM);
+      if (opts.link) {
+        // The parent link first, then the values it seeds beside it
+        // (objectstack#37246): one `formLink` pair each, all in the URL so a
+        // refresh reopens the form with them.
+        sp.append(RECORD_FORM_LINK_PARAM, `${opts.link.field}:${opts.link.parentId}`);
+        for (const [field, value] of Object.entries(opts.link.seed ?? {})) {
+          sp.append(RECORD_FORM_LINK_PARAM, `${field}:${value}`);
+        }
+      }
       setSearchParams(sp); // push → Back closes the overlay
     },
     [setSearchParams, objects, base, navigate],
@@ -596,8 +610,23 @@ export function RelatedRecordActionsBridge({
             'builtin:create:disabledWhen',
             parentObjectFields,
           );
+        /**
+         * objectstack#37248 — + New opens the child's create form pre-linked to
+         * this parent. When the relationship field is one that form will not
+         * save (`readonly`, computed, server-owned, or closed to this caller on
+         * create), the record is created WITHOUT the link and never appears in
+         * this list, with nothing said. So the list does not offer it; creating
+         * the child unlinked from its own list stays where it was. The verdict
+         * is the create form's own outbound filter (`createKeepsField`), so the
+         * list and the form cannot disagree about the field.
+         */
+        const linkSurvivesCreate =
+          !relationshipField ||
+          parentId == null ||
+          parentId === '' ||
+          createKeepsField(childDef, objectName, relationshipField, perms);
         const aff = {
-          create: objectCanCreate && createVisible,
+          create: objectCanCreate && createVisible && linkSurvivesCreate,
           edit: resolveAffordance('relatedRowEdit', source).allowed,
           delete: resolveAffordance('relatedRowDelete', source).allowed,
         };
@@ -666,10 +695,20 @@ export function RelatedRecordActionsBridge({
           handlers.onCreate = () => {
             const canLink =
               relationshipField && parentId != null && parentId !== '';
+            // objectstack#37246 — a relationship lookup scoped by the child's
+            // own fields (`dependsOn`) opens with them seeded from the parent,
+            // or the form gates the lookup (「Select Account first」) and its
+            // `lookupAutofill` empties it: the child saved without its parent.
+            // The parent record is this mount's own; a custom page's lists
+            // each name a parent of their own (`parentFromList`), which this
+            // bridge does not hold, so they seed the link alone.
+            const seed = canLink && !parentFromList && parentRecord
+              ? relatedCreateSeedOf(childDef.fields, relationshipField as string, parentRecord)
+              : undefined;
             openChildForm({
               objectName,
               link: canLink
-                ? { field: relationshipField as string, parentId: parentId as string | number }
+                ? { field: relationshipField as string, parentId: parentId as string | number, seed }
                 : undefined,
             });
           };
@@ -687,7 +726,7 @@ export function RelatedRecordActionsBridge({
         // [objectui#11270] `record_related` joins the row menu only when this
         // bridge is mounted under a parent record — the record page mounts it
         // with one; a mount without (the "standalone list" these props allow)
-        // places `list_item` alone.
+        // places `record_row` alone.
         //
         // [objectui#12870] With `parentFromList` (a custom page) the parent is
         // each list's own: a list that bound its parent through

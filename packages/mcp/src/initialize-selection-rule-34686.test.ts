@@ -270,6 +270,26 @@ describe('[#35005] initialize instructions — the ask-back is scoped in the sam
     expect(text).not.toContain('A word with no match but with candidates in the answer');
     expect(list.description).not.toContain('possible readings: ask the same way');
   });
+
+  it('[#34996] both doors say the question is for the user\'s own word, and a cut or reworded one is sent again', async () => {
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const text = await instructionsOf(runtime, makeBridge());
+    const list = getDatasetToolDefinitions().find((d) => d.name === LIST_DATASETS_TOOL_NAME)!;
+    const OWN_WORD = (tool: string) =>
+      'Only the user\'s own word is asked about: one you cut out of a longer phrase of the question, or reworded, '
+      + `is sent to ${tool} once more as the user wrote it instead, never the whole question.`;
+    expect(text).toContain(OWN_WORD('list_datasets'));
+    expect(list.description).toContain(OWN_WORD('`list_datasets`'));
+    // Each follows the question it conditions, and comes before the grouping sentence.
+    for (const door of [text, list.description]) {
+      const at = door.indexOf('Only the user\'s own word is asked about');
+      expect(door.indexOf('ask the same way')).toBeLessThan(at);
+      expect(door.indexOf(SCOPED)).toBeGreaterThan(at);
+    }
+    // The words are asked for whole, as written.
+    expect(text).toContain('with the question\'s business words, each phrase whole as the user wrote it.');
+    expect(list.description).toContain('each copied whole as the user wrote it');
+  });
 });
 
 /**
@@ -302,5 +322,30 @@ describe('[#34774] initialize instructions — the authoring contract line, and 
     for (const part of [LINE, 'search_package_docs', 'They save drafts only', 'Published skills']) expect(text).toContain(part);
     expect(carriesRule(text)).toBe(true);
     expect(text.length).toBeLessThan(4096);
+  });
+});
+
+/**
+ * [#35778] The default text says where the usage guide is served: the teaching
+ * prose moved out of the tool descriptions into the served SKILL.md, so a
+ * client that never fetches it is pointed there. The route is anonymous and
+ * mounted beside the MCP endpoint, so the sentence rides every grant's default
+ * answer; a host's or the configured text stays whole (pinned above).
+ */
+describe('[#35778] initialize instructions — the default text points at the served SKILL.md', () => {
+  const POINTER = 'Usage guide (SKILL.md): GET this endpoint\'s path plus /skill (by default /api/v1/mcp/skill).';
+  const runtime = new MCPServerRuntime({ name: 't', version: '0.0.1-operator' });
+
+  it('is in the first paragraph for every grant, with and without an authoring registry', async () => {
+    for (const o of [
+      {},
+      { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] },
+      { grantedScopes: [MCP_OAUTH_SCOPE_DATA_WRITE] },
+      { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoring: {} },
+      { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], authoring: {} },
+    ] as Opts[]) {
+      const text = await instructionsOf(runtime, makeBridge(), o);
+      expect(text.split('\n\n')[0], JSON.stringify(o)).toContain(POINTER);
+    }
   });
 });

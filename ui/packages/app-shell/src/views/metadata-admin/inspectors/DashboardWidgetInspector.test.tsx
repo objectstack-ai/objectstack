@@ -30,6 +30,10 @@ vi.mock('../previews/useDatasetCatalog', () => ({
   }),
 }));
 
+// Pay the dynamic `@objectstack/formula` / `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { DashboardWidgetInspector } from './DashboardWidgetInspector';
 // The inspector's `engine.inspector.*` rows live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
@@ -65,10 +69,10 @@ function renderWidget(extra: Record<string, unknown> = {}, props: Record<string,
 describe('DashboardWidgetInspector — dataset binding', () => {
   it('shows the Dataset picker; dimensions/values appear only once a dataset is bound', () => {
     const { rerender } = renderWidget();
-    expect(screen.getByText('Dataset')).toBeInTheDocument();
+    expect(screen.getByText('Data source')).toBeInTheDocument();
     // Dimensions/Values sections are gated behind a bound dataset.
-    expect(screen.queryByText('Dimensions')).not.toBeInTheDocument();
-    expect(screen.queryByText('Values (measures)')).not.toBeInTheDocument();
+    expect(screen.queryByText('Group by')).not.toBeInTheDocument();
+    expect(screen.queryByText('Metrics')).not.toBeInTheDocument();
 
     rerender(
       <DashboardWidgetInspector
@@ -79,10 +83,10 @@ describe('DashboardWidgetInspector — dataset binding', () => {
       />,
     );
     // Sections now present, and the bound members render in the lists.
-    expect(screen.getByText('Dimensions')).toBeInTheDocument();
-    expect(screen.getByText('Values (measures)')).toBeInTheDocument();
+    expect(screen.getByText('Group by')).toBeInTheDocument();
+    expect(screen.getByText('Metrics')).toBeInTheDocument();
     expect(screen.getByText('stage')).toBeInTheDocument();
-    expect(screen.getByText('revenue')).toBeInTheDocument();
+    expect(screen.getByText('revenue · Sum')).toBeInTheDocument();
   });
 
   it('no longer renders the removed inline object query fields', () => {
@@ -96,8 +100,8 @@ describe('DashboardWidgetInspector — dataset binding', () => {
 
   it('renders Chinese labels under zh-CN', () => {
     renderWidget({ dataset: 'sales_pipeline' }, { locale: 'zh-CN' });
-    expect(screen.getByText('数据集绑定')).toBeInTheDocument();
-    expect(screen.getByText('维度')).toBeInTheDocument();
+    expect(screen.getByText('数据来源')).toBeInTheDocument();
+    expect(screen.getByText('分组')).toBeInTheDocument();
   });
 
   it('the Dataset label resolves to the combo trigger, not to nothing (#3997)', () => {
@@ -110,15 +114,15 @@ describe('DashboardWidgetInspector — dataset binding', () => {
     // the atom's own pins live in `_shared.labels.test.tsx`.
     renderWidget({ dataset: 'sales_pipeline' });
 
-    const label = screen.getByText('Dataset');
+    const label = screen.getByText('Data source');
     const forId = label.getAttribute('for');
     expect(forId).toBeTruthy();
 
-    const trigger = screen.getByLabelText('Dataset');
+    const trigger = screen.getByLabelText('Data source');
     expect(trigger).toBe(document.getElementById(forId!));
     expect(trigger.tagName).toBe('BUTTON');
     expect(trigger).toHaveAttribute('role', 'combobox');
-    expect(trigger).toHaveAccessibleName('Dataset');
+    expect(trigger).toHaveAccessibleName('Data source');
     // Exactly one element answers that id — the trigger, not a wrapper.
     expect(document.querySelectorAll(`[id="${forId}"]`)).toHaveLength(1);
 
@@ -230,17 +234,19 @@ describe('DashboardWidgetInspector — dashboard filter bindings (framework#2501
 
   it('hides the section when the dashboard declares no filters', () => {
     renderWidget();
-    expect(screen.queryByText('Dashboard filter bindings')).not.toBeInTheDocument();
+    expect(screen.queryByText('Follows the filters at the top of the page')).not.toBeInTheDocument();
   });
 
   it('renders one row per dashboard filter (dateRange + each globalFilter)', () => {
     renderFiltered();
-    expect(screen.getByText('Dashboard filter bindings')).toBeInTheDocument();
+    expect(screen.getByText('Follows the filters at the top of the page')).toBeInTheDocument();
     expect(screen.getByTestId('widget-filter-binding-dateRange')).toBeInTheDocument();
     const region = screen.getByTestId('widget-filter-binding-region');
     expect(within(region).getByText('Region')).toBeInTheDocument();
-    // Default placeholder names the filter's own field.
-    expect(within(region).getByText('Default (region)')).toBeInTheDocument();
+    // The bound dataset declares no `region` dimension, so the empty face
+    // reads "Default field" — never the machine name (objectstack#36373).
+    expect(within(region).getByText('Default field')).toBeInTheDocument();
+    expect(within(region).queryByText('Default (region)')).not.toBeInTheDocument();
   });
 
   it('unticking Apply patches filterBindings[name] = false; re-ticking removes the entry', () => {
@@ -277,6 +283,70 @@ describe('DashboardWidgetInspector — dashboard filter bindings (framework#2501
     expect(onPatch).toHaveBeenCalledWith({
       widgets: [expect.objectContaining({ filterBindings: { region: 'sales_region' } })],
     });
+  });
+});
+
+/**
+ * objectstack#37031 — re-ticking Apply undoes an opt-out. A dashboard save
+ * stores the whole document, so a binding the box drops is the filter's own
+ * field, not the field the package re-targeted it to: re-ticking restores the
+ * binding the shipped dashboard (`shipped`, the layered read's `code`) gives
+ * this widget, and only when it ships none does the entry go.
+ */
+describe('DashboardWidgetInspector — re-ticking Apply restores the shipped binding (objectstack#37031)', () => {
+  const filters = {
+    dateRange: { field: 'issued_on', defaultRange: 'last_90_days' },
+    globalFilters: [{ name: 'region', field: 'region', label: 'Region', type: 'select', options: [{ value: 'EMEA', label: 'EMEA' }] }],
+  };
+  const shippedWith = (filterBindings: Record<string, string | false> | undefined, id = 'w1') => ({
+    ...filters,
+    widgets: [{ id, type: 'metric', title: 'Accounts Signed', ...(filterBindings ? { filterBindings } : {}) }],
+  });
+
+  function renderBound(filterBindings: Record<string, string | false>, shipped: Record<string, unknown> | null) {
+    const onPatch = vi.fn();
+    render(
+      <DashboardWidgetInspector
+        {...baseProps}
+        draft={{ ...filters, widgets: [widget({ filterBindings })] }}
+        shipped={shipped}
+        selection={{ kind: 'widget', id: 'w1' }}
+        onPatch={onPatch}
+      />,
+    );
+    const box = within(screen.getByTestId('widget-filter-binding-dateRange')).getByRole('checkbox');
+    return { onPatch, box };
+  }
+
+  const shipped = shippedWith({ dateRange: 'signed_on', region: 'sales_region' });
+
+  it('unticking writes the opt-out over the shipped re-target', () => {
+    const { onPatch, box } = renderBound({ dateRange: 'signed_on', region: 'sales_region' }, shipped);
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(onPatch).toHaveBeenCalledWith({
+      widgets: [expect.objectContaining({ id: 'w1', filterBindings: { dateRange: false, region: 'sales_region' } })],
+    });
+  });
+
+  it('re-ticking an opt-out restores the field the shipped dashboard binds', () => {
+    const { onPatch, box } = renderBound({ dateRange: false, region: 'sales_region' }, shipped);
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(onPatch).toHaveBeenCalledWith({
+      widgets: [expect.objectContaining({ id: 'w1', filterBindings: { dateRange: 'signed_on', region: 'sales_region' } })],
+    });
+  });
+
+  it('control: where the shipped widget opts out too, or ships no binding, re-ticking removes the entry', () => {
+    for (const ships of [shippedWith({ dateRange: false }), shippedWith(undefined), shippedWith({ dateRange: 'signed_on' }, 'other')]) {
+      const { onPatch, box } = renderBound({ dateRange: false, region: 'sales_region' }, ships);
+      fireEvent.click(box);
+      expect(onPatch).toHaveBeenCalledWith({
+        widgets: [expect.objectContaining({ id: 'w1', filterBindings: { region: 'sales_region' } })],
+      });
+      cleanup();
+    }
   });
 });
 

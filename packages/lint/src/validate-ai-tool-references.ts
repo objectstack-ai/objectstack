@@ -29,6 +29,15 @@
  * Trailing-wildcard entries (`action_*`, `foo_*`) resolve when ANY member of
  * that universe matches the prefix.
  *
+ * A name that resolves can still cost a skill its MCP prompt. The MCP door
+ * offers a skill with `instructions` only on a connection that serves every
+ * tool its binding names (`skillBindingServed`, `@objectstack/mcp`), and the
+ * `ask` product's data tools the door does not register
+ * ({@link ASK_TOOLS_THE_MCP_DOOR_LACKS}) are served by no MCP connection. A
+ * skill offered over MCP that binds one is therefore withheld from every
+ * connection's `prompts/list` without a word at runtime, so this rule says so
+ * at authoring time, by a verdict that names the tool.
+ *
  * Severity is **warning** (ADR-0078 advisory-first ratchet), not error,
  * because the universe has a known blind spot: a runtime plugin outside the
  * registry can legitimately register tools no static analysis can see, and
@@ -41,15 +50,29 @@
  * positives (6 references resolve via the registry).
  */
 
+import { GET_RECORD_CONTEXT_TOOL_NAME, skillBindsRecordContextTool } from '@objectstack/spec/ai';
 import {
   MCP_DOOR_TOOL_NAMES,
   PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOLS_BY_PACKAGE,
   PLATFORM_TOOL_FAMILY_PREFIXES,
 } from '@objectstack/spec/system';
 
-import { recordsOf, suggestName } from './object-graph.js';
+import {
+  packageResolutionClosure,
+  packageScopedHolderSource,
+  resolvePackageScopedHolders,
+  type PackageClosureRegistry,
+  type PackageScopedResolution,
+} from '@objectstack/metadata-core';
+
+import { packagesOf, recordsOf, suggestName } from './object-graph.js';
 
 export const AI_SKILL_TOOL_UNRESOLVED = 'ai-skill-tool-unresolved';
+/** [ADR-0160 D8] A skill's `context` names no context pack. */
+export const AI_SKILL_CONTEXT_UNKNOWN = 'ai-skill-context-unknown';
+/** [ADR-0160 D1 advisory, point 1] A skill reads packs without naming one, on an object with several. */
+export const AI_SKILL_CONTEXT_OMITTED = 'ai-skill-context-omitted';
 
 export type AiToolRefSeverity = 'error' | 'warning';
 
@@ -209,7 +232,211 @@ function offeredOverMcp(skill: AnyRec): boolean {
 }
 
 /**
- * Validate every `skill.tools[]` reference in a stack. Returns findings
+ * The `ask` product's data tools (`PLATFORM_TOOLS_BY_PACKAGE['service-ai']`)
+ * the MCP door does not register: in-product only. A skill offered over MCP
+ * whose binding names one is withheld from `prompts/list` on every MCP
+ * connection. The `build` product's tools are deliberately not here: a host
+ * may serve them over MCP through its authoring family, under
+ * `metadata:write`, so a binding naming one is not withheld everywhere.
+ */
+const ASK_TOOLS_THE_MCP_DOOR_LACKS: ReadonlySet<string> = new Set(
+  (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((name) => !MCP_DOOR_TOOL_NAMES.includes(name)),
+);
+
+/**
+ * Would the MCP door project this skill as a prompt, given a connection that
+ * served its binding? Only an active skill offered over MCP that carries
+ * `instructions` is projected (`projectSkillPrompt`, `@objectstack/mcp`); a
+ * skill that is not projected loses nothing to a binding MCP cannot serve.
+ */
+function projectedOverMcp(skill: AnyRec): boolean {
+  if (!offeredOverMcp(skill) || skill.active === false) return false;
+  return typeof skill.instructions === 'string' && skill.instructions.trim() !== '';
+}
+
+/**
+ * [ADR-0150 D3; its `ai_context` addendum, reader 2] What a skill's `context`
+ * resolves to, by the one rule (`resolvePackageScopedHolders`,
+ * `@objectstack/metadata-core`) the MCP skill prompt resolves it with
+ * (`skillPromptRecordContext`, `@objectstack/mcp`), ⛔ never a local copy of it.
+ *
+ * - **The caller** is the stack's own package (`manifest.id`), or a caller
+ *   with no package when the stack names none.
+ * - **The holders** of the name: the stack itself when its own `aiContexts`
+ *   carry it (its package, or the environment for a stack with no package),
+ *   and every other package of the artifact's `packages[]` whose body ships a
+ *   pack of that name.
+ * - **The closure** is `packageResolutionClosure` (the save door's walk plus
+ *   every `sys` package) over the artifact's packages as the registry: the
+ *   closure the CLI's per-package pass hands each package's stack
+ *   (`packageBodyAsStack`, ADR-0130 D4).
+ *
+ * So a pack a declared dependency in the artifact ships resolves (step 2), a
+ * sibling package outside the closure is refused with the rule's own remedy,
+ * and two holders the rule cannot pick between are refused naming both. A
+ * dependency the artifact does not carry ships nothing this stack can read:
+ * its pack answers `not-found` here, and the finding says so.
+ */
+function skillContextResolver(
+  stack: AnyRec,
+  ownPackNames: ReadonlySet<string>,
+): (context: string) => PackageScopedResolution<true> {
+  const manifest = stack.manifest;
+  const ownManifest = manifest && typeof manifest === 'object' && !Array.isArray(manifest) ? (manifest as AnyRec) : undefined;
+  const ownId = strName(ownManifest?.id) ?? null;
+  const byId = new Map<string, { manifest: AnyRec }>();
+  if (ownId !== null && ownManifest) byId.set(ownId, { manifest: ownManifest });
+  const holdersOf = new Map<string, Set<string>>();
+  for (const entry of packagesOf(stack)) {
+    const body = entry.manifest;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) continue;
+    const id = strName((body as AnyRec).id);
+    if (!id || id === ownId || byId.has(id)) continue;
+    byId.set(id, { manifest: body as AnyRec });
+    for (const pack of recordsOf((body as AnyRec).aiContexts)) {
+      const name = strName(pack.name);
+      if (!name) continue;
+      const holders = holdersOf.get(name) ?? new Set<string>();
+      holders.add(id);
+      holdersOf.set(name, holders);
+    }
+  }
+  const registry: PackageClosureRegistry = {
+    getPackage: (id) => byId.get(id),
+    getAllPackages: () => [...byId.values()],
+  };
+  const closureOf = (callerPackageId: string) => packageResolutionClosure(registry, callerPackageId);
+  return (context) => {
+    const holders: Array<readonly [string | null, true]> = [];
+    if (ownPackNames.has(context)) holders.push([ownId, true]);
+    for (const id of holdersOf.get(context) ?? []) holders.push([id, true]);
+    return resolvePackageScopedHolders<true>(
+      { type: 'ai_context', name: context, callerPackageId: ownId },
+      packageScopedHolderSource(holders),
+      closureOf,
+    );
+  };
+}
+
+/**
+ * The verdict and fix for a `context` the rule REFUSED: a pack another package
+ * of the artifact ships, held only outside the skill's package closure, or held
+ * by two holders the rule cannot pick between. One line each (#22161); the
+ * rule's own refusal sentence (`packageScopedRefusalMessage`) is the long form.
+ *
+ * The fix for two holders names the caller the rule judged for. A stack with a
+ * package (`ambiguous-in-closure`) is told to keep one pack in reach of it; a
+ * stack that names none (`ambiguous-in-environment`) has no package to be in
+ * reach of, so its fix names the artifact's packages, which hold the two.
+ */
+function contextRefusalFinding(
+  context: string,
+  refusal: Extract<PackageScopedResolution<true>, { status: 'refused' }>,
+): { message: string; hint: string } {
+  const holders = refusal.candidates
+    .map((c) => (c.kind === 'package' ? `"${c.packageId}"` : c.kind === 'environment' ? 'the stack' : c.kind))
+    .join(', ');
+  const outside = refusal.reason === 'outside-closure';
+  const noCallerPackage = refusal.reason === 'ambiguous-in-environment';
+  return {
+    message:
+      `\`context\` pack "${context}" is held ${outside ? 'only outside this package\'s dependency closure' : 'by more than one holder in reach'} ` +
+      `(${holders}): the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.`,
+    hint: outside
+      ? 'Declare a dependency on the package that ships the pack (ADR-0141), or name a pack the stack defines'
+      : noCallerPackage
+        ? 'Keep one pack of that name across the artifact\'s packages, or name another pack'
+        : 'Keep one pack of that name in reach of this package, or name another pack',
+  };
+}
+
+/**
+ * [ADR-0160 D8; D1 "Advisory reports", point 1's third condition] A skill's
+ * context-pack reference, judged against the stack's own packs
+ * (`stack.aiContexts`). Two verdicts, each a `warning`:
+ *
+ * - {@link AI_SKILL_CONTEXT_UNKNOWN}: `context` resolves to no pack by the
+ *   rule the MCP skill prompt resolves it with ({@link skillContextResolver}:
+ *   ADR-0150 D3 over the stack's own packs and those of the artifact's
+ *   `packages[]`, in the skill's package closure). Where no holder has it, the
+ *   prompt lists no record argument; no other pack is substituted (D8).
+ * - {@link AI_SKILL_CONTEXT_OMITTED}: the skill binds `get_record_context`
+ *   (by name or a matching wildcard) and declares no `context`, and some object
+ *   has more than one pack. The call it makes without `context` on such an
+ *   object is refused, listing the candidates (D4); the configuration is
+ *   legal, so this is advisory.
+ *
+ * A stack is one holder here: the pack names it declares are the ones its own
+ * skills resolve to first (ADR-0150 D3 step 1). A pack another package of the
+ * artifact ships resolves when that package is in the skill's package closure
+ * (step 2), and is refused, naming the remedy, when it is not.
+ */
+export function validateAiSkillContext(stack: AnyRec): AiToolRefFinding[] {
+  const findings: AiToolRefFinding[] = [];
+  if (!stack || typeof stack !== 'object') return findings;
+
+  const packNames = new Set<string>();
+  const packsByObject = new Map<string, string[]>();
+  for (const pack of recordsOf(stack.aiContexts)) {
+    const name = strName(pack.name);
+    if (!name) continue;
+    packNames.add(name);
+    const object = strName(pack.object);
+    if (!object) continue;
+    const names = packsByObject.get(object) ?? [];
+    if (!names.includes(name)) names.push(name);
+    packsByObject.set(object, names);
+  }
+  const severalPacks = [...packsByObject].filter(([, names]) => names.length > 1);
+
+  const skills = recordsOf(stack.skills);
+  let resolveContext: ((context: string) => PackageScopedResolution<true>) | undefined;
+  for (let si = 0; si < skills.length; si++) {
+    const skill = skills[si];
+    const skillName = strName(skill.name) ?? `#${si}`;
+    const context = strName(skill.context);
+    if (context !== undefined) {
+      resolveContext ??= skillContextResolver(stack, packNames);
+      const resolution = resolveContext(context);
+      if (resolution.status === 'resolved') continue;
+      findings.push({
+        severity: 'warning',
+        rule: AI_SKILL_CONTEXT_UNKNOWN,
+        where: `skill "${skillName}" · context`,
+        path: `skills[${si}].context`,
+        ...(resolution.status === 'refused'
+          ? contextRefusalFinding(context, resolution)
+          : {
+              message:
+                `\`context\` pack "${context}" is not in this stack's \`aiContexts\`: unless a dependency ships it, ` +
+                `the MCP prompt takes no record and ${GET_RECORD_CONTEXT_TOOL_NAME} is refused.` +
+                suggestName(context, packNames),
+              hint: 'Name a pack the stack defines under `aiContexts` or one a dependency package ships (check the spelling), or remove `context`',
+            }),
+      });
+      continue;
+    }
+    if (!skillBindsRecordContextTool(skill.tools)) continue;
+    // One finding per such object: each names its own packs.
+    for (const [object, names] of severalPacks) {
+      findings.push({
+        severity: 'warning',
+        rule: AI_SKILL_CONTEXT_OMITTED,
+        where: `skill "${skillName}" · context`,
+        path: `skills[${si}]`,
+        message:
+          `The skill binds ${GET_RECORD_CONTEXT_TOOL_NAME} without \`context\`, and object '${object}' has ` +
+          `${names.length} packs (${names.join(', ')}), so its call there without a pack name is refused`,
+        hint: 'Set `context` to the pack this skill works from',
+      });
+    }
+  }
+  return findings;
+}
+
+/**
+ * Validate every `skill.tools[]` reference in a stack, and each skill's
+ * context-pack reference ({@link validateAiSkillContext}). Returns findings
  * (empty = clean).
  */
 export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
@@ -238,10 +465,30 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     const refs = Array.isArray(skill.tools) ? skill.tools : [];
     const overMcp = offeredOverMcp(skill);
     const universe = overMcp ? withMcpDoorTools : shared;
+    const projected = projectedOverMcp(skill);
 
     for (let ti = 0; ti < refs.length; ti++) {
       const ref = strName(refs[ti]);
-      if (!ref || resolves(ref, universe)) continue;
+      if (!ref) continue;
+      if (resolves(ref, universe)) {
+        // A name the in-product agents serve and no MCP connection does: the
+        // skill resolves, and is withheld from every MCP `prompts/list`.
+        if (projected && ASK_TOOLS_THE_MCP_DOOR_LACKS.has(ref)) {
+          findings.push({
+            severity: 'warning',
+            rule: AI_SKILL_TOOL_UNRESOLVED,
+            where: `skill "${skillName}" · tools`,
+            path: `skills[${si}].tools[${ti}]`,
+            message:
+              `Tool "${ref}" is served by the in-product agents but by no MCP connection, so MCP withholds ` +
+              'this skill from `prompts/list` and its instructions never reach an MCP client',
+            hint:
+              'Set `mcpPrompt: false` if the skill is for the in-product agents only, or bind a tool the MCP door ' +
+              `serves in place of "${ref}"`,
+          });
+        }
+        continue;
+      }
 
       const isPattern = ref.endsWith('*');
       // A name (or family) the MCP door serves, on a skill its owner keeps out
@@ -293,5 +540,6 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     }
   }
 
+  findings.push(...validateAiSkillContext(stack));
   return findings;
 }

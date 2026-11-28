@@ -10,9 +10,9 @@ import { uiRoot } from '../scripts/ui-root.mjs';
 
 /**
  * GEOMETRY pin for objectstack#35663 (epic #35547): the list page draws ONE
- * left edge, 16 px in from the main area, for the view bar's object icon (the
- * page bar's until objectstack#35878 moved the object's name into the view
- * bar), the header's select-all box, every row's checkbox and the footer's
+ * left edge, 16 px in from the main area, for the object row's icon (the page
+ * bar's; objectstack#35878 moved the object's name into the view bar and
+ * objectstack#36113 moved it back), the view switcher's icon, the header's select-all box, every row's checkbox and the footer's
  * count; the selection column is 40 px wide (16 inset + 16 box +
  * 8 gap) on a list that fits and on one that scrolls sideways, before and
  * after a scroll; the grid draws no row numbers and every row's checkbox is
@@ -46,7 +46,12 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * FIXTURES: the rows and fields are literals; the main area is a frame beside
  * a 256 px block standing in for the open sidebar (edges are measured from the
  * frame, so the sidebar's own width is not an input); icons are 16 px boxes;
- * the switcher's and footer's contents are short literals. Fonts are
+ * the switcher's content is a short literal. The footer's count at 1280 is
+ * the grid's own summary row (`data-table-summary-lead`), drawn the way the
+ * list asks for it (`residentSummaryRow`, `summaryRowLead`), with a declared
+ * calculation on the first column (objectstack#37028: a stand-in footer here
+ * once let a count at 52 pass); on a phone, where the grid draws cards and no
+ * summary row, it is the list's record-count bar holding a literal. Fonts are
  * Chromium's fallbacks: the assertions are edges and widths of boxes, not of
  * glyphs.
  *
@@ -89,9 +94,12 @@ const CHART_BAR_CLASS = pick(
   /const chartPage = [\s\S]*?hasPhoneTitle && \(\s*<div className="([^"]+)"/,
   'the chart view bar class',
 );
-/** The view bar's object name and its right end (objectstack#35878), read off their constants. */
+/** The object row (objectstack#36113): `PageHeader`'s list posture, read out of its source. */
+const PAGE_HEADER_FILE = 'packages/app-shell/src/layout/PageHeader.tsx';
+const PAGE_BAR_CLASS = `${pick(PAGE_HEADER_FILE, /className=\{cn\(\s*'(relative shrink-0 border-b[^']*)'/, 'the page header class')} ${pick(PAGE_HEADER_FILE, /list && '([^']+)'/, "the page header's list height")}`;
+const PAGE_BAR_ROW_CLASS = pick(PAGE_HEADER_FILE, /\{list \? \(\s*<div className="([^"]+)"/, "the list page header's row");
+/** The view bar's right end (objectstack#35878), read off its constant. */
 const PAGE_BAR_FILE = 'packages/app-shell/src/views/objectViewPageHeader.tsx';
-const OBJECT_NAME_CLASS = pick(PAGE_BAR_FILE, /export const VIEW_BAR_OBJECT_NAME = '([^']+)'/, 'VIEW_BAR_OBJECT_NAME');
 const VIEW_BAR_END_CLASS = `flex shrink-0 items-center gap-0.5 ${pick(PAGE_BAR_FILE, /export const VIEW_BAR_END_INSET = '([^']+)'/, 'VIEW_BAR_END_INSET')}`;
 const FOOTER_CLASS = pick(
   'packages/plugin-list/src/ListView.tsx',
@@ -156,7 +164,8 @@ import { ActionProvider, SchemaRendererProvider } from ${JSON.stringify(REACT_BI
 
 registerAllFields();
 const h = React.createElement;
-const OBJECT_NAME_CLASS = ${JSON.stringify(OBJECT_NAME_CLASS)};
+const PAGE_BAR_CLASS = ${JSON.stringify(PAGE_BAR_CLASS)};
+const PAGE_BAR_ROW_CLASS = ${JSON.stringify(PAGE_BAR_ROW_CLASS)};
 const VIEW_BAR_END_CLASS = ${JSON.stringify(VIEW_BAR_END_CLASS)};
 const c = window.__case;
 const LABELS = {
@@ -185,13 +194,16 @@ createRoot(document.getElementById('root')).render(
         h('div', { className: 'flex', style: { width: c.viewport + 'px' } },
           h('div', { id: 'sidebar', style: { width: c.sidebar + 'px', flexShrink: 0 } }),
           h('div', { id: 'main', className: 'flex min-w-0 flex-1 flex-col bg-background', style: { height: '640px' } },
-            // objectstack#35878: no page bar; the view bar leads with the
-            // object's icon and name, then 「/」 and the switcher, then View
-            // settings, and ends with search, New and ⋮ at the right edge.
+            // objectstack#36113: the object row (its icon and name), then the
+            // view bar: the switcher and View settings, ending with search,
+            // New and ⋮ at the right edge.
+            h('div', { id: 'pagebar', className: PAGE_BAR_CLASS },
+              h('div', { className: PAGE_BAR_ROW_CLASS },
+                h('div', { className: 'flex min-w-0 flex-1 items-center gap-2' },
+                  box16('page-icon'), h('h1', { className: 'truncate' }, 'Contacts')))),
             h('div', { id: 'viewbar', className: Row.TOOLBAR_ROW },
               h('div', { className: Row.TOOLBAR_LEFT_GROUP_LEADING },
                 h('div', { className: Row.TOOLBAR_LEADING },
-                  h('span', { className: OBJECT_NAME_CLASS }, box16('page-icon'), h('span', { className: 'truncate' }, 'Contacts'), h('span', null, '/')),
                   h('button', { id: 'switcher', className: c.switcherClass }, box16('view-icon'), h('span', { className: 'truncate' }, 'All contacts'))),
                 h('button', { className: 'inline-flex items-center ' + Row.TOOLBAR_TEXT_TRIGGER }, 'View settings')),
               h('div', { id: 'cluster', className: Row.TOOLBAR_CLUSTER },
@@ -199,11 +211,10 @@ createRoot(document.getElementById('root')).render(
                   h('button', { className: 'inline-flex h-7 w-7' }),
                   h('button', { id: 'page-new', className: 'inline-flex h-7 items-center px-2' }, 'New'),
                   h('button', { className: 'inline-flex h-7 w-7 items-center justify-center' }, box16('page-more'))))),
-            // The chart bar's lead is the same one node (the object's name and
-            // the switcher), as \`ViewBarLead\` draws it.
+            // The chart bar's lead is the same one node (the switcher), as
+            // \`ViewBarLead\` draws it.
             h('div', { id: 'chartbar', className: c.chartBarClass },
               h('div', { className: 'flex min-w-0 items-center' },
-                h('span', { className: OBJECT_NAME_CLASS }, box16('chart-page-icon'), h('span', { className: 'truncate' }, 'Contacts'), h('span', null, '/')),
                 h('button', { id: 'chart-switcher', className: c.switcherClass }, box16('chart-view-icon'), h('span', { className: 'truncate' }, 'Pipeline chart'))),
               h('div', { className: VIEW_BAR_END_CLASS }, h('button', { className: 'inline-flex h-7 w-7' }))),
             h('div', { className: 'flex min-h-0 flex-1 flex-col' },
@@ -212,11 +223,20 @@ createRoot(document.getElementById('root')).render(
                 schema: {
                   type: 'object-grid',
                   objectName: 'contact',
-                  columns: c.columns.map((field) => ({ field, label: LABELS[field] })),
+                  // The first column declares a calculation, so its figure
+                  // shares the summary row's first cell with the lead.
+                  columns: c.columns.map((field, i) => ({ field, label: LABELS[field], ...(i === 0 ? { summary: 'count_filled' } : {}) })),
                   selection: { type: 'multiple' },
                 },
+                // objectstack#37028: the list's own footer posture (ListView's
+                // resident summary row), so the count measured below is the
+                // real summary row's lead, not a stand-in.
+                residentSummaryRow: true,
+                summaryRowLead: (count) => count + ' records',
               })),
-            h('div', { id: 'footer', className: c.footerClass },
+            // Below 768 the grid draws cards and no summary row; the list then
+            // draws its record-count bar (ListView), whose class is read above.
+            c.viewport < 768 && h('div', { id: 'footer', className: c.footerClass },
               h('span', { id: 'footer-text', className: 'shrink-0 font-medium text-foreground/80' }, '12 records'))))))),
 );
 `;
@@ -336,18 +356,24 @@ interface Reading {
   /** Left edges, from the main area's left. */
   left: {
     pageIcon: number;
-    chartPageIcon: number;
     viewIcon: number;
     /** The chart view's view bar (objectstack#35729). */
     chartViewIcon: number;
     headerCheckbox: number;
     rowCheckboxes: number[];
+    /** The summary row's lead, the record count (objectstack#37028). */
     footerText: number;
     firstHeaderText: number;
     firstCellText: number;
   };
   /** Right edges, from the main area's right (distance in): ⋮ (the bar's last button) and the view bar's cluster. */
-  right: { pageAction: number; viewCluster: number; footer: number; scrollBox: number };
+  right: { pageAction: number; viewCluster: number; scrollBox: number };
+  /**
+   * The first column's calculated figure, in the summary row's first cell
+   * (objectstack#35548: each figure in its column's cell): its box, the first
+   * column's header cell, and the lead's right edge, from the main area's left.
+   */
+  firstFigure: { left: number; right: number; columnLeft: number; columnRight: number; leadRight: number };
   /** The right padding of the list's view bar and of the chart view's (objectstack#35729). */
   barPaddingRight: { list: number; chart: number };
   /** The selection column's header cell: width and drawn left, from the main area. */
@@ -395,21 +421,29 @@ async function readEdges(page: Page): Promise<Reading> {
       overflows: box.scrollWidth > box.clientWidth + 1,
       left: {
         pageIcon: x(document.getElementById('page-icon')),
-        chartPageIcon: x(document.getElementById('chart-page-icon')),
         viewIcon: x(document.getElementById('view-icon')),
         chartViewIcon: x(document.getElementById('chart-view-icon')),
         headerCheckbox: x(document.querySelector('thead [role="checkbox"]')),
         rowCheckboxes: rowBoxes.map((b) => x(b)),
-        footerText: x(document.getElementById('footer-text')),
+        footerText: x(document.querySelector('[data-testid="data-table-summary-lead"]')),
         firstHeaderText: Math.round((textOf(firstData).left - main.left) * 10) / 10,
         firstCellText: Math.round((textOf(firstCell).left - main.left) * 10) / 10,
       },
       right: {
         pageAction: inRight(document.getElementById('page-more')),
         viewCluster: inRight(document.getElementById('cluster')),
-        footer: Math.round((main.right - r(document.getElementById('footer-text')!.parentElement).right) * 10) / 10,
         scrollBox: inRight(box),
       },
+      firstFigure: (() => {
+        const leadEl = document.querySelector('[data-testid="data-table-summary-lead"]');
+        const figure = leadEl?.nextElementSibling ?? null;
+        const at = (n: number) => Math.round((n - main.left) * 10) / 10;
+        return {
+          left: at(r(figure).left), right: at(r(figure).right),
+          columnLeft: at(r(firstData).left), columnRight: at(r(firstData).right),
+          leadRight: at(r(leadEl).right),
+        };
+      })(),
       barPaddingRight: {
         list: parseFloat(getComputedStyle(document.getElementById('viewbar')!).paddingRight),
         chart: parseFloat(getComputedStyle(document.getElementById('chartbar')!).paddingRight),
@@ -422,15 +456,20 @@ async function readEdges(page: Page): Promise<Reading> {
 }
 
 /** Scroll the table to its far right, read the selection column, scroll back. */
-async function scrollRoundTrip(page: Page): Promise<{ far: { width: number; left: number; checkbox: number }; back: { width: number; left: number } }> {
+async function scrollRoundTrip(page: Page): Promise<{ far: { width: number; left: number; checkbox: number; count: number }; back: { width: number; left: number; count: number } }> {
   return page.evaluate(async () => {
     const main = document.getElementById('main')!.getBoundingClientRect();
     const box = document.querySelector<HTMLElement>('[data-table-scroll-box]')!;
     const lead = document.querySelector('thead tr')!.children[0] as HTMLElement;
     const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const count = document.querySelector('[data-testid="data-table-summary-lead"]')!;
     const read = () => {
       const lr = lead.getBoundingClientRect();
-      return { width: Math.round(lr.width * 10) / 10, left: Math.round((lr.left - main.left) * 10) / 10 };
+      return {
+        width: Math.round(lr.width * 10) / 10,
+        left: Math.round((lr.left - main.left) * 10) / 10,
+        count: Math.round((count.getBoundingClientRect().left - main.left) * 10) / 10,
+      };
     };
     box.scrollLeft = box.scrollWidth;
     await frame();
@@ -464,8 +503,8 @@ function report(testInfo: TestInfo, name: string, value: unknown): void {
 
 function expectOnEdge(r: Reading, edge: number, slack = 1): void {
   const named: Array<[string, number]> = [
-    ['view-bar object icon', r.left.pageIcon],
-    ['chart view-bar object icon', r.left.chartPageIcon],
+    ['object row icon', r.left.pageIcon],
+    ['view switcher icon', r.left.viewIcon],
     ['select-all box', r.left.headerCheckbox],
     ...r.left.rowCheckboxes.map((v, i): [string, number] => [`row ${i + 1} checkbox`, v]),
     ['footer count', r.left.footerText],
@@ -492,6 +531,12 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       expect(r.selection.left).toBeCloseTo(0, 0);
       // The first column's header label and its cells start on one line.
       expect(Math.abs(r.left.firstHeaderText - r.left.firstCellText), `header text ${r.left.firstHeaderText} vs cell text ${r.left.firstCellText}`).toBeLessThanOrEqual(1);
+      // objectstack#37028 / #35548: the count on the edge, and the first
+      // column's figure still inside its column, clear of the count.
+      const f = r.firstFigure;
+      expect(f.left, `the first column's figure starts at ${f.left}, left of its column (${f.columnLeft})`).toBeGreaterThanOrEqual(f.columnLeft - 0.5);
+      expect(f.right, `the first column's figure ends at ${f.right}, right of its column (${f.columnRight})`).toBeLessThanOrEqual(f.columnRight + 0.5);
+      expect(f.left, `the first column's figure (${f.left}) overlaps the count (ends ${f.leadRight})`).toBeGreaterThanOrEqual(f.leadRight);
       // No row numbers; every row's checkbox shows without a hover.
       expect(r.rowNumbers, 'the grid draws row numbers').toBe(0);
       expect(r.rowCheckboxOpacity.length).toBe(12);
@@ -519,6 +564,10 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
       expect(leg.left).toBeCloseTo(0, 0);
     }
     expect(Math.abs(trip.far.checkbox - EDGE)).toBeLessThanOrEqual(1);
+    // The footer's count is frozen with the selection column (objectstack#37028).
+    for (const leg of [trip.far, trip.back]) {
+      expect(Math.abs(leg.count - EDGE), `the footer count starts at ${leg.count} after scrolling, not ${EDGE}`).toBeLessThanOrEqual(1);
+    }
     expect(gap, 'a strip between the frozen cells shows the scrolled content').toBeLessThanOrEqual(0.5);
   });
 
@@ -545,8 +594,8 @@ test.describe('the list page draws one left edge (objectstack#35663)', () => {
     expect(r.cardContent.length).toBe(12);
     // Below `sm` the chart view's view bar keeps the list bar's `px-2` (objectstack#35729).
     expect(Math.abs(r.chartViewIcon - r.viewIcon), `chart view icon ${r.chartViewIcon} vs list view icon ${r.viewIcon}`).toBeLessThanOrEqual(1);
-    // The object's name is not drawn below `sm` (the phone's top bar names it,
-    // objectstack#35878), so the switcher leads the bar there.
+    // The switcher leads the view bar (objectstack#36113: the object's name is
+    // in the object row above it).
     for (const at of [r.viewIcon, r.chartViewIcon, ...r.cardContent, r.footerText]) {
       expect(at).toBeGreaterThanOrEqual(12);
     }

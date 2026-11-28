@@ -72,12 +72,14 @@ export interface CoverageIssue {
     | 'report'
     | 'picklist'
     | 'page'
+    | 'form'
     | 'flow'
     | 'hook'
     | 'position'
     | 'permission'
     | 'book'
     | 'mapping'
+    | 'package'
     | 'metadataForm';
   /** Human-readable explanation. */
   message: string;
@@ -294,6 +296,12 @@ interface ExpectedKey {
   source: CoverageIssue['source'];
   /** Lookup path expressed as an array of segments. */
   path: string[];
+  /**
+   * [ADR-0159 D8] The address the translator reads when a bundle has no value
+   * at {@link path} (the walker's `ExpectedEntry.fallbackPath`): a value there
+   * translates the string too.
+   */
+  fallbackPath?: string[];
   /** Friendly display key (joined with dots). */
   displayKey: string;
   /** Description shown in the issue message when the key is missing. */
@@ -358,13 +366,17 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // it, so it keeps its own bucket and reports as `i18n/missing-picklist`.
   picklist: 'picklist',
   page: 'page',
-  // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title` /
+  // A `form` item's copy (`forms.<f>.label`, `.title`, the thank-you tails, ADR-0159) — its own bucket, reported as `i18n/missing-form`.
+  form: 'form',
+  // Flow copy (every flow's `flows.<f>.label`, `flows.<f>.screens.<n>.title` /
   // `.description` (#22507), and the per-field `label` / `placeholder` /
   // option labels), the terminal
   // toasts (`flows.<f>.successMessage` / `.errorMessage`, #22507) and a refused
   // `end` node's message (`flows.<f>.refusals.<n>.message`, #22450), and an
   // approval flow's label with each `approval` node's step label
-  // (`flows.<f>.approvals.<n>.label`, #24916) — the author's own text, so
+  // (`flows.<f>.approvals.<n>.label`, #24916), and every other step a docs
+  // flow embed draws (`flows.<f>.nodes.<n>.label`, ruling 7076440876) — the
+  // author's own text, so
   // it keeps its own bucket and reports as `i18n/missing-flow` rather than
   // folding away with `--include-platform`. Until this bucket existed the
   // family could not report a screen-flow gap at all: HotCRM measured
@@ -392,6 +404,10 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   // A named import mapping's label (`mappings.<m>.label`) — the name the
   // import wizard offers it by, reported as `i18n/missing-mapping` (#34939).
   mapping: 'mapping',
+  // A package's display name and description (`packages.<id>.name` /
+  // `.description`) — what Setup's package list and Studio's package switcher
+  // call it, reported as `i18n/missing-package` (#35513).
+  package: 'package',
   metadataType: 'metadataForm',
   metadataFormSection: 'metadataForm',
   metadataFormField: 'metadataForm',
@@ -413,12 +429,14 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   report: 'Report',
   picklist: 'Picklist',
   page: 'Page',
+  form: 'Form',
   flow: 'Flow',
   hook: 'Hook',
   position: 'Position',
   permission: 'Permission set',
   book: 'Book',
   mapping: 'Import mapping',
+  package: 'Package',
   metadataForm: 'Metadata form',
 };
 
@@ -461,12 +479,14 @@ const SOURCE_SURFACE: Record<CoverageIssue['source'], string> = {
   report: 'reports',
   picklist: 'picklists',
   page: 'pages',
-  flow: 'flow screens, approval steps, toasts and refusals',
+  form: 'forms',
+  flow: 'flow screens, steps, approval steps, toasts and refusals',
   hook: 'hook refusals',
   position: 'positions',
   permission: 'permission sets',
   book: 'doc books',
   mapping: 'import mappings',
+  package: 'packages',
   metadataForm: 'metadata forms',
 };
 
@@ -510,6 +530,7 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
     return {
       source,
       path: entry.path,
+      ...(entry.fallbackPath ? { fallbackPath: entry.fallbackPath } : {}),
       displayKey: entry.path.join('.'),
       context: describeEntry(entry, source),
       inline: entry.inline,
@@ -728,7 +749,8 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
     (key) =>
       key.inline !== undefined
       || inlineLocaleAny(key.inlineLocales) !== undefined
-      || authoredInBundle(key.path),
+      || authoredInBundle(key.path)
+      || (key.fallbackPath !== undefined && authoredInBundle(key.fallbackPath)),
   );
 
   // The platform baseline is dropped from the POPULATION, not from the issue
@@ -765,7 +787,9 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
       //    text a reader of the default locale sees, so `inlineLocaleAny`
       //    stands in for `inline` when the author wrote a map instead of a
       //    string.
+      // [ADR-0159 D8] 1b. The address the translator falls back to.
       const value = lookupKey(data, key.path)
+        ?? (key.fallbackPath !== undefined ? lookupKey(data, key.fallbackPath) : undefined)
         ?? inlineLocaleText(key.inlineLocales, locale)
         ?? (locale === defaultLocale ? (key.inline ?? inlineLocaleAny(key.inlineLocales)) : undefined);
       if (value !== undefined) {

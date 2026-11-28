@@ -128,7 +128,7 @@ const TEXT = {
 };
 const t = (key, opts) => TEXT[key] ?? (opts && opts.defaultValue) ?? key;
 const objectDef = { name: 'opportunity', label: 'Opportunity', pluralLabel: 'Opportunities', icon: 'briefcase', description: ${JSON.stringify(DESCRIPTION)} };
-const toolbarBar = { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 };
+const toolbarBar = { type: 'action:bar', location: 'list', actions: [], maxVisible: 3, mobileMaxVisible: 0 };
 const listFavorite = { isFavorite: false, toggle: () => {} };
 const VIEW_LABEL = ${JSON.stringify(VIEW_LABEL)};
 
@@ -140,7 +140,7 @@ function Header() {
     actions: { create: () => {} }, t, listActions: [], toolbarActionsWithDeepLink: [],
     identityImportEnabled: false, objectCanImport: true, importVisible: true, importDisabled: false,
     setShowImport: openImport, listFavorite, isEnvironmentList: false, toolbarBar,
-    viewAccess: { refusal: null },
+    viewAccess: { refusal: null }, createLabel: t('console.objectView.new'),
   });
   return h(ObjectViewPageHeader, {
     objectDef,

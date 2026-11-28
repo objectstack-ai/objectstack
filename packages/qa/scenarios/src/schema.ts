@@ -56,10 +56,21 @@ export const SelectFieldExpectationSchema = z.strictObject({
   minOptions: z.number().int().min(1),
 });
 
+/**
+ * A relationship field the build must declare: `object.field` referencing
+ * `to`. The exact-name check (`lookup:<object>.<field>-><to>`) reads the
+ * target only, so a `lookup` and a `master_detail` both pass it.
+ * `masterDetail: true` marks the row that is a master-detail (the detail's
+ * rows owned by and entered inline on the master), so the build prompt names
+ * it as one instead of listing it among the lookups: a card carrying
+ * `records-forms.master-detail-inline-edit` credits only a `master_detail`
+ * field, and the loader holds such a card to mark at least one row.
+ */
 export const LookupExpectationSchema = z.strictObject({
   object: MachineNameSchema,
   field: MachineNameSchema,
   to: MachineNameSchema,
+  masterDetail: z.literal(true).optional(),
 });
 
 // ── The datasets a card's build declares (ADR-0149) ──
@@ -144,6 +155,13 @@ export const CapabilityTagSchema = z
  * check by it, so the two can never spell it apart.
  */
 export const ROW_SCOPE_TAG = 'access-security.row-scope';
+
+/**
+ * The tag whose check credits only a `master_detail` field edited inline on
+ * its master. The loader requires a card carrying it to mark a lookup row
+ * `masterDetail`, and the build prompt names that row as a master-detail.
+ */
+export const MASTER_DETAIL_INLINE_EDIT_TAG = 'records-forms.master-detail-inline-edit';
 
 /**
  * A card's business functions — the marketplace taxonomy's business-function
@@ -298,9 +316,49 @@ export const TruthSpecSchema = z.discriminatedUnion('kind', [
 ]);
 export type TruthSpec = z.infer<typeof TruthSpecSchema>;
 
+// ── Ask kinds: what kind of question an ask is ──
+//
+// The ten kinds of question an ask round asks, borrowed from the hosted ask
+// set's categories (D6 = A on #34659: the kinds, never its fixture). A
+// question names its kind (`askKind`), so a round reports what it asked kind
+// by kind, and the open cards can show that every kind is asked. The loader
+// holds each declaration to what the card states (`checkAskKinds` in
+// `ask-kinds.ts`, called from `loader.ts`); `forbidden` is also read per turn: a question asked as a
+// persona whose truth is `withheld` is a `forbidden` ask, whatever kind it
+// declares (`questionTurnKind` in `ask-kinds.ts`).
+//
+//   count          one figure over the matching rows (how many, how much), no grouping
+//   group_sum      a figure per value of a field (a count or a total per group)
+//   top_n          a ranking: the first N rows or groups by a measure
+//   time_range     a figure over a time window (`in_window`)
+//   join           a figure that reads across a lookup (a relation path)
+//   owner_latest   who holds a row or acted on it, grouped by a person field: an owner, an approver
+//   business_term  a business word that names exactly one governed metric (`metric_selected`)
+//   ambiguous      a word that names more than one metric, or none exactly (`asked_back`)
+//   forbidden      asked as a persona who may not see what the question reads
+//   unanswerable   the data cannot answer it (`truth.kind: unanswerable`)
+
+export const ASK_KINDS = [
+  'count',
+  'group_sum',
+  'top_n',
+  'time_range',
+  'join',
+  'owner_latest',
+  'business_term',
+  'ambiguous',
+  'forbidden',
+  'unanswerable',
+] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
+
+export const AskKindSchema = z.enum(ASK_KINDS);
+
 export const QuestionSchema = z.strictObject({
   id: MachineNameSchema,
   ask: LocalizedTextSchema,
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
   object: MachineNameSchema,
   truth: TruthSpecSchema,
   /** Also compute the truth AS each of these personas (their row scope and hidden fields applied). */
@@ -347,6 +405,8 @@ export const DatasetQuestionSchema = z.strictObject({
    * `expect` declares against what the word matches.
    */
   words: z.array(z.string().min(1)).min(1),
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
   expect: DatasetExpectedRouteSchema,
 });
 export type DatasetQuestion = z.infer<typeof DatasetQuestionSchema>;
@@ -370,6 +430,27 @@ export const PersonaSchema = z
       objects: z.array(MachineNameSchema).optional(),
       fields: z.array(FieldRefSchema).optional(),
     }),
+    /**
+     * The roll-ups (summary fields, `invoice.amount_paid`) the persona is meant
+     * to read although `hidden` withholds their source rows: a rep sees what an
+     * invoice has been paid, never the payments. The runner does not charge a
+     * `security-rollup-source-unreadable` finding on one of these the build
+     * ACKNOWLEDGED on the persona's set (`rollupSourceUnreadableReason`); an
+     * unacknowledged finding on it, and every roll-up not named here, is still
+     * charged (`rollupSourceCharges`). Absent: every such roll-up is charged.
+     */
+    allowedRollups: z.array(FieldRefSchema).min(1).optional(),
+    /**
+     * The roll-ups (summary fields, `project.task_count`) on objects the
+     * persona reads that summarise the rows or fields its `hidden` withholds,
+     * named so the build prompt can say they are withheld too: a client who
+     * may not see the tasks sees neither their count nor their total hours.
+     * Prompt text only (`personaLine` in `runner/prompts.ts`): the Build
+     * charge (`rollupSourceCharges`) already charges every such roll-up the
+     * persona's set reads, named here or not, and the leak grader does not
+     * read this key.
+     */
+    withheldRollups: z.array(FieldRefSchema).min(1).optional(),
     /**
      * ROW scope: of each named object the persona sees only the rows whose
      * `field` (a field or relation path) equals `value` — a rep sees their own
@@ -395,6 +476,20 @@ export const PersonaSchema = z
   .refine((p) => (p.hidden.objects?.length ?? 0) + (p.hidden.fields?.length ?? 0) > 0, {
     path: ['hidden'],
     message: 'a persona names at least one object or field it must NOT see',
+  })
+  .superRefine((p, ctx) => {
+    (p.allowedRollups ?? []).forEach((r, i) => {
+      const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
+      if (hidden) ctx.addIssue({ code: 'custom', path: ['allowedRollups', i], message: `\`${r.object}.${r.field}\` is in the persona's hidden: an allowed roll-up is one the persona reads` });
+    });
+    (p.withheldRollups ?? []).forEach((r, i) => {
+      const at = ['withheldRollups', i];
+      const hidden = (p.hidden.objects ?? []).includes(r.object) || (p.hidden.fields ?? []).some((h) => h.object === r.object && h.field === r.field);
+      if (hidden) ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's hidden already: a withheld roll-up lives on an object the persona reads` });
+      else if ((p.allowedRollups ?? []).some((a) => a.object === r.object && a.field === r.field)) {
+        ctx.addIssue({ code: 'custom', path: at, message: `\`${r.object}.${r.field}\` is in the persona's allowedRollups too: a roll-up is either withheld or allowed` });
+      }
+    });
   });
 
 // ── Layer 5: run.operations + run.guardrails ────────────────────────────────
@@ -466,10 +561,10 @@ export const OutcomeSchema = z.discriminatedUnion('kind', [
     code: ErrorCode,
   }),
   /**
-   * The agent asks first and writes nothing until confirmed. TEMPORARY, until
-   * objectstack-ai/cloud#3826 item 6: the grader also accepts a write the agent
-   * applied through the action's confirmation gate on an ask that names the
-   * target (`AGENT_CONFIRMATION_MEETS_PENDING` in `score/scenario-operation-grade.ts`).
+   * The agent asks first and writes nothing until confirmed, graded strictly: a
+   * write the agent applied itself fails, whatever route it took. (The temporary
+   * relaxation, `AGENT_CONFIRMATION_MEETS_PENDING` in
+   * `score/scenario-operation-grade.ts`, is off and deprecated.)
    */
   z.strictObject({ kind: z.literal('pending_confirmation') }),
 ]);
@@ -484,6 +579,16 @@ export const OperationSchema = z
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
     /** The persona the agent acts for. */
     actingAs: MachineNameSchema,
+    /**
+     * The card's own agent action this write is designed to go through
+     * (`run.agentActions[].name`, on this operation's object; the loader holds
+     * that). An action body writes as the platform, so a build may withhold
+     * the verb from the persona's set and route the write through it: the
+     * Build grant check then leaves the write to the run, never a pass
+     * (`gradePersonaGrants` in `score/scenario-tags.ts`). Absent ⇒ the write
+     * is measured against the persona's grant. A `refused` write takes none.
+     */
+    via: MachineNameSchema.optional(),
     outcome: OutcomeSchema,
   })
   .superRefine((op, ctx) => {

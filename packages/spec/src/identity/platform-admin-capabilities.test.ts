@@ -31,6 +31,12 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
     expect(parsed.objects['*'].modifyAllRecords).toBe(true);
   });
 
+  it('[field-axis split, ruling 6912661484] the wildcard carries the read-only viewAllFields vote, and parses with it', () => {
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.objects!['*']!.viewAllFields).toBe(true);
+    const parsed = PermissionSetSchema.parse({ name: ADMIN_FULL_ACCESS, ...ADMIN_FULL_ACCESS_CAPABILITIES });
+    expect(parsed.objects['*'].viewAllFields).toBe(true);
+  });
+
   it('the wildcard grants NO export — export stays an opt-in axis, pinned at the declaration\'s new home', () => {
     // [#3544/#8681] export is an OPT-IN axis, deliberately absent from the
     // super-user wildcard (maintainer ruling 2026-08-15). Moving the
@@ -59,6 +65,17 @@ describe('ADMIN_FULL_ACCESS_CAPABILITIES — the one platform-admin list plugin-
     // `default-permission-sets.test.ts`.
     expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('manage_connector_connections');
     expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_connector_connections')?.scope).toBe('org');
+  });
+
+  it('carries the knowledge source capability, declared platform-scoped (ADR-0161 K4, ruling Q2 = B)', () => {
+    // Asked beside `manage_metadata` at every door that saves a
+    // `knowledge_source`. Platform administrators hold it by default through
+    // this grant and no other shipped set does: the holder list is pinned by
+    // the `[ADR-0161 K4] the knowledge source capability ships with the
+    // platform administrator and no other set` case in plugin-security's
+    // `default-permission-sets.test.ts`.
+    expect(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions).toContain('manage_knowledge_sources');
+    expect(PLATFORM_CAPABILITIES.find((c) => c.name === 'manage_knowledge_sources')?.scope).toBe('platform');
   });
 
   it('every granted system permission is a declared built-in capability (ADR-0066 registry)', () => {

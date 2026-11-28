@@ -56,8 +56,8 @@ import {
   smsTestActionHandler,
   storageTestActionHandler,
   aiTestActionHandler,
-  aiTestEmbedderActionHandler,
-  knowledgeTestActionHandler,
+  aiProviderTestActionHandlers,
+  registerAiModelRules,
 } from './manifests/index.js';
 import { settingsBuiltinTranslations } from './translations/index.js';
 
@@ -152,8 +152,9 @@ export interface SettingsServicePluginOptions {
    * Action handlers to register at boot, keyed by namespace and action
    * id. When omitted, the bundled handler of every `action_button` the
    * builtin manifests declare is registered (`mail.test`, `sms.test`,
-   * `storage.test`, `ai.test`, `ai.test_embedder`, `knowledge.test`;
-   * `reset` is served by the service for every namespace). Providing this
+   * `storage.test`, `ai.test`; `reset` is served by the service for every
+   * namespace). `ai.test_embedder` and `knowledge.test` arrive with the
+   * knowledge service, which contributes their buttons. Providing this
    * object replaces that whole default map. A plugin may still replace any
    * one handler later with `SettingsService.registerAction`.
    */
@@ -209,8 +210,11 @@ export class SettingsServicePlugin implements Plugin {
         mail: { test: mailTestActionHandler },
         sms: { test: smsTestActionHandler },
         storage: { test: storageTestActionHandler },
-        ai: { test: aiTestActionHandler, test_embedder: aiTestEmbedderActionHandler },
-        knowledge: { test: knowledgeTestActionHandler },
+        // `ai.test_embedder` and `knowledge.test` are not here: their buttons
+        // are contributed by `@objectstack/service-knowledge`, which registers
+        // both handlers with them. `registerAction` refuses a namespace that is
+        // not registered, so a default entry for `knowledge` would stop the boot.
+        ai: { test: aiTestActionHandler, ...aiProviderTestActionHandlers },
       },
     };
   }
@@ -255,6 +259,9 @@ export class SettingsServicePlugin implements Plugin {
         continue;
       }
       this.service.registerManifest(m);
+      // The `ai` model configuration's save rule: a default or structured-output
+      // model is one of the models of a provider that is on (`ai-models.ts`).
+      if (m.namespace === 'ai') registerAiModelRules(this.service, m);
     }
     for (const ns of Object.keys(this.opts.actionHandlers ?? {})) {
       // A held namespace's handlers register with its manifest, or not at all.

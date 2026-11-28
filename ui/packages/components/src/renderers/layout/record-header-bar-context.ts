@@ -30,6 +30,20 @@ export interface RecordHeaderBar {
   actionSlot: HTMLElement | null;
   /** The header took the bar (`true`) or gave it back (`false`). */
   claim(claimed: boolean): void;
+  /**
+   * The bar is a side preview's (objectstack#36149, objectstack#36201): the
+   * record's name comes first. The row draws at most ONE labelled action —
+   * the page's primary — and the host's buttons (Edit) go into the `⋯` with
+   * the rest, in their order; that one action folds into the `⋯` too while
+   * the name has less than 16 characters' room and is cut. No copy-id icon
+   * follows the name: a host that offers the copy does so in its `⋯`. The
+   * name's full text is its tooltip. A state's own levers (an approval's
+   * approve / reject) are drawn as the state draws them. A child list's tab
+   * under the bar draws one row per record (its title and one summary line),
+   * the phone's card rows, instead of a table. Absent: a page's bar, as
+   * before.
+   */
+  preview?: boolean;
 }
 
 export const RecordHeaderBarContext = React.createContext<RecordHeaderBar | null>(null);
@@ -79,6 +93,35 @@ export interface RecordHeaderState {
    * stage, for a reader who may. Absent: the tag as it is.
    */
   stage?: (parts: RecordHeaderStageParts) => React.ReactNode;
+  /**
+   * The name the header gives the record, where the host knows a better one
+   * than the object's declared title: a record that stands for another record
+   * (an approval request) is named by the record it stands for. Absent, or
+   * with an empty `text`: the title the header derives from the object's
+   * declaration, unchanged.
+   */
+  title?: RecordHeaderTitle;
+  /**
+   * The record scope arrangement the header draws (objectstack#36366), where
+   * the host holds it ahead of the object as served: the design mode's staged
+   * one. A header that places the object's actions itself (`placedActions:
+   * true`) reads it over the object's `actionLayout.record`. Absent: the
+   * object's own.
+   */
+  actionLayout?: { readonly pinned: readonly string[]; readonly more?: readonly string[] };
+}
+
+/**
+ * The host's name for the record (`RecordHeaderState.title`).
+ */
+export interface RecordHeaderTitle {
+  /** The name, as plain text: what the title says and what a reader copies. */
+  text: string;
+  /**
+   * Drawn inside the title's heading in place of `text`, such as a link to the
+   * record the name belongs to. Absent: `text`.
+   */
+  node?: React.ReactNode;
 }
 
 /**

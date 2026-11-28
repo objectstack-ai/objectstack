@@ -15,8 +15,8 @@
  *  - Automations: a published flow on this rail is refused with "Open"; one
  *    another package holds is refused without it; nothing is written either way.
  *  - Data: the same for objects (the namespace-prefixed identifier).
- *  - App: an app another package holds is refused (Create app is offered only
- *    to a package with no app, so there is nothing of its own to open).
+ *  - App: Studio's Create app went with the top bar (objectstack#37456, ADR-0084
+ *    amended 2026-11-26, silent item 5), so it has no case here.
  *  - A fresh identifier is created as before, with the pin.
  *
  * The REAL pillars and dialogs, over a client double that keeps published and
@@ -24,11 +24,15 @@
  * door does, and refuses the pin over a draft row.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 const OTHER_PKG = 'com.other.app';
@@ -117,12 +121,16 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { AutomationsPillar, DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -147,7 +155,6 @@ window.matchMedia = ((query: string) => ({
 
 const en = (key: string) => t(key, 'en');
 const save = mockClient.save as ReturnType<typeof vi.fn>;
-const getDraft = mockClient.getDraft as ReturnType<typeof vi.fn>;
 
 function publish(type: string, pkg: string, body: Record<string, unknown>) {
   door.published.set(`${type}/${String(body.name)}`, { pkg, body } satisfies Row);
@@ -171,7 +178,6 @@ const FLOW_ESCALATE = {
 };
 const OBJ_ACCOUNT = { name: 'acme_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
 const OBJ_TICKET = { name: 'acme_ticket', label: 'Ticket', fields: { subject: { type: 'text', label: 'Subject' } } };
-const APP_FIELD = { name: 'field_service', label: 'Field Service', active: true, navigation: [{ id: 'nav_x', type: 'object', objectName: 'other_x' }] };
 
 beforeEach(() => {
   door.published.clear();
@@ -192,25 +198,39 @@ afterEach(() => {
 /** Fill the create dialog's label (the identifier derives from it) and submit. */
 function submitCreate(dialog: HTMLElement, label: string) {
   fireEvent.change(dialog.querySelectorAll('input')[0], { target: { value: label } });
-  fireEvent.click(within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }));
+  // objectstack#36511 — a live editor's dialog says Create; an app's still says Save as draft.
+  fireEvent.click(
+    within(dialog).queryByRole('button', { name: en('engine.studio.createLive') }) ??
+      within(dialog).getByRole('button', { name: en('engine.studio.createDraft') }),
+  );
 }
 
+/**
+ * objectstack#36903 — a flow is created from the list's 「新建」
+ * (`MetadataListCreateDialog`): the Automations pillar's New went with its
+ * rail. A taken identifier is refused there, naming the flow that holds it;
+ * one this package holds is offered to open, at the flow's own address.
+ */
 describe('objectstack#26917 — Automations: New automation over a taken identifier', () => {
+  function Where() {
+    const { pathname } = useLocation();
+    return <output data-testid="where">{pathname}</output>;
+  }
   async function openNewAutomation() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <Where />
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The manual preset: the record ones hold Create until an object is named.
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-manual'));
     return dialog;
   }
 
-  it("a published flow on this package's rail: refused, nothing written, and Open opens it", async () => {
+  it('a published flow in this package: refused, nothing written, and Open opens it at its address', async () => {
     publish('flow', PKG, FLOW_ALPHA);
     publish('flow', PKG, FLOW_ESCALATE);
     const before = publishedBody('flow', 'escalate');
@@ -225,10 +245,9 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
     expect(door.drafts.size).toBe(0);
     expect(door.published.get('flow/escalate')!.body).toEqual(before);
 
-    expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(false);
     fireEvent.click(within(taken).getByTestId('flow-create-open-existing'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([, name]) => name === 'escalate')).toBe(true));
+    expect(screen.getByTestId('where')).toHaveTextContent(`/studio/${PKG}/metadata/flow/escalate`);
     expect(save).not.toHaveBeenCalled();
   });
 
@@ -267,14 +286,16 @@ describe('objectstack#26917 — Automations: New automation over a taken identif
   });
 });
 
+// objectstack#36904 — New object is the object list's create dialog; the
+// designer has no object list, so an identifier this package holds is refused
+// the same way as one another package holds.
 describe('objectstack#26917 — Data: New object over a taken identifier', () => {
   async function openNewObject() {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+      <MemoryRouter>
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={PKG} inPair={false} locale="en-US" onCreated={() => {}} />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: en('engine.studio.data.newObject') }, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     // The identifier is stored with the package's namespace prefix
     // (`prefixObjectName`): wait until the dialog previews it.
@@ -302,24 +323,6 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
     expect(door.published.get('object/acme_ticket')!.body).toEqual(before);
   });
 
-  it("an object on this package's rail: refused, nothing written, and Open opens it", async () => {
-    publish('object', PKG, OBJ_ACCOUNT);
-    publish('object', PKG, OBJ_TICKET);
-    const dialog = await openNewObject();
-    submitCreate(dialog, 'Ticket');
-
-    const taken = await within(dialog).findByTestId('object-create-taken');
-    expect(taken).toHaveTextContent(
-      tFormat('engine.studio.data.createTaken', 'en', { name: 'acme_ticket', label: 'Ticket' }),
-    );
-    expect(save).not.toHaveBeenCalled();
-
-    fireEvent.click(within(taken).getByTestId('object-create-open-existing'));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(getDraft.mock.calls.some(([type, name]) => type === 'object' && name === 'acme_ticket')).toBe(true));
-    expect(save).not.toHaveBeenCalled();
-  });
-
   it('a fresh identifier is created as before, under the first-write pin', async () => {
     publish('object', PKG, OBJ_ACCOUNT);
     const dialog = await openNewObject();
@@ -335,64 +338,17 @@ describe('objectstack#26917 — Data: New object over a taken identifier', () =>
   });
 });
 
-describe('objectstack#26917 — Create app over a taken identifier', () => {
-  async function openCreateApp() {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const toolbar = await screen.findByTestId('studio-shell-header', undefined, { timeout: 8000 });
-    await waitFor(() => expect(within(toolbar).getByRole('button', { name: en('engine.studio.app.create') })).toBeInTheDocument());
-    fireEvent.click(within(toolbar).getByRole('button', { name: en('engine.studio.app.create') }));
-    return await screen.findByRole('dialog');
-  }
-
-  it('a published app another package holds: refused, nothing written', async () => {
-    publish('app', OTHER_PKG, APP_FIELD);
-    const before = publishedBody('app', 'field_service');
-    const dialog = await openCreateApp();
-    submitCreate(dialog, 'Field Service');
-
-    const taken = await within(dialog).findByTestId('app-create-taken');
-    expect(taken).toHaveTextContent(
-      tFormat('engine.studio.app.createTaken', 'en', { name: 'field_service', label: 'Field Service' }),
-    );
-    expect(within(taken).queryByTestId('app-create-open-existing')).toBeNull();
-    expect(save).not.toHaveBeenCalled();
-    expect(door.drafts.size).toBe(0);
-    expect(door.published.get('app/field_service')!.body).toEqual(before);
-  });
-
-  it('a fresh identifier is created as before, under the first-write pin', async () => {
-    publish('app', OTHER_PKG, APP_FIELD);
-    const dialog = await openCreateApp();
-    submitCreate(dialog, 'Dispatch');
-
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    const [type, name, , opts] = save.mock.calls[0]!;
-    expect([type, name, opts]).toEqual([
-      'app',
-      'dispatch',
-      { mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' },
-    ]);
-  });
-});
-
 describe('objectstack#30038 — Automations: New automation never saves a typed prefix as the trigger object', () => {
   async function openRecordPreset() {
     publish('flow', PKG, FLOW_ALPHA);
     publish('object', PKG, OBJ_ACCOUNT);
     publish('object', PKG, OBJ_TICKET);
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
-    await screen.findByTestId('auto-rail-row-alpha_intake', undefined, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(en('engine.studio.auto.newTitle')));
+    fireEvent.click(await screen.findByTitle(en('engine.studio.auto.newTitle'), undefined, { timeout: 8000 }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByTestId('create-flow-preset-record_updated'));
     const picker = within(dialog).getByRole('combobox');

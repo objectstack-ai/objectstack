@@ -51,6 +51,10 @@
  * reader can consume — both index `[0]` and use it as a field NAME).
  */
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
@@ -178,11 +182,15 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
     // `calls[0][0]` unreachable rather than merely unasserted.
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       void input;
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ fields: [{ name: 'amount', label: 'Amount' }] }),
-      } as unknown as Response;
+      // The served object read: the item envelope around the object document.
+      return new Response(
+        JSON.stringify({
+          type: 'object',
+          name: 'showcase_opportunity',
+          item: { name: 'showcase_opportunity', fields: { amount: { type: 'currency', label: 'Amount' } } },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -193,7 +201,7 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual([
-      '/api/v1/objects/showcase_opportunity/fields',
+      '/api/v1/meta/object/showcase_opportunity?preview=draft',
     ]);
   });
 

@@ -57,6 +57,7 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { resolveHostAppSegment, resolveNotificationTarget } from '../utils/appRoute.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
+import { inboxPagePath } from '../views/inbox/inboxPageModel.js';
 import type { SharedFeedStatus } from './sharedUserFeeds.js';
 import { claimInboxArrivals, digestArrivals } from './inboxArrivals.js';
 import { showDesktopNotification } from './desktopNotifications.js';
@@ -114,7 +115,7 @@ export function useInboxArrivalNotifier({
    * Open one message: mark it read and go where it points.
    *
    * Same reading as the bell's own row click — `resolveNotificationTarget`, and
-   * the full inbox page when a row carries no link (a real state: the producer
+   * the inbox page (objectstack#36741) when a row carries no link (a real state: the producer
    * leaves `action_url` undefined when an emit has neither a `payload.url` nor
    * a `source`). Written once here and shared by the toast's action button and
    * the system notification's click, so the two cannot answer differently.
@@ -124,7 +125,7 @@ export function useInboxArrivalNotifier({
     void mark(row.id);
     const target = resolveNotificationTarget(row.action_url, segment);
     if (!target) {
-      go(`/apps/${segment}/sys_inbox_message?view=mine`);
+      go(inboxPagePath(segment));
       return;
     }
     if (target.kind === 'external') {

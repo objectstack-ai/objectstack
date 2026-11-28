@@ -29,7 +29,7 @@ import {
   AlertTriangle,
   RefreshCw,
 } from 'lucide-react';
-import type { FeedItem, FeedItemType, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
+import type { FeedItem, FeedItemType, FieldChangeEntry, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
 import type { FeedFilterMode } from '@objectstack/spec/data';
 import { ReactionPicker } from './ReactionPicker';
 import { ThreadedReplies } from './ThreadedReplies';
@@ -38,8 +38,11 @@ import { RichTextCommentInput } from './RichTextCommentInput';
 import { CommentAttachment, type Attachment } from './CommentAttachment';
 import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
+import { useRecordContext } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
+import { CommentAuthorAvatar } from './CommentAuthorAvatar';
+import { FieldChangeItem } from './FieldChangeItem';
+import { useFieldChangeWording } from './fieldChangeText';
 import {
   foldFeedItems,
   readerRecordNameOf,
@@ -164,7 +167,7 @@ export interface RecordActivityTimelineProps {
   onRetryFeed?: () => void;
   /**
    * objectstack#27055, Target 3 — `stream` is the record page's 动态 stream
-   * in full (the 动态 tab): the filter chips 全部 / 活动 / 讨论 / 变更 on the
+   * in full (the 动态 tab): the filter chips 全部 / 事件 / 讨论 / 变更 on the
    * title row instead of the dropdown, system entries (field changes, system
    * events) as one compact muted line each, and paging at the foot.
    * objectstack#27524, Target 5 — `peek` is the body of the 动态 panel, the
@@ -191,11 +194,11 @@ export interface RecordActivityTimelineProps {
   className?: string;
 }
 
-/** The stream chips' copy (objectstack#27055): 全部 / 活动 / 讨论 / 变更. */
-/** A comment's icon cell: the row's 14 px icon, centred on its first line. */
-const STREAM_ICON_CELL = 'shrink-0 flex h-[30px] w-3.5 items-center justify-center text-muted-foreground';
+/** The stream chips' copy (objectstack#27055): 全部 / 事件 / 讨论 / 变更. */
+/** A comment's avatar cell: the author's 20 px avatar, centred on its first line. */
+const COMMENT_AVATAR_CELL = 'shrink-0 flex h-[30px] w-5 items-center justify-center';
 /** A comment's header line: who, then when, 30 px tall, wrapping between pieces. */
-const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-[13px]';
+const STREAM_COMMENT_HEADER = 'flex min-h-[30px] flex-wrap items-center gap-x-2 text-sm';
 /**
  * A comment's actions, drawn on hover or keyboard focus within its row, and
  * always on a touch screen, which has no hover.
@@ -205,7 +208,7 @@ const ROW_ACTIONS_REVEAL =
 
 const STREAM_FILTER_KEYS: Record<TimelineStreamFilter, { key: string; fallback: string }> = {
   all: { key: 'detail.streamAll', fallback: 'All' },
-  activity: { key: 'detail.streamActivity', fallback: 'Activity' },
+  activity: { key: 'detail.streamActivity', fallback: 'Events' },
   discussion: { key: 'detail.streamDiscussion', fallback: 'Discussion' },
   changes: { key: 'detail.streamChanges', fallback: 'Changes' },
 };
@@ -293,6 +296,25 @@ function streamChangedFieldsOf(item: FeedItem): string[] {
   if (item.changedFields && item.changedFields.length > 0) return item.changedFields;
   const changes = fieldHistoryOf(item)?.fieldChanges ?? item.fieldChanges ?? [];
   return changes.map((change) => change.field);
+}
+
+/**
+ * The changed fields an entry draws one line each for, under its row
+ * (objectstack#36290): its own changes (an activity row's served change code,
+ * or an audit entry's), else those of the audit entry paired onto it. `null`
+ * for an entry with none, and for the record's creation, which stays one row
+ * with its values beside the summary. Only what the server served is here:
+ * a field the reader may not read has no change in the list, so it draws no
+ * line.
+ */
+export function fieldChangeLinesOf(item: FeedItem): readonly FieldChangeEntry[] | null {
+  if (isRecordCreationEntry(item)) return null;
+  if (item.fieldChanges && item.fieldChanges.length > 0) return item.fieldChanges;
+  const paired = fieldHistoryOf(item);
+  if (paired && !isRecordCreationEntry(paired) && paired.fieldChanges && paired.fieldChanges.length > 0) {
+    return paired.fieldChanges;
+  }
+  return null;
 }
 
 /**
@@ -631,19 +653,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     });
   }, []);
 
-  // A changed field's label: the object's field label where the page has the
-  // object schema (`RecordContextProvider`), through the same translated
-  // `fieldLabel` the record's own sections use; the machine name otherwise.
-  const { fieldLabel } = useSafeFieldLabel();
-  const labelOfField = React.useCallback(
-    (name: string): string => {
-      const objectName = recordContext?.objectName;
-      const def = (recordContext?.objectSchema as { fields?: Record<string, { label?: unknown }> } | undefined)
-        ?.fields?.[name];
-      const authored = typeof def?.label === 'string' && def.label ? def.label : name;
-      return objectName ? fieldLabel(objectName, name, authored) : authored;
-    },
-    [recordContext?.objectName, recordContext?.objectSchema, fieldLabel],
+  // A changed field's label and each side of it as this reader reads it, from
+  // the object schema the page has (`RecordContextProvider`); the machine name
+  // and the served text otherwise. One wording with a field's change-history
+  // card (`useFieldChangeWording`).
+  const { labelOfField, changeSideText } = useFieldChangeWording(
+    recordContext?.objectName,
+    recordContext?.objectSchema,
   );
 
   const handleFilterChange = React.useCallback(
@@ -714,13 +730,14 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // same function when expanded (objectstack#25959).
   // objectstack#27055 — a system entry of the stream: ONE muted line, the
   // change itself, then who and when. 「状态 新建 → 已联系 · Dev Admin · 昨天」.
+  // Each change reads as its line under a row does (objectstack#36290): the
+  // same label, the same sides, the same word for empty.
   const changesText = (item: FeedItem): string =>
     (item.fieldChanges ?? [])
       .map((change) => {
-        const label = change.fieldLabel || labelOfField(change.field);
-        const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
-        const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
-        return `${label} ${from || '—'} → ${to || '—'}`;
+        const label = t('detail.fieldChangeLabel', { field: change.fieldLabel || labelOfField(change.field) });
+        const empty = t('detail.fieldChangeEmpty');
+        return `${label} ${changeSideText(change, 'old') ?? empty} → ${changeSideText(change, 'new') ?? empty}`;
       })
       .join('; ');
   // An activity row paired with its audit entry (objectstack#30122) reads as
@@ -748,15 +765,15 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     whatTitle: string,
     extra?: React.ReactNode,
     rowProps?: Record<string, string>,
+    below?: React.ReactNode,
   ): React.ReactNode => {
     const when = formatTimestamp(item.createdAt, t, displayLocale);
-    return (
+    const line = (
       <div
         key={item.id}
-        className="flex min-h-[30px] items-center gap-2 text-[13px] leading-[18px]"
+        className="flex min-h-[30px] items-center gap-2 text-sm leading-[18px]"
         title={`${item.actor} · ${whatTitle} · ${when}`}
-        data-stream-row=""
-        {...rowProps}
+        {...(below ? { 'data-stream-line': '' } : { 'data-stream-row': '', ...rowProps })}
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="max-w-[40%] shrink-0 truncate font-medium text-foreground" data-stream-actor="">
@@ -774,9 +791,62 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         </span>
       </div>
     );
+    if (!below) return line;
+    // The row is its line and what sits under it: the row's markers go on the
+    // whole, so a reader of the row reads both.
+    return (
+      <div key={item.id} data-stream-row="" {...rowProps}>
+        {line}
+        {below}
+      </div>
+    );
   };
+  // One line per changed field under the entry's row (objectstack#36290):
+  // `Label: old → new`, an empty side as the pack's word for empty, each side
+  // cut to the line with a control that shows it in full. Indented to the
+  // row's text, past its icon.
+  const renderFieldChangeLines = (changes: readonly FieldChangeEntry[]): React.ReactNode => (
+    <ul className="flex flex-col gap-0.5 pb-1 pl-[22px]" data-stream-field-changes="">
+      {changes.map((change, index) => (
+        <li key={`${change.field}:${index}`} className="min-w-0" data-stream-field-change="">
+          <FieldChangeItem
+            change={change}
+            label={t('detail.fieldChangeLabel', { field: change.fieldLabel || labelOfField(change.field) })}
+            oldText={changeSideText(change, 'old')}
+            newText={changeSideText(change, 'new')}
+            emptyLabel={t('detail.fieldChangeEmpty')}
+            expandLabel={t('detail.fieldChangeExpand')}
+            collapseLabel={t('detail.fieldChangeCollapse')}
+          />
+        </li>
+      ))}
+    </ul>
+  );
   const renderSystemLine = (item: FeedItem): React.ReactNode => {
     const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    const lines = fieldChangeLinesOf(item);
+    if (lines) {
+      // The values are the lines under the row. An entry whose own changes
+      // they are names the fields it changed (its stored summary would say the
+      // lines again); an activity row carrying its paired audit entry keeps its
+      // own summary.
+      const what = lines === item.fieldChanges
+        ? t('detail.foldedUpdates', {
+            fields: Array.from(new Set(lines.map((change) => change.fieldLabel || labelOfField(change.field)))).join(
+              t('validation.formInvalidJoiner'),
+            ),
+          })
+        : systemLineText(item);
+      return streamRow(
+        item,
+        Icon,
+        <span className="text-foreground/80" data-stream-change="">{what}</span>,
+        what,
+        undefined,
+        { 'data-stream-system-row': '' },
+        renderFieldChangeLines(lines),
+      );
+    }
     const what = systemLineText(item);
     const paired = fieldHistoryOf(item);
     const diff = paired ? changesText(paired) : '';
@@ -859,27 +929,24 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         ? (emoji: string) => onToggleReaction(item.id, emoji)
         : undefined;
 
-    // A comment is the row with what they wrote under it: a small icon, who
+    // A comment is the row with what they wrote under it: the author avatar, who
     // and when on one 30 px line, the comment, and the row's actions (react,
     // reply, the author's edit and delete) revealed on hover or focus.
     return (
       <div key={item.id} className="group" data-stream-comment-row="">
         <div className="relative flex gap-2">
-          {/* Icon */}
-          <div className={STREAM_ICON_CELL}>
-            {item.actorAvatarUrl ? (
-              <img src={item.actorAvatarUrl} alt={item.actor} className="h-4 w-4 rounded-full object-cover" />
-            ) : (
-              <Icon className="h-3.5 w-3.5" />
-            )}
+          {/* The author's 20 px avatar, or their initials (objectstack#36070),
+              centred on the 30 px header line. */}
+          <div className={COMMENT_AVATAR_CELL}>
+            <CommentAuthorAvatar name={item.actor} avatarUrl={item.actorAvatarUrl} />
           </div>
           {/* Content: 13 px on a 20 px line, so the comment is one line under the row */}
-          <div className="flex-1 min-w-0 text-[13px] leading-5">
+          <div className="flex-1 min-w-0 text-sm leading-5">
             {/* The row wraps between its pieces and the time is one
                 unbreakable piece (objectstack#34614): in a narrow drawer the
                 time moves to the next line instead of breaking per word. */}
             <div className={STREAM_COMMENT_HEADER}>
-              <span className="text-[13px] font-medium">{item.actor}</span>
+              <span className="text-sm font-medium">{item.actor}</span>
               {item.source && (
                 <span className="text-xs text-muted-foreground">
                   {t('detail.via', { source: item.source })}
@@ -930,7 +997,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               item={item}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
-              bodyClassName="inline text-[13px] leading-5 whitespace-pre-wrap break-words text-foreground"
+              bodyClassName="inline text-sm leading-5 whitespace-pre-wrap break-words text-foreground"
               controlsClassName={cn('ml-1 inline-flex h-5 items-center gap-0.5 align-top [&_button]:h-5 [&_button]:w-5', ROW_ACTIONS_REVEAL)}
             />
 
@@ -962,6 +1029,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             replies={replies}
             onAddReply={onAddReply}
             showReplyInput={replyOpen}
+            focusReplyOnOpen
             onEditComment={onEditComment}
             onDeleteComment={onDeleteComment}
           />
@@ -1065,7 +1133,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     ) : (
       <button
         type="button"
-        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => setComposerOpen(true)}
         data-record-timeline-composer=""
       >
@@ -1129,17 +1197,17 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       return (
         <div
           key={item.id}
-          className="flex h-8 items-center gap-2 border-t border-border px-3 text-[12.5px]"
+          className="flex h-8 items-center gap-2 border-t border-border px-3 text-sm"
           title={`${what} · ${item.actor} · ${when}`}
           data-record-timeline-peek-row=""
         >
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">{what}</span>
           {/* Every row says who (objectstack#30122). */}
-          <span className="max-w-[40%] shrink-0 truncate text-[11.5px] text-muted-foreground" data-record-timeline-peek-actor="">
+          <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground" data-record-timeline-peek-actor="">
             {item.actor}
           </span>
-          <span className="shrink-0 text-[11.5px] text-muted-foreground tabular-nums">{when}</span>
+          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{when}</span>
         </div>
       );
     };
@@ -1173,7 +1241,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         {onViewAll && total > rootItems.length && (
           <button
             type="button"
-            className="flex h-8 w-full items-center border-t border-border px-3 text-left text-[12.5px] text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex h-8 w-full items-center border-t border-border px-3 text-left text-sm text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             onClick={onViewAll}
             data-record-timeline-view-all=""
           >
@@ -1216,7 +1284,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         {/* Wraps: in a 320 px foot card the stream's chips go under the title
             rather than past the card's edge (objectstack#27055). */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="flex items-center gap-2 text-sm font-semibold leading-none tracking-tight">
+          <h2 className="flex items-center gap-2 text-sm font-medium leading-none tracking-tight">
             <Activity className="h-4 w-4" />
             {title}
             {/* A refused read leaves the count unknown, not zero: the rows
@@ -1229,7 +1297,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             )}
           </h2>
           <div className="flex items-center gap-1">
-            {isStream && (
+            {isStream && streamFilters.length > 0 && (
               <div
                 role="group"
                 aria-label={t('detail.filterActivity')}

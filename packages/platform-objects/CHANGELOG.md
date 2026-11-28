@@ -1,5 +1,1261 @@
 # @objectstack/platform-objects
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 0b539b6: feat(app-shell): 「Who sees this view」 — pick a shared view's or a dashboard's audience from the known capabilities, and see which positions will see it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audience gate is the existing, server-enforced `requiredPermissions` (all of the capabilities listed are required). The console now sets it from a closed list and shows who it reaches; no key, value or gate changes, and nothing is granted from the view (granting stays in Setup).
+  
+  - **`@object-ui/app-shell`.** The view switcher's in-place create card offers 「Who sees this view」 for a shared view: the capabilities the environment knows (declared, or granted by a permission set), each with the permission sets granting it, and a read-only preview of the positions whose permission sets grant every capability picked. The preview reads each position's sets from the server (`GET /meta/position?include=grants`, the sets the resolver grants its holders), never from a position's raw definition; a list served without them leaves the positions unknown. While a gate is picked, the card says it applies to its creator too. It starts from the open view's gate, which a new shared view used to inherit silently, and the pick replaces it; an empty pick writes no gate. A failed catalog read offers nothing to type. The shared hint no longer says every shared view is seen by everyone who can see the list. In Studio, the view panel's and the dashboard settings' audience row is the new `ref-multi:capability` picker: a closed list (no typed-name box when the catalog is unread, empty or failed), each option with its granting sets, and the same preview under it. The picker reads the catalog once its row is on screen, so an editor whose audience section stays closed sends no request.
+  - **`@objectstack/spec`.** The view and dashboard forms' `requiredPermissions` rows declare `widget: 'ref-multi:capability'` (the list is closed: a host with no catalog offers nothing to add). The view hint's last sentence now says only what holds on every carrier: the person setting the gate no longer sees the view in the list either.
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the narrowed view hint (zh-CN, ja-JP and es-ES translated; the other locales the English source).
+  - **`@object-ui/i18n`.** The create card's new strings and the corrected shared hint, in all eleven console locales.
+  
+  Nothing to migrate.
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- ddd5941: feat(ai): a skill names the context pack it works from (`context`), and its MCP prompt takes a record id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  ADR-0160 D8. A skill can now name a context pack (`ai_context`) by its bare name:
+  
+  ```ts
+  defineSkill({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer the question about this policy, citing its sections.',
+    tools: ['get_record_context'],
+    context: 'policy_document',
+  });
+  ```
+  
+  - **`@objectstack/spec`.** `SkillSchema.context?: string` (snake_case, the pack's machine name; a face such as `NS-NAME` is refused). A skill that declares it must bind `get_record_context` in `tools`, by name or by a wildcard that matches it (`get_record*`, `get_*`); without the binding it is refused at parse, located on `tools`. `skillBindsRecordContextTool(tools)` answers that binding. The skill form gains a `context` control.
+  - **`@objectstack/mcp`.** When a skill's `context` resolves to a pack, its prompt lists one optional argument, `recordId`. The name resolves by ADR-0150 D3 from the skill's own package (its own pack, else the one holder in its dependency closure), or as for a caller with no package for an environment skill; a name that resolves to no pack adds no argument. Given a record id, the prompt's one message is the skill's instructions, one fixed line telling the model to call `get_record_context` with the arguments that follow, and those arguments as one JSON object: `objectName` (the pack's root), `recordId`, and `context` (the pack's face). The record id only ever appears as that JSON string value, and the pack is never inlined. Without the argument the prompt is byte-identical to the same skill's prompt without `context`. A blank record id is refused (`-32602`). Both the per-request HTTP prompt surface and the long-lived stdio server serve it; the stdio server, which applies no tool-binding filter, offers the argument only where it registers `get_record_context` (its data tools are now bridged before its prompts). `McpSkillBridge` gains two optional members, `listContextPacks` and `packageResolutionClosure`; `MCPServerRuntime.bridgePrompts` takes the closure as an optional fourth argument.
+  - **`@objectstack/lint`.** Two warnings where skills are validated (`os validate`): `ai-skill-context-unknown`, for a `context` that names no pack the stack's own `aiContexts` define (a pack a dependency package ships resolves at run time and is not read here), and `ai-skill-context-omitted`, for a skill that binds `get_record_context` without `context` while an object has more than one pack (its call there without a pack name is refused).
+  - **`@objectstack/runtime`.** The `/mcp` route's bridge hands the skill prompt surface the same pack listing `get_record_context` selects from, and the skill's package closure.
+  - **`@objectstack/platform-objects`.** The generated metadata-form translation bundles carry the skill form's new `context` control (label and help text, translated in every shipped locale).
+- c3da753: feat(ui): the field hand lock (`uiReadonly` / `uiReadonlyWhen`) holds on the Gantt, the timesheet cell, the calendar quick-create and the palette prefill
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A field a person may not edit by hand (`uiReadonly: true`, or `uiReadonlyWhen` true over the record) now stays locked on the console surfaces that still wrote it:
+  
+  - **Gantt.** A bar's drag and edge resize, the progress handle, the title and dates edited in place, the auto-schedule and the conflict reschedule, undo and redo, and a drawn dependency link all read the one verdict of `@object-ui/core` (`fieldReadOnlyByHand`) over the stored record, with the shell's predicate scope. A write that would change a locked field is refused: nothing is sent, the bar goes back and a toast gives the read-only reason. A locked field the write only echoes back (an in-place title edit carries the dates and progress too) is dropped from the write, so the rest still saves. A field locked on every record also closes the gesture before it starts: a move closes when either date is locked, a resize only when both are (the locked edge is refused on the write), and the progress handle and the link tool close with their own field.
+  - **Timesheet.** A cell whose record's value field is locked by hand is drawn read-only, so it cannot be edited or cleared. A row, date or value field locked on every record closes the create, so the empty cells and **Add row** are not offered.
+  - **Calendar quick-create.** A click on an empty day or a range drag no longer writes a field locked by hand on every record. Where the title or a date field the dialog writes is locked, the gesture opens the full create form instead (a locked date field is not prefilled there). A required locked field is left out of the dialog's write so the server applies its `defaultValue`; one with no default sends the gesture to the full form too.
+  - **Command palette.** The create-as prefill skips a field that is `uiReadonly`, as it already skipped a `readonly` one; a create is judged by the static half only, as the create dialog judges it.
+  - **List view.** A kanban board whose block names no `groupByField` takes the object's lifecycle field as its lanes; the operands of that field's lock predicates are now read with the rows too, so a card drag is judged over the whole record.
+  
+  A kanban drag on the swimlane layout writes only the lane (column) field, never the swimlane field; that is now pinned.
+  
+  Not yet covered: the in-app assistant acting for a person. Its writes run in the AI service, which does not read the hand lock, and the field descriptions now say so. Every other console surface a person edits through honours the hand lock, and the `uiReadonly` / `uiReadonlyWhen` descriptions and the MCP `describe_object` guidance say that. Writes through the API, import, actions and flows are unchanged: only the server lock (`readonly` / `readonlyWhen`) binds them.
+- 1dbf19a: feat(spec): an agent's `planning.maxIterations` accepts up to 1000
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - `AgentSchema.planning.maxIterations` now accepts any whole number from 1 to 1000 (it stopped at 100). An agent can declare a fuse of a few hundred rounds, such as 300; 0 and anything above 1000 are still refused at `planning.maxIterations`. The default stays 10.
+  - The value is a runaway fuse counted in model calls, one model call plus the batch of tool calls it requests. It stops a loop that would otherwise never end; it is not a quality knob, and raising it does not make the agent reason better. The docblock, the `.describe()` text and the Studio form help text say so, and the help text's translations in `@objectstack/platform-objects` (all eleven locales) now state 1–1000 instead of 1–100.
+  - Nothing to migrate: every value accepted before is accepted now.
+
+### Patch Changes
+
+- bb76b8c: feat(spec): the view and dashboard authoring forms offer the audience gate, `requiredPermissions`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A list view's and a dashboard's `requiredPermissions` (the capabilities a caller must all hold to be served the item) has been enforced by the server's `/meta` read gate since it landed, but no authoring form offered it, so only a source file could set it. Both forms now carry the row; no key, value or gate changes.
+  
+  - **`@objectstack/spec`.** `viewForm`'s "Navigation & sharing" section gains a `requiredPermissions` row (tags), and `dashboardForm` a new "Access" section holding the same row. The hint states the gate's rules in an administrator's words: every capability listed is required, an empty list is no gate, one capability granted to several permission sets is how to serve several groups, a position passes on what its permission sets grant, and the gate applies to the person setting it too (a capability they do not hold, or a misspelt one, locks them out of the item as well).
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the new rows; zh-CN (「所需权限」), ja-JP (「必要な権限」) and es-ES ("Permisos requeridos") carry translated labels and hints; the other seven locales fall back to the English source until translated.
+  - **`@object-ui/app-shell`.** The console's zh-CN overlay for the two forms carries the same rows, so Studio's view inspector and the dashboard settings panel show them in Chinese.
+  
+  Nothing to migrate.
+- dedc16c: feat(spec): a Studio metadata form's select choices are translatable — `metadataForms.<type>.fields.<path>.options.<value>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **Translation slot.** A `metadataForms.<type>.fields.<path>` entry accepts `options`, a map from option `value` to its translated name — the shape `objects.<object>.fields.<field>.options` already uses. `choices` and `values` are refused there, as on the object-field face, and the refusal names `options` as the key to write.
+  - **Served forms.** `resolveMetadataFormLabels` (what `/api/v1/meta/types` localizes forms with) now overlays each option's `label` with the translation keyed by its `value`; an option with no translation keeps its own label. Before this, a select on a Studio metadata form (sharing model, ownership, field type, delete behaviour, default period, …) showed English choice names in every locale while the label and help text around it were translated.
+  - **Extraction.** `os i18n extract` and `pnpm check:i18n` emit the new `options.<value>` keys for every form row that lists `options`.
+  - **Shipped locales.** The ten translated metadata-forms packs of `@objectstack/platform-objects` name all 185 choices (38 select rows across nine forms). The Default Period choices reuse the wording of the console's period chip.
+- adb65d1: refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that its factory is `defineForm` (question 1, option A). The helper that held the name builds something else: a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`). It is renamed after the translation family its forms feed (`metadataForms`), with the same argument and the same result, and its 18 modules under `packages/spec/src` are renamed with it. `defineForm` is absent from `@objectstack/spec` until the `form` type lands with it, in the same major; it never has two meanings. Nothing a metadata author writes changes: no stack, no stored row and no spec key names the helper, which is why the protocol line is `none`.
+  
+  <!-- adr-0087: registered define-form-studio-helper-renamed-define-metadata-form -->
+  
+  **BREAKING** (a published export is renamed), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - **FROM:** `import { defineForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineForm({ schemaId, … })` in a `NAME.form.ts` module.
+  - **TO:** `import { defineMetadataForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineMetadataForm({ schemaId, … })` in a `NAME.metadata-form.ts` module.
+  - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
+  - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
+  - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+  - `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+- 68aa1be: feat(setup): the environment directory (positions, capabilities, permission sets, sharing rules) moves from Studio's menu to Setup → Access control
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio develops one package, and Setup holds what is global (ADR-0084, amended 2026-11-26). The cross-package directory of the environment's access metadata (positions, capabilities, permission sets and sharing rules) is now a Setup page: **Setup → Access control → Positions and Permissions** (`/apps/setup/component/security/access-directory`).
+  
+  - The page shows the same directory and the same per-type lists as before, with the activation switches, Clone and New. Opening an item, creating one, or opening its history still happens in Studio, on the same editor as before.
+  - Studio's left menu no longer has the "Positions and permissions" entry under Access. On the organization-flows scope (`~org`), the menu's access rows open their lists on the Setup page for a user who can open Setup (`setup.access`); for one who cannot, they open the same lists in Studio as before.
+  - Old links keep working and, for a user who can open Setup, land on the Setup page in one hop: `/studio/~all/metadata`, a directory type's list (`/studio/~all/metadata/permission?scope=environment`), a bare `/studio/~all/…` address, and the old Setup metadata URLs that led there. Item links under `/studio/~all/metadata/TYPE/NAME` are unchanged. A user who cannot open Setup keeps these addresses in Studio.
+  - Visibility does not widen. The Setup entry and the page both require `studio.access`, the capability that admitted a user to the directory in Studio, in addition to Setup's own `setup.access`.
+  - A user who can enter Studio but cannot open Setup → Packages, and has no recent package, now lands on Studio's organization-flows scope (`/studio/~org`) instead of the old directory. This is temporary: the scope retires when the door that moves loose items into a package ships, and the landing is decided again then.
+  - One new Setup menu label, "Positions and Permissions", in every Setup locale, and one new message for a user without `studio.access`.
+- d92684a: feat(studio): the Studio app is named 应用搭建 in a Chinese interface and App Studio in every other
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Display text only (ADR-0084, the position amendment): the Studio app's label is now "App Studio" (`STUDIO_APP.label`), its `zh-CN` translation 应用搭建 and its `zh-Hant` translation 應用搭建; every other locale pack, which kept the English product name, now reads "App Studio". Each pack's recorded source hash for the label moves with it, so the translations are served rather than replaced by the English source. In the console:
+  
+  - The Studio brand reads `engine.studio.mark` (Studio catalogue, en and zh): App Studio, and 应用搭建 in Chinese.
+  - `console.studio.title`, the AppHeader `studio` crumb, follows in all eleven UI packs.
+  - The five doors into Studio follow in all eleven UI packs: `topbar.viewInStudio`, `topbar.designInStudio`, `topbar.openAppInStudio`, `layout.appSwitcher.editAppInStudio` and `layout.appSwitcher.openAppInStudio`. The Chinese packs read 在应用搭建中… (zh-Hant 在應用搭建中…), and the others read App Studio inside the same sentence.
+  
+  Unchanged: the app's name `studio`, the `/studio` address, permission names such as `studio.access`, and every package and API name. Sentences that mention Studio elsewhere in the UI are not reworded by this change.
+- f07d63a: feat(spec)!: retire an agent's `model.provider` — no runtime read it; the deployment's AI settings choose the provider
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37796
+  
+  <!-- adr-0087: registered agent-model-provider-removed, agent-model-provider-retired -->
+  
+  **BREAKING** key removal on `AIModelConfigSchema` (`@objectstack/spec/ai`), an agent's `model` block. The key declared which provider served the agent, from an enum of `openai`, `azure_openai`, `anthropic` and `local`, and no runtime ever read it: the AI runtime that executes agents applies the model name, `temperature` and `maxTokens` from the block and nothing else, so an agent that declared `anthropic` ran on whatever provider the deployment served. The providers a deployment can turn on are its own AI settings, a list the enum neither matched nor could follow.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `model: { provider: 'anthropic', model: 'claude-sonnet-4' }` | `model: { model: 'claude-sonnet-4' }` — the deployment resolves the name among the providers it has turned on |
+  
+  The one-line fix: delete `provider` from every agent's `model` block; `os migrate meta --from 18 --write` deletes it from agent sources. Writing it after upgrade fails `tsc` (the input type is `never`) and fails the parse with that prescription. `provider: 'openai'`, the default every released 18.x toolchain wrote into a parsed agent's `model` block, is accepted as inert residue and stripped, so agents built and stored by 18.x keep loading. The model name, `temperature`, `maxTokens` and `topP` are unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `provider` is a `retiredKey()` tombstone on `AIModelConfigSchema`, and the 18.x emitted default is stripped by `acceptRetiredDefaultResidue`. The D2 conversion `agent-model-provider-removed` (lossless, retired from the load path) deletes the key from `agents[]` on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `agent-model-provider-retired` names what the upgrade still owes: whether the model each agent names is one the target deployment offers. The key is registered in `RETIRED_KEYS_BY_MAJOR[19]`. The liveness ledger's `model` row records the removal. The agent form's model help text no longer names a provider, and a `provider` written at the agent's top level is answered with the same fact instead of a pointer to `model.provider`. The `AIModelConfigSchema` export is now the residue stage's preprocess pipe with a read-through `shape` (the `ViewSharingSchema` shape), so `.extend()`, `.pick()`, `.omit()` and `.partial()` are no longer available on it; extend the inner shape instead.
+  - **`@objectstack/platform-objects`**: the agent form's regenerated help-text labels.
+  - **`@object-ui/app-shell`**: the agent metadata preview shows the model name alone and never a provider pill.
+  - **`@object-ui/console`**: the agent preview sample no longer writes `provider`.
+  - **`@objectstack/cli`**: `os explain agent` describes the `model` block without `provider`, and its example drops it.
+- babd660: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app menu entry naming a platform object the stack does not declare (`sys_task`, `sys_note`, or any `sys_`/`cloud_`/`ai_` name) is still refused by `defineStack` / `os validate`, but the refusal now names the fix: add `requiresObject: '<name>'` to the entry (the menu hides it wherever the object is not registered) and do not declare a copy of the object in the package. A name without a platform prefix keeps the old message. The `sys_task` and `sys_note` docblocks now teach the menu entry with `requiresObject`.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- df81f4c: feat: working calendars in Setup — `sys_work_calendar` and `sys_work_calendar_exception` (ADR-0157, part two of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Not released alone; pair #35641/#35642. The first half, #35641 (the calendar service and its arithmetic), is merged; this half ships in the same release as it, with the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Two platform objects** (`@objectstack/platform-objects`). `sys_work_calendar` holds a calendar's `code` (unique per organization, snake_case), `name`, required IANA `timezone`, `is_default` (one per organization), the required `maintained_from` .. `maintained_through` span its holidays are entered for, and one period column per weekday (`monday_periods` … `sunday_periods`, `HH:mm-HH:mm` periods separated by commas, blank for a day off). `sys_work_calendar_exception` holds dated overrides: `calendar`, `date`, `kind` (`off`, no periods; `on`, that date's full periods), `periods` and `note`, one row per calendar and date. Both are organization data an administrator keeps, audited, like `sys_exchange_rate`; a package may seed rows under the existing seed contract and name a calendar by code. Their names join the platform object name list (`@objectstack/spec`).
+  - **Setup.** Two entries under Exchange Rates: Working Calendars (with a Needs Maintenance list of every calendar whose maintained span ends within 60 days) and Calendar Exceptions, whose list page imports a year of holidays from a file; the `calendar` column names a calendar by its code or name. Labels and help text ship in all eleven locales.
+  - **Time zone on create** (`@object-ui/plugin-form`, ADR-0157 D7). A create form opens a required time-zone field that declares no default (`valueDomain: 'iana_time_zone'`) on the organization's time zone, as it opens a record-currency field on the organization's currency; the user can change it. A create that leaves the calendar's `timezone` out takes the same zone on the server. An optional time-zone field, where blank means "take the parent's", is not prefilled.
+  - **Refusal wording** (`@objectstack/objectql`). The refusal of a create that marks a calendar the default in another organization no longer assumes the writer is working in an organization.
+  - **A calendar stays in its organization** (`@objectstack/objectql`). An update that changes the organization of a calendar or of an exception date is refused with `400 VALIDATION_FAILED` on `organization_id` (`invalid_value`), before any read and for every writer, system writes included. To have a calendar in another organization, create it there. An edit that leaves `organization_id` out or repeats the stored one is judged as before; a predicate update is judged row by row, and one matched row whose organization would change refuses it.
+  - **An exception date names a calendar of its own organization** (`@objectstack/objectql`). On a create, and on an update that carries `calendar`, the calendar is read by id in the exception's organization; when it is not there, the write is refused with `400 VALIDATION_FAILED` on `calendar` (`invalid_value`). A calendar of another organization and an id that names no calendar get the same refusal, word for word. The import door is judged the same way, row by row.
+  - **Organization ownership** (`@objectstack/cli`). Both objects are organization-owned; an exception reaches its organization through its calendar.
+- 2495486: feat(spec): `userActions.transfer`, the per-object switch for the Change Owner action, and its structural eligibility
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An object can now say whether it offers the Change Owner action. The action is not meant for every record that happens to carry an `owner_id`: line items, invoices and other details get one injected too, and an admin holding `modifyAllRecords` would otherwise see the action everywhere.
+  
+  - **Structural eligibility (derived, never overridable).** `isTransferEligible(def)` from `@objectstack/spec/data` answers true only when the platform injects the object's reassignable `owner_id` (`resolveInjectedSystemColumns(def).owner`), an owner is provable for it, and the object does not declare that field `readonly: true` (in either `fields` shape, record or array). So `ownership: 'business_unit' | 'org' | 'none'`, every `managedBy` object, every `sys_*` object and `systemFields: false` never offer the action, and neither does an `external` object whose owner is unprovable (`isOwnerAnchorUnprovable`: it neither declares `owner_id` nor maps a remote column onto it in `external.columnMap`). `transferIneligibilityReason(def)` names the structural fact when the answer is no, and, where the object can be made eligible, the change that does it (drop `readonly` from `owner_id`, set `ownership` to `user`, declare or map the external owner).
+  - **The switch.** `userActions.transfer` takes the same shape as the CRUD entries beside it: a boolean, or `{ enabled, visibleWhen, disabledWhen }` whose CEL predicates read the record the action acts on. Omitted, it is on for `sharingModel` `private`, `public_read` and `public_read_write`, and for an object that declares no `sharingModel` (a custom object then resolves to `private`); it is off for a `controlled_by_parent` detail. Authors override both ways: `transfer: true` on a detail with a real owner, `transfer: false` where the owner is the actor by rule.
+  - **The one resolution.** `resolveUserActionTransfer(def)` returns `{ enabled, predicates? }`: structural eligibility first, then the switch, then the `sharingModel` default. It is the answer the Change Owner endpoint and the console action will read once they ship, each still asking the caller's own transfer verdict per record; neither exists in this release.
+  - **Refused at parse.** `transfer: true` or `{ enabled: true }` on an object that is not eligible is refused at `userActions.transfer`, with the structural reason and its remedy in the message. Closing the switch there (`false`) is accepted. `changeOwner` and `reassign` under `userActions` are refused with a pointer to `transfer`.
+  
+  The switch gates the dedicated action, not the raw write: a plain `owner_id` update stays governed by `allowTransfer` alone, so import mappings and hooks are unaffected. To block every change of owner, declare `owner_id` `readonly`.
+  
+  The Studio object form gains a Change Owner row under User Actions, with its label and help text translated in every shipped locale.
+  
+  The served object document classifies `userActions.transfer` beside the four CRUD entries: for a caller who cannot read a field, a `transfer` predicate that names it is removed and the switch with its other predicate stays, as for `edit` and `delete`, instead of the whole entry being dropped.
+  
+  Nothing reads the switch at runtime yet. The Change Owner endpoint and the console action come in follow-up changes, so the liveness ledger grades `userActions.transfer` `planned` and `os lint` / `os validate` warn an author who sets it to `true` or uses the object form that nothing honours it yet. The key is new, so no stored object carries it and nothing needs migrating.
+  
+  **Existing objects that set `userActions.exportCsv: true` get a new warning.** Drilling `userActions` showed that no export menu reads `exportCsv`: setting it to `false` does not hide CSV export, which follows the view's `exportOptions` and the object's effective API operations. The ledger now grades it `dead`, so `exportCsv: true` raises a `liveness-dead-property` warning at `os lint` / `os validate`, and the hint says to remove it (`exportCsv: false` is not flagged). It is a warning, not a refusal: every stored object still loads. A follow-up (#35619) either makes the export menus honour the key or removes it.
+- f3c9d42: feat(spec, ui): a master_detail child is a tab by default; a field group puts it in the overview and the form
+  
+  Clause-②: yes (widening: `@objectstack/spec/data` exports `isGroupPlaceableRelationship`, `fieldGroupsPlaceRelationship` and the `BodyTableContext` type, and `isBodyTableRelationship` takes an optional second argument)
+  Metadata-protocol: semantic
+  
+  A `master_detail` FK that declares no `relatedList` used to put its child list into the parent record's overview as a table (since #35597). Now it is a tab of the record page with its count, like any other related list, `inlineEdit` or not. It goes into the overview only where a field group of the PARENT names it (`fieldGroups[].relatedList`).
+  
+  - Placed by a group, the child's table is drawn at that group's position in the overview, the parent's create and edit forms inline it, and the record page's Edit saves the record fields and the rows in one save. Its tab stays on the tab row too, with its count.
+  - `relatedList: 'primary'` on the FK is unchanged on the record page: a body table with no group, and no tab of its own whether or not a group positions it. Its forms follow ruling B like every other child: a field group naming it inlines it in the parent's create and edit forms, `inlineEdit` or not, and with no group naming it the forms do not inline it, even with `inlineEdit`. `relatedList: true` keeps a tab that no group may place, and `false` hides the list.
+  - A field group may name exactly what it could name before: a plain `master_detail` child or a `'primary'` one. `isGroupPlaceableRelationship` is that test; `isBodyTableRelationship(field, { placedByGroup })` is still the one body-table judgement.
+  - `inlineEdit` on the FK no longer inlines a child in the parent's form by itself (maintainer ruling B: only the field group decides). It now only picks the form factor of a child a group places: `'grid'`, `'form'`, or `true` / absent for the shape-picked default. A child with `inlineEdit` that no group names is a tab and is not in the form.
+  - `os lint`: `relationship/line-items-inline-edit` now suggests a field group on the parent (with its required `label`) instead of `inlineEdit: true`, and only for a FK a group may place; `relationship/association-inline-edit` and `relationship/inline-edit-needs-bulk` judge the children a parent group places; the field-consumer rule credits a child's inline grid columns only when a parent group places it.
+  - The showcase invoice and expense report, and the CRM opportunity, gain a field group naming their lines, so their forms and record pages keep the line table.
+  - In the entry form a placed table sits at its group's place too: between the sections of the groups around it, or in a tab of its own (labelled with the group) in a tabbed form. A form whose sections name no field group keeps it below the record's fields.
+  - Studio's field-group picker offers the same children as before. The relationship field inspector reads a plain `master_detail` FK as "Show", and "Show" leaves the key absent so a group can still place it.
+  
+  To keep a master-detail child's table in the overview and its rows in the form (including a child that set `inlineEdit`), add a field group to the parent that names it, in the place the table should sit:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic information' },
+    { key: 'lines', label: 'Lines', relatedList: 'order_line' }, // or 'order_line.order' for one FK
+    { key: 'terms', label: 'Terms' },
+  ],
+  ```
+  
+  Such a group holds no fields. Or write `relatedList: 'primary'` on the child's FK to keep it in the overview with no group. A group may name only a list it can place: for an `inlineEdit` child on a `lookup` FK, or on a FK declaring `relatedList: true`, also write `relatedList: 'primary'` on the FK (a `master_detail` FK may instead drop `relatedList: true`). A form view that declares its own subforms still inlines what it declares.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+- a23164e: feat(spec, ui): an object takes a colour from a fixed palette, and its icon is drawn as a white glyph on a square of that colour
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **`ObjectSchema.color` (new, optional).** One name from a closed palette of nine: `gray`, `blue`, `teal`, `green`, `amber`, `orange`, `red`, `pink`, `purple` (exported as `OBJECT_COLORS` and the `ObjectColor` type from `@objectstack/spec/data`). No free colour values: `color: '#ff0000'` is refused, and the refusal lists the nine names. An object without a `color` is drawn in the neutral `gray`. Nothing to migrate: every existing object stays valid and simply has no colour.
+  - **The AI blueprint carries it too.** `BlueprintObjectSchema.color` is the same leaf (required-but-nullable on `SolutionBlueprintStrictSchema`, like `icon`), and its rule asks the model to colour every object and give each object of one solution a different colour while the palette lasts. A producer of the STRICT shape must now send `color` on each object, `null` when it has none; the lenient shape a stored blueprint is read with keeps it optional.
+  - **`ObjectIconTile` (new, `@object-ui/components`).** Draws an icon name as a white glyph on a rounded square of a palette colour, in four sizes. Each name has a light-theme and a dark-theme value chosen so the white glyph keeps at least 3:1 contrast. `OBJECT_COLOR_TILE_CLASS` and `objectColorOrDefault` are exported with it.
+  - **Navigation draws objects as tiles.** In the sidebar, the app-home menu and the phone menu, every entry that opens an object is drawn as that object's tile: the entry's own `icon` when it names one, else the object's, on the object's colour. Dashboards, pages and links keep their line icons. `NavigationRenderer` takes a new `resolveTargetColor` resolver (`NavTargetColorResolver`) beside `resolveTargetIcon`; the console answers it from the object metadata it already holds (`useNavTargetColor`). A host that passes no `resolveTargetColor` gets its object entries as gray tiles where it had line icons.
+  - **The designer picks icon and colour together.** In the object's settings, the icon picker shows the nine colour swatches, and the trigger and every icon in the grid are previewed as the tile they become. The picker elsewhere (pages, apps, navigation entries) is unchanged: only objects carry a colour.
+  - The other places that draw an object's icon (list and record headers, search, related-record chips, the designer's object lists) switch to the tile in a follow-up release.
+  
+  `@objectstack/metadata-core`: the field-level-security reference table classifies the new `color` key as `keep` (a palette name names no field).
+  
+  `@objectstack/platform-objects`: the generic object form's metadata-form packs ship the new `color` row's label and help text in all 10 locales.
+- 9742142: feat(plugin-detail): on the synthesized record page every titled field group folds, open by default
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  On the synthesized (default) record page every field group that has a title now draws the right-hand chevron and folds from its whole title row, whatever its `collapse` says. This holds in the side preview, on the phone's 「详情」 tab, in the wide page's pinned left column and on the full page. Folding a group there is something the reader does. `collapse` still sets the first state: `'collapsed'` starts closed, `'none'` and `'expanded'` start open. 系统信息 still starts closed.
+  
+  Unchanged:
+  
+  - Forms and the designer preview: `'none'` still means always open, with no toggle.
+  - The untitled field bucket has no toggle.
+  - A print page draws every group open.
+  - An authored record page keeps its own faces.
+  - The fold state lasts while the record stays open. It is not saved.
+  
+  `@objectstack/spec`: the `ObjectFieldGroupSchema.collapse` description, the refusal guidance for a stray `expanded` key and the object form's Collapse help text now say that the default record page lets the reader fold every titled group; the form's "None" option reads "always open on the entry form, no toggle". The enum, its default and what it accepts are unchanged.
+  
+  `@objectstack/platform-objects`: the object form's Collapse help text in every metadata-form catalog follows the new wording (English regenerated, the ten translated catalogs re-translated).
+  
+  What to check in an app: an object that used `collapse: 'none'` to keep a group's heading from folding on the record page now shows a chevron there. The setting still keeps the group always open on forms.
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+
+### Patch Changes
+
+- a73edb3: fix(settings)!: the knowledge settings page and the AI page's embedder section appear only where the knowledge service is mounted
+  
+  Clause-②: no (narrowing) — narrowed: on a deployment that does not mount `KnowledgeServicePlugin` (every stock boot), `GET` / `PUT /api/settings/knowledge` and `POST /api/settings/knowledge/test` now answer `404 UNKNOWN_NAMESPACE`, where they served the Knowledge page; a write of an `ai.embedder_*` key (`embedder_provider`, `embedder_api_key`, `embedder_model`, `embedder_base_url`, `embedder_dimensions`, `embedder_batch_size`) now answers `400 UNKNOWN_KEY`, and `POST /api/settings/ai/test_embedder` answers that no handler is registered; the hub list no longer carries `knowledge`, and the Setup sidebar no longer carries `nav_settings_knowledge`. `builtinSettingsManifests` drops `knowledgeSettingsManifest`, and `aiSettingsManifest` drops its embedder section.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the knowledge settings page or the `ai.embedder_*` keys; `skills/objectstack-ai` teaches wiring `KnowledgeServicePlugin`, which is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: settings manifests are runtime registrations, not authorable metadata. The moved answers are settings doors that a deployment without the knowledge service no longer serves; a deployment that mounts it serves them exactly as before, and stored rows are untouched, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a deployment that does not mount the knowledge service: the knowledge base is not a default capability, so its settings are no longer offered by default. The Knowledge page, the AI page's Embedder section, their "Test connection" / "Test embedder" buttons and the Setup entry are now contributed by `@objectstack/service-knowledge` when `KnowledgeServicePlugin` is mounted beside `SettingsServicePlugin`, and only then. Values already stored under `knowledge.*` or `ai.embedder_*` stay in the database and are served again as soon as the service is mounted.
+  
+  The AI page's description no longer names the knowledge base, in every bundled locale.
+  
+  `@objectstack/service-settings` now exports `knowledgeSettingsManifest`, `knowledgeTestActionHandler`, `aiSettingsManifest`, `aiEmbedderSettingsSpecifiers`, `withAiEmbedderSection` and `aiTestEmbedderActionHandler` from its package entry, and its default `actionHandlers` map no longer registers `knowledge.test` or `ai.test_embedder`. `@objectstack/service-knowledge` depends on `@objectstack/service-settings` and declares the settings plugin in `optionalDependencies`, so the kernel inits it first.
+  
+  What to do: nothing, unless you configure an embedder or a knowledge backend from Setup. Then mount `KnowledgeServicePlugin` from `@objectstack/service-knowledge` (with a knowledge adapter plugin) beside `SettingsServicePlugin`; the page, the embedder section and the Setup entry come back with it. A host that passed its own `ai` manifest to `SettingsServicePlugin({ manifests })` adds `aiEmbedderSettingsSpecifiers` to it (or wraps it with `withAiEmbedderSection`) to keep the embedder keys. The embedder section joins only the bundled `ai` page, recognised as that very declaration; a host's own `ai` page (or one served through an option source) is left as it is, and the plugin logs a warning saying so. A host that passes its own `actionHandlers` to `SettingsServicePlugin` keeps a `knowledge` entry there only beside the knowledge manifest: without it the settings plugin refuses to register the handler for an unknown namespace at boot.
+  
+  Stored credentials: on a deployment that does not mount the knowledge service, `ai.embedder_api_key`, `knowledge.turso_auth_token` and `knowledge.ragflow_api_key` stay stored (as `sys_secret` handles) but no settings door serves, edits or clears them, and the AI page's reset clears declared keys only. To remove them, mount `KnowledgeServicePlugin` once and clear the keys from Setup, or delete their rows from `sys_platform_setting` (the `knowledge` namespace and the `ai.embedder_*` keys) and the `sys_secret` rows whose `id` those rows hold in `value_enc` (a `sec_` handle); until then the `sys_secret` orphan report may list them.
+- b38e133: feat(spec): the Studio hook form offers a hook's declared `texts`, and `HookContext` declares `ctx.text`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The added key is the type member `HookContext.text` (the authorable-surface record lists `HookContext` members); nothing a stack writes changes.
+  
+  - **Studio hook form.** `hookForm` gains a `texts` row beside `refusals`: a key-only record keyed by the snake_case key the hook's code asks for with `ctx.text`, each entry editing its `message` and `params`. An author editing a hook in the Studio can now write the `texts` the schema has accepted since 18.6.0, instead of going through the metadata API or the package source. The row's label and help text ship in all eleven metadata-forms locale packs of `@objectstack/platform-objects`. Nothing about what a hook may declare changes.
+  - **`HookContext.text`.** `HookContext` now declares `text?: (key: string, params?: Record<string, unknown>) => Promise<string>` (named `HookTextReader`), the call the runtime already binds on every path a hook runs on, declared the way `api` and `notice` are: `z.unknown()` at parse, a static cast for the type, optional because a context parsed without the runtime carries none. A typed handler no longer needs a local type to call `ctx.text`. `HookContextSchema.parse` now keeps a bound `text` instead of stripping it.
+- d053c7d: feat(identity): the Add User result says when the address was already pending
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  On a cloud-managed environment, Setup → Users → Add User now says when the address you added was already waiting for its first sign-in, including when you sent only an email. Before, that answer looked exactly like a fresh add.
+  
+  - `POST /api/v1/auth/admin/add-sso-user` answers `pendingAgain: true` on a re-add of a person who is still pending, and leaves the key out on a fresh add. It never answers `false`. `alreadyPending` is unchanged and is still on every answer, so nothing an API reader reads today changes.
+  - The `sys_user.add_sso_user` result dialog gains an "Already pending" row that reads `pendingAgain`. The dialog skips a field whose path is absent from the answer, so the row is drawn only on a re-add; a fresh add shows no `false` row.
+- c9b3f7a: feat(account): a Notification Settings page where each person chooses their own notification topics, channels, digest and quiet hours
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The Account app has a new **Notification Settings** page, under Inbox and only when the messaging service runs. It shows one row per notification topic and one column per channel. Each cell shows whether that notification reaches you on that channel, and where the answer comes from: your own setting, your organization's default, the built-in default, or a mandatory topic. Mandatory topics are always delivered and cannot be switched off. A channel the deployment cannot send on yet says so in its column header. Above the matrix you can set your digest and your quiet hours.
+  
+  - **The read: `GET /api/v1/messaging/me/preferences`.** This new door answers the signed-in person's *effective* preferences. The server computes them with the same resolver `emit` uses to filter (`PreferenceResolver.effectiveFor`), so the page shows what is actually sent and computes nothing itself. The door takes no parameters and answers only about the caller: there is no `user` parameter, and any parameter is refused `VALIDATION_ERROR` / `400`. It keeps the posture of `GET /api/v1/messaging/preference-options`:
+    - an anonymous caller gets `401`;
+    - a held sign-in gets `403`;
+    - a source it cannot read is `500` / `INTERNAL_ERROR`, never a partial or "everything on" answer.
+  
+    The door reads only what the answer needs: the caller's own rows and the organization's default rows, each by equality on `user_id` within the caller's organization. A read that comes back with more rows than its cap is a fault (`500`), never a page.
+  
+    The organization's defaults appear only as `source: 'default'` on the caller's own cells. No other person's row, and no row id except the caller's own, is ever answered.
+  - **The writes: your own `sys_notification_preference` rows, through the data door, as you.** `member_default`, the baseline set every signed-in person resolves (external members excepted), now carries a grant of read, create and edit on the object, with no delete. Two row policies come with it:
+    - `sys_notification_preference_self` binds every principal that holds the grant. Its row scope is `user_id == current_user.id`, and its write check is the same expression, so the row as written must still be your own.
+    - `sys_notification_preference_org_admin` widens organization owners and administrators back to every row of their organization. Its write check is `topic != null`, which holds on every row being created because `topic` is required with a default. If `topic` ever becomes optional, an administrator's create is refused, never widened.
+  
+    An ordinary member or a delegated administrator lists only their own rows. Their create with `user_id` omitted, empty or naming another person is refused `403` / `PERMISSION_DENIED`, as is moving their own row to another person or to the organization default.
+  - **Owners and administrators are unchanged.** They still list every row, create and edit the organization default, create and edit another person's row, and delete in the Setup grid.
+  - **App-authored grants are narrowed too.** `sys_notification_preference_self` carries no `positions` domain, so it binds every principal that holds a grant on this object, including through an app's own permission set. A role other than organization owner or administrator that an app grants this object reads and writes only its own rows, unless the app declares its own widening policy for that role.
+  
+  There is no "reset to the organization's default" button, because that needs a delete, which members are not granted. Changing your digest or quiet hours saves your own general setting, and the page says so beside the control. From then on, that setting applies in place of the organization's defaults to every topic and channel you have not set yourself.
+- 01e6af6: Clause-②: no
+  Metadata-protocol: none
+  
+  feat(messaging): Setup lists the Slack page where connector-slack is composed
+  
+  - **Setup › Integrations › Slack.** Where connector-slack is composed, Setup now lists a Slack entry under Integrations. It opens the console's Slack page (`messaging:slack`), where an organization administrator installs or replaces the organization's Slack token, removes the install, and reviews or removes each member's Slack link. The entry asks `setup.write`, the capability every Slack administrator door asks. `MessagingServicePlugin` registers it in the same `kernel:ready` hook, and on the same condition, as the `slack` channel. Without connector-slack, Setup lists no Slack entry. The label is translated in every locale the platform ships. The bundle is exported as `SLACK_SETUP_UI_BUNDLE`, with `SLACK_SETUP_COMPONENT_REF`.
+  - **The Slack link removal topic, on every deployment.** `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list the topic `messaging.slack_link_removed` on every deployment, including one without connector-slack. It is emitted only where connector-slack is composed, when an administrator removes a person's Slack link or removes the organization's Slack install.
+- 4026c44: fix(identity): two Setup outcome texts say only what is true
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - On a deployment without live mail, Invite User (Users, Members, Invitations, the organization page) and Resend Invitation no longer tell the admin to use Copy Invite Link. Accepting an invitation needs a verified email address, and without mail a password account cannot verify one, so a copied link only admits the sign-up. The message now says so: only an invitee whose social or SSO sign-in verifies the address can accept, and for anyone else a platform administrator creates the account (the operator path in the self-hosting guide). The translations carry the same text. Nothing else changes: the outcome, the action and Copy Invite Link behave as before.
+  - Import Users (cloud-managed environments) labels its `alreadyPending` count and column "Already pending" instead of "Already pending, told again". A deactivated pending person is re-added without the hosting organisation being told, so the old label contradicted the "Why not told: deactivated" cell beside it; whether the host was told is the "Hosting organization told" and "Why not told" columns' answer, as on Add User.
+- c0716ed: feat(spec): the Studio action form offers an action's declared `refusals` and `texts`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Studio action form.** `actionForm` gains two rows in the Behavior section, right after the script `body`, each shown only on a `type: 'script'` action as the body is: `refusals`, a key-only record keyed by the SCREAMING_SNAKE code the body throws, each entry editing its `message`, `status`, `reasons` (a key-only record of `{ message }`) and `params`; and `texts`, a key-only record keyed by the snake_case key the body asks for with `ctx.text`, each entry editing its `message` and `params`. They are the hook form's two rows, because the action entries are the hook entries. An author editing an action in the Studio can now write the `refusals` and `texts` the schema already accepts, instead of going through the metadata API or the package source. Nothing about what an action may declare changes.
+  - **Locale packs.** The rows' labels and help text ship in all eleven metadata-forms locale packs of `@objectstack/platform-objects`.
+- 89ea9bf: feat(platform-objects): Setup → Users can take a pending person back out on a managed environment
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_user` gains a row action, `remove_sso_user` (Remove Pending User), on the Users list row and the user record header. It posts the row's id as `userId` to plugin-auth's `admin/remove-sso-user`, which removes a person added ahead of their first sign-in and cancels their invitation at the hosting organization. It is offered only where that door answers: to a platform administrator, on a cloud-managed environment, on a row that is still pending (`source` is `idp_pending`). A confirmation dialog asks first and says that no one is removed when the person has signed in meanwhile or the hosting organization cannot be reached. The door itself is unchanged. Its labels are added to the translation bundles, translated for zh-CN, ja-JP and es-ES.
+- 61722e9: feat: Change Owner cascade — a relationship declares `transferBehavior: 'cascade'`, and the Change Owner dialog offers it as a tick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36713
+  
+  A Change Owner can now move related records along with the record, relationship by relationship.
+  
+  - **The declaration.** A `lookup` or `master_detail` field takes `transferBehavior: 'none' | 'cascade'`, beside `deleteBehavior` (omitted means `'none'`). `'cascade'` on the child's reference field to a parent says: when the parent's owner changes, the child records that point at it and are owned by the parent's previous owner may move to the new owner too. No other child records move; there is no filter key.
+  - **Refused where it could never act.** The key is refused on any other field type, `'cascade'` is refused on a reference to a `sys_` object and on a multi-value reference (`multiple: true`), and `'cascade'` is refused on a field of an object that does not offer Change Owner itself: one that is not structurally eligible (no reassignable owner), a `controlled_by_parent` detail (its access already follows its master), or one whose `userActions.transfer` is off. Each refusal names the field and the fix.
+  - **The request.** `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` take an optional `cascade: [{ object, field }]` naming the relationships to move along (`data.changeOwner` / `data.changeOwnerMany` in `@objectstack/client`). A relationship that does not declare `'cascade'`, or whose child does not offer Change Owner, is refused `400 VALIDATION_ERROR` before anything is written; so is a cascade with a queue target. Each cascaded record is updated as the caller, so it needs the caller's own transfer grant on the child object. Each relationship's outcome in the answer's `cascade[]` lists every record the caller's write refused, with its id, code and sentence: a related record whose `owner_id` is locked on it (read-only, or under a `readonlyWhen` that holds) is refused `FIELD_NOT_ACCESSIBLE` and keeps its owner, as the record itself would be, while the record's own move stands. One call moves at most 500 related records; the records past that limit are counted in `remaining`, still with the previous owner, not listed. When a relationship's records could not be read, its outcome carries `readFailure` and none of them moved.
+  - **The candidates.** `GET /api/v1/data/:object/change-owner/cascades` (`data.changeOwnerCascades`) lists the relationships declared to an object whose child offers Change Owner. A child whose declared API exposure does not serve `update` is left out, and so is a child of a disabled package.
+  - **The Studio.** The field form and the object form's field rows offer `transferBehavior` beside `deleteBehavior`, on `lookup` and `master_detail` fields; the row's label and help text ship in the metadata-forms locale packs of `@objectstack/platform-objects`.
+  - **The dialog.** For a person target, the Change Owner dialog lists those relationships on which the explain engine allows the caller the `transfer` operation, one tick each, sends the ticked ones, and draws each relationship's outcome, every record it did not move included.
+  
+  A plain `owner_id` update is unchanged: the declaration is read only by the Change Owner action.
+- 7411f9b: feat(spec, platform-objects): the standard unit table and the organization unit object `sys_unit` (ADR-0158 U1–U3)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Units of measure, first release (ADR-0158 U7 R1). Nothing reads these tables yet: the unit declaration on a `number` field, the write-time membership check and the display of a quantity with its unit ship with their own cards. No field key ships here.
+  
+  - **`@objectstack/spec`** (`@objectstack/spec/data`) exports `STANDARD_UNITS`, a closed table of 41 UN/ECE Recommendation 20 codes. Each code carries its dimension (`UNIT_DIMENSIONS`: `mass`, `length`, `area`, `volume`, `time`, `count`, `package`) and its ratio to the dimension's base unit (`UNIT_DIMENSION_BASE_CODES`: `KGM`, `MTR`, `MTK`, `MTQ`, `SEC`, `H87`), as an exact decimal string: `1 CODE = ratio × BASE`. Package codes (`XBX`, `XCT`, `XPX`, …) carry no ratio. The piece is `H87`; `C62` and `EA` are not members. `ORGANIZATION_UNIT_CODE_PATTERN` is the namespace of an organization's own codes (uppercase letters, digits and underscores, at least 4 characters or containing an underscore), which no standard code can match. `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` gains `sys_unit`. The table is not a value domain: `ValueDomainSchema` keeps its three members.
+  - **`@objectstack/platform-objects`** registers `sys_unit` (Setup → Configuration → Units of Measure), an organization's own units: `code`, `label`, `dimension`, `ratio` (scale 12; required on every dimension but `package`, refused on `package`), `decimal_places` (a display default) and `retired`. It is organization-owned behind the tenant wall and ships no rows. A code outside the organization namespace is refused, the code is unique within the organization, and the code and dimension cannot change after create. A unit is retired instead of deleted, and retiring cannot be undone, so a code is never created again with another meaning; the data API serves no delete on it. Every column carries field history.
+  - **`@objectstack/plugin-security`**: `member_default` reads `sys_unit`, so a unit's label displays to every member; organization administrators write it through their existing grant.
+  - **`@objectstack/cli`**: the organization-ownership inventory lists `sys_unit` as attributed to its organization.
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+- f71d488: feat(fields): a quantity displays with its unit's label and display decimal places in grid, form and detail (ADR-0158 R1 display)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A `number` field that declares `unitConfig` now draws its unit beside the number on every face: grid and list cells, the record page (sections, highlights, the quick-look panel, related lists), and the form, both read-only and beside the edited box. A `fixed` quantity shows its one unit; a `record` quantity shows the unit its row's code field holds, and the list, grid and related-list reads fetch that field (and the row's organization) even when no column shows it. A `text` field declaring `unitConfig: { unitMode: 'code' }` shows the code's label.
+  
+  - A standard code (`KGM`, `H87`, …) shows the platform's name for it in the reader's locale; an organization code shows its `sys_unit` label. `@objectstack/spec` now exports the English base name of every standard code, `STANDARD_UNIT_NAMES` and `standardUnitName(code)`, beside `STANDARD_UNITS`. `@objectstack/platform-objects` serves each locale's names through the i18n service, as `messages.standardUnit<CODE>` in every platform bundle, and a reader without a translation falls back to the English base.
+  - Decimal places: a standard code takes its organization's `sys_standard_unit_setting` row, an organization code its `sys_unit.decimal_places`. The row is the record's own organization's, never merely the first one returned. The field's `scale` is the ceiling (ADR-0158 L4). The number is drawn at that fixed width, rounded half away from zero (ADR-0158 Open item 6, ruled A): `1.5` beside a unit of 0 places reads `2`. Only the display rounds; nothing is rounded at write, and footers, exports and the API keep the exact value.
+  - A retired organization unit, and a unit whose row the reader may not read (an external member holds no `sys_unit` read), show the bare code, never an error.
+  - One resolver (`resolveQuantityUnit` in `@object-ui/core`) and one formatter (`formatQuantity` in `@object-ui/fields`) serve every face.
+  - `@object-ui/types`: `unitConfig` is now an authorable key on `FormField` and `FormFieldSchema` (by reference to the spec's `FieldSchema.unitConfig`, beside `currencyConfig`), so `objectui validate` accepts it on a hand-authored form field. The tolerant face now checks its value against the spec's `UnitConfigSchema`, where before it passed as an unknown key. On the form face the `number` widget reads it, and on a `text` field `unitMode: 'code'` makes the text widget the unit picker.
+  - A unit code field is chosen, never typed (ADR-0158 Open item 8): a `text` field declaring `unitMode: 'code'`, and the `unitField` a `record` quantity on the same form points at, draw a searchable picker (`UnitCodeField`) of the organization's non-retired units and the standard codes, each by name and restricted to the declared `unitDimension`. It stores the code; read-only, it shows the unit's name. `@object-ui/core` exports the option list (`unitPickerOptions`) and the pointer helpers (`quantityUnitCodePointers`, `withUnitCodePointer`, `declaresUnitCode`).
+- a0b01fa: feat(platform-objects): an organization sets how many decimal places each standard unit of measure displays with (`sys_standard_unit_setting`, ADR-0158 U6)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization administrator can now give any standard unit of measure (UN/ECE Recommendation 20 codes such as `KGM` or `H87`) its own display decimal places, for example 3 for grams at a jeweller or 0 for kilograms at a gravel yard. The value lives in the new organization-owned object `sys_standard_unit_setting` (Setup → Configuration → Standard Unit Settings): one row per standard code, `decimal_places` a whole number from 0 to 12. Deleting the row clears the setting. The organization's own units keep their decimal places on their own `sys_unit` row.
+  
+  - Every member reads the settings (`member_default`, read only); organization administrators and owners create, edit and delete them (`organization_admin`). External members get no read, as with `sys_unit`.
+  - `organization_id` is injected and stamped on every row. Under the `isolated` tenancy posture the tenant wall (ADR-0095 D1) confines every read and write to the caller's organization, so another organization's setting is never read. As with every organization-owned object (ADR-0105 D1), the `single` posture raises no wall, and the `group` posture walls by membership, so a member of several organizations can read each one's settings.
+  - Every set, change and clear is written to `sys_audit_log`, with field history on both columns.
+  - The value is a display default only (ADR-0158 L4): a field's own `scale` stays the storage ceiling, and nothing is rounded at write by it. No reader ships in this change; the quantity display card (#35490) will read it.
+  - Like an exchange rate, a setting is a record the organization owns, so an organization delete is refused (`DELETE_RESTRICTED`) until its settings are deleted.
+- f98f18c: feat: an object's `userActions.exportCsv: false` hides the console's Export entry
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `userActions.exportCsv` on an object now does what the Studio object form says it does. Set to `false`, the console offers no Export entry for downloading that object's data, in any of its formats (CSV, XLSX, JSON):
+  
+  - the object grid hides its toolbar Export menu, and the table's own CSV button that `operations.export: true` turns on;
+  - the list view hides Export in both toolbar forms, the wide toolbar's button and the Display panel's export footer;
+  - a dataset report hides its Export control when the dataset's base object sets it.
+  
+  A view's export of the picture it draws is not covered: a Gantt view's PNG and PDF buttons stay.
+  
+  Every surface reads one verdict, the new `isObjectExportOffered(objectSchema, effectiveApiOperations)` from `@object-ui/core`: the authored `exportCsv` over the object's `managedBy` default, ANDed with the caller's effective `export` API operation. Before this change the grid's toolbar menu, the list view and the report read the effective operation but not the object's bit, and the grid's table CSV button read neither half (only `operations.export`), so `exportCsv: false` changed nothing. Export is a read, so the verdict is not a row of `AFFORDANCE_GRANTS` and asks no `can(object, verb)`: the caller's export grant reaches the console through the effective `export` operation, which the server derives from `list` and `allowExport`.
+  
+  An object that does not author the key keeps its Export entries, since every `managedBy` bucket still defaults `exportCsv` to `true` (ADR-0103), with one change: the grid's table CSV button (`operations.export: true`) now also follows the effective `export` operation, as the toolbar menu beside it already did. So a viewer whose effective operations exclude `export` no longer sees that button, even on an object that authors nothing. The setting hides the entry and is not a permission: no export request is refused because of it, and who may export is still the permission set's `allowExport`. The report reads the base object's definition through the report's data source, and a report whose source cannot serve one keeps its Export control.
+  
+  The spec's `exportCsv` description and the Studio form's help text now say this; the form's English help text bundle in `@objectstack/platform-objects` is regenerated to match, and the translated locales keep their wording. The liveness ledger grades `userActions.exportCsv` `live`, so an authored `exportCsv: true` no longer raises the `liveness-dead-property` warning at `os lint` / `os validate`. Nothing needs migrating.
+- 17ed9e7: fix(objectql): deleting an organization also deletes its units of measure, the one exemption from the `sys_unit` delete refusal
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization that had ever created a unit of measure could not be deleted: the delete was refused with 409 `DELETE_RESTRICTED` naming `sys_unit`, and the units could not be removed first, because the engine refuses every delete of a unit (405 `ERR_UNIT_DELETE_REFUSED`). Now the organization delete's own cascade removes that organization's `sys_unit` rows, retired ones included, through the engine's delete path, after the delete has been admitted, so no unit row is left naming a deleted organization. `organizationOwnedRowCounts` (the question plugin-auth's organization delete asks first) and the engine's own refusal no longer count units as records the organization still owns.
+  
+  **Declared behaviour change.** A delete door widens, in one place only. A delete of an organization that holds units and no other record now succeeds and removes the units; before, it was refused. An organization that owns any other record is still refused, and none of its units is removed. Every other delete of a unit is still refused with 405 `ERR_UNIT_DELETE_REFUSED`, by id and batched, for a user, a system writer and an automation run, including a delete issued by a hook while the organization's delete is running: the exemption is recognised from the engine's own cascade, never from anything a caller passes. Retire a unit (`retired: true`) to stop its use, as before.
+- 8df7bf2: feat(spec): an object's `relatedLists` is its record page's tab list — only the listed related lists show, in order, the attachments, approvals and activity-stream tabs are placed by object name, and an entry can carry its list's title and columns
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record page's tabs are now declared on the parent object, in one place:
+  
+  ```ts
+  relatedLists: [
+    { list: 'quote_line', label: 'Line items', columns: ['product', 'quantity', 'unit_price', 'amount'] },
+    'task',
+    'sys_attachment',
+    'sys_approval_request',
+    'sys_activity',
+  ],
+  ```
+  
+  - **No `relatedLists` (or an empty one): nothing changes.** Every related list shows, in the derived order, then attachments, approvals and the activity stream.
+  - **A declared `relatedLists` now decides which tabs show**, not only their order. A related list no entry names shows no tab; before, it still followed the listed ones. Removing an entry removes its tab. Body tables a field group places in the overview (`fieldGroups[].relatedList`) stay at their group, and the tab such a `master_detail` table also keeps on an undeclared page shows only when an entry names it, and `relatedList: false` on the child's FK still hides a list.
+  - **This narrows the #35889 note** ("Its tab stays on the tab row too, with its count"): the tab of a `master_detail` child that a field group places in the overview stays only while the parent declares no `relatedLists`; once it declares one, that tab shows only if an entry names the child.
+  - **The three built-in tabs by object name**: `'sys_attachment'` (attachments; shown only when listed, and still only when the object enables files), `'sys_approval_request'` (approvals; still only on a record with requests, and when unlisted it follows the listed tabs), `'sys_activity'` (the one activity stream; when unlisted it closes the strip). A built-in is written only as its bare name: `{ list: 'sys_attachment', … }` is refused at parse. `'sys_comment'` and `'sys_audit_log'` are parts of the stream, not tabs: `os validate` warns (`related-list-stream-part`) and prescribes `'sys_activity'`. `'sys_attachment'` on an object without files warns (`related-list-attachments-off`).
+  - **An entry's own title and columns**: `{ list, label?, columns? }` wins over the child FK's `relatedListTitle` / `relatedListColumns`, which keep working unchanged. The columns are child field names, used wherever the list is drawn (its tab, and the body table a field group places); a dotted column (`account.industry`) walks the child's relationships, as `relatedListColumns` does, and a name that resolves to no field of the child is refused (`related-list-column-unknown`) by `os validate`, `os build` and the metadata write door.
+  
+  - **The generic object form** (metadata admin) edits `relatedLists` with its own chip input: a bare name and an object entry both show and both survive add and remove (the entry's title and columns beside its name; they are edited in Studio). Its help text states the tab-list meaning in every translated locale.
+  - **Studio** (object settings, Record page tabs): the editor lists the entries in order, the built-in tabs among them, and offers the built-ins not yet listed (attachments only when the object enables files). A relationship row's edit sets its own title and columns, and clearing both writes the bare name again. The relationships not listed are shown below as having no tab. A move, a removal or an add keeps every entry's object form and every built-in name.
+  
+  What to check in an app: an object that already declares `relatedLists` and leaves some related lists out now shows only the listed ones, and shows no attachments tab unless `'sys_attachment'` is listed. List every tab the page should keep, or remove `relatedLists` to show them all. A child list another package adds is hidden too until the parent names it, which a build accepts only when that package is in the parent's stack; letting a package place its own list is a later change. ADR-0087 semantic entry `related-lists-declared-is-tab-list`.
+- a98c077: fix(platform-objects): the view form's navigation help no longer says rows open in a drawer by default in Arabic, German, French, Korean, Brazilian Portuguese, Russian and Traditional Chinese
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `navigation` and `navigation.mode` help texts of the view metadata form are now translated from the current English in these seven locales, matching the zh-CN, ja-JP and es-ES wording: `mode` is deprecated on an object's list (the record name opens the full page, the hover icon the side panel), and `none` still means rows open nothing. Before, the `navigation` help still said the drawer is the default, and `navigation.mode` showed an older English copy.
+- 236c804: feat(spec)!: retire the boolean arm of a relationship field's `inlineEdit` — `true` and `false` both read as the key left out
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37042
+  
+  <!-- adr-0087: registered field-inline-edit-boolean-removed, field-inline-edit-boolean-retired -->
+  
+  **BREAKING** accept-set narrowing on `FieldSchema.inlineEdit` (`@objectstack/spec/data`), the inline form factor of a `lookup` or `master_detail` field. Since the field-group placement, a field group of the parent (`fieldGroups[].relatedList`) decides whether the parent's create and edit forms inline a child, and `inlineEdit` only picks the form factor of a placed child. Every reader of the key passes anything but `'grid'` and `'form'` as absent, so `true` (documented as "auto") and `false` both did exactly what leaving the key out does: the form factor is picked from the child's shape.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `inlineEdit: true` on a `lookup` / `master_detail` field | delete the key (the form factor is still picked from the child's shape), or write `'grid'` / `'form'` |
+  | `inlineEdit: false` on a `lookup` / `master_detail` field | delete the key |
+  | a child meant to be entered in the parent's form | name it in a field group of the parent: `fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: '<child object>' }]` |
+  
+  The one-line fix: delete a boolean `inlineEdit` wherever it is written; `os migrate meta --from 17 --write` deletes it from object sources. Writing one after upgrade fails `tsc` (the input type is `'grid' | 'form'`) and fails the parse with that prescription. `'grid'` and `'form'` parse unchanged. The view-level `inlineEdit` (a list view's in-cell editing switch) is a different key and is unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `FieldSchema.inlineEdit` is `z.enum(['grid', 'form'])`, and a boolean meets the prescription from the enum's own error map. The D2 conversion `field-inline-edit-boolean-removed` (lossless, retired from the load path) deletes a boolean `inlineEdit` from `objects[]` and `objectExtensions[]` field maps on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `field-inline-edit-boolean-retired` names what the upgrade still owes: whether the child should be placed by a field group of the parent. The liveness ledger keeps the key `live` for the two surviving values, with the narrowing recorded.
+  - **Field form** (`@objectstack/spec` `field.form.ts`, labels in `@objectstack/platform-objects`): with the boolean arm gone a select spells every value, so the field designer now offers `inlineEdit` as a `Grid` / `Form` select on `lookup` and `master_detail` fields; left unset, the form factor is picked from the child's shape. Before, the form left the key out because no widget could spell a boolean-or-string union.
+  - **`@objectstack/lint`**: two doc comments in the field-consumer rule (`validate-field-consumers.ts`) now read a boolean `inlineEdit` as refused by the spec and as absent at the renderer; comment text on unexported functions only, so no shipped byte changes.
+  - **`@objectstack/cli`**: the golden metadata-eval corpus places its line items with a field group of the parent, with `inlineEdit: 'grid'` as their form factor, instead of `inlineEdit: true`.
+- d71fe59: fix(platform-objects): every locale's Studio help for related-list field groups and inline columns states the field-group rule
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A master-detail child table appears on the parent's create and edit forms, and at a place on its record page, when a field group of the parent names it (`fieldGroups[].relatedList`); `inlineEdit` alone no longer does that. The English and Simplified Chinese Studio help already said so. The Arabic, German, Spanish, French, Japanese, Korean, Portuguese (Brazil), Russian and Traditional Chinese help for two keys still gave the old rule. The inline columns help said the columns are used only when the field sets `inlineEdit`, and the field group help said the record page does not draw the placement yet. Both now match the English text.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- a5a5312: feat(console): a list's column widths, row height and tab order are kept in this browser only
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a Console object list, the column widths a reader drags, the row height they pick and the order they give the view tabs are now kept in their own browser only, per signed-in user and object (localStorage `list-layout:<user id>:<object>`). Nothing is sent to the server: the Console no longer reads or writes the per-user list preference row `sys_user_preference` `ui.list.<object>`, and its boot read of the reader's preferences no longer asks for that key family. A list opens at once, without waiting for that read.
+  
+  - Another browser or device opens the list on its view's own widths, row height and tab order until the reader changes them there.
+  - Signing out clears these entries with the rest of this browser's Console state, as before.
+  - With nobody signed in, nothing is kept.
+  - The record page's "show empty fields" choice (`ui.record.<object>`) is unchanged and still follows the reader.
+  
+  Upgrade note: what an earlier Console kept for a reader's lists is not carried over. The `ui.list.<object>` rows are no longer read, so every reader's lists open on their views' own widths, row height and tab order until they change them again. This browser's old copies (`list-state:*`, `list-filters:*` and `viewOrder:*` in localStorage) are removed on the first list the Console opens. The server rows stay where they are, unread; leaving them does no harm.
+  
+  `@object-ui/data-objectstack`, `@object-ui/react` and `@objectstack/platform-objects` change only comments and a README example that named the retired key. No metadata key, value or default changes.
+- 8c5a81e: fix(plugin-list): Refresh alone no longer draws the Display entry in the default list toolbar
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default (Display) list toolbar has no Refresh button, yet `userActions.refresh` still counted as a reason to draw the toolbar's Display entry. On a non-grid view (kanban, calendar and the rest) whose other Display controls were all off, the entry opened a panel holding only its footer. Refresh no longer counts, so such a view draws no Display entry. The wide toolbar (`compactToolbar: false`) still draws Refresh as before, and `userActions.refresh: false` still takes it off there.
+  
+  `@objectstack/spec`: the `userActions.refresh` description now says the toggle governs only the wide toolbar's Refresh button and changes nothing in the default toolbar. The view form's hint for the key says the same, and `@objectstack/platform-objects` ships it as the English help text in the metadata-forms bundle; the other locales keep their existing translations. Only the description text changed: the key, its type and its default are the same.
+- 6943af1: fix(platform-objects): Setup → Users shows who a user's manager is, who reports to them, and can remove a manager
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator who set a user's manager could not read it back anywhere in Setup: the record page's Details tab named no section holding `manager_id`, no list showed the people reporting to a user, and the Set Manager dialog opened on an empty picker. The value was stored correctly; only the reading back was missing.
+  
+  - **Details → Reporting Line** shows the user's manager (`sys_user.manager_id`, still read-only on the record; it is written only through the admin endpoint).
+  - **Details → Direct Reports** lists the users whose manager is this user. It is read-only: a report's manager is changed on that report's record.
+  - **Set Manager** now opens on the current manager (the param is field-backed on `manager_id` with `defaultFromRow`), so an admin sees what a re-point replaces. The request body is unchanged: `{ userId, managerId }`.
+  - **Remove Manager** (new `sys_user` action `remove_user_manager`, on the row menu and the record header) clears the link by posting `managerId: null` to `POST /api/v1/auth/admin/set-user-manager`. It carries the same platform-admin gate as Set Manager, is offered only while the user has a manager, asks for confirmation, and is not exposed to AI agents. The endpoint's refusals are unchanged and apply to the clear too: an identity a SCIM directory holds is refused there.
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+- 7a5ae65: docs(spec): the `compactToolbar` describe says which toolbar is the default and that it draws no Refresh
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `compactToolbar` description on a list view (and the view form's hint for it, which mirrors it) now says what a renderer does when the key is omitted and which toolbar `userActions.refresh` applies to: the compact toolbar (the View settings popover) is on by default, omitted or `true`; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. This matches the `userActions.refresh` description, which already scopes the toggle to the wide toolbar.
+  
+  Description text only: the key, its type, its optionality and the accepted values are unchanged, so every view that parsed before parses the same. The generated reference pages and the English metadata-forms help text carry the new sentence; the translated help texts keep their current wording.
+- 70d07fd: feat: an object arranges its actions per scope (`actionLayout`: pinned buttons and the 「More」 order), and the design mode sets it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36630
+  
+  A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` pins none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
+  
+  - `list` arranges the actions placed at `list_toolbar` and the list page's built-ins `$import` and `$export`. A built-in is only ever pinned: one named in `more` is refused with its reason, since not pinned the list page draws it in its own Import / Export menu.
+  - `record` arranges the actions placed at `record_header` or `record_more`. It is a scope, not a page: the record page header, the side preview and a phone's bottom action bar all read it. A `page:header` that authors its own `actions` list keeps that list.
+  - An arm left out (or the key left out) draws that scope exactly as before.
+  
+  What each package gains:
+  
+  - `@objectstack/spec`: the key and its shape refusals at every door (more than three pinned, a name given twice in one part or in both, a malformed name, a built-in the scope does not have, a built-in in `more`, since a built-in is only ever pinned), each with its reason. New exports `OBJECT_ACTION_LAYOUT_PINNED_LIMIT`, `OBJECT_ACTION_LAYOUT_SCOPES`, `OBJECT_ACTION_LAYOUT_BUILTINS` and the types `ObjectActionLayoutScope`, `ObjectActionLayout`, `ObjectActionLayoutArm`. The object form offers it under Advanced, one JSON row per arm.
+  - `@objectstack/objectql`: `actionLayout` joins `fieldGroups` and `relatedLists` as a key only the base's paired `.custom` package writes on an `object_extension` (ADR-0146 D10). It is applied last, after every other layer, arm by arm: each arm it writes replaces the served arm for that scope whole, and an arm it leaves out stays. A manifest's `objectExtensions` entry now carries the key to the fold.
+  - `@objectstack/metadata-protocol`: the one judge refuses `actionLayout` from any other package, naming the action's own `locations` and `order` as the way to place an action the package brings. Each door says it its own way: publish, restore and draft promotion of an `object_extension` answer `VALIDATION_ERROR` / 400; marketplace install refuses the package body with `VALIDATION_ERROR` / 422; `os validate` and `os build` exit non-zero and print the row; the registry fold skips the key and leaves a note.
+  - `@objectstack/lint`: `validateObjectActionLayout` (`object-action-layout-unknown`, `object-action-layout-not-placed`, at `error`) refuses in `os validate`, `os build` and `os lint` a name, in either part, that is no action of the object or is not placed in the scope its arm arranges.
+  - `@object-ui/types`: `arrangedHeaderActions(actions, arm, scope)`, the one reader both record headers and the list header apply, and `readActionLayoutArm`.
+  - The console: both record headers (the default page's and an authored `page:header` with `placedActions: true`) and the list header draw the arrangement. In the design mode, 「Header buttons」 at the end of the page header lists the scope's actions under 「Pinned to header」 and 「Other」 (the 「More」 menu), each dragged into order; a dot moves an action between them, a fourth pin is refused with a toast, the header shows the change at once, and 「Save」 writes only the arms that changed: into the object's own package when it is writable, else into the installed object's customization package as an `object_extension`, through the one writer of an installed object's arrangement (`saveObjectExtensionArrangement`, whose patch type now takes the object-shaped `actionLayout`), which refuses a customization package the server does not list writable. A name the scope no longer offers is listed in the panel as left out. A name the header cannot draw is refused at save with its reason. New `@object-ui/i18n` keys under `designMode.pins`.
+- 3b58921: feat(console): record create and edit stop loading internal forms; a field's Show on create switch
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered internal-record-forms-not-loaded -->
+  
+  The Console's record create and edit surfaces no longer load an object's internal form view. The create dialog, the edit dialog, the full-page create and edit (`/new`, `/record/:id/edit`) and a create or edit an action opens now lay the record out by the object's field groups (`fieldGroups`) and follow the rules on its fields (`visibleWhen`, `readonlyWhen`, `requiredWhen`, `required`). What used to steer those surfaces and now steers nothing: the default form view (`form`, `formViews.default`), the `create` form view, and on them `sections`, the `tabbed` and `wizard` layouts, `defaultTab`, `tabPosition`, `subforms`, `modalSize`, `buttons`, `layout` and `defaults`. A master-detail sub-table still comes from `fieldGroups[].relatedList`, and a flow screen reads its sub-table settings from there too.
+  
+  An app that still declares an internal form installs and runs as before; the definition is inert. A public form (`sharing.enabled: true`) keeps loading at its own link by its own definition, and a named form an action of type `form` opens is unchanged.
+  
+  `showOnCreate` is now live: a field with `showOnCreate: false` is left out of every create surface and stays on edit, the record page and lists. The field form (`field.form.ts`) and the Studio field inspector offer it as "Show on create", on by default; a required field keeps it on.
+  
+  `@objectstack/lint` adds the advisory rule `form-view-internal-not-loaded`: a warning, never an error, on each internal create or edit form an app declares (a container's `form`, `formViews.create`, `formViews.default`, and a stored form view that is the default or named `OBJECT.create`), and on no public or named form.
+  
+  Studio: the Data pillar's Form tab always lays out the object's field groups, and the Interfaces rail no longer lists internal forms; public forms and named forms stay listed.
+  
+  An app that relied on its internal form for create defaults should move them to each field's `defaultValue`; sections move to `fieldGroups`, and required or conditional rules move onto the fields.
+  
+  The upgrade guide carries this as the protocol-18 semantic entry `internal-record-forms-not-loaded`.
+- c45dd80: feat(setup): Setup → Configuration → Public forms lists every public form of the environment and switches it on or off
+  
+  Clause-②: yes (widening) — a new Setup navigation id `nav_public_forms`, a new component id `forms:public-forms`, new language-pack keys (the `publicFormsSetup` block and the nav label) in every shipped locale, and `anonymousFormIntakeWithdrawnIn` newly exported from `@objectstack/spec/ui` (moved from `@objectstack/metadata-core`, which re-exports the same binding)
+  Metadata-protocol: none
+  
+  A system administrator (`manage_platform_settings`, the capability the Setup entry asks) now has one page for the operations side of public forms. It lists every public form of the environment: its name, the object a submission creates a record of, its address, and whether it is on. Per row: switch it on or off, copy its address, or open it in a new tab. A form is designed (created, deleted, its fields and title changed) in Studio, not here.
+  
+  - **Which forms are listed.** A form view whose `sharing` opens it to anonymous intake once switched on (`allowAnonymous: true` and a `publicLink`), read by the same rule the anonymous form routes use (`anonymousFormIntakeCandidates`). A switched-off form stays listed and can be switched back on. A form with no public address or no anonymous access is an internal form and is not listed. The list is the effective one (`GET /meta/view`), so an installed app's form switched off in this environment lists as off.
+  - **Where a switch is saved.** The switch is the form's `sharing.enabled`, saved and published at once. A form of a writable package is saved in that package. A form of an installed (read-only) app is saved as this environment's customization, an override in the app's `.custom` package (ADR-0146), never an edit of the app's own package, so the app upgrades as before. Switching such a form back on removes the override when it held nothing but the switch, so the app's own form is served again; an override that also carries design changes keeps them, with the switch on.
+  - **A form its installed app ships switched off** (its address kept, `enabled` or `allowAnonymous` set to `false`, or `enabled` omitted, which the stack schema reads as `false`) stays closed whatever the environment saves: the anonymous routes treat the app's own document as a withdrawal that no override re-opens. The page judges this with the routes' own function, `anonymousFormIntakeWithdrawnIn`, now declared in `@objectstack/spec/ui` beside the rest of the intake rule; `@objectstack/metadata-core` re-exports the same binding, so the server's import is unchanged. The page lists such a form as "Off (switched off by its app)" with its switch disabled, also when an override already switches it on, and a switch-on writes nothing and says the app ships it switched off. A form whose app's document cannot be read is shown as status unknown, never as on.
+  - **After an app upgrade**, switching back on an override taken from an earlier version restores the app's own form when the form is otherwise unchanged. When it is not, the override is kept with the switch on and the page says the form stays on the app's earlier version, which Studio's "Restore package original" undoes.
+  - A switch over a draft already pending where it would save writes nothing and says so: that draft is its saver's and is never published on their behalf.
+  - A switch writes the form's metadata, which the server lets only a `manage_metadata` holder do. Without it the page still lists the forms but disables the switches and says why. A refused switch, and a list read that fails, are told in business words, never the server's raw message.
+  - A switched-off form keeps answering as it does today: `404 FORM_NOT_FOUND` at its address. No route, error code or stored key is added.
+  
+  New Setup navigation entry `nav_public_forms` in `group_configuration` (label "Public Forms", in every shipped locale) opening the component `forms:public-forms`; the Setup navigation now carries 35 entries. New locale block `publicFormsSetup` in every console locale. Not shown: when a form last took a submission, since a submission is an ordinary record of the form's object and records no form.
+- 48c5484: Clause-②: no
+  Metadata-protocol: none
+  
+  The report authoring form now reads in business terms: data source, grouping, metric. It no longer uses the schema's own vocabulary (dataset, dimension, measure, "render-time", "ANDed"), and its English matches what the Chinese report panel says. Every section description and field hint the report panel draws was reworded. The `dateRange` and `exportOptions` composites now declare their children as form rows (Date Field, Default Period, Allow Custom Range; Formats, Include Headers, File Name), each with its own hint, so the panel no longer shows the schema descriptions for them. The Description row gained its own hint. The joined-block and sort row titles now read Data Source, Group By, Group Columns By, Metrics, Sort Order and Sort By, in the form and in the item schema `title` together.
+  
+  Only prose and form layout moved. No key, accepted value or section title changed, and nothing an author can write or validate is different. The platform metadata-form bundles are regenerated, with zh-CN, ja-JP and es-ES translations for the 13 new rows, and the console's zh-CN overlay carries the new rows too.
+- cb2d6aa: docs(spec): `navigation.size` says what `'auto'` really does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The TSDoc and `.describe()` text of a view's `navigation.size` said that the default `'auto'` makes the renderer derive the drawer size from the object's field count and the viewport, so an author writes nothing. No renderer does that. `'auto'` is the host's fixed default width, the same for every object: the console's record side panel opens at `min(92vw, 460px)`, and a page block's drawer at that block's own default. The text now says so, gives the pixel cap of each explicit bucket (sm 480, md 720, lg 960, xl 1200, full 1600, always clamped to the viewport), says that a width the reader drags wins, and says where the key has no effect (a record that opens as a page, a phone-width screen). It no longer calls the buckets aligned with `FormView.modalSize`, whose buckets have other names and other widths.
+  
+  Prose only: the key, its values and its default are unchanged. The view form's help text for the key, the English metadata-form bundle `@objectstack/platform-objects` serves it from, and the generated reference pages carry the same text.
+- 7501d0c: feat(studio): the Field History setting offers Default, On and Off, and Default says what it resolves to
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Field History setting on the field form, on each row of the object form's field list, and in the object's capabilities is now a three-way choice instead of a switch. Default leaves the setting unset, so the field (or object) follows the platform, and it names what that means for the row: "Default (On)" for most field types, "Default (Off)" for a media or JSON field unless the field opts in with Track History, and for a credential field always. On and Off write `true` and `false` as before. A setting turned off can now be returned to Default, which removes the key.
+  
+  `@objectstack/spec/data` exports `resolveFieldHistory(field, object)` and `FIELD_HISTORY_DEFAULT_OFF_TYPES`: whether a changed field's old → new values show on the activity timeline, and the types that are off by default. The activity writer in `@objectstack/plugin-audit` now asks this predicate instead of its own copy of the type list, so the default the form shows and what the writer keeps cannot disagree. Behaviour of the writer is unchanged.
+- 24ff03c: feat(platform-objects): built-in objects shown in Setup and the Account app carry a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. Users, organizations, business units and their members, teams, memberships and invitations are now `blue`; API keys, sessions, linked accounts, OAuth applications, SSO providers and SCIM connection credentials `purple`; notification events `pink`; exchange rates, units of measure, working calendars, calendar exceptions and user preferences `green`.
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- 13f5466: Clause-②: no
+  Metadata-protocol: none
+  
+  The dashboard settings panel's hints now read in business terms. Nine field hints of the dashboard authoring form (Name, Label, Columns, Gap, Refresh Interval Seconds, Header, Widgets, Date Range, Global Filters) no longer use developer vocabulary such as "snake_case", "in steps of 0.25rem (4 = 1rem)" or "config". Each one now says what the builder decides. The Columns and Gap hints also describe what an empty value does, in line with the dashboard renderer.
+  
+  Only hint text moved. No key, accepted value, label or section title changed, and nothing an author can write or validate is different. The platform metadata-form bundles are regenerated, and the nine hints are re-translated in all ten translated locales (zh-CN, zh-Hant, ja-JP, ko, es-ES, fr, de, pt-BR, ru, ar). The console's own zh-CN overlay for the dashboard panel now uses the same platform wording for these nine hints.
+- c8d4b90: feat(console): Setup gets one Packages entry, the package list's administration face; the Installed Apps entry retires
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The maintainer's ruling on objectstack#36834 amends ruling 甲 of #25098: Setup lists what is installed, with the administration actions only, and the marketplace-only "Installed Apps" entry merges into it.
+  
+  - **Setup → Apps → Packages (`nav_packages`).** `@objectstack/platform-objects` contributes one entry to Setup's `group_apps`, gated on `manage_platform_settings` like Setup's other administration entries. It opens the console's `developer:packages` page with `params: { face: 'admin' }`, so the URL carries `?face=admin`. Its label is translated in every locale the Setup bundle carries.
+  - **The page's administration face.** With `?face=admin`, the Packages page lists every package of every source, with modules folded under their app. It shows the Name, Version, Status, Source and Update columns, plus a Source filter (All, Code, Marketplace, Authored) that writes `?source=`. Its only header action is New Package, and a package created there opens in Studio, on the address the Studio landing's package card opens. The detail sheet offers View info, Disable / Enable and Delete (keeping the choice to keep the data), plus "Open in Studio" on an authored package. Import, Edit, Publish, Revert, Export, Duplicate, Adopt loose items and the pending changes' Publish and Discard are not offered there. An unknown or repeated `face` value is refused by name. With no `face`, the page is unchanged: Studio's "All packages" link and each package card's Manage keep every action.
+  - **Installed Apps retires.** `MARKETPLACE_INSTALLED_UI_BUNDLE` (`@objectstack/cloud-connection`) no longer carries `nav_marketplace_installed`. The bundle stays exported under its id, with an empty `navigationContributions`, so a host that imports and registers it keeps working. The entry's labels are removed from the Setup translation bundle, and its id joins the dead-key tombstone. A bookmarked `/apps/setup/component/developer/packages?source=marketplace`, which the marketplace page's "Installed" button also opens, still shows the list filtered to marketplace installs, on the administration face.
+- 15e80d2: Clause-②: no
+  Metadata-protocol: none
+  
+  The report authoring panel now says the same thing in Chinese, Japanese and Spanish as it does in English. The Data Source, Metrics, Group By and Group Columns By rows (top level and joined blocks) and the section heading above them used the older dataset wording (数据集 / 度量 / 行 / 列, データセット / メジャー / 行 / 列, Conjunto de datos / Medidas / Filas / Columnas); they now read 数据来源 / 指标 / 分组 / 列分组, データソース / 指標 / グループ化 / 列のグループ化 and Fuente de datos / Métricas / Agrupar por / Agrupar columnas por. The six hints that were reworded into business terms in English (the section description and the Data Source, Metrics, Group By, Drilldown and Runtime Filter hints) are re-translated from the current English in all three languages.
+  
+  Only translated text moved. No key, accepted value, default or English string changed.
+- d95d34f: Clause-②: no
+  Metadata-protocol: none
+  
+  The report authoring form now names its top-level data rows with the same words as its joined-blocks grid: Data Source, Metrics, Group By and Group Columns By, where they read Dataset, Values, Rows and Columns. One form no longer calls the same setting by two names. The Metrics hint no longer says a metric is only a total or a count; it can be any measure of the data source, such as an average or a ratio. The File Name hint now says what the download does: the prefix takes the place of the report's label, and an empty prefix names the file after the label, or after the report's name when it has no label.
+  
+  Only prose moved. No key, accepted value, default or section title changed. The platform metadata-form bundles are regenerated, the File Name hint is re-translated in zh-CN, ja-JP and es-ES, and the console's zh-CN overlay now follows the current English for the Date Range and Runtime Filter hints.
+- 84b1e0c: feat(spec): Studio list columns for 27 metadata types, served in the reader's language on both doors
+  
+  Clause-②: yes (widening: `/meta/types` serves `list` on 26 more entries, and the runtime dispatcher's listing is now translated)
+  Metadata-protocol: none
+  
+  `METADATA_LIST_REGISTRY` now declares the Studio list columns of 27 metadata types: the first batch (`hook`, `flow`, `job`, `api`, `action`, `report`, `dataset`, `email_template`, `assignment_rule`, `sharing_rule`, `queue`, `agent`, `tool`, `skill`, `doc`, `seed`, `mapping`, `picklist`, `translation`) and the eight types the console used to declare itself (`object`, `field`, `view`, `page`, `dashboard`, `permission`, `position`, `book`). Every column names a key the type's schema declares, checked by the reconciliation test. Nothing an author writes changes: the registry is the spec's own constant.
+  
+  - **Headers in every shipped language.** The 52 headers no form field already labels get their own `metadataForms.<type>.fields.<path>.label` leaf in the 11 platform bundles (`@objectstack/platform-objects`), translated in all ten non-English locales. A column the form labels reads the form's words.
+  - **Both doors translate the listing.** The runtime dispatcher's `GET /meta` and `GET /meta/types` now answer the types listing in the request's language, as `RestServer`'s `GET /meta` does: type labels, form labels, list headers and schema titles. Both run one function, `translateMetaTypesListing` (`@objectstack/rest`). Before this, a host served through the dispatcher answered all of it in English.
+  - **The console's own declarations move into the spec.** Studio's lists of objects, fields, views, pages, dashboards, permission sets, positions and books read the served columns. The console keeps only what the schema cannot say: a field row's server-stamped `object`, a position's holder count and granted permission sets, a view's derived display type, a book's audience and a sharing rule's `sharedWith` rendering. The console declared `object`'s columns twice, in two registrations that disagreed (the later one won); both declarations are gone, so one remains, in the spec. A page's former `route` column named no `PageSchema` key and is dropped. What an admin sees in Studio (`@object-ui/app-shell`): the metadata lists of all 27 types show the spec's columns, in the declared order, with headers in the reader's language. The moved lists lose the console's fixed column widths (the view list's display type and the book list's audience keep theirs), the Fields list reads name, type, label, then object, the sharing-rule list's header reads "Access Level" where it read "Access", and the Pages list shows type and description in place of the dropped route column. A summary cell reads an expression member as its source, so the Jobs list's schedule shows a cron job's expression (`cron · 0 2 * * * · UTC`), not only its kind and time zone.
+- 81c1ae9: fix(i18n): the compact toolbar hint says the same thing in every language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `compactToolbar` hint in Studio was reworded in English to say that the compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar. The ten translated hints (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-CN, zh-Hant) and the console's zh-CN overlay still carried only the old first sentence. They now carry the whole hint.
+  
+  Each translation names the popover by its own locale's label for the "View settings" button (`list.viewSettings`).
+  
+  The `compactToolbar` jsdoc in `@object-ui/types` and the `@object-ui/plugin-list` README describe the View settings popover as it is: the view's name, its columns, and Layout, Group, Row height and Row color where offered, with Save, Restore defaults and Export in its footer. Neither lists Refresh there any more: Refresh is a wide-toolbar button only. The view liveness ledger's `userActions` note points at the current `toolbarFlags` lines.
+  
+  Text only: no schema, key or behaviour change.
+- fbb62e1: feat(studio): Studio no longer has a home page; opening Studio takes you to the package you were last in, or to the package list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The package-card page Studio used to open on is gone. Studio is opened from an app or from Setup → Packages, and everything that page offered has another place:
+  
+  - **Opening Studio** takes you to the package you were last in, if it is still installed. Otherwise an administrator lands on Setup → Packages, and a developer who cannot open that Setup page lands on the All metadata area. The 应用构建 entry of the Studio app goes to the same place.
+  - **New package.** 「New blank app」 (formerly 「New in Studio」) on Home, on the AI-unavailable screen and in the 「Add app」 menu opens Setup → Packages with the New Package dialog already open; a developer who cannot open Setup → Packages is taken to the All metadata area instead. After the package is created you land in Studio on it. An old bookmark to Studio's new-package page makes the same choice. Creating a package and its app in one step comes with a later change; for now this creates the package only.
+  - **What this environment changed on an installed app.** The "n customized, m switched off" line and the "Customizations in this environment" panel are now in the app's detail in Setup → Packages, with a 「Customize in Studio」 link. Tab, field-group and action-layout arrangements are named on their own in that line, not counted as customized. The list across all installed apps at once is now shown one app at a time.
+  - **The 「Add app」 menu** no longer offers 「Build with AI」, and neither do the buttons on the "No applications yet" screen. 「New blank app」 is now always offered wherever apps can be built, whether or not the AI build assistant is available, so the menu is never empty for someone who may add an app; a menu with nothing to offer is not shown. Home's own 「Build with AI」 button is unchanged.
+  - **Organization flows and the environment catalog** are in Studio's left menu.
+  - **A package Studio cannot find** offers a way to Setup → Packages, or to the All metadata area for a developer who cannot open that page. A retired Setup page whose address names no package opens Setup → Packages.
+  
+  The Packages page's developer view (import, publish, revert, adopt loose items) still opens at its address; its menu entry comes with a later change.
+- 8b1841f: feat(platform-objects): built-in tasks and notes, `sys_task` and `sys_note`, in every environment
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `PlatformObjectsPlugin` now registers two ordinary, customizable objects on their own manifest
+  (`com.objectstack.platform-objects.work`), so any application can put tasks and notes in its menu
+  without declaring its own:
+  
+  - `sys_task` — title (required), description (rich text), status (To Do / In Progress / Done,
+    default To Do), due time, assignee (a user, defaulting to the creator) and a read-only completion
+    time the platform writes when the status becomes Done and clears when it leaves Done.
+  - `sys_note` — an optional title and a rich-text body; lists show a read-only heading that is the
+    title, or the body's first line when the title is empty.
+  
+  Each keeps its own sharing: `sharingModel: 'private'` over a declared `owner_id` (the creator), and a
+  task is also shared, with edit access, with its assignee through the declared `sys_task_assignee`
+  sharing rule. Neither links to, grants access to, or derives access from any other record. Default
+  views: tasks Assigned to Me (open, by due time), Created by Me and All Tasks (a board by status);
+  notes My Notes and All Notes. Attachments are on for both.
+  
+  Both names join `PLATFORM_OBJECTS_BY_PACKAGE['platform-objects']` in `@objectstack/spec`, so
+  validation treats them as platform-provided: an app's navigation entry reaches them with
+  `requiresObject` beside `objectName` (`{ type: 'object', objectName: 'sys_task', requiresObject:
+  'sys_task' }`), which `defineStack` accepts and the console hides on a kernel without the object.
+  Their labels ship in the platform's eleven locales (zh-CN 任务 / 备忘).
+  
+  `@objectstack/plugin-security`: the member baseline `member_default` grants `sys_task` and
+  `sys_note` read, create and edit, with no delete (maintainer ruling 7131539862, option A). It opens
+  the objects only: which rows a member sees stays with each object's private sharing, so a task is
+  read by its creator and its assignee and a note by its creator.
+  
+  `@objectstack/cli`: the organization-ownership inventory (ADR-0131 D10) gives `sys_task` and
+  `sys_note` the `attribution` fate, so `os migrate organization-ownership` and the `os dev` upgrade
+  plan databases that hold them instead of refusing an object with no fate.
+  
+  Clause-② reads `yes (widening)`: `defineStack` now accepts a top-level action whose `objectName` is
+  `sys_task` or `sys_note`, and the public surface grows. `Metadata-protocol: none` follows the
+  `sys_unit` roster-addition precedent: no metadata key, type or schema value is added, and a
+  reference that already parsed now resolves.
+- 012f0a1: Clause-②: no
+  Metadata-protocol: none
+  
+  The dashboard authoring form's Default Period row (Filters, then Date Range) now names each choice: Today, This month, Last 30 days, Custom… and so on, instead of the stored preset (`this_month`). It offers the same named options as the report form, from one shared table, so the two selects name a period the same way and a preset added later is named on both the day it lands. The Date Range group now lists its three rows (Date Field, Default Period, Allow Custom Range) by name, with zh-CN catalog wording. In the Studio dashboard inspector, a Chinese session reads the period names from the console's locale packs, the same words the period chip shows (本月, 近 30 天, 自定义…), through the helper the report inspector uses.
+  
+  Only the form's row and option names moved. No key, accepted value or default changed, and nothing an author can write or validate is different.
+- 68250f6: feat(studio): author context packs (`ai_context`) in Studio — a form for the type, and a related-lists block that picks each list's columns from its own child object
+  
+  Clause-②: yes (widening) — one new public export, `aiContextForm` from `@objectstack/spec/ai`, and `/meta/types` now serves a form for `ai_context`; no key is added to what a pack may hold
+  Metadata-protocol: none
+  
+  ADR-0160 D1, clause 2 (runtime authoring). A context pack can now be created and edited in Studio like a skill: Studio's metadata editor lays it out with the new `aiContextForm` (`@objectstack/spec/ai`, registered in `METADATA_FORM_REGISTRY` as `ai_context`), and saving goes through the metadata API, where the pack's author defects are reported at save as before.
+  
+  - **Root object and its fields.** The root is picked from the object catalog; `fields` is the generic field picker scoped to that root (`field-multi`, `dependsOn: 'object'`); `body.field` is a single field picker over the root's fields.
+  - **Related lists.** `related` uses the `related-list-entries` block. Under a pack, whose entries are `{ object, field?, fields? }`, the block offers every reference field of a served object that points at the root (a self-reference and each of a child's several links included) and writes the pick as `{ object, field }`; each entry's columns are picked from that child object's fields. It stops adding at the schema's bounds (3 lists, 10 columns), and an emptied list or column set removes its key. A stored entry the catalog shows no link for is kept and marked; the save-time report judges it. The object form's `relatedLists` keeps its chip face unchanged: the block tells the two apart by the entry schema it is handed.
+  - **An emptied picker removes its key.** In Studio's metadata editor, removing the last chip of a field list whose schema has `minItems: 1` (a pack's `fields`) now removes the key instead of writing `[]`, and a composite left with no value while its schema requires a key that has no default (a pack's `body` after choosing "None") is removed instead of written as `{ field: '' }`; a composite whose required keys all carry a default (a view's `pagination`, `selection`) keeps `{}`; both were drafts the save refused with no way back in the form. A cleared sub-field of any composite drops its key, as a cleared top-level field already did.
+  - **The related-lists block waits for the object list.** While the object list loads, or after it failed, no stored entry is marked as unlinked and the add picker says it is loading or could not load.
+  - No key is added to `AiContextSchema`, and nothing a pack may hold changes.
+- 088852b: Clause-②: no
+  Metadata-protocol: none
+  
+  The rest of the report authoring panel's hints now say in Japanese and Spanish (and, where it still lagged, Chinese) what the English says. The Group Columns By, Sort Order, Blocks, Chart, Date Range and Export Options hints and the Joined blocks and Filter & chart section descriptions still translated the older developer wording (dimension names, sort keys with rows / columns / values, sub-reports bound to a dataset, chart type / legend / colors, the dataset's date dimension, the dataset's object); they are re-translated from the current English with the panel's business words (データソース / 指標 / グループ化, Fuente de datos / Métricas / Agrupar por, 数据来源 / 指标 / 分组). In Chinese the Chart hint and the Filter & chart description already followed the English and are unchanged.
+  
+  Only translated text moved. No key, accepted value, default or English string changed.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- b3247dd: fix(auth)!: a server outside development mode refuses a development seed credential, and `os user set-password` sets a new one on the server
+  
+  Clause-②: yes (narrowing) — narrowed: on a server whose `NODE_ENV` is not `development`, a password sign-in that submits the development seed password (`admin123`, or the value `OS_SEED_ADMIN_PASSWORD` sets) is refused on every account, and an account the development seed created opens no session while its stored password is still the one it was seeded with. Widened: the `os user set-password` command, the `sys_user.dev_seed_credential` column, and new `@objectstack/plugin-auth` exports `setOperatorPassword`, `findAccountByEmail`, `operatorPasswordRefusal`, `OPERATOR_PASSWORD_MIN_LENGTH`, `OPERATOR_PASSWORD_MAX_LENGTH` and the types `OperatorPasswordResetEngine`, `OperatorPasswordResetOutcome`, `OperatorPasswordResetRefusalReason`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, accepted value or metadata type is added, removed or renamed; a system column is added; nothing stored is rewritten: the moved answer is whether a server outside development mode accepts a development seed credential at sign-in. The one-line fix for a refused account is in the body: set a new password on the server with os user set-password. -->
+  
+  **BREAKING** for a deployment that serves, outside development mode, a database `os dev` seeded, or any account whose password is the development seed password. Such a sign-in is refused. Set a new password on the server with `os user set-password <email>`; the refusal names the command. A server in development mode (`os dev`) is unchanged.
+  
+  **The rule: a server outside development mode never accepts a development seed credential.** Development mode is `NODE_ENV=development`, the condition the development seed itself runs under. The rule lives in the auth plugin, so `os start`, `os serve`, the image and a custom host all apply it.
+  
+  - **The seed password is refused at sign-in, on any account.** A password sign-in with the development seed password answers `403 PERMISSION_DENIED`, and its message names `os user set-password`. It is decided on the submitted password alone, before any account is read, so every address gets the same answer. This covers the seeded admin, the stack's `demoStaff`, any other account on that password, and a database seeded by an earlier release.
+  - **The accounts the development seed creates are marked.** `os dev`'s admin and each `demoStaff` account carry `sys_user.dev_seed_credential`: a one-way digest of the password hash the seed stored, never the password. The column is never returned on reads, and any password change stops it matching.
+  - **A marked account still on its seed password opens no session**, on any sign-in door (password, emailed link, one-time code, passkey, social or SSO, impersonation), whatever password it was seeded with, `os dev --admin-password` included. A password check never confirms that seed password: a password sign-in answers it as a wrong password.
+  - **No password change is offered at sign-in.** Whoever signed in first could perform it. The way out is the operator's reset on the server.
+  
+  **`os user set-password <email>`** sets the account's password in the project database. It reads the new password from a terminal prompt (twice, not echoed) or from standard input with `--password-stdin`, never from the command line, and takes `--database-url` like the other one-shot commands. It checks that the new password is not a development seed password and is 8 to 128 characters long; the deployment's own password policy and password history are not applied. It writes nothing on a refusal. It deletes the account's outstanding password-reset links and codes from the project database before the new password lands. It clears the account's development seed mark and any sign-in lock, records the change time, and ends every session and revokes every API key of the account, as an administrator's forced reset does. It asks for no password change at the next sign-in. It writes the project database only: a secondary storage the host configures for the auth service is out of its reach, for the reset links and the sessions alike. With one configured, run the command with the server stopped, or restart the server afterwards; a secondary storage kept outside the server process outlives a restart and is cleared of the account's entries by hand.
+  
+  **Not detected:** a database seeded before this release with a custom seed password carries no mark and no well-known password. Set a new password with `os user set-password` on each account it seeded before serving it outside development mode.
+  
+  **Ended by `os user set-password`, and at boot:** this release refuses the development seed password and every new session for a seeded account still on it. Sessions and API keys a seeded account was issued before the server left development mode are ended by `os user set-password`; run it on each seeded account before serving the database. In the same release, a boot outside development mode also retires them: see the note "a boot outside development mode retires what the development seed issued" (#36699).
+- bc2aaf1: fix(plugin-auth)!: a disabled or removed account keeps nothing running in its name
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is what four identity doors end and refuse: the ban, the directory's deactivation and delete, and an administrator's delete end what a password reset ends of the account's registrations, and the AI service account doors refuse an owner whose account is disabled. No stored row, registry key or authored value needs rewriting, so there is nothing for a migration to change and no tombstone. -->
+  
+  **The rule.** An account that is disabled or removed, by any door, keeps nothing running in its name. What it is accountable for is suspended, what it registered is disabled, what it minted is revoked, and turning the account back on restores none of it.
+  
+  - **A platform administrator's ban** (`POST /api/v1/auth/admin/ban-user`) suspends every AI service account the person is accountable for, in every organization, with the reason `Accountable owner banned by an administrator`; disables every OAuth application the account registered; and revokes every SCIM provisioning credential it minted, each revoke recorded in `sys_audit_log` against the administrator. The answer reports it under `data.revoked` (`serviceAccounts`, `ownedApps`, `scimCredentials`, `failed`, `complete`), as the administrator's forced reset reports its own, and the ban's audit row carries the same counts. A step that cannot finish does not undo the ban: `complete` is `false`, and banning again ends what remains.
+  - **The directory** (SCIM `active: false`, `DELETE /Users/{id}`) disables the OAuth applications the person registered and revokes the SCIM credentials they minted, each revoke recorded against the connection (`actor` `svc:scim:CONNECTION_ID`). It never fails the SCIM request; a revoked credential is reported once in the server log at `error`, with the remedy.
+  - **An administrator's delete** (`POST /api/v1/auth/admin/remove-user`) ends the same registrations before the user is deleted, inside the delete's unit of work, and answers `{ success: true, revoked: { ownedApps, scimCredentials } }`. When one cannot be ended, the delete is refused `503 SERVICE_UNAVAILABLE` and nothing changes.
+  - **An AI service account runs only while its accountable owner's account is active.** `register` and `set-owner` refuse an owner who is banned or deactivated (`400 VALIDATION_FAILED` at `ownerId`), and `resume` refuses an account whose owner is (`409 RESOURCE_CONFLICT`), whichever door disabled them.
+  - An unban or a re-activation restores none of it: a platform administrator enables an application again, a new credential is minted, and an administrator resumes an AI service account once its owner's account is active again or a new owner is named. A timed ban leaves the accounts suspended after it expires. Single sign-on providers the account registered are kept, as a password reset keeps them.
+  
+  The Ban action's confirmation and its AI-facing description, and the Unban action's AI-facing description, now state these effects.
+  
+  **BREAKING** for:
+  
+  - a caller that names, as an AI service account's owner, a person whose account is banned or deactivated: the door refuses it. Name a person whose account is active.
+  - an operator who relied on a banned, deactivated or removed administrator's SCIM credential: it is revoked, and provisioning through its connection pauses until another administrator mints a new credential. Rotate a connection's credential to another administrator before removing the one who minted it.
+  - a client that read the ban's answer or the delete's answer as an exact shape: each gains `revoked`.
+- 4e55e4e: fix(plugin-auth)!: deleting an SSO provider ends the sessions a sign-in through it opened and removes its projected grants
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no published skill teaches deleting an SSO provider, its sessions or its projected grants; the rule is documented in `content/docs/permissions/sso.mdx` ("Deleting an SSO provider")
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key, value or export is added, removed, renamed or re-shaped. `sys_session` gains a system-managed, read-only column the platform writes itself, and what changes is which sessions and projected grants stay live once an SSO provider is gone: no stored metadata row, registry key or authored value moves, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a session a sign-in through an SSO provider opened: deleting that provider ends the session, and its next request is answered as signed out. Sessions opened any other way are not touched.
+  
+  - **Sessions.** Each session an SSO sign-in opens records the provider it was signed in through, in the new read-only `sys_session.sso_provider_id` column. `POST /api/v1/auth/sso/delete-provider` revokes the live sessions that record the deleted provider (`revoke_reason: 'sso_provider_deleted'`). A session signed in any other way (a password, another provider) is left as it is, and a delete the vendor refuses ends nothing.
+  - **The answer.** A successful delete's `data` carries `revokedSessions`, the number of live sessions it ended, beside the other counts, and its `message` says so.
+  - **Projected grants.** A permission-set grant projected by an SSO provider's group mapping exists only while that provider does: the delete removes them, as before, and at every boot the grants whose `reason` names a provider with no `sys_sso_provider` row are removed too, as are live sessions recording such a provider. The boot does not remove the provider's group mappings (delete each with **Delete Mapping**, or `POST /api/v1/auth/admin/scim/delete-group-mapping`); it logs at `info` what it removed, and at `error`, with the remedy, when it could not. Several servers sweeping at once each remove what is left, and none reports the others' removals as a failure.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

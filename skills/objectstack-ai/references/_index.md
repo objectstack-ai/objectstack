@@ -10,7 +10,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 ## Core schemas
 
 - `node_modules/@objectstack/spec/src/ai/agent.zod.ts` — Exports: AIModelConfigSchema, StructuredOutputFormatSchema, TransformPipelineStepSchema, StructuredOutputConfigSchema, AgentSchema
-- `node_modules/@objectstack/spec/src/ai/knowledge-source.zod.ts` — Knowledge Source — declarative metadata describing what to index and
+- `node_modules/@objectstack/spec/src/ai/knowledge-source.zod.ts` — Knowledge Source — the governed metadata type `knowledge_source`
 - `node_modules/@objectstack/spec/src/ai/model-registry.zod.ts` — AI Model Registry Protocol
 - `node_modules/@objectstack/spec/src/ai/skill.zod.ts` — Skill Trigger Condition Schema
 - `node_modules/@objectstack/spec/src/ai/solution-blueprint.zod.ts` — Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
@@ -18,7 +18,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/ai/embedding.zod.ts` — Embedding & Vector Store Primitives
+- `node_modules/@objectstack/spec/src/ai/record-context-tools.zod.ts` — Exports: GetRecordContextInputSchema, RecordContextFieldEntrySchema, RecordContextRelatedRowSchema, RecordContextRelatedListSchema, RecordContextOutlineEntrySchema
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema

@@ -422,7 +422,13 @@ describe('member_default lets a member react to comments; external_default does 
  * capability by default). And `manage_connector_connections` (ADR-0143 D5 —
  * platform administrators hold the connector connection capability by default;
  * so do both organization-administrator sets since ruling B, record
- * 6545223261, pinned below).
+ * 6545223261, pinned below). And `manage_knowledge_sources` (ADR-0161 K4,
+ * ruling Q2 = B on #37304 — platform administrators hold the knowledge source
+ * capability by default and no other shipped set does, pinned below). And `viewAllFields` on the wildcard (the
+ * field-axis split, ruling of record 6912661484, letter A): the read-only
+ * "every field" vote, which duplicates the field vote the two record bits
+ * already cast, so no answer changes; the no-behaviour-change pin is in
+ * `fls-own-field-mask-33828.test.ts`.
  *
  * The set's `description` is admin-facing copy, not capability, so it is left
  * out of the comparison (its shape is pinned by
@@ -441,6 +447,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
           allowDelete: true,
           viewAllRecords: true,
           modifyAllRecords: true,
+          // added on purpose (ruling 6912661484) — see the docblock above.
+          viewAllFields: true,
           // [#8681] no `allowExport` — deliberate, see the spec declaration.
         },
       },
@@ -458,6 +466,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'manage_mailboxes',
         // added on purpose (ADR-0143 D5) — see the docblock above.
         'manage_connector_connections',
+        // added on purpose (ADR-0161 K4) — see the docblock above.
+        'manage_knowledge_sources',
       ],
       // [#21237] added on purpose — see the docblock above. The group is read off
       // the identity object's declaration, never listed here.
@@ -491,6 +501,16 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
       expect(setByName(withheld)).toBeDefined();
       expect(setByName(withheld).systemPermissions ?? []).not.toContain('manage_connector_connections');
     }
+  });
+
+  it('[ADR-0161 K4] the knowledge source capability ships with the platform administrator and no other set', () => {
+    // Ruling Q2 = B on #37304: saving a knowledge source starts an egress and
+    // a bill, so the organization administrator holds it only by an explicit
+    // grant, unlike the connector connection capability above.
+    const holders = (defaultPermissionSets as any[])
+      .filter((s) => (s.systemPermissions ?? []).includes('manage_knowledge_sources'))
+      .map((s) => s.name);
+    expect(holders).toEqual(['admin_full_access']);
   });
 
   it('[ADR-0143 D5] the wall-less organization administrator inherits the capability through the derivation, not a second literal', () => {

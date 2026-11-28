@@ -1,5 +1,1576 @@
 # @objectstack/lint
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- ab04434: feat(spec): a package's display name per locale — the translation bundle's `packages` group, read by Setup's package list and Studio's package switcher
+  
+  Clause-②: yes (widening) — the translation bundle (`TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema`, `TranslationItemSchema`) accepts a new group `packages`, keyed by `manifest.id`, each row `{ name?, description? }`; a bundle that wrote `packages` was refused as an unknown key before. `@object-ui/i18n` `useObjectLabel()` gains `packageName` and `packageDescription`.
+  Metadata-protocol: added — a new translation group `packages.MANIFEST_ID.name` / `.description`
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A package had one name, the plain-string `manifest.name`, so a zh-CN administrator read every package in Setup's package list, and every package with no app of its own in Studio's package switcher, in English, beside a launcher that already named the same apps in Chinese.
+  
+  A package now names itself per locale in the translation bundle it already ships:
+  
+  ```ts
+  export const zhCN: TranslationData = {
+    packages: { 'com.acme.reporting': { name: '报表', description: '经营报表' } },
+  };
+  ```
+  
+  - The key is the package's `manifest.id`. A key that is not a manifest id — a namespace like `crm`, or a display name — is refused at parse, naming the rule, because a row keyed by one would never render. `package`, and the leaf spellings `label`, `title` and `displayName`, are answered with the declared spelling.
+  - The console draws the translated name where a reader sees a package — Setup's package list (row, detail title, description, search, the installed-apps group) and Studio's package switcher for a package that ships no app — and falls back to `manifest.name`. A package that publishes an app is still named by the app's label in the switcher.
+  - `manifest.name` stays exactly as authored on every wire and in every editor: the translation is a display overlay, so the edit dialog that prefills from the listed manifest never saves a translated name back.
+  - A disabled package keeps its translated name: its bundle is loaded at boot whether or not the package is enabled.
+  - `os i18n extract` scaffolds `packages.MANIFEST_ID.name` / `.description` from the manifest, and `os i18n check` / `os lint` report a locale that leaves them out as `i18n/missing-package` — a warning, like every other missing translation. A stack that declares a non-default locale and has never named its package in it sees two new warnings per locale on upgrade; the ObjectStack examples now name theirs.
+  
+  `MANIFEST_ID_PATTERN` is now declared in `kernel/address-grammar.ts` beside `NAMESPACE_PATTERN`; `kernel/manifest.zod.ts` re-exports it, so every existing import keeps working.
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/sdui-parser@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Major Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+
+### Minor Changes
+
+- d9bc148: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint)!: four publish-time checks for data-model metadata that saves and does not work — two refuse the publish, two warn
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37529
+  
+  <!-- adr-0087: registered publish-refuses-data-model-fields-that-save-and-do-not-work -->
+  
+  **BREAKING** for the publish of an object that carries one of the two errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored objects are not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  Two errors, run by the runtime publish gate and the CLI:
+  
+  - `rollup/child-without-parent-reference`: a `summary` field whose child object has no `lookup` / `master_detail` field referencing the parent, or whose `summaryOperations.relationshipField` names no field of the child. With no foreign key the engine's summary index skips the summary with nothing logged; with a `relationshipField` that names no child field the summary is indexed and never recomputed. Either way the field reads 0 or empty on every parent while every child write reports success. Judged once the child resolves (a child the stack does not hold is still not judged), against the child's fields as served (an object extension may add the foreign key) and its injected columns (`owner_id`, `created_by` back to `sys_user`). Reported by `lintSummaryRollups`, beside its aggregand checks.
+  - `field/reference-on-non-reference-type`: `reference` on a field type that reads none — anything but `lookup`, `master_detail`, `user`, `tree` and `summary`. It links no record, and the record page edits a text, number or date field carrying it with a record picker that writes a record id into it. Judged on objects and on object extensions.
+  
+  Two warnings, which refuse nothing and make `os validate --strict` exit 1 as any warning does:
+  
+  - `field/count-named-lookup`: a `lookup` / `master_detail` field named like a count or a total (`contact_count`, `total_amount`); a relationship stores the id of one record, never a number.
+  - `approval-detail-editable-while-pending`: an approval step that locks its record (`lockRecord`, default `true`) on an object whose record page draws a `lookup` child as a table in its own body (`relatedList: 'primary'`); the approval lock covers `master_detail` children only, so those rows stay editable while the record waits. Reported by `validateApprovalApprovers`.
+  
+  A formula reading a summary that has no configuration stays covered by `field/summary-without-operations`, which refuses the summary itself.
+  
+  ## FROM → TO
+  
+  - `summaryOperations: { object: 'order_line', function: 'count' }` over an `order_line` with no field pointing at `order` → add `order: { type: 'master_detail', reference: 'order' }` to `order_line`.
+  - `summaryOperations: { ..., relationshipField: 'order_ref' }` naming no field of the child → name the child field that holds the parent id.
+  - `account: { type: 'text', reference: 'account' }` → `account: { type: 'lookup', reference: 'account' }`, or drop `reference`.
+  
+  No new exports. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-data-model-fields-that-save-and-do-not-work`.
+- c42a045: fix(lint)!: three publish-time checks for seeds, flow nodes and actions that save and do not work
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37814
+  
+  <!-- adr-0087: registered publish-refuses-seeds-and-actions-that-save-and-do-not-work -->
+  
+  **BREAKING** for the publish of a seed, a flow, an action or an object that carries one of the errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored metadata is not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  - `seed-record-unknown-field`: a seed record key, or a seed `columns` key, that the engine's insert door would refuse: a key that names no field of the dataset's object, no system column the platform injects on it (`owner_id`, the tenant and audit columns, unless the object opts out), and none of the columns every table carries (`id`, `created_at`, `updated_at`). The seed load writes each record through that insert, so such a record is dropped while the rest load. An object with no field map is not judged, as the engine's door does not judge it. `defineSeed` already refused such a key when it ran; a plain `data: [{ object, records }]` entry and a `seed` saved at the runtime publish door are now judged too. A field an object extension adds counts. Runs on the runtime `seed` door.
+  - `object-reference-unknown` (and the warning `object-reference-unregistered-platform` for a platform-prefixed name no known package registers), at three more bindings: a seed dataset's `object`, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node's `config.objectName`, and a standalone action's `objectName`. A seed over a missing object loads nothing, and an action bound to one is carried by no page. A flow node is split as `flow-trigger-unknown-object` is: on `os validate` / `lint` / `build` an unprefixed name the stack does not define is a warning, because a package the stack declares in `dependencies` may define it and a build cannot see that package; at the runtime publish door it is an error, judged against the written package's closure, or against every object the deployment serves for a write that names no package, where a step bound to a missing object fails the run every time it executes. An object the stack extends resolves at these three. At the runtime publish door the seed binding stays with the save door's own refusal of a seed over an unknown object (#34864), which accepts a draft of the object in the same package; the rule now also runs on the runtime `action` door, so an `action` write is therefore also judged for its params' `reference` / `objectOverride` objects, as `os validate` already judged them, and an action saved into a package (`?package=`) is judged against that package's closure, as a flow saved there already was: an object another package owns resolves only when the manifest declares that package in `dependencies`.
+  - `action-body-write-capability-undeclared`: an L2 action body that calls a `ctx.api` write (`insert`, `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without `api.write` in its `body.capabilities`. The sandbox refuses the call with `403 INSUFFICIENT_PRIVILEGES` every time the action reaches it. Runs on the runtime `action` and `object` doors.
+  
+  `os build` now infers `api.write` for every handler write shape the new check reads: a lone `updateMany` or `deleteMany`, `?.` before the leaf, an `.object(…)` argument holding a call, and a handle bound to `.object(…)` (`const repo = ctx.api.object('x'); repo.update(…)`). Before, such a handler was lowered with no grant and refused at every call.
+  
+  ## FROM → TO
+  
+  - `data: [{ object: 'task', records: [{ name: 'a', stauts: 'open' }] }]` → `status: 'open'`, or declare `stauts` on `task`, or drop the key.
+  - `{ type: 'create_record', config: { objectName: 'invoce', … } }` → `objectName: 'invoice'` (the object's full, namespaced name).
+  - `body: { language: 'js', source: "await ctx.api.object('task').update(…)", capabilities: [] }` → `capabilities: ['api.write']`.
+  
+  `@objectstack/lint` exports two rule id constants, `SEED_RECORD_UNKNOWN_FIELD` and `ACTION_BODY_WRITE_CAPABILITY_UNDECLARED`, so `os explain` carries an entry for each; the rules themselves are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-seeds-and-actions-that-save-and-do-not-work`.
+- 81c68b3: feat(spec): a book audience can name a capability, so the Setup and Studio docs open only for callers who can open those apps
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents the new form in this change
+  
+  A book's `audience` (ADR-0046 §6.7) takes a fourth form, `{ systemPermission: 'TOKEN' }`: the book's pages are read by a signed-in caller who holds that capability through any permission set, the same caller an app with `requiredPermissions: ['TOKEN']` opens for. `{ permissionSet }` names one set, so it could not gate a manual on a capability several sets grant (`setup.access` comes with `organization_admin`, `admin_full_access` and any delegated-admin set an application authors).
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` and `BookAudience` gain the arm. It is strict, so `{ systemPermission, label }` is refused at parse, and an object that also carries `permissionSet` is refused too: an audience names one gate. `BookAudience` is a wider union now: TypeScript code that reads `.permissionSet` after a bare `typeof audience === 'object'` check narrows by key instead (`'permissionSet' in audience`). `AudienceCaller` gains `systemPermissions`, and `audienceAllows` admits the arm only when that list holds the token; an absent list denies (fail closed). Every other form answers as before.
+  - **`@objectstack/rest`.** The docs audience reads the caller's own `systemPermissions` (the list every `requiredPermissions` arm of the `/meta` read gate reads) when some book carries the new form, on `GET /meta/doc` (with and without `?include=content`), `GET /meta/doc/:name`, `GET /meta/book`, `GET /meta/book/:name/tree` and the app-nav `doc` entries. New: `anySystemPermissionAudience`, and the optional `resolveAudienceSystemPermissions` port on `MetaReadGateAudienceSources` for a transport whose audience reads someone else's holdings.
+  - **`@objectstack/runtime`.** The MCP docs tools (`search_package_docs`, `read_package_doc`) gate on the same form; on an OAuth grant they read the delegating person's own capabilities, never the token's ceiling.
+  - **`@objectstack/setup`, `@objectstack/studio`.** Each package now ships a manual (`setup_manual`, `studio_manual`) claiming its package's doc namespace (`setup_*`, `studio_*`), gated on `setup.access` / `studio.access`. Before, those docs were claimed by no book, so they fell back to `org`: listed to administrators only by the Console's docs index, but readable at their address, and through `?include=content`, by every signed-in member. Now a member who cannot open Setup gets `setup_overview` in neither list and a `403 PERMISSION_DENIED` on its read; an administrator reads it as before. The docs' Console address now names the manual (`/apps/com.objectstack.setup/docs/setup/setup_overview`) in place of the package's implicit one; the flat `/docs/setup_overview` permalink still finds it.
+  - **`@objectstack/lint`.** `capability-reference-unknown` also resolves a book's `audience.systemPermission`, so a misspelled capability (which hides the manual from everyone) warns.
+  - **`@object-ui/app-shell`, `@object-ui/i18n`.** Studio's book preview shows a capability-gated book as "Capability: TOKEN" instead of "Org", and the book form round-trips the new form.
+  
+  Nothing to migrate: the manuals claim by name, so a stored doc bound to no package (which a package-scoped `include: '*'` would also have claimed) keeps the audience it had. Only docs named under those prefixes change audience: on `main` that is `setup_overview` and `studio_overview`.
+- c3a4a30: fix(lint)!: a `_relatedLists` translation key over a list the `.custom` arrangement hides or re-states without a label is refused, as nothing reads it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37620
+  
+  <!-- adr-0087: registered translation-related-list-key-under-arrangement-refused -->
+  
+  **BREAKING** for a translation bundle that carries `objects.<object>._relatedLists.<list>` over a list the object's owner labels but the paired `.custom` package's `relatedLists` (ADR-0146 D10) re-states. `objectstack validate` and the other doors that run `translation-target-unknown` now report such a key as an error, where 18.x accepted it. Drop the key, or re-state the arrangement's entry with the owner's own `label` (`{ list, label }`) and keep it: an object read translates a label only while it still equals the packaged one.
+  
+  **Why.** The registry applies the `.custom` arrangement after the owner's tab list and every `place` entry, and each arrangement entry replaces every entry it covers: the same list, or, for a bare child name, every list of that child (`relatedListNameCovers`). An entry `{ list, hidden: true }` leaves no tab, and a bare name or an entry with no `label` leaves the tab titled by the child lookup field's `relatedListTitle`. In both cases the served object has no `label` on that list for the key to translate. The rule judged the owner's label first and accepted the key before it looked at the arrangement, and it never saw the arrangement's bare names.
+  
+  **What changes in `@objectstack/lint`.**
+  
+  - The rule folds the arrangement's entries after the owner's entries and every placement, as the registry does. A list the arrangement labels resolves. A list it hides, names bare or names without a label does not resolve, whatever label the owner or a placement gave it; a labelled bare child such as `{ list: 'event', label }` covers the owner's `event.related_to` too. Lists the arrangement does not cover keep what they had. Each arrangement is read in two passes, as the registry reads it, so one entry never strips the label a sibling entry of the same arrangement gives (`[{ list: 'event.related_to', label }, 'event']` resolves in either order).
+  - A key over a list the arrangement hides gets the "hidden by the `.custom` arrangement" message, now also when a bare child name such as `{ list: 'event', hidden: true }` hides a dotted list such as `event.related_to`. A key over an owner-labelled list the arrangement re-states without a label names the arrangement too, and its hint points at the owner's `label`.
+  - `VisibleObjectExtension` (`object-graph.ts`, internal) carries the extension's `relatedLists` as written, bare names included, as `relatedListArrangement`.
+  
+  Measured first-party exposure: none. No example or first-party package ships a `.custom` arrangement that re-states an owner-labelled list together with a key for it.
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- ddd5941: feat(ai): a skill names the context pack it works from (`context`), and its MCP prompt takes a record id
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  ADR-0160 D8. A skill can now name a context pack (`ai_context`) by its bare name:
+  
+  ```ts
+  defineSkill({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer the question about this policy, citing its sections.',
+    tools: ['get_record_context'],
+    context: 'policy_document',
+  });
+  ```
+  
+  - **`@objectstack/spec`.** `SkillSchema.context?: string` (snake_case, the pack's machine name; a face such as `NS-NAME` is refused). A skill that declares it must bind `get_record_context` in `tools`, by name or by a wildcard that matches it (`get_record*`, `get_*`); without the binding it is refused at parse, located on `tools`. `skillBindsRecordContextTool(tools)` answers that binding. The skill form gains a `context` control.
+  - **`@objectstack/mcp`.** When a skill's `context` resolves to a pack, its prompt lists one optional argument, `recordId`. The name resolves by ADR-0150 D3 from the skill's own package (its own pack, else the one holder in its dependency closure), or as for a caller with no package for an environment skill; a name that resolves to no pack adds no argument. Given a record id, the prompt's one message is the skill's instructions, one fixed line telling the model to call `get_record_context` with the arguments that follow, and those arguments as one JSON object: `objectName` (the pack's root), `recordId`, and `context` (the pack's face). The record id only ever appears as that JSON string value, and the pack is never inlined. Without the argument the prompt is byte-identical to the same skill's prompt without `context`. A blank record id is refused (`-32602`). Both the per-request HTTP prompt surface and the long-lived stdio server serve it; the stdio server, which applies no tool-binding filter, offers the argument only where it registers `get_record_context` (its data tools are now bridged before its prompts). `McpSkillBridge` gains two optional members, `listContextPacks` and `packageResolutionClosure`; `MCPServerRuntime.bridgePrompts` takes the closure as an optional fourth argument.
+  - **`@objectstack/lint`.** Two warnings where skills are validated (`os validate`): `ai-skill-context-unknown`, for a `context` that names no pack the stack's own `aiContexts` define (a pack a dependency package ships resolves at run time and is not read here), and `ai-skill-context-omitted`, for a skill that binds `get_record_context` without `context` while an object has more than one pack (its call there without a pack name is refused).
+  - **`@objectstack/runtime`.** The `/mcp` route's bridge hands the skill prompt surface the same pack listing `get_record_context` selects from, and the skill's package closure.
+  - **`@objectstack/platform-objects`.** The generated metadata-form translation bundles carry the skill form's new `context` control (label and help text, translated in every shipped locale).
+- 39fafc0: fix(spec)!: a book audience names one gate, and a gated book claims its pages by name
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents both refusals in this change
+  
+  <!-- adr-0087: registered book-audience-two-gates-and-catch-all-claim-refused -->
+  
+  **BREAKING** for two book shapes (ADR-0046 §6.7) that were accepted and meant less than they said. Stored books are not rewritten or refused at boot; the next save or publish of such a book is refused with the fix named.
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` refuses an `audience` naming both `permissionSet` and `systemPermission`. The older `{ permissionSet }` arm is a plain object, so the pair used to parse as the set form with the capability stripped: the author believed the book was gated on a capability, and it was gated on one set. `defineStack`, `os validate` and the `/meta` save now refuse it, and the message says which key to keep. Only the second gate key is refused: every other shape that parsed before still parses the same way.
+  - **`@objectstack/lint`.** New error `book-gated-catch-all-include` (`validateBookAudienceClaims`): a book whose `audience` is `{ permissionSet }` or `{ systemPermission }` with a group claiming docs by `include: '*'`. A package scope leaves out only a doc stamped with another package, so a stored doc bound to no package is in every scope, and the catch-all claimed it too and hid it from every reader outside the audience. It runs on `os validate`, `os build` and `os lint`, and at the runtime publish gate on a book write (Studio, REST `/meta`, MCP).
+  
+  ## FROM → TO
+  
+  - `audience: { permissionSet: 'crm_admin', systemPermission: 'setup.access' }` → `audience: { systemPermission: 'setup.access' }` (everyone holding the capability through any set) or `audience: { permissionSet: 'crm_admin' }` (the holders of that one set).
+  - `audience: { systemPermission: 'crm.runbook' }` with `groups: [{ key: 'all', label: 'All', include: '*' }]` → `include: 'crm_runbook_*'` (the package's doc namespace), a tag include `{ tag: 'runbook' }`, or pinned `pages`.
+- 709a087: fix(lint,core)!: a lookup `dependsOn` entry whose filter key names a formula of the referenced object is refused at authoring; an import lookup none of whose scoped reads answered is never reported as out of scope
+  
+  Clause-②: yes (narrowing) — a lookup, master_detail or user field whose `dependsOn` filter key names a field of the referenced object computed on read (a `formula`) publishes today and is now refused at `error` by `object-field-ref-unknown`
+  Metadata-protocol: narrowed — a `dependsOn` filter key naming a field of the referenced object computed on read is refused at authoring
+  Skills-docs: none — no published skill page teaches a `dependsOn` filter key on a formula
+  
+  <!-- adr-0087: registered lookup-depends-on-param-computed-field-refused -->
+  
+  **BREAKING** for the publish of an object with such a `dependsOn` entry: it was accepted before and is refused now, by `objectstack validate` / `lint` / `compile` / `build` and by the runtime publish gate, with the field and the fix named in the finding. The schema is unchanged, and stored objects are not rewritten or refused at boot; the refusal comes at the next publish.
+  
+  **Why.** The record picker filters its candidates, and the importer scopes a lookup cell, by the entry's filter key on the referenced object (`param` in `{ field, param }`, else the bare name or `field`). The engine refuses every filter on a field computed on read, so such an entry published clean, then every picker query it scoped was refused and every import of the column failed its lookup. The finding names the referenced field and why it cannot be filtered on, for example `fields.task.dependsOn[0].param "project_label" is a formula field of "oos_task", computed on read: no record-picker query or import lookup can filter on it.`
+  
+  ## FROM → TO
+  
+  - `dependsOn: [{ field: 'project', param: 'project_label' }]`, where `project_label` is a formula of the referenced object → `dependsOn: [{ field: 'project', param: 'project' }]`, naming the stored field of the referenced object that holds the same value; or drop the entry.
+  - `dependsOn: ['region']`, where `region` is a formula on the referenced object → `dependsOn: [{ field: 'region', param: 'region_code' }]` with `region_code` a stored field of the referenced object.
+  
+  A formula on the OWNING object stays a legal gate (`dependsOn[i].field`): the form reads it from the record being edited.
+  
+  **`@objectstack/core`, the importer.** A scoped lookup none of whose reads answered (every read refused, for example because the row's master cell is a value the scoping field's type cannot take) is no longer asked again without the scope. It keeps `reference_not_found` and the plain `no record matches` sentence, and never answers `reference_out_of_scope`, which it could before when the value matched a record outside the scope. `RefMatch` gains the optional member `scopeUnanswered`, which a resolver sets for such a lookup.
+  
+  Measured first-party exposure: none. Every `dependsOn` in `examples/` and in the packaged objects names a stored field on the referenced side, or sits on a field type with no picker.
+  
+  `@objectstack/spec` adds only the upgrade-guide entry `lookup-depends-on-param-computed-field-refused`.
+
+### Patch Changes
+
+- dedc16c: feat(spec): a Studio metadata form's select choices are translatable — `metadataForms.<type>.fields.<path>.options.<value>`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - **Translation slot.** A `metadataForms.<type>.fields.<path>` entry accepts `options`, a map from option `value` to its translated name — the shape `objects.<object>.fields.<field>.options` already uses. `choices` and `values` are refused there, as on the object-field face, and the refusal names `options` as the key to write.
+  - **Served forms.** `resolveMetadataFormLabels` (what `/api/v1/meta/types` localizes forms with) now overlays each option's `label` with the translation keyed by its `value`; an option with no translation keeps its own label. Before this, a select on a Studio metadata form (sharing model, ownership, field type, delete behaviour, default period, …) showed English choice names in every locale while the label and help text around it were translated.
+  - **Extraction.** `os i18n extract` and `pnpm check:i18n` emit the new `options.<value>` keys for every form row that lists `options`.
+  - **Shipped locales.** The ten translated metadata-forms packs of `@objectstack/platform-objects` name all 185 choices (38 select rows across nine forms). The Default Period choices reuse the wording of the console's period chip.
+- adb65d1: refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that its factory is `defineForm` (question 1, option A). The helper that held the name builds something else: a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`). It is renamed after the translation family its forms feed (`metadataForms`), with the same argument and the same result, and its 18 modules under `packages/spec/src` are renamed with it. `defineForm` is absent from `@objectstack/spec` until the `form` type lands with it, in the same major; it never has two meanings. Nothing a metadata author writes changes: no stack, no stored row and no spec key names the helper, which is why the protocol line is `none`.
+  
+  <!-- adr-0087: registered define-form-studio-helper-renamed-define-metadata-form -->
+  
+  **BREAKING** (a published export is renamed), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - **FROM:** `import { defineForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineForm({ schemaId, … })` in a `NAME.form.ts` module.
+  - **TO:** `import { defineMetadataForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineMetadataForm({ schemaId, … })` in a `NAME.metadata-form.ts` module.
+  - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
+  - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
+  - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+  - `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
+- 302cfda: fix(lint): a context pack is warned when it reads an injected column with no storage on an external object
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A new advisory rule, `ai-context-field-unprovisioned` (a `warning`), reports a context pack (`ai_context`) that names a system column the platform injects (`owner_id`, `created_at`, `created_by`, …) on an ADR-0015 `external` object. The name resolves, so `ai-context-field-unknown` stays silent, but the remote database owns the table and the platform provisions no column behind it. The rule judges the names in the root's `fields`, `body.field`, and each `related` entry's `fields`, `where`, `orderBy` and link field. Its message names the cost for each position: an empty value on every record, no body, no rows, or an arbitrary order. A column the author declares on the external object is never reported. The provenance answer is the spec's `unprovisionedInjectedColumns`, which every other unprovisioned-anchor rule reads too. `os explain ai-context-field-unprovisioned` states the cause and the remedy, and `os explain ai-context-field-unknown` now says that injected columns count as defined.
+- 54d6726: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint): `field-no-consumers` credits a related list's columns to the child object it lists
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - An object-form `relatedLists` entry (`{ list, label?, columns? }`) is now read against the child object its `list` names (`child`, or `child.field`), not against the object that declares the list. Its `columns` are the child's field names, so each one counts as a display of the child's field.
+  - Before, a column was credited to the declaring object's field of the same name. A parent field that nothing displayed stayed silent whenever a child's related-list column had the same name (the blank starter's company lists its contacts with a `phone` column, which kept an undisplayed `company.phone` quiet), and the child's own column did not count for the child.
+  - What you may see: `os validate` and `os lint` can now report a parent field that only a child's related-list column used to cover. Place the field (a field group, `highlightFields`, a view column) or remove it. A child field that only a related list draws is no longer reported. A column of a child this stack does not declare credits no object. The rule stays a warning.
+  - `child.field` in `list` now also counts as a read of that relationship field on the child: the list joins on it.
+- ddc96d8: docs(lint): `os explain flow-condition-option-label` describes every place the rule reads — the start condition, edge and decision conditions, and the `get_record` / `update_record` / `delete_record` and time-relative sweep filters — and names the CEL value envelope as the way to filter on a label on purpose
+  
+  Clause-②: no (explanation text only)
+- 9b99640: feat(spec,plugin-audit): an activity milestone's timeline row reads in the reader's language — `objects.<object>._milestones.<field>.<value>.summary`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37585
+  
+  - **Translation slot.** An object translation accepts `_milestones`, keyed by an `activityMilestones` entry's watched `field` and then the `value` it fires on, each carrying `summary`: the milestone's template in that language, with the same `{field}` tokens. `milestones` and `activityMilestones` are refused, and the refusal names `_milestones` as the key to write. `resolveObjectMilestoneSummary` (`@objectstack/spec/system`) reads it along the locale chain.
+  - **Timeline rows.** A fired milestone's `sys_activity` row now stores a summary code (`metadata.summary_message`, `key: 'activityMilestone'`): the pair, and each interpolated token's value with the select option it matched. On a read whose caller has a locale, a language that translates the milestone serves the row's `summary` composed from its template, a select token named by the option label in that language. The stored `summary` is unchanged — the authored sentence — and a language with no entry, a read with no locale, and every row written before this change read it as stored. A tenant that reworded a packaged milestone's `summary` keeps its words. The field redaction still judges the composed text by the fields the row was composed from.
+  - **Extraction and references.** `os i18n extract` scaffolds the key for each milestone pair (the first entry of a repeated pair, the one that fires), and the translation-reference rule flags a `_milestones` key over a pair no milestone of the object declares.
+  - **Docs.** `content/docs/ui/translations.mdx` and the i18n standard's reference table name the key.
+- 520cf3f: fix(lint): a skill's `context` naming a pack a declared dependency in the artifact ships no longer warns `ai-skill-context-unknown`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ai-skill-context-unknown` judged a skill's `context` against the stack's own `aiContexts` only, so `os validate`, `os build` and `os lint` warned in their per-package pass about a pack that a package the skill's package depends on ships, though the MCP skill prompt resolves that pack. The rule now resolves `context` by the one ADR-0150 D3 rule the prompt uses, over the stack's own packs and the packs of the artifact's other packages, in the skill's package closure (its declared dependencies plus every `sys` package). A pack a declared dependency in the artifact ships gets no warning. A pack that only a sibling package outside the closure ships still warns, naming the holder and saying to declare the dependency. A pack two packages in reach both ship warns, naming both. A pack no package in the artifact ships warns as before.
+  
+  `@objectstack/metadata-core` now exports the ADR-0150 D3 resolution rule, `resolvePackageScopedHolders`, with its holder source, refusal, refusal error class and vocabulary (`packageScopedHolderSource`, `PackageScopedNameRefusedError`, `PACKAGE_SCOPED_TYPES`, `BARE_NAME_ONE_HOLDER_TYPES` and the rest of that module). They moved there from `@objectstack/core` so lint, which depends on metadata-core and never on a runtime, can call the same rule. `@objectstack/core` re-exports every name under the same spelling, and each value is the very object metadata-core exports, so `instanceof PackageScopedNameRefusedError` holds whichever package a caller imports it from.
+  
+  Nothing to migrate: every `@objectstack/core` import of these names keeps working unchanged.
+- 4b8aca2: fix(lint): the `ai-skill-context-unknown` fix for two holders names no package when the stack has none
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A stack with no `manifest.id` whose skill `context` names a pack two packages of the artifact ship is refused by ADR-0150 D3 as `ambiguous-in-environment`. Its hint said "Keep one pack of that name in reach of this package", though the stack names no package. It now says "Keep one pack of that name across the artifact's packages, or name another pack". The rule id, the severity, the message and the hint of every other arm are unchanged.
+- 3ed97b7: fix(lint): saving a permission set through Studio, REST `/meta` or the MCP authoring door now warns when the set reads a roll-up over child data it cannot read
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `validateRollupSourceVisibility` (`security-rollup-source-unreadable`, `security-rollup-source-row-scoped`) ran only in `os validate`, `os build` and `os lint`. It now also runs at the runtime authoring door on `permission` writes, at advisory tier, so an author who never runs the CLI (an AI agent saving drafts through `save_metadata_draft`, a Studio admin) is told when a set reads a summary column such as `project.task_count` while it cannot read the `task` rows, or the child field, the column aggregates.
+  
+  What changes for a caller:
+  
+  - A `permission` save or publish that grants such a pair **still succeeds** and returns the finding in `advisories[]` (the draft verdict's `advisories` for a draft save), with the same `message` and `hint` `os lint` prints. `path` is the name-keyed `permissions.<set>.fields["<object>.<field>"]`.
+  - **Never a refusal.** The rule stays advisory; nothing that saved before is refused.
+  - A set's finding is charged only to a write of that set, never to a write of another set or of the objects. A child object the save cannot see (another package outside the written package's closure) is left unjudged, as the rule already left it in the CLI.
+  - **`object` writes are unchanged.** An advisory object rule stays off that door until its finding volume is decided separately.
+  - **The CLI commands are unchanged**: same rule, same positional `permissions[i]…` path.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/sdui-parser@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 4ffe9d3: feat(actions): an action writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening: a new optional authorable key `ActionSchema.texts`, and new translation keys)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-ui/rules/actions.md, skills/objectstack-i18n/SKILL.md
+  
+  A `script` action's `js` body can now write a sentence into a record in the organization's language, the way a hook does: declare it under `texts`, keyed by a snake_case key, and ask for it by key — `texts: { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } }`, then `await ctx.text('email_subject', { subject })` where the body used to write `'Email: ' + subject`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who ran the action. The translation is picked first, then its `{{ }}` holes are filled from `params`. The entry is the hook text's, built by the same shared factory.
+  
+  - The translation sits beside the action's other copy: `objects.<object>._actions.<action>.texts.<key>.message` for an action bound to an object, `globalActions.<action>.texts.<key>.message` for an object-less one. `os i18n extract` scaffolds the keys and the existing coverage check counts them; `objectstack validate` refuses a translation over a key the action does not declare.
+  - A missing translation, or no language to pick, answers the declared sentence, and the action goes on. A Localization setting that cannot be read rejects the call.
+  - Only declared text is translated: a string the body builds itself is written as it is. A key `texts` does not declare is refused when the action is saved if the body asks for it literally (`ctx.text('key')`), otherwise when it runs, as a fault naming the action and the key.
+  - `texts` is read only for a `type: 'script'` action with a `js` body (an inline `target` function is lowered to one by `os build`); on any other action, or with no body, it is refused at save. A `flow` action's record writes are the flow's own, marked and translated there (`flows.<flow>.records.…`).
+  - A text with `params` is compiled like a hook's: a hole over another name is refused when the action is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - Text is picked when it is written. Records already written are not changed. An action without `texts` runs exactly as before.
+  
+  `@object-ui/core` lists `texts` among the spec's declared action keys, so an action carrying them is not reported as having an unknown key; the console reads nothing new, because the body stores the sentence already picked.
+  
+  New exports: `@objectstack/spec` adds `ActionTextSchema` and the `ActionText` type (`ui`), `actionTextMessageKey` (`system`), and `ACTION_TEXT_MESSAGE_HOLE_REFUSED`, `actionTextsWithoutRunnableCode`, `undeclaredActionTextKeyAtSave` and `undeclaredActionTextAtRun` (`data`); `@objectstack/runtime` adds none. Nothing that was accepted before is refused.
+- f796089: fix(spec,metadata-protocol)!: retire the seed modes `insert` and `replace`, which inserted every record again on each replay
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #34798
+  
+  <!-- adr-0087: registered seed-mode-insert-replace-retired -->
+  
+  **BREAKING** for a seed dataset authored with `mode: 'insert'` or `mode: 'replace'`. A seed is replayed on every single-tenant boot, every package install or upgrade and every publish, and neither mode matched an existing row, so every replay inserted each record again: an un-walled install went from 1 to 2 to 3 rows over three boots, a person reference the first load had to leave empty stayed empty on the first row while only the newest copy named the person, and with a unique field the replay insert was refused and the one row stayed empty. `replace` expected the caller to clear the table first, and no load path ever clears one.
+  
+  What moves (each line FROM → TO):
+  
+  - `SeedSchema.mode` / `SeedMode` (`@objectstack/spec/data`; `defineSeed`, `defineStack({ data })`, a `seed` metadata item, a package body's seed): FROM `insert` / `update` / `upsert` / `replace` / `ignore` TO `update` / `upsert` / `ignore` (default `ignore`, unchanged). `mode: 'insert'` or `mode: 'replace'` fails parse with a prescription naming the fix; the save and publish doors refuse it with the same message. The retired pair is exported as `RETIRED_SEED_MODE_VALUES` (`@objectstack/spec/data`): it is derived from the parse refusal's own table, and the loader and the artifact door read it.
+  - a stored dataset that still declares one, replayed by the boot seed, the per-organization replay, the dev hot reload or a package install, upgrade or sample-data reseed (`SeedLoaderService.loadStored`, `@objectstack/metadata-protocol`): FROM inserted again on every load TO refused alone — it writes nothing, the load result carries one error with the prescription and `success: false`, and every other dataset loads. `SeedLoaderService.load()` and `validate()` refuse the dataset the same way when handed one unparsed, so a dry run reports what a real load does.
+  - a compiled artifact (`objectstack.json`) carrying such a dataset, booted by `os serve` / `os start` / `os dev` (the artifact door, `MetadataPlugin`, `@objectstack/metadata`): the door parses the artifact without that dataset and hands it back to the seed load, which refuses it alone; the door logs a warning naming the dataset and the fix. Everything else in the artifact registers and boots.
+  - `os diff` (`@objectstack/cli`) on a dataset declaring either mode: FROM "a replay inserts these again" TO a note that the mode is retired, that a replay refuses the dataset, and what to declare.
+  - the advisory lint rule `seed-insert-mode-duplicates-on-replay` (`validateSeedReplaySafety`, `@objectstack/lint`): FROM a warning on `mode: 'insert'` TO removed; the schema refusal does its job for both modes. The author-time rule count `os validate` / `os build` print drops by one (71 to 70 at this release).
+  - the save door's and the loader's hint for a key no record carries: FROM "or use mode 'insert' for rows with no natural key" TO a list of fields when no single field names a row, or `'id'` when the records carry their own ids.
+  
+  The fix: declare which field identifies a row and drop the mode (or declare `upsert` for reference data the package keeps current). Set `externalId` to the field that names a row, to a list of fields when no single field does (a junction table's `['team', 'project']`), or to `'id'` when the records carry their own ids. Rebuild the package, and reinstall it where it was installed with `os package install`, so the stored body carries the new declaration.
+  
+  No conversion is made, at load, at save or by a migration (ADR-0087 D3, entry `seed-mode-insert-replace-retired`): a keyed mode needs the field that identifies a row, and only the author knows it. Rows earlier replays duplicated are data and are left as they are.
+  
+  Unchanged: `ignore`, `upsert` and `update` datasets load byte-identically.
+- f4dbcc2: feat(lint): five publish-time checks for metadata that passes the schema and does nothing at run time, and four build probes over what landed
+  
+  Clause-②: no (narrowing: four publish-time refusals of metadata the schema accepts today)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #35245
+  
+  <!-- adr-0087: registered publish-refuses-metadata-the-runtime-ignores -->
+  
+  Five authoring rules join the registry the runtime publish gate and `objectstack validate` / `lint` / `compile` run. Each finding names its fix.
+  
+  - `flow-node-type-no-executor` (error): a flow node whose `type` no executor in this deployment runs fails every run with `NO_EXECUTOR`. Judged only against the automation engine's SEALED node-type vocabulary, which the publish gate reads from the new `AutomationEngine.getSealedNodeTypeVocabulary()` (it answers `undefined` until `sealNodeTypeVocabulary()` ran at `kernel:bootstrapped`). The CLI does not know which plugins a deployment loads, so it judges nothing here.
+  - `flow-approval-decision-unrouted` (error): an `approval` node whose decision out-edges are not labelled exactly `approve` and `reject` runs every out-edge for a decision no label claims, so the approving and the rejecting branch both run.
+  - `flow-http-timeout-missing` (warning): an `http` node with no positive `config.timeoutMs` and no positive node-level `timeoutMs` waits on a slow upstream for as long as the connection stays open; the engine arms no default timer. A `durable: true` node, which does not wait on the endpoint, is not reported. Like every warning, it makes `os validate --strict` exit 1.
+  - `state-machine-no-initial-states` (error): an active `state_machine` validation without `initialStates` (or with an empty list) lets a record be created already in any state. Add `initialStates`.
+  - `action-no-object-binding` (error): a standalone action that declares `locations` but no `objectName` binds to no object, so its button never renders. Set `objectName`, or write `locations: []` for a headless action.
+  
+  What was accepted before and is refused at publish now: a flow with an unrouted approval decision or a node type the deployment cannot run, a state machine without `initialStates`, a placed action with no object. The fix for each is in the finding.
+  
+  Four post-publish build probes report, as warnings on the publish receipt, what the person will see: `widget_empty_result` (a dashboard card whose real query reads only zeros), `rollup_never_computed` (a roll-up blank on all of the sampled parents that have children, judged inside one organization when the rows carry one), `seed_reference_unresolved` (a sample record the seed loader landed whose reference names no row in the organization that record belongs to, so the reference leads nowhere) and `flow_connector_action_unresolved` (a `connector_action` step naming a connector or action this environment does not serve). Each carries its sentence for the person in every platform locale. `RunBuildProbesOptions` gains `automation`, `packageId` and `seedLanded`; the publish passes the automation engine's connector lookups, the publishing package and its `seedApplied.landed` ids. `ProbeEngine` gains an optional `getSchema`, which names the column a row's organization is stamped in; the roll-up and seed probes judge each row inside that organization.
+  
+  New exports: `@objectstack/lint` adds `validateFlowNodeExecutors`, `validateInertObjectDeclarations`, `validateActionObjectBinding`, their finding types, and the rule ids `FLOW_NODE_TYPE_NO_EXECUTOR`, `FLOW_APPROVAL_DECISION_UNROUTED`, `FLOW_HTTP_TIMEOUT_MISSING`, `STATE_MACHINE_NO_INITIAL_STATES`, `ACTION_NO_OBJECT_BINDING`; `@objectstack/metadata-protocol` adds the `ProbeAutomation` and `SeedLandedRows` types; `@objectstack/service-automation` adds `AutomationEngine.getSealedNodeTypeVocabulary()`. `@objectstack/spec` changes only descriptions: those of `RuntimeBuildIssueSchema`, and that of a state machine validation's `initialStates`.
+- 0739dee: fix(objectql)!: a field that is `required` and hidden by its own `visibleWhen` is required only when shown, so one admin setting no longer locks every record outside the condition
+  
+  Clause-②: yes (narrowing + widening of the required write contract) — widened: an insert or update whose record a `required` field's own `visibleWhen` cleanly hides no longer needs that field, and an explicit null onto a row already shown and empty is accepted. Narrowed: a write that moves a record INTO the condition while that field is empty is refused; 18.5.0 accepted it.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is when the engine enforces required on a field that also declares visibleWhen. The one-line fix for a refused write is in the body: fill the field in the same write that moves the record into the condition. -->
+  
+  **BREAKING** for flows, bulk updates, imports and API PATCHes that move existing records into a `required` field's `visibleWhen` condition without filling the field. Such a write is now refused with `required` naming the field (on a bulk update, one such row refuses the batch). Fill the field in the same write. A field with `required` and no `visibleWhen` is unchanged.
+  
+  **What changed (ADR-0113 D1 and D5, amended).** A field that declares `required: true` and its own `visibleWhen` used to be enforced on every save. In Studio an administrator can add one in a few clicks, and from then on every record that fails the condition refused every write, even an edit of an unrelated field, naming a field nobody could see. The engine now judges such a field from its visibility on the write:
+  
+  - the predicate evaluates cleanly to anything but TRUE on the record (the stored row with the write over it), so FALSE, or `null` such as an unset boolean: the field is not required for that write, so a record outside the condition can be created and edited, and the form's clear-on-hide `null` is accepted;
+  - the predicate is true: the field is required by the same non-regression rule `requiredWhen` uses, against the prior record, which the engine now reads on update for objects with such a field;
+  - the predicate cannot be evaluated: it counts as shown, the field stays required exactly as before, and the server logs a warning naming the field and the fault.
+  
+  The predicate is evaluated with the acting user bound as `current_user`, so a role-gated field is judged per writer; a system write with no user counts as shown. A `formula` field it reads is computed over the record first, as a read of that record computes it. A formula that faults for a reason a read shares (an empty operand) is judged on the `null` a read serves; a formula whose read value the write path cannot know (it reads through a reference, calls `label()`, calls `can` on a write that picks no permission-gated option and so resolves no permission map, reads `current_user` on a system write with no user, or reads such a formula at any depth) counts as shown; the system-write case is logged as `no-acting-user`, as the direct `current_user` spelling is. Only the field's own `visibleWhen` is read: a field group's `visibleWhen` and form-view predicates are not.
+  
+  The refusal for such a field now comes from the rule pass rather than the record walk. A single-fault write gets the same `required` code and sentence; a write with several faults may name fewer of them in one `400`, or answer a dangling reference first, and a `beforeUpdate` hook now runs before the refusal and may fill the field.
+  
+  **A formula-driven `visibleWhen` on the form.** The form computes the object's formula fields over the record being edited before it judges the field rules (the form-side recompute in `@object-ui/core`, `@object-ui/components` and `@object-ui/console`), so it shows such a field where the server requires it. A formula the form cannot compute (it reads through a reference, calls `label()` or `can()`, reads `os`, or reads the user when nobody is signed in) leaves the field shown and required, and the server decides on save.
+  
+  **`@objectstack/lint`.** Three new warnings at `objectstack validate` and the object save door, on a `required` field with a `visibleWhen`: the predicate reads through a reference field (the server cannot evaluate it, so the field stays required everywhere); the predicate reads a `formula` field (with the counts-as-shown consequence when a formula it reads, at any depth, reads through a reference, calls `label()`, or calls `can`, which a write computes only when it picks a permission-gated option); and `storage.notNull: true` beside the pair (the column still refuses the null on a record outside the condition).
+  
+  **`@object-ui/app-shell`.** Studio's field inspector shows the reference-read and formula-read warnings under the Visible-when editor of a required field.
+  
+  **`@objectstack/spec`.** The `required` and `visibleWhen` descriptions on `FieldSchema` say how the two combine.
+- 5ecf937: fix(lint)!: a hook body or job body that does not compile in the wrapper the runtime runs it in is refused
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up owed — skills/objectstack-data/references/data-hooks.md (its "Sandbox restrictions" section teaches what a body may contain and names no compile check)
+  
+  <!-- adr-0087: registered hook-job-body-does-not-compile-refused -->
+  
+  **BREAKING** only for a hook or job body that never ran. The runtime runs an L2 hook body and an L2 job body (`body.language: 'js'`) as the body of `(async (ctx) => { … })`. A source that does not compile there, such as `const ctx = ctx.input || {}` (the parameter declared again) or `let x = 1; let x = 2;`, raised a SyntaxError before its first statement on every run, yet passed `os validate`, `os build`, `os lint` and the runtime publish door: the hook parse check reads the source with a parser, which reports no redeclaration, and a job body had no check at all.
+  
+  What moves (FROM → TO):
+  
+  - New gating rule `validateHookAndJobBodyCompiles` (`@objectstack/lint`), rule ids `hook-body-does-not-compile` and `job-body-does-not-compile`: FROM no finding TO `error` at `os validate`, `os build`, `os lint`, and at the runtime publish door for `hook` writes (`422 INVALID_METADATA`). No door publishes a job, so a job body is refused by the three commands. A hook lowered from an inline `handler` is located at `hooks[N].handler`. The severity split is `action-body-does-not-compile`'s, read through the same `judgeBodyCompile`: a regular-expression pattern the host engine refuses is a `warning`, and every other compile failure is an `error`.
+  - `hookBodyFunctionExpression` and `HOOK_BODY_PARAMETERS` (`@objectstack/lint`, the first also on `@objectstack/lint/runtime`): the one spelling of the `(ctx)` wrapper. The runtime's QuickJS runner now builds the hook and job wrapper from it, byte for byte the wrapper it built before, so the check and the run cannot disagree about it.
+  - `judgeBodyCompile`, `BodyCompileVerdict` and `BodyCompileShape` (`@objectstack/lint`): the compile-and-classify core both rules share. `action-body-does-not-compile` reads it with unchanged findings.
+  - `os explain hook-body-does-not-compile` and `os explain job-body-does-not-compile` explain both rules.
+  
+  The fix: use `ctx` as it is, or give the local another name (`const input = ctx.input || {}` in a hook, `const api = ctx.api` in a job); declare each name once; fix any other compile error at the line of `body.source` the finding names.
+  
+  No conversion is made (ADR-0087 D3, entry `hook-job-body-does-not-compile-refused`): which name the author meant for the local is a judgement. Measured first-party exposure: zero.
+- feb9b79: fix(lint)!: an action body whose regular-expression literal never closes, or whose flags are not a flag set, is refused, not only warned about
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no published skill teaches the action-body compile check or regular-expression literals in an action body
+  
+  <!-- adr-0087: registered action-body-regexp-literal-token-refused -->
+  
+  **BREAKING** only for an action body that never ran. `action-body-does-not-compile` compiles an L2 action's `body.source` inside `(async (input, ctx) => { … })` with the host's JavaScript engine, and reported every failure whose sentence opens `Invalid regular expression` at `warning`, because the host's V8 and the runtime's QuickJS differ on some patterns. That sentence also opens V8's two token errors: a literal that never closes on its line (`return /abc;`, `return /[/;`, a literal broken by a line terminator: `Invalid regular expression: missing /`) and a flag set that is not one (`/a/gg`, `/a/zz`, `/a/uv`: `Invalid regular expression flags`). QuickJS refuses every one of them, so such a body passed `os validate`, `os build`, `os lint` and the runtime publish door, and every run of the action failed with the coded `500` that names the action and the compile error.
+  
+  What moves (FROM → TO):
+  
+  - `action-body-does-not-compile` on an unterminated regular-expression literal or an invalid flag set (`validateActionBodyCompiles`, `@objectstack/lint`): FROM `warning` TO `error` at `os validate`, `os build`, `os lint` and the runtime publish door (`action` and `object` writes, `422 INVALID_METADATA`), with a hint that names the fix. A failure in the literal's pattern (a duplicate named capture group, a modifier group: syntax QuickJS accepts and runs) is still a `warning`.
+  - `os explain action-body-does-not-compile` and the ADR-0087 entry `action-body-does-not-compile-refused` now say that only a pattern the host refuses is a warning.
+  
+  The fix: close the literal with `/`, write a `/` inside it as `\/`, or, when the `/` is a division, give it a left-hand operand; write the flags as letters from `dgimsuvy`, each at most once, never `u` with `v`.
+  
+  No conversion is made (ADR-0087 D3, entry `action-body-regexp-literal-token-refused`): whether a `/` opened a literal or meant a division is the author's choice. Measured first-party exposure: zero.
+- 9062756: fix(lint)!: ten publish-time checks for flows that save and do not run — seven refuse the publish, three warn
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #36718
+  
+  <!-- adr-0087: registered publish-refuses-flows-that-save-and-do-not-run -->
+  
+  **BREAKING** for the publish of a flow that carries one of the seven errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored flows are not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  Seven errors, run by the runtime publish gate and the CLI:
+  
+  - `flow-trigger-object-missing`: a record-triggered flow with no `objectName` registers its hook with no object, so it fires on writes to every object; a blank `objectName` is refused too, because the engine will not register a hook on an empty name and the flow never starts.
+  - `flow-condition-option-label`: a start condition compares a select field with one of its option labels (`record.stage == 'Closed Lost'`) where the row holds the option value (`closed_lost`), so it is never true. Reported only when the label is that field's own comparand (`F == 'L'`, `F != 'L'`, `'L' == F`, or a member of `F in [...]`); judged only when the field's options are inline in this stack.
+  - `flow-time-relative-shadowed`: a `timeRelative` block under a record `triggerType` never sweeps, because a record trigger wins.
+  - `flow-time-relative-key-misplaced`: `filter` or `maxRecords` written beside `timeRelative` is ignored; the sweep reads them only inside the block.
+  - `flow-time-relative-date-field-invalid`: a `timeRelative.dateField` the swept object does not have, or that is not a `date` / `datetime` field, matches no record. Judged only when the stack declares the object; `created_at` / `updated_at` count as datetime fields.
+  - `flow-node-write-unknown-option`: a create / update node writes a select field a literal no option carries; the record validator refuses it `invalid_option` on every run. When the literal is an option's label, the finding names its value.
+  - `flow-node-write-date-helper-text`: a create / update node writes a date field the text of a helper call (`'today()'`); the validator refuses it `invalid_date`. The fix is a CEL value envelope, `{ dialect: 'cel', source: 'isoDate(today())' }`.
+  
+  Three warnings, which refuse nothing and make `os validate --strict` exit 1 as any warning does:
+  
+  - `flow-schedule-timezone-missing`: a schedule or time-relative cron with no `timezone` runs in UTC.
+  - `flow-subflow-unknown` (CLI only, new rule `validateFlowSubflowTargets`): a `subflow` / `map` node names a flow this stack and its packages do not carry. The publish gate sees one flow at a time, and another package may ship the called flow, so it is not judged there.
+  - `flow-create-update-pair`: an after-create flow and an after-update flow on the same object with the same nodes; one flow on `triggerType: 'record-after-write'` does both (on the create run `previous` is null). Judged on the CLI, where the stack holds both flows.
+  
+  ## FROM → TO
+  
+  - a start node `{ triggerType: 'record-after-update' }` with no `objectName` → `{ triggerType: 'record-after-update', objectName: 'deal' }`.
+  - `record.stage == 'Closed Lost'` → `record.stage == 'closed_lost'`.
+  - `triggerType: 'record-after-update'` plus `timeRelative` → keep the one the flow means.
+  - `{ timeRelative: {...}, filter, maxRecords }` → `{ timeRelative: { ..., filter, maxRecords } }`.
+  - `fields: { stage: 'Closed Lost' }` → `fields: { stage: 'closed_lost' }`.
+  - `fields: { due_on: 'today()' }` → `fields: { due_on: { dialect: 'cel', source: 'isoDate(today())' } }`.
+  
+  New exports from `@objectstack/lint`: `validateFlowSubflowTargets` and the rule ids `FLOW_TRIGGER_OBJECT_MISSING`, `FLOW_CONDITION_OPTION_LABEL`, `FLOW_TIME_RELATIVE_SHADOWED`, `FLOW_TIME_RELATIVE_KEY_MISPLACED`, `FLOW_TIME_RELATIVE_DATE_FIELD_INVALID`, `FLOW_SCHEDULE_TIMEZONE_MISSING`, `FLOW_SUBFLOW_UNKNOWN`, `FLOW_NODE_WRITE_UNKNOWN_OPTION`, `FLOW_NODE_WRITE_DATE_HELPER_TEXT`, `FLOW_CREATE_UPDATE_PAIR`. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-flows-that-save-and-do-not-run`.
+- 5dd856f: fix(lint): `state-machine-no-initial-states` judges only state machines that run on insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The publish-time rule `state-machine-no-initial-states` now refuses an active `state_machine` validation with no (or an empty) `initialStates` only when the machine runs on insert: its `events` include `insert`, or are left to the default `['insert', 'update']`. The engine runs a rule only on the write contexts its `events` name, so a machine declared `events: ['update']` (or `events: []`) never runs on create and never reads `initialStates`. Such a machine is accepted at publish and by `os validate` again, with no `initialStates`; adding one to satisfy the rule produced metadata the runtime ignores. A machine that runs on insert without `initialStates` is still refused, with the same fix.
+  
+  `@objectstack/spec` changes only the description of a state machine validation's `initialStates`, which now says the rule judges a machine that runs on insert.
+- 5dd856f: fix(lint): `field-group-shadowed` judges the six highlights the record page draws, from one shared constant
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  The default record page draws the first six of an object's `highlightFields` (after the title field leaves the list) in its header strip and leaves those fields out of the Details body. The `field-group-shadowed` warning judged only the first four, so a field group whose only member sat fifth or sixth in `highlightFields` was empty on the record page and passed `os lint --strict`. It now judges the same six, and its hint says "first 6 highlightFields".
+  
+  What was accepted before and is warned now: an object whose field group is emptied by its fifth or sixth highlight. Fix it as the hint says: keep a member of that group out of the first six highlights, or drop the group. A list the old count warned is still warned: six hoisted fields include the first four, so no list that passed only under six is refused.
+  
+  New export: `@objectstack/spec/ui` adds `RECORD_HIGHLIGHTS_MAX` (6), the count both the lint and `@object-ui/plugin-detail`'s record page synthesizer read. `@object-ui/plugin-detail` now takes its own `RECORD_HIGHLIGHTS_MAX` from there; the value and the page are unchanged.
+  
+  <!-- adr-0087: registered field-group-shadowed-six-highlights -->
+- e6fa510: feat(approvals): an escalation deadline can count working time on an organization's working calendar (`escalation.clock: 'working_time'`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
+  
+  An approval node's `escalation` gains two optional keys (ADR-0157 D5):
+  
+  - **`clock`**: `'wall_clock'` (the default) or `'working_time'`. Under `wall_clock` nothing changes: `timeoutHours` counts elapsed hours from `created_at`, nights, weekends and holidays included, and every request already open keeps its deadline (a stored snapshot carries no `clock`). Under `working_time` the hours count only the working periods of a working calendar (`sys_work_calendar`), skipping its holidays and counting its make-up workdays: a request opened at 17:00 on a Friday with `timeoutHours: 4`, on 09:00-12:00 and 13:00-18:00 periods, escalates at 12:00 on the next working day.
+  - **`calendar`**: the code of the working calendar to count on. Left out, the request organization's default calendar counts. There is never a fallback to wall-clock hours.
+  
+  The approvals sweep and the request read share one deadline function. A `working_time` deadline is counted again on every sweep and every read and is never stored, so a holiday entered after a request opened moves its deadline; an escalation that already fired stays fired (single-shot, ADR-0042). When the calendar cannot count the deadline (no calendar has the code, the organization has no default, or the calendar is not maintained as far as the deadline needs), the request does not escalate, the next sweep tries again, and the request read carries a new additive field, `sla_due_refusal` (`code`, `reason` or `date`, `message`), in place of `sla_due_at`. The approvals inbox shows "Calendar can't compute" with the reason where the SLA countdown sits, in every console language.
+  
+  `@objectstack/lint` refuses a `calendar` written beside the wall clock (`approval-escalation-calendar-without-working-time`, error): nothing would read it. Whether the named calendar exists is the organization's runtime data and is never checked at publish. The Studio approval inspector offers the clock and, under working time only, the calendar.
+  
+  Not released alone: this ships in the same release as the working-calendar objects and service and the working-day formula functions (ADR-0157 D4).
+- 29f1280: feat(cli)!: `os validate` and `os build` refuse seed records the seed load would drop: one its own validation rule refuses, or a keyed one with a blank key field
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37158
+  
+  <!-- adr-0087: registered seed-record-refused-before-load -->
+  
+  **BREAKING** accept-set narrowing of two authoring doors, shipped as `minor`. FROM: `os validate` and `os build` exit 0 on a config one of whose seed records the seed load drops (its own validation rule refuses it, or it is keyed and leaves a key field blank). TO: both exit 1 and name the record, its object, its index and the refusing rule or the blank field. The load's own verdicts do not change. Fix: correct the record so its rule admits it, change the rule if the record is right, or give the record its key value.
+  
+  A seed write is held to the object's own validation rules (every type but `state_machine`), and a record a rule refuses is dropped from the load while the rest land. Until now nothing at authoring time judged a seed record against those rules: `os validate` and `os build` passed, and the first sign was a `[Seeder] … dropped record(s)` line at boot carrying the rule's message, not its name. Both commands now refuse such a config (exit 1), one line per refusal (a record two rules refuse prints two), naming where the record sits, its index and the refusing rule:
+  
+  ```text
+  ✗ Seed records the seed load refuses (1 record)
+    ✗ data[0].records[1]: Seed record #1 of 'xt_payment' is refused by its validation rule 'amount_positive': A payment amount must be positive.
+  ```
+  
+  The verdict is the write path's own evaluator, run on one rule at a time. A record and rule pair is judged only when the record's own literal values decide it; a pair whose rule reads something the load decides (a reference, a roll-up, formula or autonumber field, a default, a platform-injected column, an expression value, a present value of a non-literal type such as `date` or `datetime`, a `json_schema` rule, a `beforeInsert` hook's write, or the stored row of an `update` dataset) is counted in one dim line and never refused; a dataset whose object the stack does not declare has no rules to judge. A hook registered in plugin code is not visible to the stack, so a config that relies on one to fill a field a rule reads can be refused although the load admits it. Advisory rules (`warning` / `info`) and inactive rules are not judged.
+  
+  A keyed record (every live mode: `ignore`, `upsert`, `update`) whose literal value for a key field is blank (no value, `null` or `''`) is refused the same way, in the sentence the seed loader refuses it with at load, naming the object, the record index and the field. A key field holding an expression is judged at load only, and so is the object's organization column, which the load stamps: a declared `tenancy.tenantField` the object has, else `organization_id`.
+  
+  `--json` output carries the refusals under `errors` (`os validate`) or `issues` (`os build`), each with `rule` (`seed-row-refused-by-validation-rule` or `seed-record-key-field-blank`), `location`, `object`, `recordIndex`, and `validationRule` or `field`.
+  
+  To fix a refused config: correct the record so its rule admits it, change the rule, or give the record its key value. `@objectstack/lint` exports the walk as `judgeSeedRowRefusals`, which takes the evaluator and the tenancy resolver (`resolveTenantFieldName`, `@objectstack/core`) as inputs.
+- fe19096: fix(lint)!: a body whose regular-expression pattern the runtime's QuickJS also refuses is refused, not only warned about
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #36727
+  
+  <!-- adr-0087: registered body-regexp-pattern-refused -->
+  
+  **BREAKING** only for a body that never ran. `action-body-does-not-compile`, `hook-body-does-not-compile` and `job-body-does-not-compile` compile an L2 body inside the wrapper the runtime runs it in, with the host's JavaScript engine, and reported every failure V8 words as `Invalid regular expression: /PATTERN/FLAGS: REASON` at `warning`, because the host's V8 and the runtime's QuickJS differ on some patterns. Measured over the same wrapper text (Node 22.23.5's V8 12.4, Unicode 17.0 tables, against quickjs-emscripten 0.32.0), they differ on two constructs, a duplicate named capture group in different alternatives (`/(?<a>x)|(?<a>y)/`, V8 `Duplicate capture group name`) and a modifier group (`/(?i:a)/`, V8 `Invalid group`), and on three Unicode property names, `IDS_Unary_Operator` (`IDSU`), `Modifier_Combining_Mark` (`MCM`) and the script `Katakana_Or_Hiragana` (`Hrkt`, under `sc=`, `Script=`, `scx=` or `Script_Extensions=`), V8 `Invalid property name`: every name in QuickJS's own tables was compiled in every key form, under `u` and `v`, bare and in a class, and these twelve spellings were every disagreement. Node 22 refuses them and QuickJS runs them. Every other pattern reason probed is refused by QuickJS too, among them an unterminated group (`/(/`), nothing to repeat (`a**`), a class range out of order (`/[b-a]/`), and under `u` a back-reference to a group the pattern does not name, a Unicode property name neither engine knows (`/\p{Nope}/u`) and an incomplete quantifier (`/a{/u`). Such a body passed `os validate`, `os build`, `os lint` and the runtime publish door, and every run of it failed.
+  
+  What moves (FROM → TO):
+  
+  - The three rules (`validateActionBodyCompiles`, `validateHookAndJobBodyCompiles`, `@objectstack/lint`) on a regular-expression pattern failure that is not one of those measured gaps: FROM `warning` TO `error` at `os validate`, `os build`, `os lint` and the runtime publish door (`action`, `object` and `hook` writes, `422 INVALID_METADATA`), with a hint that names the fix. The measured gaps stay a `warning`; a property name is judged by the host's Unicode tables, and on a host whose tables are older than Unicode 17.0 every property name it refuses is a `warning`; a later Node whose V8 accepts a gap reports nothing for it.
+  - `BodyCompileShape` (`@objectstack/lint`) gains `regexp-dialect-gap`, the one `warning` arm; `regexp-pattern` is now an `error`.
+  - The unterminated-literal hint names a line terminator inside the literal as a cause (a `\n` written with one backslash in a quoted or JSON-carried `body.source`).
+  - A hook lowered from an inline `handler` whose body does not compile gets a hint that names the handler instead of `body.source`.
+  - The runtime's QuickJS runner (`@objectstack/runtime`): a hook or job body that does not compile is reported FROM the generic `hook 'NAME' threw: SyntaxError: …` (the sentence a body that ran and threw gets) TO `hook 'NAME' does not compile: SyntaxError: …` (and `job 'NAME' …`), the way an action body's is. The caller's answer is unchanged: the `/data` door still answers the sanitised `500 INTERNAL_ERROR`.
+  - `os explain` for the three rules and the ADR-0087 entries `action-body-does-not-compile-refused`, `action-body-regexp-literal-token-refused` and `hook-job-body-does-not-compile-refused` now say which pattern failures warn.
+  
+  The fix: close every group, give each quantifier something to repeat or escape it, write a class range low to high, reference only a group the pattern names, and use a Unicode property that exists.
+  
+  No conversion is made (ADR-0087 D3, entry `body-regexp-pattern-refused`): which pattern the author meant is a judgement. Measured first-party exposure: zero.
+- af566c2: feat(spec): `count_true` / `count_false` column summaries — a boolean column's Yes and No counts in the list footer and group headers
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `ListColumn.summary` accepts two more members, `count_true` and `count_false`: the number of rows whose boolean (or toggle) cell is true, and the number whose cell is false. A cell with no value is neither; it stays `count_empty`'s, so `count_true + count_false = count_filled`.
+  
+  Both are answered on the server with no new aggregation function: booleans aggregate as numbers on every backend, so `count_true` is `SUM(field)` and `count_false` is `COUNT(field) − SUM(field)`, read off the group header row (or the footer's whole-set row) by `deriveColumnSummary`. `COLUMN_SUMMARY_AGGREGATION`'s derived rows now carry `reads`, every node the member reads (`from` is its first); `columnSummaryNodeFunctions(mapping)` is the one reading of a row's nodes, which the group header compiler, the footer's whole-set query and the lint now share. `COLUMN_SUMMARY_FIELD_TYPES` / `isColumnSummaryCompatibleWithFieldType` say the two members apply to `boolean` and `toggle` only.
+  
+  `@objectstack/lint` refuses `count_true` / `count_false` over any other field type under `list-view-summary-field-type-refused` (an error, so `os validate` and the save door fail): over a number the same `SUM(field)` is a total, and the footer would print it as a count.
+  
+  `@object-ui/plugin-grid`'s footer menu offers Count of Yes and Count of No first on a boolean or toggle column, and only there; the footer draws them as `Yes 12` / `No 3`, from the whole matched set when the server answers it and from the page, labelled as the page's, when it does not. `@object-ui/i18n` adds the `grid.summary` keys `countTrue`, `countFalse`, `menuCountTrue` and `menuCountFalse` in every pack.
+- f3c9d42: feat(spec, ui): a master_detail child is a tab by default; a field group puts it in the overview and the form
+  
+  Clause-②: yes (widening: `@objectstack/spec/data` exports `isGroupPlaceableRelationship`, `fieldGroupsPlaceRelationship` and the `BodyTableContext` type, and `isBodyTableRelationship` takes an optional second argument)
+  Metadata-protocol: semantic
+  
+  A `master_detail` FK that declares no `relatedList` used to put its child list into the parent record's overview as a table (since #35597). Now it is a tab of the record page with its count, like any other related list, `inlineEdit` or not. It goes into the overview only where a field group of the PARENT names it (`fieldGroups[].relatedList`).
+  
+  - Placed by a group, the child's table is drawn at that group's position in the overview, the parent's create and edit forms inline it, and the record page's Edit saves the record fields and the rows in one save. Its tab stays on the tab row too, with its count.
+  - `relatedList: 'primary'` on the FK is unchanged on the record page: a body table with no group, and no tab of its own whether or not a group positions it. Its forms follow ruling B like every other child: a field group naming it inlines it in the parent's create and edit forms, `inlineEdit` or not, and with no group naming it the forms do not inline it, even with `inlineEdit`. `relatedList: true` keeps a tab that no group may place, and `false` hides the list.
+  - A field group may name exactly what it could name before: a plain `master_detail` child or a `'primary'` one. `isGroupPlaceableRelationship` is that test; `isBodyTableRelationship(field, { placedByGroup })` is still the one body-table judgement.
+  - `inlineEdit` on the FK no longer inlines a child in the parent's form by itself (maintainer ruling B: only the field group decides). It now only picks the form factor of a child a group places: `'grid'`, `'form'`, or `true` / absent for the shape-picked default. A child with `inlineEdit` that no group names is a tab and is not in the form.
+  - `os lint`: `relationship/line-items-inline-edit` now suggests a field group on the parent (with its required `label`) instead of `inlineEdit: true`, and only for a FK a group may place; `relationship/association-inline-edit` and `relationship/inline-edit-needs-bulk` judge the children a parent group places; the field-consumer rule credits a child's inline grid columns only when a parent group places it.
+  - The showcase invoice and expense report, and the CRM opportunity, gain a field group naming their lines, so their forms and record pages keep the line table.
+  - In the entry form a placed table sits at its group's place too: between the sections of the groups around it, or in a tab of its own (labelled with the group) in a tabbed form. A form whose sections name no field group keeps it below the record's fields.
+  - Studio's field-group picker offers the same children as before. The relationship field inspector reads a plain `master_detail` FK as "Show", and "Show" leaves the key absent so a group can still place it.
+  
+  To keep a master-detail child's table in the overview and its rows in the form (including a child that set `inlineEdit`), add a field group to the parent that names it, in the place the table should sit:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic information' },
+    { key: 'lines', label: 'Lines', relatedList: 'order_line' }, // or 'order_line.order' for one FK
+    { key: 'terms', label: 'Terms' },
+  ],
+  ```
+  
+  Such a group holds no fields. Or write `relatedList: 'primary'` on the child's FK to keep it in the overview with no group. A group may name only a list it can place: for an `inlineEdit` child on a `lookup` FK, or on a FK declaring `relatedList: true`, also write `relatedList: 'primary'` on the FK (a `master_detail` FK may instead drop `relatedList: true`). A form view that declares its own subforms still inlines what it declares.
+- 52fb30c: feat(plugin-detail): the default record page draws no stage bar and no key-field strip; the stage moves from the header's status tag
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  The default record page (`buildDefaultPageSchema`) no longer emits `record:highlights` or `record:path`. The stage is the status tag beside the record's name: a reader who may edit the stage field sees it with an arrow and opens a menu listing every stage in order, the current one checked; a stage the field's blocking `state_machine` cannot reach is disabled with its reason under the name. Picking a stage confirms, and a stage that makes other fields required (their `requiredWhen` holds once the record stands on it, such as a loss reason on a lost stage) asks for exactly those fields in the same dialog and writes them with the move. A refusal stays in the dialog, beside the field it names, and the stage does not move. A reader who may not edit the field, an approval lock or an open draft leaves the plain tag. A plain status field (no stage role) is read and moved the same way.
+  
+  The details body now draws every field its groups hold: the highlight fields and the stage field are no longer taken out of their groups, so a record reads in the same groups and order in view and in edit (objectstack#35849). `highlightFields` itself is unchanged and still drives the hover card, a related list's default columns and the record picker; nothing is picked when an object declares none.
+  
+  `buildDefaultHighlights` and both blocks are kept: an authored page, or a slotted page's `highlights` slot, still places a strip and a path where it wants them.
+  
+  - `@object-ui/components`: `RecordHeaderState` gains an optional `stage` renderer (with the exported `RecordHeaderStageParts`), which the header calls with the stage tag it would draw. Without a host bar (a phone) the header now draws the stage tag in the row under the record's name, beside the state's tags; before, a phone showed no stage at all.
+  - `@object-ui/plugin-detail`: exports `RecordStageMenu`, the menu a host hands the header as `RecordHeaderState.stage`. Its fields-a-stage-needs dialog comes from the package-internal `useStageChange` (`record:path` keeps its plain confirmation).
+  - `@object-ui/plugin-detail`: `BuildPageOptions.highlightFields`, `.statusField` and `.stages` are still accepted by `buildDefaultPageSchema` and `buildDefaultTabs` but no longer do anything there, since the default page draws no strip and no stage bar; `buildDefaultHighlights` still reads them. Retiring them is objectstack#35943.
+  - `@object-ui/i18n`: four `detail.stageMenu*` strings in every locale.
+  - `@objectstack/lint`: `field-group-shadowed` no longer counts the highlight strip as hiding fields from the detail body, since the default record page leaves them in their groups; a group whose only visible member is the record title still warns.
+- 8df7bf2: feat(spec): an object's `relatedLists` is its record page's tab list — only the listed related lists show, in order, the attachments, approvals and activity-stream tabs are placed by object name, and an entry can carry its list's title and columns
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record page's tabs are now declared on the parent object, in one place:
+  
+  ```ts
+  relatedLists: [
+    { list: 'quote_line', label: 'Line items', columns: ['product', 'quantity', 'unit_price', 'amount'] },
+    'task',
+    'sys_attachment',
+    'sys_approval_request',
+    'sys_activity',
+  ],
+  ```
+  
+  - **No `relatedLists` (or an empty one): nothing changes.** Every related list shows, in the derived order, then attachments, approvals and the activity stream.
+  - **A declared `relatedLists` now decides which tabs show**, not only their order. A related list no entry names shows no tab; before, it still followed the listed ones. Removing an entry removes its tab. Body tables a field group places in the overview (`fieldGroups[].relatedList`) stay at their group, and the tab such a `master_detail` table also keeps on an undeclared page shows only when an entry names it, and `relatedList: false` on the child's FK still hides a list.
+  - **This narrows the #35889 note** ("Its tab stays on the tab row too, with its count"): the tab of a `master_detail` child that a field group places in the overview stays only while the parent declares no `relatedLists`; once it declares one, that tab shows only if an entry names the child.
+  - **The three built-in tabs by object name**: `'sys_attachment'` (attachments; shown only when listed, and still only when the object enables files), `'sys_approval_request'` (approvals; still only on a record with requests, and when unlisted it follows the listed tabs), `'sys_activity'` (the one activity stream; when unlisted it closes the strip). A built-in is written only as its bare name: `{ list: 'sys_attachment', … }` is refused at parse. `'sys_comment'` and `'sys_audit_log'` are parts of the stream, not tabs: `os validate` warns (`related-list-stream-part`) and prescribes `'sys_activity'`. `'sys_attachment'` on an object without files warns (`related-list-attachments-off`).
+  - **An entry's own title and columns**: `{ list, label?, columns? }` wins over the child FK's `relatedListTitle` / `relatedListColumns`, which keep working unchanged. The columns are child field names, used wherever the list is drawn (its tab, and the body table a field group places); a dotted column (`account.industry`) walks the child's relationships, as `relatedListColumns` does, and a name that resolves to no field of the child is refused (`related-list-column-unknown`) by `os validate`, `os build` and the metadata write door.
+  
+  - **The generic object form** (metadata admin) edits `relatedLists` with its own chip input: a bare name and an object entry both show and both survive add and remove (the entry's title and columns beside its name; they are edited in Studio). Its help text states the tab-list meaning in every translated locale.
+  - **Studio** (object settings, Record page tabs): the editor lists the entries in order, the built-in tabs among them, and offers the built-ins not yet listed (attachments only when the object enables files). A relationship row's edit sets its own title and columns, and clearing both writes the bare name again. The relationships not listed are shown below as having no tab. A move, a removal or an add keeps every entry's object form and every built-in name.
+  
+  What to check in an app: an object that already declares `relatedLists` and leaves some related lists out now shows only the listed ones, and shows no attachments tab unless `'sys_attachment'` is listed. List every tab the page should keep, or remove `relatedLists` to show them all. A child list another package adds is hidden too until the parent names it, which a build accepts only when that package is in the parent's stack; letting a package place its own list is a later change. ADR-0087 semantic entry `related-lists-declared-is-tab-list`.
+- 170ca48: feat(spec): a field group lists its own members and their order (`fieldGroups[].fields`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A field group may now list which fields it shows and in what order:
+  
+  ```ts
+  fieldGroups: [
+    { key: 'basic', label: 'Basic', fields: ['account', 'name', 'valid_until'] },
+    { key: 'terms', label: 'Terms', fields: ['terms'] },
+  ]
+  ```
+  
+  The record page, the create and edit forms and the drawer show the group's fields in the list's order, whatever order the object's `fields` declares them in, so a group can be reordered without moving any field (and without changing a list view's default column order).
+  
+  Nothing changes for an object that writes no `fields` on its groups: a group without the list still holds the fields whose `group` names it, in field declaration order. `Field.group` is the older spelling and is still read; it is not deprecated for removal.
+  
+  The two spellings must agree. The object parse refuses a field one group lists while its own `group` names another declared group (reported at both places; a `group` naming no declared key is not another group, so the list wins), a field two groups list, a name one list repeats, and `fields` on a group that places a related list (`relatedList`). A field whose `group` names a listing group that leaves it out is shown after the listed fields, never dropped. A listed name the object does not declare is skipped, so removing a field never makes the object unparseable; `os lint` warns about it (`field-group-member-unknown`).
+  
+  New export: `readFieldGroupMembership` (`@objectstack/spec/data`), the membership `deriveFieldGroupLayout` places sections from, for editors that also show hidden fields.
+  
+  Studio: dragging a field inside a group, or into another group, now writes those groups' `fields` lists and leaves the object's field declaration order alone. Only the ungrouped bucket, which has no list, still reorders by declaration order. Moving a field to another group from the field inspector does the same once a list is involved.
+  
+  Field-level security: the object document served to a caller who cannot read some fields keeps each group's `fields` list, with the hidden names filtered out and the rest in order, so the record page and forms keep the layout for that caller.
+- d33bf5a: feat(spec): an object extension says where the fields, groups and child lists it brings go (`place`), and a child list another package brings is no longer hidden by the parent's `relatedLists`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  An `objectExtensions` entry can now place what it brings on the object it extends:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'account',
+    fields: { tax_id: { type: 'text', label: 'Tax ID' } },
+    place: [
+      { field: 'tax_id', group: 'basic', after: 'industry' },
+      { group: { key: 'tax', label: 'Tax' }, after: 'basic' },
+      { list: 'contract', after: 'opportunity', label: 'Contracts', columns: ['name', 'amount'] },
+    ],
+  }],
+  ```
+  
+  - **No `place`: nothing moves.** Fields still arrive after the object's own, and an extension that writes no `place` serves exactly what it served before.
+  - **One merge, every reader.** The registry fold applies the placements once, after every contributor's fields are merged, so the record page, the forms and Studio show one arrangement. Uninstalling or disabling the package takes its items off and leaves the object's own order as it was.
+  - **Placement arranges what the parent declares.** A list placement applies when the extended object declares `relatedLists`; a group or field placement when it declares `fieldGroups`. On a parent that declares neither, its automatic arrangement stays and nothing is dropped: the list shows in the automatic tab order, and its entry's `label` / `columns` are not applied either (write `relatedListTitle` / `relatedListColumns` on your child object's lookup field to title it on every parent); the field shows among the fields, its `after` / `before` not applied. The boot log names each placement that did not apply, with the object and the package. It is the main channel: `os validate` names it too (`extension-placement-not-applied`, warning) only when the extended object is in the same stack.
+  - **Anchors and order.** `after` or `before`, not both; neither means the end. An anchor may be an item another placement brings, whatever order the two are written or registered in. An anchor nobody has puts the item at the end of its group, of the groups, or of the tabs (before a trailing approvals / activity-stream run), and `os validate` warns (`extension-placement-anchor-missing`). A list placement's `columns` are fields of the child, checked by `os validate` as a `relatedLists` entry's are (`related-list-column-unknown`). Several packages at one anchor follow ascending `priority`, then package name, so every build gives the same order. When the object itself already names the list or lists the field, its own position wins.
+  - **An extension places only its own items.** A field outside its own `fields`, a field the extended object declares (also one the extension redeclares to relabel it), a group key the extended object already declares, or a list (placed as a tab or by a group's `relatedList`) that is not a child object of its package pointing at the extended object is refused at parse or at `defineStack`, and skipped by the merge with a warning naming whose item it is, whichever door registered the extension. The extension keys `fieldGroups` and `relatedLists` are refused with a prescription naming `place`.
+  - **Shipped behaviour change (flips #35897's hiding):** a child list another package brings is no longer hidden by the parent's declared `relatedLists`. Placed, it sits where its package puts it; unplaced, it shows at the end of the tabs. "Another package" means the child and the parent both belong to a package and the two differ; a child of the parent's own package, or one no package owns, is still hidden until an entry names it. This narrows the #35897 note "A child list another package adds is hidden too until the parent names it … letting a package place its own list is a later change": that change is this one.
+  - **Studio** (object settings, Record page tabs) shows such a list read-only among the unlisted rows with a "from <package>" badge, and the preview draws it where the record page does.
+  
+  What to check in an app: on an object that declares `relatedLists`, every installed package's child lists of it now show, at the end of the tabs unless placed; name one in the parent's `relatedLists` to put it elsewhere, or set `relatedList: false` on that package's FK to hide it. Nothing in HotCRM changes meaning today: no module writes `place`, and no object declares `relatedLists`. Most HotCRM objects already declare `fieldGroups`, so a field or group placement there applies as soon as a module writes one; a list placement waits until the parent declares its `relatedLists` (follow-up #35902). ADR-0087 semantic entry `object-extension-place-and-cross-package-lists`; ADR-0146 D10 and ADR-0085 notes.
+- f2a990b: feat(spec): every step a flow drawing shows can be translated, under `flows.<flow>.nodes.<node_id>.label`
+  
+  Clause-②: yes (widening: a new translation key `flows.<flow>.nodes.<node_id>.label`; the new exports `FLOW_TECHNICAL_NODE_TYPES` and `isFlowTechnicalNodeType` from `@objectstack/spec/automation`; and `@object-ui/i18n`'s exported `FlowLabelTranslations` type gains the member `screenTitle`, and its `stepLabel` parameter accepts a `config`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36401
+  
+  A package can now translate the label of any flow step, not only a screen's heading and an approval step's label. A manual that embeds a flow (a `type: flow` metadata embed) lists its steps by label, and until now a start, decision, notify or end step had nowhere to put a translation, so a zh-CN reader saw those steps in English beside translated approval steps.
+  
+  - **The key.** `flows.<flow>.nodes.<node_id>.label`, keyed by the node's `id`, at any depth. It overlays the node's own `label` and is plain text. A `screen` keeps its `screens.<node_id>.title` and an `approval` its `approvals.<node_id>.label`, so one string keeps one key: `objectstack validate` points a `nodes` key over either at that key, and points a `screens` or `approvals` key over any other node at `nodes.<node_id>.label`. A key over a node the flow does not declare is refused. `nodes` was an unknown-key hint that suggested `screens`; it is now its own group.
+  - **Start and end steps are translated like any other.** Their labels are the author's words and often name an outcome or a trigger ("Approved", "On Task Created"), so nothing substitutes words of its own for them.
+  - **Missing translations are reported.** `os lint` and `os i18n check` (`i18n/missing-flow`) now ask for the label of every top-level step the embed draws at its default `detail: business` altitude, except screens and approvals, which they already asked for, and of a folded technical step where a drawn decision's branch list names it as the step the branch leads to (a decision whose branch runs a `script` first). `os i18n extract` scaffolds the keys. An app that ships translated locales gets new findings for its flows until it translates them.
+  - **The drawings read it.** The docs viewer's `type: flow` embed (`element:metadata_viewer`) and the Studio flow designer's canvas, nested region nodes included, now name each step by its translation in the reader's language, through the one resolution in `@object-ui/i18n`: `stepLabel` reads `approvals.<node_id>.label` for an approval, `screens.<node_id>.title` for a screen with no `config.title`, and `nodes.<node_id>.label` for any other node. A step the package leaves untranslated keeps its authored label. A decision's branch list names the step a branch leads to the same way.
+  - **A titled screen is named by its heading in the docs embed.** A screen that authors its own `config.title` shows that heading at run time, translated under `screens.<node_id>.title`, so the embed names it by the heading (translated where the bundle carries it) instead of its canvas label, which has no key. A heading with a `{{ }}` hole cannot be filled in a drawing, so such a screen keeps its authored label. `FlowLabelTranslations` gains `screenTitle` for this read. The Studio canvas keeps a titled screen's authored label.
+  - **One table for what business altitude hides.** `FLOW_TECHNICAL_NODE_TYPES` (and `isFlowTechnicalNodeType`) in `@objectstack/spec/automation` lists the node types `detail: business` folds away (`script`, `http`, `connector_action`, `assignment`, `get_record`, `create_record`, `update_record`, `delete_record`, `boundary_event`). The docs viewer folds steps by it and the coverage check asks for translations by it, so they agree on which steps a reader sees.
+- 78437e2: feat(security): the read-only `viewAllFields` object-permission bit
+  
+  Clause-②: yes (widening) — @objectstack/spec adds the optional `viewAllFields` key to `ObjectPermissionSchema` (and so to the wire `EffectiveObjectPermissionSchema`) and the optional `viewAllFields` column to `AccessMatrixEntrySchema`; nothing removed or narrowed
+  Metadata-protocol: added
+  
+  A permission set can now say "this role reads every field of this object" on its own: `objects: { crm_account: { allowRead: true, viewAllFields: true } }`. The bit casts a read vote on every field of the object, fields added later included, and never an edit vote: an edit still comes from the default (a field no set names follows the object grant) or from an explicit `editable: true` field row. Inside one set the specific row beats the general bit, so a set's own `readable: false` row on a field keeps that field hidden for that set. It is allowed on the `'*'` wildcard entry. It is a field vote only: it grants no object access and widens no record, so pair it with `allowRead`, and use `viewAllRecords` for records.
+  
+  Nothing behaves differently yet. Today `viewAllRecords` and `modifyAllRecords` also vote on every field, so on a set that carries either bit the new key duplicates a vote already cast. The built-in `organization_admin` set carries it on its wildcard entry, so its holders keep their field visibility when a later major release stops those two bits voting on fields; the wall-less `organization_admin_no_bypass` variant drops it together with the two record bits, as it never held that field vote.
+  
+  Every reader of the super-user bits reads the new one too:
+  
+  - both field merges (`PermissionEvaluator.getFieldPermissions` and the `fields` slot of `/auth/me/permissions`) apply it through the one shared vote, `superuserFieldVote` in `@objectstack/core`;
+  - the agent ceiling clears it on every object entry, as it clears View All and Modify All;
+  - an organization administrator cannot distribute a set whose `'*'` entry carries it (the organization boundary, condition (a));
+  - a set carrying it on any object is high-privilege, so it is not bound to the `everyone` or `guest` audience;
+  - the access-matrix snapshot gains a `viewAllFields` column, written only when `true`, so the `access-matrix.json` of a stack that does not author the bit is byte-identical, and the semantic diff names it ("gains View All Fields on …").
+- ad65d82: fix(formula)!: `validateExpression` refuses `==` / `!=` between a list-valued field and a scalar, which answers a constant on every row
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #36217
+  
+  <!-- adr-0087: registered cel-list-equality-refused -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. CEL compares the whole list with the scalar, so `record.labels == 'frontend'` is `false` for `['frontend', 'qa']` and for `null` alike, and `record.labels != 'frontend'` is always `true`: a condition written that way never fires (or always does), with no fault and no log line. The shared validator accepted it.
+  
+  - **The refusal.** `validateExpression` refuses a `==` / `!=` between a read of a list-valued field on `record` / `previous` (`record.f`, `record['f']`, either operand order) — or, at a flattened (flow) condition, its bare name `f`, which the run binds to the trigger record's field, unless a flow variable holds the name or a node can bind names no reader sees — and a non-null string, number or boolean literal, as the new `list-equality` code (params `reference`, `operator`, `operand`, `answer`, `rewrite`), prescribing the null-guarded membership test.
+  - **Which fields are lists.** A `fieldTypes` entry of an inherently multi-value type (`multiselect`, `checkboxes`, `tags`), or a field named in the new optional `ExprSchemaHint.multiValueFields` — the fields a caller reads as multi-valued through `isMultiValueField` (`@objectstack/spec/data`), which is how a `select` / `radio` / `lookup` / `user` / `file` / `image` field declared `multiple: true` becomes a list here. Absent, such a field is not judged, as before.
+  - **Who fills it.** The publish lint (`os validate` / `os build`, every CEL site that types the object's fields), the MCP `validate_expression` tool (read off the served definition, `McpDataBridge.servedObjectDefinitionOf`, at the validation / formula / flow-condition sites; a bridge without it answers as before), `registerFlow`'s schema pass (`parseObjectFieldSchema` returns `multiValueFields`; logged, never thrown, like every finding of that pass), the scenario scorer, and Studio's object draft check (field rules, formulas, validation rules; `CelSchemaHint.multiValueFields`).
+  - **Still accepted.** `S == null` / `S != null` (either side), `'a' in S`, a list compared with a list literal or with another list field, and a comparison whose other operand is not a literal.
+  
+  FROM → TO:
+  
+  - `record.labels == 'frontend'` → `record.labels != null && 'frontend' in record.labels`
+  - `record.labels != 'frontend'` → `record.labels == null || !('frontend' in record.labels)`
+  - at a flow condition, `labels == 'frontend'` → `labels != null && 'frontend' in labels`
+  
+  One-line fix: test membership with `in`, null-guarded (`'a' in null` faults); compare the list with `null` to test whether it is set.
+- cb5a975: fix(formula): the `list-equality` refusal prescribes a rewrite that works where it is read, and a flow condition is judged only where the run binds a row of the typed object
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36217
+  
+  The two widenings. A flow condition in a flow that no record write or sweep starts (an API, scheduled or trigger-less flow) is no longer refused as `list-equality`, bare or `record.`: that run holds what its entrance handed it, so `labels == 'frontend'` can be correct code there. And `ExprSchemaHint` gains the optional key `filterCompiled`, which tells the validator that the site's source compiles to a query filter.
+  
+  The rewrite the refusal prescribes now depends on the site, and is parenthesised whole so it can stand where the comparison stood (`A && (…)`):
+  
+  - **A `record.` / `previous.` read evaluated as CEL** (a validation rule, a field rule, a formula, an action's `visible` / `disabled` / `pressed`, a hook condition):
+    - FROM `record.labels != null && "frontend" in record.labels`
+    - TO `(has(record.labels) && record.labels != null && "frontend" in record.labels)`
+    - `has()` answers on a sparse row or a null `previous`, where the old form faulted.
+    - For `!=` the TO form is `(!has(record.labels) || record.labels == null || !("frontend" in record.labels))`. The old `!=` form, with no parentheses, split under a leading `&&`.
+  - **A bare name at a flow condition:**
+    - FROM `labels == null || !("frontend" in labels)`
+    - TO `(labels == null || !("frontend" in labels))`
+    - For `==` the TO form is `(labels != null && "frontend" in labels)`.
+  - **A sharing rule `condition`**, which compiles to a query filter:
+    - FROM `record.labels != null && "frontend" in record.labels`, which does not lower (`in` needs a field on its left), so the rule was dropped as `sharing-rule-unlowerable-condition`.
+    - TO `(record.labels != null && record.labels.contains("frontend"))`, which lowers to a membership filter (`$contains`).
+    - For `!=` the TO form is `(record.labels == null || !record.labels.contains("frontend"))`.
+    - A number or boolean operand is passed as its text (`contains("3")`).
+  
+  One-line fix: write the rewrite the refusal names.
+  
+  `registerFlow`'s advisory pass now hands the validator `faultOutcome: 'run-fails'` on a record-triggered flow and on a time-relative sweep of the typed object, the same flows `os validate` declares it on. On those flows its logged type-mismatch lines now use the wording `os validate` prints. It still only logs and never throws.
+- ad92dfd: fix(lint)!: `==` / `!=` between a list-valued field reached through a lookup hop and a scalar is refused, as the root-field case is
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — the `objectstack-formula` skill already teaches that a list field compared with a scalar literal is refused and the `has()`-guarded `in` rewrite; a hop read of a list field takes the same rewrite
+  
+  <!-- adr-0087: not-required (already-registered cel-list-equality-refused) the same list-equality refusal and membership rewrite, one hop away; this change extends that entry's surface to the one-hop read at a validation rule predicate and a field expression, and states its doors (os validate, os build, the object save door) -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`; the new `@objectstack/formula` export `findHopListEquality` widens the package's public surface.
+  
+  `record.labels == 'vip'` on a list-valued field has been refused as `list-equality` since the shared validator learned it, but the same comparison one hop away, `record.account.labels == 'vip'` where `account` is a lookup and `labels` a list-valued field of its target, was refused nowhere. A validation rule's `condition` / `when` and a formula's `expression` are the two sites that serve a hop: the engine hydrates the related row, so `record.account.labels` is the stored list, and comparing it with a scalar answers `false` (for `!=`, `true`) on every row. A rule written that way never fires and saves clean.
+  
+  - **The refusal.** At those two sites, the publish lint (`os validate` / `os build`) and the object save door refuse a `==` / `!=` between a read of a hop target's list-valued field (an inherently multi-value type, or a multi-capable type declared `multiple: true`) and a non-null scalar literal, either operand order, in the root case's words, prescribing the root case's membership test on the hop read.
+  - **What carries it.** `@objectstack/formula` exports `findHopListEquality(source, listLeaves)`, which returns the `list-equality` refusals (same code and params as `validateExpression`'s) for the reference → list-valued-leaves map its caller hands in. `ExprSchemaHint` is unchanged. The ADR-0087 entry `cel-list-equality-refused` now names the one-hop read and its doors; the Studio draft check and the shared-validator half of the MCP `validate_expression` tool do not see a hop.
+  - **Still accepted.** A hop to a scalar field (`record.account.tier == 'vip'`), `record.account.labels == null`, `'vip' in record.account.labels`, a hop through a reference that is itself multi-valued, and every site that serves no hop (an action's `visible`, a flow condition), where `record.account` is the stored id.
+  
+  FROM → TO:
+  
+  - `record.account.labels == 'vip'` → `(has(record.account.labels) && record.account.labels != null && "vip" in record.account.labels)`
+  - `record.account.labels != 'vip'` → `(!has(record.account.labels) || record.account.labels == null || !("vip" in record.account.labels))`
+  
+  One-line fix: test membership with `in` on the hop read, guarded as the refusal prescribes.
+- 70d07fd: feat: an object arranges its actions per scope (`actionLayout`: pinned buttons and the 「More」 order), and the design mode sets it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36630
+  
+  A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` pins none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
+  
+  - `list` arranges the actions placed at `list_toolbar` and the list page's built-ins `$import` and `$export`. A built-in is only ever pinned: one named in `more` is refused with its reason, since not pinned the list page draws it in its own Import / Export menu.
+  - `record` arranges the actions placed at `record_header` or `record_more`. It is a scope, not a page: the record page header, the side preview and a phone's bottom action bar all read it. A `page:header` that authors its own `actions` list keeps that list.
+  - An arm left out (or the key left out) draws that scope exactly as before.
+  
+  What each package gains:
+  
+  - `@objectstack/spec`: the key and its shape refusals at every door (more than three pinned, a name given twice in one part or in both, a malformed name, a built-in the scope does not have, a built-in in `more`, since a built-in is only ever pinned), each with its reason. New exports `OBJECT_ACTION_LAYOUT_PINNED_LIMIT`, `OBJECT_ACTION_LAYOUT_SCOPES`, `OBJECT_ACTION_LAYOUT_BUILTINS` and the types `ObjectActionLayoutScope`, `ObjectActionLayout`, `ObjectActionLayoutArm`. The object form offers it under Advanced, one JSON row per arm.
+  - `@objectstack/objectql`: `actionLayout` joins `fieldGroups` and `relatedLists` as a key only the base's paired `.custom` package writes on an `object_extension` (ADR-0146 D10). It is applied last, after every other layer, arm by arm: each arm it writes replaces the served arm for that scope whole, and an arm it leaves out stays. A manifest's `objectExtensions` entry now carries the key to the fold.
+  - `@objectstack/metadata-protocol`: the one judge refuses `actionLayout` from any other package, naming the action's own `locations` and `order` as the way to place an action the package brings. Each door says it its own way: publish, restore and draft promotion of an `object_extension` answer `VALIDATION_ERROR` / 400; marketplace install refuses the package body with `VALIDATION_ERROR` / 422; `os validate` and `os build` exit non-zero and print the row; the registry fold skips the key and leaves a note.
+  - `@objectstack/lint`: `validateObjectActionLayout` (`object-action-layout-unknown`, `object-action-layout-not-placed`, at `error`) refuses in `os validate`, `os build` and `os lint` a name, in either part, that is no action of the object or is not placed in the scope its arm arranges.
+  - `@object-ui/types`: `arrangedHeaderActions(actions, arm, scope)`, the one reader both record headers and the list header apply, and `readActionLayoutArm`.
+  - The console: both record headers (the default page's and an authored `page:header` with `placedActions: true`) and the list header draw the arrangement. In the design mode, 「Header buttons」 at the end of the page header lists the scope's actions under 「Pinned to header」 and 「Other」 (the 「More」 menu), each dragged into order; a dot moves an action between them, a fourth pin is refused with a toast, the header shows the change at once, and 「Save」 writes only the arms that changed: into the object's own package when it is writable, else into the installed object's customization package as an `object_extension`, through the one writer of an installed object's arrangement (`saveObjectExtensionArrangement`, whose patch type now takes the object-shaped `actionLayout`), which refuses a customization package the server does not list writable. A name the scope no longer offers is listed in the panel as left out. A name the header cannot draw is refused at save with its reason. New `@object-ui/i18n` keys under `designMode.pins`.
+- 73f2cf4: feat(kanban): the board's own 视图设置, a lane header 「+」 and 「⋯」, and a lane statistic and card toggles on `KanbanConfig`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains three optional keys, none with a default; a view that declares none of them renders as before:
+  
+  - `summary` — a lane statistic drawn at the foot of each lane (`KanbanLaneSummary`): `{ type: 'count' }`, or `{ type: 'sum', field }` of a number field over the cards the lane has loaded, not every record of the lane; `{ type: 'none' }` shows nothing. It takes precedence over `summarizeField`. A sum over a lane holding more cards than were loaded says so (「仅已加载的卡片」). The whole-lane sum, and average, minimum and maximum, wait for a server lane read (#36520).
+  - `showFieldLabels` — absent means `true`: a card names each field beside its value; `false` draws the values alone.
+  - `hideEmptyFields` — absent means `true`: a card leaves out an empty field; `false` keeps its line.
+  
+  On a board, the view settings show the lane field, which lanes show and in what order, the card fields (order, hide, add), the two card toggles and the lane-foot statistic, in place of the table's columns, group, row height and row colour. Each change applies at once and is held as the list's draft until Save. Each lane header gets 「+」 (a new record with the lane prefilled; an empty lane also gets a 「+ New」 row) and 「⋯」 (collapse, kept in this browser; hide). Hiding a lane moves its cards into 「未分类」, as `kanban.lanes` (#28211) always has, and the menu and the lanes list say so. The lane field picker offers select and radio fields; collapse is kept per reader, object and view. The Console now relays the view's `kanban.lanes`, which it used to drop, and both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) relay the three new keys. `ObjectKanban` takes the host's `laneMenu` request (`KanbanLaneMenuRequest`). `@objectstack/lint` walks `kanban.summary.field` and refuses a `sum` over a field that is no number, a yes / no field included (`list-view-summary-field-type-refused`). Saving a board whose view declares no `kanban` block stores the lane field the board draws with the changed keys.
+- 3b58921: feat(console): record create and edit stop loading internal forms; a field's Show on create switch
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered internal-record-forms-not-loaded -->
+  
+  The Console's record create and edit surfaces no longer load an object's internal form view. The create dialog, the edit dialog, the full-page create and edit (`/new`, `/record/:id/edit`) and a create or edit an action opens now lay the record out by the object's field groups (`fieldGroups`) and follow the rules on its fields (`visibleWhen`, `readonlyWhen`, `requiredWhen`, `required`). What used to steer those surfaces and now steers nothing: the default form view (`form`, `formViews.default`), the `create` form view, and on them `sections`, the `tabbed` and `wizard` layouts, `defaultTab`, `tabPosition`, `subforms`, `modalSize`, `buttons`, `layout` and `defaults`. A master-detail sub-table still comes from `fieldGroups[].relatedList`, and a flow screen reads its sub-table settings from there too.
+  
+  An app that still declares an internal form installs and runs as before; the definition is inert. A public form (`sharing.enabled: true`) keeps loading at its own link by its own definition, and a named form an action of type `form` opens is unchanged.
+  
+  `showOnCreate` is now live: a field with `showOnCreate: false` is left out of every create surface and stays on edit, the record page and lists. The field form (`field.form.ts`) and the Studio field inspector offer it as "Show on create", on by default; a required field keeps it on.
+  
+  `@objectstack/lint` adds the advisory rule `form-view-internal-not-loaded`: a warning, never an error, on each internal create or edit form an app declares (a container's `form`, `formViews.create`, `formViews.default`, and a stored form view that is the default or named `OBJECT.create`), and on no public or named form.
+  
+  Studio: the Data pillar's Form tab always lays out the object's field groups, and the Interfaces rail no longer lists internal forms; public forms and named forms stay listed.
+  
+  An app that relied on its internal form for create defaults should move them to each field's `defaultValue`; sections move to `fieldGroups`, and required or conditional rules move onto the fields.
+  
+  The upgrade guide carries this as the protocol-18 semantic entry `internal-record-forms-not-loaded`.
+- 45ef94e: feat(spec): a base's paired `.custom` package declares an installed object's whole field-group and tab arrangement (`fieldGroups`, `relatedLists` on its object extension)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The record page is arranged in three layers. The package that owns an object declares its `fieldGroups` and `relatedLists`; a package that extends it places what it brings with `place`; and now the environment, in the base's paired `.custom` package, may declare the whole arrangement over both:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'crm_lead',
+    fields: { region__c: { type: 'text', label: 'Region' } },
+    // The whole field arrangement: the two groups swapped, `status` moved.
+    fieldGroups: [
+      { key: 'contact', label: 'Contact', fields: ['email', 'phone', 'status'] },
+      { key: 'basic', label: 'Basics', fields: ['name', 'company', 'region__c'] },
+    ],
+    // The whole tab list: events before tasks, the notes tab hidden.
+    relatedLists: ['crm_event', 'crm_task', { list: 'crm_note', hidden: true }],
+  }],
+  ```
+  
+  - **Two new keys on an object extension, written only by a `.custom` package.** `fieldGroups` takes the shape an object's `fieldGroups` takes and may list any field the object has, whoever declares it; a group's `relatedList` may place any body table. `relatedLists` takes an object's entry shape (a bare name, the three built-in tab names, or `{ list, label?, columns? }`) plus `hidden`.
+  - **Each key replaces, whole.** The registry applies it last: the owner's arrangement, then every extension's `place`, then the `.custom` key in place of the result. Nothing is merged entry by entry. A key the extension does not write keeps the owner's arrangement with the placements, so writing only `relatedLists` leaves the field groups as they were.
+  - **A field the arrangement does not list is not dropped.** It shows after the last group, whichever group its owner or another extension had put it in. A group that lists `fields` shows exactly its list.
+  - **A tab the arrangement does not name still shows, after the listed ones.** This is the reverse of an object's own `relatedLists`, where leaving a list out hides it. Hiding is written: `{ list: 'crm_note', hidden: true }` hides that list's tab, whichever package brings it. `hidden` is accepted only here; an object's own `relatedLists` refuses it and says where it belongs. A list the owner hides by leaving it out of its own `relatedLists` stays hidden until the arrangement names it. The built-in tabs keep their own rules and are not hidden here.
+  - **A package that is not a `.custom` package writing either key is refused**, once at each door: saving or publishing the extension, `os validate` and `os build`, and installing the package (`VALIDATION_ERROR`; 400 at save and publish, 422 at install). Each refusal names the key, the object and the package and prescribes `place`. An extension that reaches the registry past those doors is not applied, and the boot log says so. Within one extension, a `place` entry beside the arrangement key that would replace it is refused at parse.
+  - **Only the object's own pair is served.** The pair is the `.custom` package of the App the object belongs to: for an object a module of an App owns, the App's pair. A `.custom` package an earlier version created for the module itself is still read while it is installed; where both write a key, the App's pair is served. The choice is by role, never by load order. What any other `.custom` package writes under these keys is not refused at the doors; the registry does not apply it, alone or beside the pair, and the boot log names the package and the object.
+  - **One merge, every reader.** The record page, the forms, the preview and Studio read the served object, so they show one arrangement. Removing a key, or uninstalling or disabling the `.custom` package, serves the owner's arrangement with the placements again.
+  - **Served reads say what the reader cannot derive.** Where a `.custom` package writes `relatedLists`, the served object carries the read decoration `_relatedListsArrangement` (`{ packageId, hidden, unlisted }`): the lists the environment hides, and whether an unlisted list shows. The record page's tab reader and the default page synthesis read it; with no decoration served they answer exactly as before. A reader's own tab order (kept per user) is still laid over this list, and a tab the environment hides is not offered to them.
+  - **A group the arrangement brings is a translation anchor.** `os validate`'s translation-reference rule reads an extension's `fieldGroups` too, so a bundle's `_sections` key for a group the `.custom` arrangement declares is not reported as naming nothing.
+  - **`hidden` on a field is not a display property a `fieldPatches` entry may set.** A hidden field is also left out of the search index and out of a form's required check, so the display whitelist is not widened. To keep a vendor field off the record page and the forms, list it in a group whose `visibleWhen` is false. That is presentation only, not access control: the field stays readable and writable through the API. Do not use it for a `required` field that has no default: the create form no longer shows the field while the save still requires it, so the form cannot be submitted.
+  
+  What to check in an app: nothing changes until a `.custom` package writes one of the two keys. A package other than a `.custom` one that wrote `fieldGroups` or `relatedLists` on an extension was refused at parse. It is now refused by the save, publish, install, `os validate` and `os build` doors, with the same prescription. Where none of those doors judges it (for example a code-defined stack that boots without `os validate` or `os build`, or a stack that names no package id), the key is not applied and the boot log names it, where the parse refused it before.
+- 8f141a2: feat(kanban): a lane's sum, average, minimum and maximum cover every record of the lane, computed in the query
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #36422 (skills/objectstack-ui/rules/list-views.md teaches the board lane summary, now including avg / min / max)
+  
+  A stored `kanban.summary` of type `sum` now totals every record in the lane (computed in the query) instead of the loaded cards; where the board cannot ask the server, no figure is drawn.
+  
+  A board's lane foot statistic, `kanban.summary`, now takes `{ type: 'avg' | 'min' | 'max', field }` beside `none`, `count` and `sum`, and every one of `sum`, `avg`, `min` and `max` covers all of the lane's records:
+  
+  - **One grouped aggregate, no fetch-then-add.** The board asks ONE aggregate over its own query — its filter and its host's search, grouped by the lane field — through the data door a grouped list view's headers already ride (`DataSource.queryGroupHeaders`, `POST /data/:object/query`). A lane longer than its page (50 records) shows the whole lane's figure; the "loaded cards" label is gone. Records with no lane value, and records in a value that is no lane, are folded into the trailing "Uncategorized" lane. A lane with no record shows `0` for a sum and no figure for the other three; a lane that holds records but that the answer has no group for (the door can cut the group rows under a deployment's default page size) shows no figure rather than `0`. A whole answer needs the door to hand back that the rows were cut: follow-up #36870.
+  - **Under the reader's permissions.** The platform runs the aggregate with the reader's row filter, and refuses an aggregate over a field the reader may not read; the board asks nothing for such a field, and a refused read draws no figure.
+  - **No figure rather than a partial one.** A data source without `queryGroupHeaders`, or a filter the read cannot repeat, draws no `sum` / `avg` / `min` / `max` figure. Over cards a host hands to the board, a `sum` is still added up on the board and the other three draw nothing. Known gap, follow-up #36871: the list view hands a board whose lanes it cannot know before the query (lanes over a lookup field, a view with grouping) its fetched page, so there `sum` totals that page, unmarked.
+  - **`@objectstack/lint`** judges `avg`, `min` and `max` the way it judges `sum` (`list-view-summary-field-type-refused`): the aggregate × field-type table's row for that function over the field's declaration, less the boolean class, which it now reads from the spec (`BOOLEAN_VALUE_TYPES`) instead of listing `boolean` and `toggle` itself. The list view's lane-statistic picker reads the same class, and now offers and names `avg` (Average), `min` (Minimum) and `max` (Maximum) over the number fields it offers for `sum`; the locale packs carry the three names and drop the retired loaded-cards label.
+  
+  A stored `sum` keeps its key and its field; what it draws is now the whole lane's total where it drew a total over the loaded cards before, and no figure over a data source that cannot answer the lane read.
+- f66340a: feat: a record-page tab title an object's `relatedLists` entry declares can be translated
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An object-form `relatedLists` entry (`{ list, label, columns }`) titles its tab and table on the parent's record page, and its `label` wins over the child lookup field's `relatedListTitle`. The field's title had a translation key; the entry's did not, so a declared tab title showed its authored text in every locale.
+  
+  A translation bundle now carries it on the parent object, keyed by the entry's literal `list` (a dotted `object.field` is one key):
+  
+  ```ts
+  objects: {
+    account: {
+      _relatedLists: {
+        contact: { label: '联系人' },
+        'event.related_to': { label: '会议' },
+      },
+    },
+  }
+  ```
+  
+  - `@objectstack/spec`: `ObjectTranslationDataSchema._relatedLists` (a closed leaf with one key, `label`; the un-prefixed `relatedLists` is named as a rename onto `_relatedLists`). `translateObject` overlays it onto the served parent object's entries, so `GET /meta/object` serves the translated title and the console's record page shows it with no change of its own. Only an entry that authors a `label` is translated: an entry without one, a bare name and a built-in tab keep their current title (the child field's `relatedListTitle`, else the child object's plural label). A title a tenant changed keeps its text, as every other translated slot does.
+  - `@objectstack/lint`: `os i18n extract` scaffolds the key for every labelled entry and the coverage gate counts it; `os validate` reports a `_relatedLists` key that names no labelled entry of that object as `translation-target-unknown`. A labelled entry an object extension brings (a list placement in `place`, or a shown entry of the paired `.custom` package's `relatedLists`) is a labelled entry of the object it extends, so its key resolves; the record page shows a placed tab only where that object declares `relatedLists`. A key over a built-in tab, or over an entry the `.custom` arrangement hides, is reported with its own reason.
+  - `@objectstack/metadata-protocol`: a save that sends back a translated entry title (a Studio edit of the object read in another language) stores the source title instead, with an `info` advisory, as it already does for field labels.
+  - `@objectstack/objectql`: the packaged base `getPackagedObjectBase` hands the `/meta` read (the text a served slot is compared with) carries the tabs a code package's `place` adds to the owner's `relatedLists`, as the fold splices them (so only where the owner declares `relatedLists`). A placed title is therefore translated from the deployment's catalog, which carries the placing package's translations, the way a field such a package adds already is; a tenant's rename of that title keeps its text. A `.custom` arrangement's title is the customization layer and reads the pair's own translations.
+- fed637c: feat(i18n): a flow screen with its own heading gets a translatable step name, `flows.FLOW.nodes.NODE_ID.label`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A screen node that sets its own `config.title` has a heading and a separate canvas label. Until now only the heading could be translated (`flows.FLOW.screens.NODE_ID.title`), so the label stayed in the authoring language. The docs flow embed and the Studio flow designer both draw that label.
+  
+  - **New key accepted.** `objectstack validate` now accepts `flows.FLOW.nodes.NODE_ID.label` over a screen whose `config.title` is a non-empty string. A screen with no `config.title` is still refused there and pointed at `screens.NODE_ID.title`, because its heading is its label and one string keeps one key. An `approval` node is still pointed at `approvals.NODE_ID.label`.
+  - **Docs embed.** The `type: flow` embed (`element:metadata_viewer`) names a titled screen by its heading, translated where the bundle has the heading. When the heading holds a `{{ }}` hole, which a drawing cannot fill, the embed now names the screen by the new key, and falls back to the authored label only if the key is missing.
+  - **Studio designer.** The canvas draws a titled screen's label from the new key.
+  - **Untitled screen with a hole.** If a translated `screens.NODE_ID.title` contains a `{{ }}` hole, the embed and the canvas now draw the authored label rather than the raw template.
+  - **Coverage.** `os lint`'s i18n coverage and `os i18n extract` ask for the new key on a top-level screen whose authored heading holds a `{{ }}` hole. These are the screens the embed draws by their label.
+  - **One branch rule.** `@objectstack/spec/automation` exports `flowDecisionEdgeBranch`, `FlowDecisionEdgeBranch` and `FLOW_DECISION_DEFAULT_BRANCH_LABEL`. They decide which out-edges of a decision a drawing lists as branches. The docs embed's branch list and the i18n walk's folded branch targets both read them, so the two can no longer disagree.
+  
+  Nothing to migrate. A bundle that does not use the new key keeps working.
+- 151e812: feat(spec): declare a metadata type's Studio list columns in the spec and serve them on `/meta/types`
+  
+  Clause-②: yes (widening: new exported schemas and a new optional `list` on each `/meta/types` entry)
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/**` teaches Studio's metadata list columns; `skills/objectstack-ui/SKILL.md` names `entries[].schema` only, which is unchanged
+  
+  Which columns Studio's generic list shows for a metadata type is now declared in the spec, beside the type's form, instead of in console code:
+  
+  - **Spec.** `MetadataListViewSchema` is a list layout bound to the type's own schema (`data: { provider: 'schema', schemaId }`) with its `columns`; each `MetadataListColumnSchema` names a key of that schema or a dotted path into it, a header, and a cell renderer (`MetadataListCellTypeSchema`: `text`, `badge`, `boolean`, `count`, `list`, `summary`). `defineList({ schemaId, columns })` builds one and refuses an unknown renderer, an empty column list and any `ListColumn` key outside `field` / `label` / `type`. `METADATA_LIST_REGISTRY` (`@objectstack/spec/system`) is the list counterpart of `METADATA_FORM_REGISTRY`; this release declares `hook`, and a type with no entry keeps Studio's default list. A reconciliation test refuses a column naming a key the type's schema does not declare (or declares retired, or as an overlay `_` key) and a header that differs from the form field label of the same path.
+  - **Serve.** `getMetaTypes()` serves the registry entry as `list` on the type's `/meta/types` row, next to `form`; `GetMetaTypesResponseSchema` declares it. The REST handler translates each header through the type's form field slot, `metadataForms.<type>.fields.<field>.label`, so a column and the form field of the same key read the same words. `resolveMetadataListLabels` (`@objectstack/spec/system`) does the lookup.
+  - **i18n.** `os i18n extract` emits that slot for every column whose path the type's form does not already label, with the column's header as the English source. Every `hook` header reuses a form label, so no bundle changes here.
+  - **Console.** Studio's generic list reads the served columns first: the served list, else the console's own `listColumns`, else name / label / description. A served header is shown as served, already in the reader's language. A key the stored row leaves out shows the default the type's JSON Schema declares there, the value the runtime uses. The console can still draw a served column's cell its own way (`listCells`) and append values the server stamps on a row that are not schema keys (`listExtraColumns`).
+  
+  New exports: `@objectstack/spec` adds `MetadataListCellTypeSchema`, `MetadataListColumnSchema`, `MetadataListViewSchema`, `defineList` and their types (`ui`), and `METADATA_LIST_REGISTRY`, `MetadataListType` and `resolveMetadataListLabels` (`system`). Nothing that was accepted before is refused, and a client that ignores `list` sees the `/meta/types` it saw before.
+- 227e952: fix(lint)!: `os validate` and the publish gate refuse an option label in a flow's query filter, edge condition or decision branch
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37504
+  
+  <!-- adr-0087: not-required (already-registered publish-refuses-flows-that-save-and-do-not-run) the same option-label refusal at more positions of the same flow; this change extends that entry's surface from the start condition to an edge condition, a decision branch and a query filter operand, at the same doors (os validate / lint / compile / build and the runtime publish gate) -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`: a flow carrying one of the shapes below was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored flows are not rewritten or refused at boot; the refusal comes at the next publish of the flow, and from `os validate` / `lint` / `compile` / `build`. No export is added or removed.
+  
+  A select field stores the option's value, never its label, and a flow hands its filters and conditions to the data engine and the expression engine as written: nothing resolves a label to its value there. So `filter: { stage: 'Closed Lost' }` on a `get_record`, `update_record` or `delete_record` step matched no row, and the step reported success having read, updated or deleted nothing; an edge condition or `decision` branch `deal.stage == 'Closed Lost'` was never taken. `flow-condition-option-label` read only the start condition, so nothing said so.
+  
+  - **The refusal.** `flow-condition-option-label` (`error`, as on the start condition) now also reads:
+    - each operand of a `get_record` / `update_record` / `delete_record` `filter`, and of a time-relative sweep's `timeRelative.filter`: a field's implicit equality, its `$eq` / `$ne` comparand and each member of its `$in` / `$nin` list, at the top level or under `$and` / `$or` / `$not`, at any region depth;
+    - every edge condition and every `decision` node's `conditions[].expression`, at any region depth, where it compares a select field of the trigger record (`record.F`, `previous.F`, or a bare `F`) on a record-change or time-relative flow, or of the row a single-row `get_record` step (`limit` absent or 1) bound to its `outputVariable` (`deal.F`).
+  - **Not judged.** A CEL value envelope, a variable or a template operand or comparand; a field whose options come from a shared picklist; a variable that anything else in the flow also binds (another step, a declared variable, a node id, a screen field); a `record` / `previous` root the flow rebinds itself; a bare `F` that such a binding shadows. A `readonly` select is still judged, as the start condition already judges it.
+  - **Escape, filters only.** A filter that is meant to find rows still holding a label (a clean-up after the options changed) writes the operand as a CEL value envelope, `{ dialect: 'cel', source: "'Closed Lost'" }`, which is evaluated before the query and not judged. An edge condition or a `decision` branch has no such escape: compare the value.
+  - **What carries it.** The ADR-0087 entry `publish-refuses-flows-that-save-and-do-not-run` now names the edge condition, the `decision` branch and the filter operand beside the start condition.
+  
+  FROM → TO:
+  
+  - `filter: { stage: 'Closed Lost' }` → `filter: { stage: 'closed_lost' }`
+  - `deal.stage == 'Closed Lost'` (an edge condition or a `decision` branch) → `deal.stage == 'closed_lost'`
+  
+  One-line fix: write the option's value where the label is, as the finding names it.
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+- da50177: feat(ai): a context pack's related list takes `where`, `orderBy` and `limit` (ADR-0160 second amendment)
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  A `related` entry of an `ai_context` pack may now choose, order and cut the child rows it carries:
+  
+  ```yaml
+  related:
+    - object: policy_revision
+      field: policy
+      fields: [version, published_at]
+      where: { is_current: { $eq: true } }
+      orderBy: [{ field: sort_no, order: asc }]
+      limit: 5
+  ```
+  
+  - **`where`** is the object filter form on the child's own fields: `$eq`, `$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$null` and `$exists` (`AI_CONTEXT_WHERE_OPERATORS`), joined by `$and` / `$or` nested at most `AI_CONTEXT_WHERE_MAX_DEPTH` (32) deep. A bare value reads as `$eq`. Refused at parse: any other operator (`$not`, `$between`, `$contains`, …), a dotted path or a condition on a lookup's target, a field-to-field comparand (`{ $field }`), a `$now` anchor, a formula, and a comparand that is one whole `{…}` placeholder (`{today}`, `{current_user_id}`, `${record_id}`, or an unknown one), and `$and` / `$or` nested deeper than the bound.
+  - **`orderBy`** is `{ field, order }[]` (the sort node; `direction` is refused by name) on the child's own fields.
+  - **`limit`** is a positive integer, at most `AI_CONTEXT_MAX_RELATED_ROWS` (20). Over it the pack is refused at parse, never lowered at call time. `RECORD_CONTEXT_RELATED_MAX_ROWS` in `@objectstack/service-record-context` is now this one number.
+  
+  `get_record_context` reads such a list in the one capped child query, as the caller: the link filter and `where` joined with `$and`, ordered by `orderBy`, cut at `limit` (else the row cap), and a cut is stated in the notes. The filter grants nothing: a row the caller's row rules hide stays absent. A `where` or `orderBy` field the caller cannot query on (outside the security service's `getQueryableFields`; without that answer, any field that declares a `maskingRule`, or that the caller's schema hides or field-level security withholds) drops the whole section with the one "some material is not visible" statement, and the field is never named. A field the child does not define leaves the section out and states nothing; `os validate` and the save-time check report it as `ai-context-field-unknown`. So does an `orderBy` field the child does not offer as a sort (a formula, or a field that declares `sortable: false`, which the record doors refuse with `INVALID_SORT`): the section is left out and nothing is stated, and `os validate` and the save-time check report it as the new warning `ai-context-sort-field-unsortable`. The call's read set does not change. A door may hand the executor the caller's queryable fields through the new optional `RecordContextDoor.queryableFieldsOf`.
+- f9dd033: feat(lint): refuse a `transferBehavior: 'cascade'` the Change Owner action can never offer
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered transfer-cascade-never-offered-refused -->
+  
+  **BREAKING** for a stack that declares one of these cascades: `os validate`, `os build` and `os lint` now refuse it where they accepted it before. Fix it as below; the runtime never ran such a cascade, so no data changes.
+  
+  `os validate`, `os build` and `os lint` now refuse three `transferBehavior: 'cascade'` declarations that parsed and then did nothing, because the Change Owner endpoint re-judges every relationship and never offers them. Each is an `error`, with the fix named:
+  
+  - `transfer-cascade-parent-without-change-owner`: the reference points at a parent in the stack that does not offer Change Owner (`ownership: 'business_unit' | 'org' | 'none'`, any `managedBy`, a pinned or unprovable owner, or `userActions.transfer` off, by the author or by the `controlled_by_parent` default). A `sys_` parent stays the field parse's refusal.
+  - `transfer-cascade-extension-child-ineligible`: an object extension's field (`objectExtensions[].fields`) declares the cascade on an object that cannot take one. `ObjectSchema` already refused this on a field the object declares itself; an extension's field skipped that parse. A `fieldPatches` entry cannot carry the key at all.
+  - `transfer-cascade-child-update-unexposed`: the child's `enable` block does not serve `update` (`apiEnabled: false`, or `apiMethods` without update).
+  
+  Fix: set the field's `transferBehavior` to `'none'` or remove it, or change the object the message names (offer Change Owner on the parent, or open update on the child). The verdicts come from the spec predicates the runtime reads (`resolveUserActionTransfer`, `transferCascadeIneligibilityReason`, `apiExposureDenialReason`); the runtime is unchanged. New exports: `validateTransferCascades` and the three rule id constants. Not yet run at the runtime publish gate (follow-up #37397). Migration entry `transfer-cascade-never-offered-refused` (`@objectstack/spec`) carries the same fix for `os migrate meta` and the upgrade guide.
+
+### Patch Changes
+
+- 806bba8: fix(lint, service-automation): the date-text refusal on a flow value envelope names the rewrite for a record-triggered flow that a parent also starts
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A flow with its own record trigger or time-relative sweep gets the date-text check on its value envelopes (`update_record` / `create_record` `fields.*`, `assignment` values). Example: `timestamp(record.borrow_date)` over a `date` field. The check is refused at `os validate` / `os build` and at `registerFlow`. It stays refused when another flow also starts the same flow through a `subflow` or `map` node, because the flow's own trigger hands it a row of the typed object on every run it starts. The set of refused flows does not change.
+  
+  The refusal now also says how to share the steps with such a parent. Move the shared steps into a child flow with no trigger of its own, which is judged untyped because its `record` is whatever each caller hands it. Then start that child from both flows. Both doors append the same sentence after the verdict's own fix. The stored pass of `os migrate meta --stored` lists that sentence too.
+- 89364b4: feat(spec, core, ui): `{current_iso_week}` defaults a week-keyed filter to the current ISO week
+  
+  Clause-②: yes (widening: the closed filter-placeholder vocabulary gains one token)
+  Metadata-protocol: added
+  
+  A dashboard whose rows carry a text week key (`cost_week: '2026-W47'`) could only default its week filter to a fixed week, which went stale the next Monday. Write the placeholder instead and the filter opens on the current week each time:
+  
+  ```ts
+  globalFilters: [
+    { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+  ],
+  ```
+  
+  - It resolves to the ISO-8601 week key of today, `YYYY-Www`: Monday-start weeks, week 1 is the week that holds the year's first Thursday, and the year is the ISO week-numbering year, so 2027-01-01 is `2026-W53` and 2025-12-29 is `2026-W01`. "Today" is the day in the workspace time zone, on the server and in the browser alike; the label is the one the analytics week bucket already uses.
+  - It is a period key, not a date. It lives in its own closed list, `PERIOD_KEY_TOKENS`, beside `DATE_MACRO_TOKENS` and not inside it, so a date filter default and a calendar `initialDate` still refuse it. `classifyFilterToken` answers a new kind, `period-key`, and `isKnownFilterToken` knows it, so lint, flow filter operands and the server resolver accept it wherever a filter placeholder is accepted. A consumer that switches exhaustively on `kind` gets a compile error until it handles the new kind.
+  - The server resolves it in `resolveFilterTokens`; the browser resolves it in `resolveFilterPlaceholders` and in the dashboard filter defaults (every filter type except `date` and `dateRange`), so the filter box opens showing the resolved key. A literal `2026-W47` default keeps working and stays fixed.
+  - Every filter and default written before parses and resolves exactly as before. Only the whole value is a placeholder: `'week {current_iso_week}'` is left as written. A near spelling such as `{currentIsoWeek}` is still refused as an unknown token.
+  - Use it only on a field that stores week keys. On a date, datetime or time field the placeholder is refused (`INVALID_FILTER` / 400), as the literal key is; filter those with the `this_week` preset or `{current_week_start}` / `{current_week_end}`.
+- f19e6c6: fix(lint): `ai-skill-tool-unresolved` resolves every tool the MCP door registers for a skill offered over MCP, and says why when a skill kept out of MCP names one
+  
+  Clause-②: yes (widening) — `ai-skill-tool-unresolved` stops warning on eight tool names the MCP door registers, and `@objectstack/spec/system` gains the export `MCP_DOOR_TOOL_NAMES`; nothing that resolved before is reported
+  Metadata-protocol: none
+  
+  The MCP door in `@objectstack/mcp` registers record, file, action, federation and dataset tools, and offers a skill bound to them over MCP. The lint rule knew only the two file tools, so a skill bound to `aggregate_records`, `delete_record`, `delete_records`, `list_actions`, `run_action`, `resume_run`, `list_remote_tables` or `import_object` was warned that the agent cannot call it, and `os lint --strict` failed.
+  
+  `@objectstack/spec/system` now exports `MCP_DOOR_TOOL_NAMES`, every tool the door registers on a bridge carrying every optional member under a grant naming every scope. For a skill offered over MCP (`mcpPrompt` not `false`), the rule resolves every name in it. `@objectstack/mcp` has a test that keeps this list equal to what the door registers, so a tool added to or renamed at the door fails there until the list follows it. Some door names (`get_record`, `query_records`, `describe_object`, …) are cloud registrations as well and stay in `PLATFORM_PROVIDED_TOOL_NAMES`; the door's names do not join `PLATFORM_TOOLS_BY_PACKAGE`, so each group there stays the exact set one cloud package registers. `MCP_FILE_TOOL_NAMES` stays as it was and is part of the new list.
+  
+  A skill kept out of MCP (`mcpPrompt: false`) runs only in the in-product agents, which do not have the door tools no cloud package registers, so naming one there is still reported. The warning now says so: "Tool "run_action" resolves only for a skill offered over MCP, and this skill sets `mcpPrompt: false`, so the in-product agents it runs in have no such tool". The fix line offers dropping `mcpPrompt: false` or removing the name. A trailing-wildcard entry that matches only door tools gets the same verdict.
+  
+  `os explain ai-skill-tool-unresolved` names `MCP_DOOR_TOOL_NAMES` as the third source and adds that a skill which runs an app action binds `action_<name>` (or `action_*`) rather than `run_action`: the MCP door serves that entry through `run_action`, and the in-product agents call the action tool itself.
+- ba304e0: fix(mcp, lint): `create_record` and `update_record` over stdio answer `droppedFields` and no longer echo a dropped value; a flow write to a roll-up summary field draws a warning
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  On the stdio MCP transport, `create_record` and `update_record` now answer `droppedFields`, as the HTTP transport has: each entry names the object, the fields the engine did not store and the reason. A non-system write of a `readonly: true` column or of a roll-up `summary` field (read-only on create and update whether or not it declares `readonly: true`) reports the field there with reason `readonly`. Before, the stdio answer carried no `droppedFields`, and `update_record` answered the caller's own value for such a field over the stored one, so the answer read as if the write had landed. The `record` in both answers now leaves a dropped key's caller value out: an update answers the stored value, and a create answers what the write stored. A write that drops nothing answers as before, with no `droppedFields` key. No MCP tool input, `@objectstack/mcp` export or metadata key changes.
+  
+  `os validate`, `os lint` and `os build` now report a new warning, `flow-update-summary-field`, when a flow's `create_record` or `update_record` node that does not run as `runAs: 'system'` writes a roll-up `summary` field that does not declare `readonly: true`. The engine drops that value on create and on update, so the step changes nothing in that column. It is a warning, so no build that passes today fails. Like every warning, it makes `os validate --strict` and `os lint --strict` exit 1; there is no per-rule switch, so a strict run fails until the field is removed from the node. The metadata save and publish answers carry it under `advisories`, never as a refusal: on a flow save whose user-run node writes such a roll-up, and on an object save that makes a field such a roll-up while a live user-run flow of the same package writes it. A roll-up that declares `readonly: true` is reported as `flow-update-readonly-field`, an error, as before. `os explain flow-update-summary-field` gives the details. The fix is to remove the field from the node, since the engine recomputes it from the child records.
+  
+  New export: `FLOW_UPDATE_SUMMARY_FIELD` from `@objectstack/lint`, the rule id constant.
+- 7702f09: fix(lint, studio): warn about a required field's `visibleWhen` formula read only when the form cannot compute the formula
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `required` field whose `visibleWhen` reads a `formula` field used to draw a warning from `os validate` (and the object save door) and an advisory in Studio's field inspector for every formula it read. The form now computes the object's formulas over the record being edited, so for a formula it can compute the form and the server judge the same value, and that warning named no real problem. Both now fire only for a formula the form cannot compute:
+  
+  - **The server cannot compute it either.** The formula reads through a reference, calls `label()` or `current_user.can()`, or reads such a formula. The server counts the field as shown, so it stays required on every record. Same verdict as before, now stated on its own.
+  - **Only the form cannot compute it.** The formula reads `os`, or reads such a formula. The server computes it and can waive the field where the form still shows it and keeps it required. Before this change such a formula drew only the generic warning, which said the form computes it.
+  
+  Either message now says that the form's half holds for a form that computes the object's formulas. A form check that computes none judges the value it last read, and can hide the field or not ask for it.
+  
+  A formula that reads the acting user draws nothing, as before. Both sides compute it for a signed-in writer.
+  
+  Studio catalogue (en, zh): `designer.field.requiredVisibleWhenFormula` is removed. `designer.field.requiredVisibleWhenFormulaUnservable` is now a full sentence on its own. `designer.field.requiredVisibleWhenFormulaFormOnly` is new. The lint rule's location and severity (warning) are unchanged. No props or exports change.
+- f6902e9: feat(lint): warn when a text field named like a currency, country or time zone code declares no valueDomain
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `os lint` gains `field/missing-value-domain`, a warning. It fires on a `text` field that declares no `valueDomain` and whose whole name, compared case-insensitively, reads as a standard code: `currency` or `currency_code` (fix: `valueDomain: 'iso_4217_currency'`), `country` or `country_code` (`iso_3166_alpha2`), `time_zone`, `timezone` or `tz` (`iana_time_zone`). The fix line names the domain to add. A field that already declares a domain, a `select` field, any other type and any other name are not judged. It is a warning only: `os validate`, `os build` and the metadata save door are unchanged. Like every warning, it makes `os lint --strict` exit 1; there is no per-rule switch, so a strict run fails until the field declares the domain. Declaring it does not re-read rows that already hold free text; only a later write that carries a non-member is refused. `os explain field/missing-value-domain` gives the reasoning.
+  
+  New exports: `VALUE_DOMAIN_FIELD_NAMES` from `@objectstack/spec/shared`, the one word list (domain → field names) the rule reads, and `FIELD_MISSING_VALUE_DOMAIN` from `@objectstack/lint`. The word list adds no member to `ValueDomainSchema`.
+- 3d6dea2: feat(formula): `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` count with the organization's working calendar (ADR-0157 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added — a formula field's or a stored field's `expression` may now call `addWorkingDays(...)`, `workingDaysBetween(...)` and `addWorkingHours(...)`
+  Skills-docs: updated here — skills/objectstack-formula/SKILL.md teaches the three functions and eval 8 of skills/objectstack-project/evals/project-process.json exercises them (the card's order names both)
+  
+  Not released alone: it ships in the same release as the working calendar service and objects (#35355) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Three formula functions** (`@objectstack/formula`). `addWorkingDays(day, n[, code])` answers the calendar day `n` working days after `day` (before it, for a negative `n`); `day` itself never counts and `0` answers `day`. `workingDaysBetween(start, end[, code])` counts the working days after `start` up to and including `end`, negative when `end` is earlier, and is the inverse of `addWorkingDays`. `addWorkingHours(start, hours[, code])` answers the instant `hours` of working time after `start`, counted as elapsed time in the calendar's time zone (D11); a start outside working time begins at the next working period. All three step over the calendar's weekends and holidays and onto its make-up working days. Without `code` a call counts with the organization's default calendar; `code` names a calendar and is written as a quoted literal. They join the advertised standard library (`CEL_STDLIB_FUNCTIONS`).
+  - **Where they count** (`@objectstack/objectql`). A `formula` field and a stored field's `expression` count with the record's own organization's calendars, which the engine loads through the calendar service before it evaluates them: only the calendars the expressions name, once per organization per read, from the service's cache. A formula field counts again on its next read after a calendar edit; a stored due time keeps the value of its last write.
+  - **When the calendar cannot answer** (D8). With no default calendar in the organization, a code the organization has no calendar for, or a count that reaches past the span the calendar is maintained for, the formula reads `null` and the server logs one line naming the object, the field and the reason. A stored field's `expression` stores blank and the write goes through; the blank stays until that record's next write, and a write made while the calendar refuses blanks a value that was valid before. Nothing counts on the weekly pattern or the wall clock instead.
+  - **No calendar arithmetic as a filter.** A query filter, a sharing rule's condition and every filter compiled from CEL refuse the three functions with a message that prescribes the stored due-time field (D6).
+  - **Build refusals** (`@objectstack/lint`). `os build` / `os validate` refuse the three functions at every expression site but a formula field's and a stored field's `expression` (validation rules, visibility, action conditions, flow conditions and values, sharing rules, a field's expression `defaultValue` and a seed value), and refuse a calendar code that is not a quoted literal, with a branch between literal calls as the way to pick a calendar per record.
+  - **Forms** (`@object-ui/core`). A form does not compute a formula that calls one of the three: its calendar is loaded for the server's read, never handed to the form, so the field is unservable there as on the server's write-path check.
+  - **Teaching** (`@objectstack/skills`). objectstack-formula documents the three functions; the platform catalog moves working-day formulas from Planned into what the platform ships; the project-process eval for business-hours SLAs now expects the functions.
+- 65fddc8: fix: a `percent` or `currency` formula is a KPI chip on the record header; the lint prescription names all six return types
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `formula` field whose `returnType` is `percent` drew percentages in its list cells, and the record header strip drew it without the figure typography a `percent` field's chip has. The strip now reads a formula's declared `returnType` before it picks its face, for the two return types the spec reads as a field type, `percent` and `currency`. Both are KPI chips on the header strip. A formula of any other return type chips as before.
+  
+  The grid's footer formatting reads the same two return types, so a browser-computed footer over a `percent` formula reads `Sum: 75%` rather than `Sum: 0.75`, and over a `currency` formula reads as money. That is not a supported authoring shape: a `sum`, `avg`, `min` or `max` column summary over a `formula` field is refused at authoring by `list-view-summary-field-type-refused`, whatever its `returnType`, because a formula is computed on read and stored in no column, and the whole-set footer query answers `400 INVALID_FIELD`. The formatting reaches only an ungrouped, one-page footer the browser computes over a declaration `os validate` refuses. To total a formula's value, make it a stored field of its own, of the formula's `returnType` and carrying the same `expression`, which the engine computes and stores on every write, and summarise that field.
+  
+  `os explain dimension-virtual-field-refused` told the author to make a stored copy "of the formula's `returnType` (`number`, `text`, `boolean`, `date` or `currency`)", which named no type for a `percent` formula. It now lists all six, and a test holds the list to the spec's own `returnType` enum.
+- 236c804: feat(spec)!: retire the boolean arm of a relationship field's `inlineEdit` — `true` and `false` both read as the key left out
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37042
+  
+  <!-- adr-0087: registered field-inline-edit-boolean-removed, field-inline-edit-boolean-retired -->
+  
+  **BREAKING** accept-set narrowing on `FieldSchema.inlineEdit` (`@objectstack/spec/data`), the inline form factor of a `lookup` or `master_detail` field. Since the field-group placement, a field group of the parent (`fieldGroups[].relatedList`) decides whether the parent's create and edit forms inline a child, and `inlineEdit` only picks the form factor of a placed child. Every reader of the key passes anything but `'grid'` and `'form'` as absent, so `true` (documented as "auto") and `false` both did exactly what leaving the key out does: the form factor is picked from the child's shape.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `inlineEdit: true` on a `lookup` / `master_detail` field | delete the key (the form factor is still picked from the child's shape), or write `'grid'` / `'form'` |
+  | `inlineEdit: false` on a `lookup` / `master_detail` field | delete the key |
+  | a child meant to be entered in the parent's form | name it in a field group of the parent: `fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: '<child object>' }]` |
+  
+  The one-line fix: delete a boolean `inlineEdit` wherever it is written; `os migrate meta --from 17 --write` deletes it from object sources. Writing one after upgrade fails `tsc` (the input type is `'grid' | 'form'`) and fails the parse with that prescription. `'grid'` and `'form'` parse unchanged. The view-level `inlineEdit` (a list view's in-cell editing switch) is a different key and is unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `FieldSchema.inlineEdit` is `z.enum(['grid', 'form'])`, and a boolean meets the prescription from the enum's own error map. The D2 conversion `field-inline-edit-boolean-removed` (lossless, retired from the load path) deletes a boolean `inlineEdit` from `objects[]` and `objectExtensions[]` field maps on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `field-inline-edit-boolean-retired` names what the upgrade still owes: whether the child should be placed by a field group of the parent. The liveness ledger keeps the key `live` for the two surviving values, with the narrowing recorded.
+  - **Field form** (`@objectstack/spec` `field.form.ts`, labels in `@objectstack/platform-objects`): with the boolean arm gone a select spells every value, so the field designer now offers `inlineEdit` as a `Grid` / `Form` select on `lookup` and `master_detail` fields; left unset, the form factor is picked from the child's shape. Before, the form left the key out because no widget could spell a boolean-or-string union.
+  - **`@objectstack/lint`**: two doc comments in the field-consumer rule (`validate-field-consumers.ts`) now read a boolean `inlineEdit` as refused by the spec and as absent at the renderer; comment text on unexported functions only, so no shipped byte changes.
+  - **`@objectstack/cli`**: the golden metadata-eval corpus places its line items with a field group of the parent, with `inlineEdit: 'grid'` as their form factor, instead of `inlineEdit: true`.
+- f548bdc: fix: descriptions and help text no longer say the default record page draws a key-field strip or a stage path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The default record page draws no key-field strip and no stage path: the stage is the status tag beside the record name. These texts said otherwise and now say what each key drives:
+  
+  - `@objectstack/spec`: the `highlightFields` describe ("Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it") and its Studio help text. The `stageField` and `RECORD_HIGHLIGHTS_MAX` doc comments say the header's status tag reads the stage and the count cuts only a strip a page places in its `highlights` slot. The upgrade-guide entry `field-group-shadowed-six-highlights` no longer tells authors to move highlights: the warning now judges the record title alone, and no action is owed.
+  - `@objectstack/platform-objects`: the `highlightFields` help text in every metadata-form locale.
+  - `@objectstack/lint`: the `os explain` text of `object-field-ref-unknown` and `semantic-role-field-unprovisioned` names the hover card and the record picker in place of the strip.
+  - `@object-ui/plugin-detail`: the `record:details` `hideFields` description no longer says the default page fills it. The key is still accepted.
+  - `@object-ui/i18n`: Studio's lifecycle-field help (`stageField`, and its "None" choice) talks about the status tag, not a progress bar.
+  - `@object-ui/types`: the page `highlights` slot doc says it places a strip the synthesized default does not draw.
+  - `@object-ui/app-shell`: on a phone the default record page no longer hands the synthesizer a highlight list it never read. The page looks the same, and the subtitle under the record name is unchanged.
+- 92f6216: feat(lint): warn when another permission set's View All, Modify All or View All Fields re-opens a field one set hides
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A new warning, `security-cross-set-field-reopen`. When one permission set hides a field (`readable: false`) or makes it read-only, and another set holds View All (`viewAllRecords`), Modify All (`modifyAllRecords`) or View All Fields (`viewAllFields`) on the same object (on its own entry for the object, or on its `'*'` entry when it has none), a user who holds both sets still reads the field, and under Modify All still edits it. The warning names both sets and the field. Its fix: drop the bit from the second set, give the second set its own `readable: false` row on the field (this works beside View All and View All Fields, not beside Modify All), say `viewAllFields: true` when the second set really should read every field, or, for a field that must stay hidden from everyone without a capability (a salary, an ID number), declare `requiredPermissions` on the field itself, with a `maskingRule` where a partial value is needed. It is a warning only: nothing that builds today stops building.
+  
+  Not reported: a field that declares `requiredPermissions` (that gate applies after the permission sets are merged, so no set's bit opens it); a set's own Modify All over its own row, which stays `security-superuser-field-mask-inert`, so one row gets one finding; a second set whose own `readable: false` row on the field keeps it closed beside View All or View All Fields; an edit lock beside View All or View All Fields, which never grant an edit; and a key on an object or field the stack does not declare. Fields are never judged by their name.
+  
+  `security-wildcard-vama` also reads `viewAllFields` on a package-authored `'*'` entry, as an error like the two record bits: such a set reads every field of every object, other packages' objects included. The key is new in this release, so no stack accepted by a released version is refused. On an object's own entry the bit is not reported. `os explain security-cross-set-field-reopen` prints the full reasoning, and Studio shows the warning in every platform locale.
+- 13da40c: feat(lint): warn when a full record page's header title or action order differs from what the phone and the drawer draw
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An object's hand-written full record page (`type: 'record'`, `kind: 'full'`) is drawn on the desktop full page only; on a phone, in the side drawer, in a split pane and in an interface page's preview the record draws the standard page, built from the object. Two new advisories name a header that makes the same record read differently between the two:
+  
+  - `record-page-header-title-differs`: the `page:header` declares a `title` that is not exactly the object's name field token (`{nameField}`, or the derived title field). The standard page, lists, search and lookups all title the record by that field.
+  - `record-page-header-actions-differ`: the header's `actions` list gives a different primary button, or a different order within the row of buttons or within the `⋯`, than the actions' own `order` / `variant: 'primary'` and their declaration order give on the standard page.
+  
+  Both are warnings. They run on `os validate`, `os build` and `os lint`, and on a page publish at the metadata save door, where they come back as advisories and refuse nothing. Nothing about how a page renders changes. The fix each names: drop the header `title` (or set `nameField` on the object), give the actions an `order` and the main one `variant: 'primary'`, or move a header that should differ everywhere into a `kind: 'slotted'` page's `header` slot. `os explain` on either id prints what the check cannot see: visibility predicates and permissions, actions another package attaches, and the served declaration order, which it estimates.
+- a61b8ab: fix(lint): the `field/embedded-sub-fields` fix names the field group that inlines the child
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The rule's fix line told the author to make the typed list a child object and that `inlineEdit: 'grid'` edits it inline. A child is inlined in its parent's form only when a field group of the parent names it in `relatedList`; the FK's `inlineEdit` picks grid or form, nothing more. An author who followed the old line got a child shown as a tab, with no lines on the parent's form. The fix now reads: make the typed list a child object whose `master_detail` field points back here, name it in a `fieldGroups[].relatedList` here (`inlineEdit` only picks how rows are edited), and remove the key. When the rule fires, its id, severity and path are unchanged.
+- 5c2e34c: fix(lint): the translation coverage check asks every named flow for its label, not only a flow with a screen or an approval step
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `flows.FLOW_NAME.label` is now demanded for every flow a stack declares with a `name`. Until now it was demanded only for a flow with a `screen` or `approval` node, the two readers the key used to have (the screen-flow runner and the approvals inbox). The docs viewer's `type: flow` embed titles its card by the same key for whichever flow a page names, record-triggered, scheduled and API flows included, and the check already asks every flow's drawn steps for their `nodes` labels. So a zh-CN reader saw an English flow name above translated step names, and `os lint` and `os i18n check` did not report it.
+  
+  What you see after upgrading: `os lint` reports one more `i18n/missing-flow` finding per untranslated locale for each flow that has neither a screen nor an approval step, and `os i18n extract` scaffolds its `label`. Translate it under `flows.FLOW_NAME.label` in each locale bundle, the key the runner and the approvals inbox already read. A flow with no `name` is not asked: no bundle entry can address it.
+  
+  The repository's own coverage ratchet rises by those labels: `examples/app-showcase` 425 to 449 (24 flows, one untranslated locale each) and `examples/app-todo` 130 to 136 (3 flows in two locales). The other twelve configs, including the ten bundle packages, are unchanged.
+- a98f8c6: fix(lint): a default or create form that a form-type action opens by name is not reported as internal
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The advisory rule `form-view-internal-not-loaded` warned on every default form (`form`, `formViews.default`, an `isDefault` form view item) and every create form (`formViews.create`, `OBJECT.create`) that is not shared publicly. A `type: 'form'` action can still open one of those forms by its name, and the Console still loads it then, so for that form the warning said "no longer loaded" about a form users reach.
+  
+  The rule now leaves such a form out. A form counts as opened by an action when the `target` of a `type: 'form'` action in the stack equals the name the form is served under: the item's own `name` for a stored form view item, and for a view container's form the name the spec's container expansion gives it (`OBJECT.form` for the default form, or its own `name`; `OBJECT.create` for `formViews.create`; a key collision's renamed name). The actions read are `actions[]`, `objects[].actions[]` and a page component's inline `properties.action`. An interpolated target, a shorter spelling, or an action of another type exempts nothing. The `os explain form-view-internal-not-loaded` text says so.
+  
+  The warning still fires for every other internal create or edit form, with the same message and hint. Nothing is refused or accepted differently.
+- 8aecf6d: feat(mcp,service-knowledge): the MCP door serves `search_knowledge`, and a skill MCP withholds is no longer withheld in silence
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  **`search_knowledge` over MCP.** An app that mounts the knowledge service (`KnowledgeServicePlugin`) now has its knowledge sources searchable from any MCP client: `tools/list` lists `search_knowledge` wherever the kernel holds a `knowledge` service and the connection's grant reaches the read family (`data:read`, or an API key or session, which carry no OAuth grant). Before, no MCP connection served a knowledge tool, so a BYO-AI client could not reach an app's knowledge base at all, and every skill whose `tools` named `search_knowledge` was dropped from `prompts/list`.
+  
+  - **One definition, one executor (ADR-0149 D2).** `@objectstack/service-knowledge` exports the tool's `AIToolDefinition` (`getKnowledgeToolDefinitions`) and its executor (`createKnowledgeTools`, also `KnowledgeService.knowledgeTools()`). The MCP door registers the definition as the service hands it over, on HTTP and on stdio, and holds no copy of its description or argument schema. Arguments: `query` (required), `sourceIds` (at least one id; omit it to search every source, and an empty list is refused `VALIDATION_ERROR` rather than answered with no passage), `topK` (1 to 20, default 5); any other key is refused before the search runs.
+  - **As the caller.** Each call runs with the caller's execution context, and the knowledge service re-checks every passage indexed from a record against the caller's row-level security; on an OAuth connection that is the delegating person's own reach.
+  - **Only `aiExposed` sources.** The tool searches only the sources whose `aiExposed` is not `false`, and refuses a `sourceIds` entry naming any other source with `NOT_FOUND` and the sentence an unknown id gets, so an agent never learns a withheld source exists. `IKnowledgeService.search` itself is unchanged: it still searches a source its caller names explicitly, because it also serves platform callers that are not agents.
+  - `MCP_DOOR_TOOL_NAMES` (`@objectstack/spec/system`) lists `search_knowledge`, so `os lint` resolves it for a skill offered over MCP, as it already did through the platform registry.
+  
+  **A withheld skill is said, twice.**
+  
+  - **Authoring time.** The `ai-skill-tool-unresolved` rule gains a verdict for a skill MCP would offer as a prompt (`instructions`, not `mcpPrompt: false`, not `active: false`) whose `tools` names one of the `ask` product's data tools no MCP connection serves (`aggregate_data`, `query_data`, `visualize_data`): the name resolves, but MCP withholds the skill from every `prompts/list`, and the warning names the tool. Fix: bind tools both doors serve, or set `mcpPrompt: false` on a skill written for the in-product agents.
+  - **Runtime.** On the HTTP door, each `prompts/list` that withholds a skill logs one `debug` line naming the skill and each bound tool the connection does not serve.
+- 021524c: feat(spec,ui): a field can be read-only by hand at the console while actions, imports, the API and flows keep writing it (`uiReadonly` / `uiReadonlyWhen`)
+  
+  Clause-②: yes (widening: two new optional authorable keys `Field.uiReadonly` and `Field.uiReadonlyWhen`)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37405
+  
+  A status column that only moves through actions, or a field an integration fills, used to have no honest declaration: `readonly: true` also strips every client write, so the action, the import and the API lost the field too. Fields now carry two lock tiers:
+  
+  | | server lock: no client writes | hand lock: no person edits at the console |
+  |:--|:--|:--|
+  | always | `readonly` | `uiReadonly` |
+  | conditional | `readonlyWhen` | `uiReadonlyWhen` (CEL, the same scope as `readonlyWhen`) |
+  
+  - **`uiReadonly: true` / `uiReadonlyWhen`.** These console surfaces lock the field: the create and edit dialogs (the field is left off them and out of the payload they submit, so a create from the console lands on the field's `defaultValue`, and a `required` field therefore needs one), the record page's inline edit and stage path, the highlight-strip chip, grid inline edit and its multi-row save, kanban drag between columns grouped by the field, calendar drag, and the line-item grid (a `uiReadonly` child field is not a derived column, and an authored column over it is locked; a `uiReadonlyWhen` one locks its cell per row). The Gantt, the timesheet cell, the kanban swimlane drag and the in-app assistant do not read the keys yet. The engine never reads either key, so REST, import, declarative and script actions, and flows write the field, and the object's validations (a `state_machine`, for one) judge each write.
+  - **`uiReadonlyWhen` is judged on an existing record only** (the create dialog does not read it, nor does a new line-item row), over the host's predicate scope on every surface. Grids and list views fetch the operands of a shown or dragged field's lock predicates. A predicate that cannot be evaluated LOCKS the field (no server judges the hand lock), the edit dialog refuses to submit until it is fixed, and `os validate` checks it as it checks `readonlyWhen`.
+  - **Refused: `uiReadonly: true` beside `readonly: true`** (at `['uiReadonly']`, at every door that parses a field: `defineStack`, `os validate`, metadata save). Keep one: `readonly` when no client may write the field, `uiReadonly` when people at the console may not. `uiReadonlyWhen` beside `readonlyWhen` is accepted.
+  - **Kanban: a `readonly` lane field no longer drags.** The board read no field lock before, so a card grouped by a `readonly` field could be dragged and its PATCH was silently stripped. The board now reads both locks.
+  - **`@object-ui/core` exports the one verdict:** `fieldReadOnlyByHand(def, record?, context?)`, `fieldStaticallyReadOnlyByHand(def)`, `fieldHasConditionalHandLock(def)`. `resolveFieldRuleState` takes `uiReadonlyWhen` in its rules and `uiReadonly` in its statics. The import wizard's target mapping and the Studio/designer reads stay on the raw `readonly`.
+  - **MCP `describe_object`** reports `uiReadonly` and `uiReadonlyWhen` as their own keys where set (never folded into `readonly`, which tells an agent to leave the field out of a write), on the HTTP and the stdio transport, and the tool description names them.
+  - **Censuses and Studio.** The FLS reference scrub classifies both keys (`@objectstack/metadata-core`: `uiReadonly` kept, `uiReadonlyWhen` an expression position). A caller denied a field the `uiReadonlyWhen` reads is served the field with `uiReadonly: true` in place of the predicate, so the lock never opens for them. The Studio field form offers both rows beside Read-only and Read-only when, with their labels and help translated in every metadata-forms locale pack (`@objectstack/platform-objects`).
+- ec46903: fix(lint): a context pack may name a system column the platform injects
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ai-context-field-unknown` no longer warns on a system column the platform adds to an object without the author declaring it (`owner_id`, `created_at`, `created_by`, `updated_at`, `updated_by`, `organization_id`, …) when a context pack names it in `fields`, in a `related` entry's `fields`, `where` or `orderBy`, or in `body.field`. `get_record_context` reads the object's published definition, which carries those columns, and serves them like any field: the warning was false, and an author who followed it removed a field the assistant reads. A column the platform does not add to that object is still reported: `owner_id` on an object with `ownership: 'org'` or `'none'`, and every system column on an object with `systemFields: false`. A `body.field` naming an injected column is now judged by that column's type (`ai-context-body-not-long-text`), and a `related` entry's `orderBy` on one is judged by its sortability. On a related list whose root is a `sys_*` object, the child's injected references to it (`created_by`, `updated_by` and `owner_id` to `sys_user`) count as links, as they do for `get_record_context`: a child with one declared reference to that root and no `field` is now reported as having several.
+- 376377c: A context pack (`ai_context`) saved at runtime is now judged by `validateAiContext` on the publish door (ADR-0160 D1: author defects are "reported at save and by `os validate`"). A pack that names a field or object the live objects do not define, a related list with no link to the root, or a body that is not a long-text field is saved and told so on the save response's existing `advisories`, with the same rule ids (`ai-context-field-unknown`, `ai-context-object-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`) and, for a write that names no package, the messages `os validate` prints; under a package, an object outside the package's closure (the package, its declared `dependencies` and platform objects) is told so, with the remedy to declare the dependency. The save is never refused for them, as for every advisory rule on that door; a draft save is not judged.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+  - @objectstack/sdui-parser@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

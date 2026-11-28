@@ -205,7 +205,7 @@ async function createChartViewThroughTheSwitcher() {
   await waitFor(() => expect(metadataClient.save).toHaveBeenCalledTimes(1));
   const [type, , body, opts] = metadataClient.save.mock.calls[0] as unknown as [string, string, any, any];
   expect(type).toBe('view');
-  expect(opts).toEqual({ mode: 'draft' });
+  expect(opts).toEqual({ mode: 'draft', ifNoneMatch: '*' });
   return body;
 }
 

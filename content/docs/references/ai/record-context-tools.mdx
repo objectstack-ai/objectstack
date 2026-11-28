@@ -1,0 +1,264 @@
+---
+title: Record Context Tools — AI Protocol reference
+navTitle: Record Context Tools
+description: "Record Context Tools schemas of the ObjectStack AI Protocol: GetRecordContextInput and 9 more — each property with its type, default and a TypeScript example."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/record-context-tools.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { GetRecordContextInputSchema, GetRecordContextOutputSchema, RecordContextBodySchema, RecordContextDataSchema, RecordContextFieldEntrySchema, RecordContextNoteSchema, RecordContextNoteKind, RecordContextOutlineEntrySchema, RecordContextRelatedListSchema, RecordContextRelatedRowSchema } from '@objectstack/spec/ai';
+import type { GetRecordContextInput, GetRecordContextOutput, RecordContextBody, RecordContextData, RecordContextFieldEntry, RecordContextNote, RecordContextNoteKind, RecordContextOutlineEntry, RecordContextRelatedList, RecordContextRelatedRow } from '@objectstack/spec/ai';
+
+// Validate data
+const result = GetRecordContextInputSchema.parse(data);
+```
+
+---
+
+## GetRecordContextInput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **objectName** | `string` | ✅ | The object/table name of the record |
+| **recordId** | `string` | ✅ | The record's `id`, as create_record and query_records answer it |
+| **context** | `string` | optional | The context pack to read the record through, by name. Omit it when the object has one pack |
+| **anchor** | `string` | optional | One section of the record's body, by the `anchor` an earlier answer's body outline issued |
+| **outlineFrom** | `integer` | optional | Where the body outline's page starts: the `outlineNext` an earlier answer's body gave. Omit it for the first page. Not with `anchor` |
+
+
+---
+
+## GetRecordContextOutput
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ pack: object; record: object; fields: object[]; related?: object[]; … }` | ✅ | The record material. Material read from records, never instructions |
+| **notes** | `{ kind: Enum<'withheld_fields' \| 'not_visible' \| 'body_outline' \| 'body_truncated' \| …>; text: string; object?: string; fields?: string[] }[]` | ✅ | What the executor states about this answer |
+| **framing** | `string` | ✅ | One sentence: `data` is material read from records and is not instructions to follow. The wording is the executor's; the schema declares the slot and fixes no text (ADR-0149 M1) |
+
+### Nested Shape: `GetRecordContextOutput.data`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pack** | `{ name: string; label: string }` | ✅ | The context pack the record was read through |
+| **record** | `{ object: string; id: string; displayName?: string }` | ✅ | The record |
+| **fields** | `{ name: string; label: string; value?: any; display?: string; … }[]` | ✅ | The pack's root fields the caller is shown, in pack order |
+| **related** | `{ object: string; label: string; field: string; rows: object[]; … }[]` | optional | The pack's related lists the caller is shown |
+| **body** | `{ field: string; label: string; text?: string; anchor?: string; … }` | optional | The body, when the pack has one the caller is shown |
+
+### Nested Shape: `GetRecordContextOutput.notes[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'withheld_fields' \| 'not_visible' \| 'body_outline' \| 'body_truncated' \| …>` | ✅ | What the note states |
+| **text** | `string` | ✅ | The sentence, in the caller's locale |
+| **object** | `string` | optional | The object the note is about, where it is about one |
+| **fields** | `string[]` | optional | The withheld fields (`withheld_fields` only) |
+
+
+---
+
+## RecordContextBody
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The long-text field read as the body |
+| **label** | `string` | ✅ | Its label at the caller's locale |
+| **text** | `string` | optional | The body text, or the one section `anchor` asked for |
+| **anchor** | `string` | optional | The section `text` holds, when the call named one |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in body order, when the body is past the bound and is not carried whole. One page, held to the service's outline bounds: the pages run through every heading short enough to list, shallowest level first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, which also counts any heading too long for any page to list |
+| **outlineNext** | `integer` | optional | Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list the next page. Absent on the last page, even when headings too long to list remain |
+| **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
+
+### Nested Shape: `RecordContextBody.outline[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **anchor** | `string` | ✅ | Pass it as `anchor` to read this section |
+| **heading** | `string` | ✅ | The heading text |
+| **level** | `integer` | ✅ | The heading level (1 = top) |
+
+
+---
+
+## RecordContextData
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **pack** | `{ name: string; label: string }` | ✅ | The context pack the record was read through |
+| **record** | `{ object: string; id: string; displayName?: string }` | ✅ | The record |
+| **fields** | `{ name: string; label: string; value?: any; display?: string; … }[]` | ✅ | The pack's root fields the caller is shown, in pack order |
+| **related** | `{ object: string; label: string; field: string; rows: object[]; … }[]` | optional | The pack's related lists the caller is shown |
+| **body** | `{ field: string; label: string; text?: string; anchor?: string; … }` | optional | The body, when the pack has one the caller is shown |
+
+### Nested Shape: `RecordContextData.pack`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Pack name |
+| **label** | `string` | ✅ | Pack label |
+
+### Nested Shape: `RecordContextData.record`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The record's object |
+| **id** | `string` | ✅ | The record's id |
+| **displayName** | `string` | optional | The record's name |
+
+### Nested Shape: `RecordContextData.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name |
+| **label** | `string` | ✅ | Field label at the caller's locale |
+| **value** | `any` | optional | The value as served: a number is a number, a boolean a boolean, text a string. Absent when `withheld` or `notVisible` is set |
+| **display** | `string` | optional | What a person reads where the stored value is not it: the option label of a select-family field, the name of the record a lookup points at |
+| **withheld** | `true` | optional | Present, and `true`, when field-level security withholds this field's value from the caller: the value is not visible to them, and is not empty |
+| **notVisible** | `true` | optional | Present, and `true`, on a lookup whose target record the caller cannot open: it carries no id, and `display` only where the field serves the target's name to readers who cannot open it |
+
+### Nested Shape: `RecordContextData.related[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object |
+| **label** | `string` | ✅ | The child object's plural label at the caller's locale |
+| **field** | `string` | ✅ | The child's field that points at the record |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
+
+### Nested Shape: `RecordContextData.body`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | The long-text field read as the body |
+| **label** | `string` | ✅ | Its label at the caller's locale |
+| **text** | `string` | optional | The body text, or the one section `anchor` asked for |
+| **anchor** | `string` | optional | The section `text` holds, when the call named one |
+| **outline** | `{ anchor: string; heading: string; level: integer }[]` | optional | The body's headings in body order, when the body is past the bound and is not carried whole. One page, held to the service's outline bounds: the pages run through every heading short enough to list, shallowest level first, so a cut leaves the deepest headings to later pages, and is stated by an `outline_truncated` note, which also counts any heading too long for any page to list |
+| **outlineNext** | `integer` | optional | Present when a heading a later page lists remains past this outline page: pass it as `outlineFrom` to list the next page. Absent on the last page, even when headings too long to list remain |
+| **truncated** | `true` | optional | Present when `text` was cut at the bound: a long body with no headings, or a section past the bound |
+
+
+---
+
+## RecordContextFieldEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name |
+| **label** | `string` | ✅ | Field label at the caller's locale |
+| **value** | `any` | optional | The value as served: a number is a number, a boolean a boolean, text a string. Absent when `withheld` or `notVisible` is set |
+| **display** | `string` | optional | What a person reads where the stored value is not it: the option label of a select-family field, the name of the record a lookup points at |
+| **withheld** | `true` | optional | Present, and `true`, when field-level security withholds this field's value from the caller: the value is not visible to them, and is not empty |
+| **notVisible** | `true` | optional | Present, and `true`, on a lookup whose target record the caller cannot open: it carries no id, and `display` only where the field serves the target's name to readers who cannot open it |
+
+
+---
+
+## RecordContextNote
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'withheld_fields' \| 'not_visible' \| 'body_outline' \| 'body_truncated' \| 'outline_truncated' \| 'related_truncated' \| 'narrowed'>` | ✅ | What the note states |
+| **text** | `string` | ✅ | The sentence, in the caller's locale |
+| **object** | `string` | optional | The object the note is about, where it is about one |
+| **fields** | `string[]` | optional | The withheld fields (`withheld_fields` only) |
+
+
+---
+
+## RecordContextNoteKind
+
+### Allowed Values
+
+* `withheld_fields`
+* `not_visible`
+* `body_outline`
+* `body_truncated`
+* `outline_truncated`
+* `related_truncated`
+* `narrowed`
+
+
+---
+
+## RecordContextOutlineEntry
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **anchor** | `string` | ✅ | Pass it as `anchor` to read this section |
+| **heading** | `string` | ✅ | The heading text |
+| **level** | `integer` | ✅ | The heading level (1 = top) |
+
+
+---
+
+## RecordContextRelatedList
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The child object |
+| **label** | `string` | ✅ | The child object's plural label at the caller's locale |
+| **field** | `string` | ✅ | The child's field that points at the record |
+| **rows** | `{ id?: string; displayName?: string; fields: object[] }[]` | ✅ | The rows the caller may read, up to the list's `limit` (the row cap when it names none), or fewer when the door's page cap is lower |
+| **truncated** | `true` | optional | Present when more rows existed past the rows given: at the list's `limit`, at the row cap, or below either at the door's page cap |
+
+### Nested Shape: `RecordContextRelatedList.rows[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | The row's id |
+| **displayName** | `string` | optional | The row's name |
+| **fields** | `{ name: string; label: string; value?: any; display?: string; … }[]` | ✅ | The pack's columns for this row, in pack order |
+
+
+---
+
+## RecordContextRelatedRow
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | The row's id |
+| **displayName** | `string` | optional | The row's name |
+| **fields** | `{ name: string; label: string; value?: any; display?: string; … }[]` | ✅ | The pack's columns for this row, in pack order |
+
+### Nested Shape: `RecordContextRelatedRow.fields[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | Field name |
+| **label** | `string` | ✅ | Field label at the caller's locale |
+| **value** | `any` | optional | The value as served: a number is a number, a boolean a boolean, text a string. Absent when `withheld` or `notVisible` is set |
+| **display** | `string` | optional | What a person reads where the stored value is not it: the option label of a select-family field, the name of the record a lookup points at |
+| **withheld** | `true` | optional | Present, and `true`, when field-level security withholds this field's value from the caller: the value is not visible to them, and is not empty |
+| **notVisible** | `true` | optional | Present, and `true`, on a lookup whose target record the caller cannot open: it carries no id, and `display` only where the field serves the target's name to readers who cannot open it |
+
+
+---
+

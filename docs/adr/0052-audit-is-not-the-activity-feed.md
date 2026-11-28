@@ -289,6 +289,33 @@ for genuinely semantic events that a field diff can't express.
    from becoming change-noise. Enforce-or-remove (ADR-0049) is satisfied: the
    flag now has a runtime consumer.
 
+   > **Note (2026-11-24, [#36290](https://github.com/objectstack-ai/objectstack/issues/36290),
+   > ruling record [`7076513167`](https://github.com/objectstack-ai/objectstack/issues/36290#issuecomment-7076513167)).**
+   > The opt-in default above is reversed. The maintainer's choices on the card, verbatim:
+   > 「默认显示，可逐个关闭」 and 「能看这个字段的人」. A changed field's old and new values now show on
+   > the record's activity timeline by default, on every object, with no flag. One rule decides it
+   > (`packages/spec/src/data/field-history-default.ts#resolveFieldHistory`):
+   >
+   > - An object turns the values off for all its fields with `enable.fieldHistory: false`.
+   > - A field turns its own off with `fieldHistory: false`. `trackHistory: false` is not an off
+   >   switch: it reads as unset.
+   > - A credential field never shows them.
+   > - A type whose value has no one-line text, such as media, an embedded structured value, a
+   >   vector or a signature (`FIELD_HISTORY_DEFAULT_OFF_TYPES`, same file), shows them only when
+   >   the field opts in with `fieldHistory: true` or the older `trackHistory: true`.
+   >
+   > The object's `enable.trackHistory` keeps its meaning, the ledger view on the record page and
+   > the derived `history` verb, and turns no values off. A member sees the entries of every record
+   > they can open, and an entry serves a field's values only to a reader who is served that field
+   > (`packages/plugins/plugin-audit/src/activity-field-redaction.ts#redactActivityRows`). The audit
+   > ledger (`sys_audit_log`) is still not granted to members. Built by
+   > [#36399](https://github.com/objectstack-ai/objectstack/pull/36399),
+   > [#36580](https://github.com/objectstack-ai/objectstack/pull/36580),
+   > [#36613](https://github.com/objectstack-ai/objectstack/pull/36613),
+   > [#36641](https://github.com/objectstack-ai/objectstack/pull/36641) and
+   > [#36661](https://github.com/objectstack-ai/objectstack/pull/36661). Item 1 is left as written; read
+   > its opt-in sentence with this note.
+
 2. **Object-level milestone templates (P1, declarative).** For semantic events a
    raw diff can't name — *"Deal won — {name} ({amount})"* when `stage` enters
    `closed_won`, *"Case resolved — {subject}"* when `status` enters `resolved`.

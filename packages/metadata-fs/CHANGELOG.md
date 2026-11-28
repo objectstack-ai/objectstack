@@ -1,5 +1,40 @@
 # @objectstack/metadata-fs
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- @objectstack/metadata-core@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [eb683b8]
+- Updated dependencies [adb65d1]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [520cf3f]
+  - @objectstack/metadata-core@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [61722e9]
+- Updated dependencies [2495486]
+- Updated dependencies [e114324]
+- Updated dependencies [170ca48]
+- Updated dependencies [a23164e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [70194ff]
+- Updated dependencies [70d07fd]
+- Updated dependencies [28588d0]
+- Updated dependencies [c45dd80]
+- Updated dependencies [021524c]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [66452df]
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

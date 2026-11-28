@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { jaJPObjects } from './ja-JP.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 日本語 (ja-JP) — Setup App Translations
  */
 export const jaJP: TranslationData = {
   objects: jaJPObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ja-JP'),
   apps: {
     account: {
       label: 'アカウント',
@@ -40,7 +43,7 @@ export const jaJP: TranslationData = {
         group_overview: { label: '概要' },
         group_apps: { label: 'アプリ' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
-        nav_marketplace_installed: { label: 'インストール済みアプリ' },
+        nav_packages: { label: 'パッケージ' },
         nav_cloud_connection: { label: 'クラウド接続' },
         group_people_org: { label: 'ユーザーと組織' },
         group_access_control: { label: 'アクセス制御' },
@@ -76,6 +79,7 @@ export const jaJP: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 資格情報' },
         nav_api_keys: { label: 'API キー' },
+        nav_access_directory: { label: '役職と権限' },
 
         nav_approvals_inbox: { label: '承認センター' },
         nav_approval_requests: { label: 'リクエスト' },
@@ -86,6 +90,7 @@ export const jaJP: TranslationData = {
         nav_settings_localization: { label: 'ローカリゼーション' },
         nav_exchange_rates: { label: '為替レート' },
         nav_units_of_measure: { label: '計量単位' },
+        nav_standard_unit_settings: { label: '標準単位の設定' },
         nav_work_calendars: { label: '稼働カレンダー' },
         nav_work_calendar_exceptions: { label: 'カレンダー例外' },
         nav_settings_company: { label: '会社' },
@@ -99,6 +104,7 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
+        nav_public_forms: { label: '公開フォーム' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 
@@ -119,7 +125,7 @@ export const jaJP: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '開発者・アナリスト・実装担当者向けのメタデータワークベンチ',
       navigation: {
         group_overview: { label: '概要' },

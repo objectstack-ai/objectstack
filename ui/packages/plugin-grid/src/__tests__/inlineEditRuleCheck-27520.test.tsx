@@ -14,13 +14,14 @@
  * (`min: 0`), "Save All". The `PATCH` went out with -5 and came back refused.
  * Now a row whose edits break a declared rule is refused here, unsent, in the
  * shape the server refuses it in, so the table marks its cells and names its
- * reasons; the other rows still save.
+ * reasons. Each commit is its own save since the staged model was retired
+ * (objectstack#35827), so the check runs on each commit.
  *
  * The real `ObjectGrid` and `data-table` over an in-memory data source whose
  * `update` persists.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -88,7 +89,6 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', editable: false },
       { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
@@ -98,6 +98,7 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
   render(
     <ActionProvider>
       <ObjectGrid
+       
         schema={schema}
         dataSource={dataSource as unknown as GridProps['dataSource']}
         onEdit={() => {}}
@@ -110,65 +111,56 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-async function editEstimate(title: string, from: string, to: string) {
+/**
+ * Type a new Estimate on the row titled `title` and commit it with Enter, the
+ * select-first way (a click selects, a double-click edits): the commit is the
+ * cell's save (objectstack#35827).
+ */
+async function commitEstimate(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find((c) => c.textContent?.trim() === from);
     if (!cell) throw new Error(`no ${from} cell on ${title}`);
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688).
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
-  await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
+  await act(async () => {});
   return td;
 }
 
 describe('ObjectGrid default saves — a field rule is checked before sending (#27520)', () => {
-  it('"Save All": the row below `min` is refused unsent, its cell marked; the other row saves', async () => {
+  it('a commit below `min` is refused unsent and says why on its cell', async () => {
     const ds = makeDataSource();
     await loaded(ds);
-    const refusedCell = await editEstimate('Ingest pipeline', '60', '-5');
-    await editEstimate('Warehouse schema', '33', '31');
-    fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
+    await commitEstimate('Ingest pipeline', '60', '-5');
 
     await waitFor(() =>
-      expect(screen.getByTestId('table-save-refusal')).toHaveTextContent('Estimate (h) must be at least 0'),
-    );
-    // Only the row that keeps every rule was sent.
-    expect(ds.update).toHaveBeenCalledTimes(1);
-    expect(ds.update).toHaveBeenCalledWith(OBJECT, 't2', { estimate_hours: 31 }, undefined);
-    expect(ds.store.t1.estimate_hours).toBe(60);
-    expect(refusedCell).toHaveAttribute('aria-invalid', 'true');
-    expect(refusedCell).toHaveAttribute('data-cell-error', 'Estimate (h) must be at least 0');
-    expect(toasts.success).toHaveBeenCalledWith('1 row saved');
-  });
-
-  it('the per-row save refuses the same edit unsent', async () => {
-    const ds = makeDataSource();
-    await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '-7');
-    fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
-
-    await waitFor(() =>
-      expect(screen.getByTestId('table-save-refusal')).toHaveTextContent('Estimate (h) must be at least 0'),
+      expect(rowOf('Ingest pipeline').textContent).toContain('Estimate (h) must be at least 0'),
     );
     expect(ds.update).not.toHaveBeenCalled();
+    expect(ds.store.t1.estimate_hours).toBe(60);
     expect(toasts.success).not.toHaveBeenCalled();
   });
+
+  // The staged pins ("Save All" sending only the row that keeps every rule,
+  // the per-row save refusing the same edit) went with the staged model
+  // (objectstack#35827): each commit is its own save, judged on its own,
+  // as above.
 
   it('CONTROL — an edit inside the rules is sent as before', async () => {
     const ds = makeDataSource();
     await loaded(ds);
-    await editEstimate('Ingest pipeline', '60', '0');
-    fireEvent.click(screen.getByRole('button', { name: /Save All/ }));
+    await commitEstimate('Ingest pipeline', '60', '0');
 
     await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
-    expect(screen.queryByTestId('table-save-refusal')).toBeNull();
+    expect(ds.update).toHaveBeenCalledWith(OBJECT, 't1', { estimate_hours: 0 }, undefined);
+    expect(rowOf('Ingest pipeline').textContent).not.toContain('must be at least');
   });
 });
 

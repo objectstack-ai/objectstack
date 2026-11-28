@@ -128,8 +128,11 @@ describe('form designer field card type tag (objectui#13148)', () => {
       expect(name, `no en-US row for ${id}`).not.toBe(`engine.fieldType.${id}`);
       const c = card(`Field ${id}`);
       expect(within(c).getByText(name)).toBeInTheDocument();
-      // CONTROL — the wide-widget span reads the spec id, not the name.
-      expect(c.className.split(/\s+/).includes('col-span-full'), id).toBe(isWideFieldType(toFormFieldType(id)));
+      // CONTROL — the wide-widget span reads the spec id, not the name: a wide
+      // widget, or a repeater, which the form widens by its declared type
+      // because the JSON editor it maps to is shared (objectstack#37677).
+      const wide = isWideFieldType(toFormFieldType(id)) || id === 'repeater';
+      expect(c.className.split(/\s+/).includes('col-span-full'), id).toBe(wide);
     }
   });
 

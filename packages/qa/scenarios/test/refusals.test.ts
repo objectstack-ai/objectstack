@@ -79,6 +79,8 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['a title in a third language', (c) => (c.title.ja = '顧客管理'), 'title.ja', /unknown key `ja`/],
   // ── expect consistency ──
   ['a lookup to an object the card does not expect', (c) => c.expect.lookups.push({ object: 'contact', field: 'email', to: 'customer' }), 'expect.lookups[1].to', /lookup target `customer` is not in expect.objects/],
+  ['the inline-edit tag with no lookup row marked master-detail', (c) => c.capabilities.push('records-forms.master-detail-inline-edit'), 'expect.lookups', /credits only a `master_detail` field.*marked `"masterDetail": true`/],
+  ['a lookup row marked `masterDetail: false` (the marker is `true` or absent)', (c) => (c.expect.lookups[0].masterDetail = false), 'expect.lookups[0].masterDetail', /expected true/],
   ['a dangling app nav target', (c) => (c.expect.appNavTargets = ['account', 'overview']), 'expect.appNavTargets[1]', /dangling nav/],
   ['a seed thinner than minFieldsPerObject', (c) => { c.expect.minFieldsPerObject = 5; Object.assign(c.run.seed.contact[0], { phone: '555', title: 'CTO' }); }, 'run.seed.account', /4 field\(s\), fewer than expect.minFieldsPerObject = 5/],
   // ── questions ──
@@ -153,6 +155,12 @@ const CASES: Array<[string, (c: RawCard) => void, string, RegExp]> = [
   ['fewer than 8 questions without a stated reason', (c) => c.run.questions.splice(7), 'run.countsReason', /7 questions \/ 6 operations is below the default 8 \/ 4/],
   ['agent actions with none confirm-gated', (c) => c.run.agentActions.forEach((a: { confirm: boolean }) => (a.confirm = false)), 'run.agentActions', /at least one confirm-gated/],
   ['an agent action on an unexpected object', (c) => (c.run.agentActions[0].object = 'lead'), 'run.agentActions[0].object', /`lead` is not in expect.objects/],
+  ['a write routed through an action the card does not declare', (c) => (op(c, 'move_eli').via = 'approve_contact'), 'run.operations[1].via', /`approve_contact` is not one of the card's `run.agentActions` on `contact`/],
+  ['a write routed through the card\'s action on another object', (c) => {
+    c.run.agentActions[0].object = 'account';
+    op(c, 'add_contact').via = 'create_contact';
+  }, 'run.operations[0].via', /`create_contact` is not one of the card's `run.agentActions` on `contact`/],
+  ['a refused write that names a route', (c) => (op(c, 'contact_bad_email').via = 'create_contact'), 'run.operations[3].via', /a `refused` write goes through no route/],
   ['an iterate delta that re-adds an expected object', (c) => (c.iterate.expectDelta = { objects: ['account'] }), 'iterate.expectDelta.objects[0]', /already in expect.objects/],
 ];
 
@@ -213,6 +221,14 @@ describe('scenario card refusals', () => {
     const r = load((c) => {
       c.capabilities = c.capabilities.filter((t: string) => t !== 'access-security.row-scope');
       delete c.run.personas[0].scope;
+    });
+    expect(r.refusals.map(formatRefusal)).toEqual([]);
+  });
+
+  it('the inline-edit tag loads once a lookup row is marked master-detail (control for the tag rule)', () => {
+    const r = load((c) => {
+      c.capabilities.push('records-forms.master-detail-inline-edit');
+      c.expect.lookups[0].masterDetail = true;
     });
     expect(r.refusals.map(formatRefusal)).toEqual([]);
   });

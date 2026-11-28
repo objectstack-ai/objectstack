@@ -29,6 +29,7 @@ import type {
   MetadataImportResult,
   MetadataTypeInfo,
   MetadataWriteOptions,
+  MetadataPackageBinding,
   IRealtimeService,
   RealtimeEventPayload,
   IPubSub,
@@ -108,9 +109,15 @@ import {
   storedNameOf,
   storeKeysNamed,
   storeRemovalKeys,
+  storePlatformRemovalKeys,
   storeSlotKey,
   storeWriteKey,
   environmentStoreKey,
+  readPlatformEntry,
+  carriesPlatformStamp,
+  isPlatformOrigin,
+  withPlatformOrigin,
+  withoutPlatformOrigin,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -139,6 +146,19 @@ export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 export interface MetadataRegisterOptions extends MetadataWriteOptions {
   /** Skip the write-through to the loader `loadMany` read this very item from. */
   skipSourceLoader?: boolean;
+  /**
+   * [#37013] `'platform'`: the platform's own code registers this item (a
+   * built-in the host registers at boot). It is stamped with the platform's
+   * provenance (`_provenance: 'platform'`, `PLATFORM_PROVENANCE`) and fills
+   * the name's bare slot of a type stored per `(package, name)`, ⛔ never a
+   * package's slot of the name; a package's item of the name stays beside it.
+   * Every write without it is stored without that stamp, so no package write
+   * and no environment write carries it — except a stored row the boot pass
+   * re-registers as it was read. Class-level, as
+   * {@link MetadataUnregisterOptions.packageId} is: the spec's
+   * `MetadataWriteOptions` is not widened.
+   */
+  origin?: 'platform';
 }
 
 /**
@@ -160,6 +180,14 @@ export interface MetadataRegisterOptions extends MetadataWriteOptions {
 export interface MetadataUnregisterOptions extends MetadataWriteOptions {
   /** The package whose item is removed; see the interface doc. */
   packageId?: string;
+  /**
+   * [#37013] `'platform'`: the platform withdraws its own record of the name
+   * — the name's package-less slot only, from the registry, every loader and
+   * every peer (`storePlatformRemovalKeys`). ⛔ A package's item of the name
+   * is never taken, and nothing is refused however many packages hold it.
+   * Ignored when `packageId` is given.
+   */
+  origin?: 'platform';
 }
 
 /**
@@ -485,6 +513,12 @@ interface ClusterMetadataRemoval {
    * name's package-less slots from its in-memory copy, never a package's.
    */
   packagelessOnly?: true;
+  /**
+   * [#37013] The platform withdrew its own record: a peer deletes the name's
+   * package-less slots holding the platform's record, never a package's item
+   * nor the environment's own.
+   */
+  platformOnly?: true;
 }
 
 /**
@@ -496,12 +530,14 @@ interface ClusterMetadataRemoval {
 function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
   const removal: unknown = payload.removal;
   if (removal === null || typeof removal !== 'object') return undefined;
-  const { packageId, registryOnly, packagelessOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown };
+  const { packageId, registryOnly, packagelessOnly, platformOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown; platformOnly?: unknown };
   if (registryOnly !== undefined && registryOnly !== true) return undefined;
   const only: { registryOnly?: true } = registryOnly === true ? { registryOnly: true } : {};
   // [#32560] Read wrongly, a package-less-only removal would delete by name
   // and take the package's item: one that is not `true` is dropped too.
   if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly, ...only } : undefined;
+  // [#37013] …and so would a platform-only one, taking the environment's item.
+  if (platformOnly !== undefined) return platformOnly === true && packageId === undefined ? { platformOnly, ...only } : undefined;
   if (packageId !== undefined && typeof packageId !== 'string') return undefined;
   return {
     ...(packageId !== undefined ? { packageId } : {}),
@@ -698,6 +734,23 @@ function redactServedDocument(
 }
 
 /**
+ * [#37013] A served body without the platform's mark: removed from the top
+ * level unless `keepTop`, and from every publish snapshot it nests under
+ * `publishedDefinition` (a snapshot is a body another write stored, never the
+ * platform's registration). Returns the same object when nothing is removed.
+ */
+function withoutServedPlatformMarks(body: unknown, keepTop: boolean): unknown {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
+  let served = (keepTop ? body : withoutPlatformOrigin(body)) as Record<string, unknown>;
+  const snapshot = served.publishedDefinition;
+  if (snapshot !== undefined) {
+    const unmarked = withoutServedPlatformMarks(snapshot, false);
+    if (unmarked !== snapshot) served = { ...served, publishedDefinition: unmarked };
+  }
+  return served;
+}
+
+/**
  * Main metadata manager class.
  * Implements IMetadataService contract for unified metadata management.
  */
@@ -705,6 +758,25 @@ export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
   /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
   private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
+
+  /**
+   * [#37013] The bodies {@link loadMany} handed out from a `datasource:` row
+   * that carried the platform's stamp when read — the rows an earlier platform
+   * registration wrote, as `register` persists only there. `register` keeps
+   * the stamp on such a body alone: a body whose caller set the stamp after
+   * the read is not in it, and is stored without the stamp.
+   */
+  private readonly storedPlatformRows = new WeakSet<object>();
+
+  /**
+   * [#37013] A loader's body as the manager serves it: the platform's stamp is
+   * honoured only on a `datasource:` row, where the platform's registration
+   * persists it, and stripped from any other loader's body (a `file:` or
+   * `memory:` body is authored, never the platform's registration).
+   */
+  private servedLoaderBody<T>(loader: MetadataLoader, data: T): T {
+    return loader.contract.protocol === 'datasource:' ? data : withoutPlatformOrigin(data) as T;
+  }
   /**
    * [#32986] The items of every OTHER type (one not stored per
    * `(package, name)`: `object`, `view`, `app`, `hook`, `dashboard` …) that
@@ -1260,6 +1332,13 @@ export class MetadataManager implements IMetadataService {
     // because it judges the arguments, not the persistence posture.
     assertMetadataRegisterContract(type, name, data);
     type = canonicalMetadataServiceType(type);
+    // [#37013] Only the platform's own registration carries the platform's
+    // provenance: stamped here when the caller says so, and stripped from
+    // every other write — but a stored row the boot pass re-registers keeps
+    // the stamp its row held when it was read ({@link storedPlatformRows}),
+    // never one its caller set since.
+    if (options?.origin === 'platform') data = withPlatformOrigin(data);
+    else if (!(data !== null && typeof data === 'object' && this.storedPlatformRows.has(data))) data = withoutPlatformOrigin(data);
 
     // Persistence write gate: when `persistence.writable` is explicitly false
     // we treat register() as read-only. Default `true` (or omitted) preserves
@@ -1276,7 +1355,7 @@ export class MetadataManager implements IMetadataService {
     // Captured before the write so the event distinguishes a first
     // registration from an overwrite, matching the repo-watch path's
     // 'added' vs 'changed' split.
-    const existed = this.writeRegistryEntry(type, name, data);
+    const existed = this.writeRegistryEntry(type, name, data, this.primedRowSlot(type, name, data, options));
     this.invalidateListCache(type);
 
     // [#33003] An environment row the boot pass stamped is stored as the
@@ -1359,7 +1438,9 @@ export class MetadataManager implements IMetadataService {
     // and this is the boot-time seeding primitive (see
     // assertMetadataRegisterContract's header for the boundary).
     type = canonicalMetadataServiceType(type);
-    this.writeRegistryEntry(type, name, data);
+    // [#37013] The boot seeding primitive registers authored bodies: never
+    // the platform's stamp (only `register(…, { origin: 'platform' })` sets it).
+    this.writeRegistryEntry(type, name, withoutPlatformOrigin(data));
     this.invalidateListCache(type);
   }
 
@@ -1560,6 +1641,27 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#37013] The platform's own record of `(type, name)`: the item the
+   * platform registered (`register(…, { origin: 'platform' })`), from the
+   * registry's package-less slot, else a loader's stored one. ⛔ Never a
+   * package's item of the name and never the environment's own: `undefined`
+   * when the platform holds no record of the name — a read naming no package
+   * ({@link get}) keeps its own rule for every other caller.
+   */
+  async getPlatformItem(type: string, name: string): Promise<unknown | undefined> {
+    type = canonicalMetadataServiceType(type);
+    const entry = readPlatformEntry(this.registry.get(type), type, name);
+    if (entry.found) return entry.data;
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      const { slots } = await this.loaderSlotsNamed(type, name);
+      const stored = readPlatformEntry(slotStoreOf(type, name, slots), type, name);
+      return stored.found ? stored.data : undefined;
+    }
+    const loaded = await this.load(type, name);
+    return isPlatformOrigin(loaded) ? loaded : undefined;
+  }
+
+  /**
    * [ADR-0150 D3/D4, #32246] The answer to a read of a type stored per
    * `(package, name)` that the in-memory registry could not answer: the
    * holders of the name as one store ({@link slotViewOf} — the registry's
@@ -1608,11 +1710,11 @@ export class MetadataManager implements IMetadataService {
     for (const loader of this.loaders.values()) {
       try {
         if (typeof loader.loadSlots === 'function') {
-          slots.push(...(await loader.loadSlots(type, name)));
+          for (const slot of await loader.loadSlots(type, name)) slots.push({ ...slot, data: this.servedLoaderBody(loader, slot.data) });
           continue;
         }
         const result = await loader.load(type, name);
-        if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: result.data });
+        if (result.data) slots.push({ packageId: indexedItemPackageId(result.data), data: this.servedLoaderBody(loader, result.data) });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         errors.push(`${loader.contract.name}: ${message}`);
@@ -1703,6 +1805,120 @@ export class MetadataManager implements IMetadataService {
     // [#7378 row 2] Same fold as `list` — same read, narrowed differently.
     const { items, degraded, errors } = await this.readList(canonicalMetadataServiceType(type));
     return { items, degraded, errors };
+  }
+
+  /**
+   * [#37039, cloud ADR-0118 D2] Every item {@link list} answers, in its order,
+   * with the package it is bound to: the package column of the stored row that
+   * holds it (`source: 'row'`), else the package its registration files it
+   * under (`source: 'registration'`) — the contract on
+   * `IMetadataService.listPackageBindings`.
+   *
+   * An item is a stored row's when it is the body {@link loadMany} read from
+   * that row (the registry's copy the boot priming pass registered, whose key
+   * follows the body's stamp; {@link MetadataLoader.rowPackageIdOf}), or when
+   * a loader of rows ({@link MetadataLoader.loadRowBindings}) holds a row
+   * under the key {@link list} lists the item by. Its binding is that row's
+   * column (by key: the first loader's, the first row of the key, as
+   * {@link list} admits them): `null` for a legacy row with an empty column,
+   * ⛔ never the stamp its body carries. Any other
+   * item's binding is its slot's package for a type stored per
+   * `(package, name)`, else the package its body names, as {@link query}
+   * reads it.
+   *
+   * Uncached: it walks the loaders as {@link list} does, then once more for
+   * the rows, skipping a loader the first walk lost (named once in `errors`).
+   * A row loader that cannot be read is reported as {@link list}
+   * reports a loader, and makes the answer `degraded`. [#37130 N2] So does a
+   * loader of stored rows (`datasource:`) that offers no
+   * {@link MetadataLoader.loadRowBindings}, named in `errors`: its items
+   * answer `registration`, which is not their rows' binding.
+   */
+  async listPackageBindings(type: string): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }> {
+    const canonical = canonicalMetadataServiceType(type);
+    const { items, degraded: listDegraded, errors, lostLoaders } = await this.readListKeyed(canonical);
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(canonical);
+    const rowColumns = new Map<string, string | null>();
+    let degraded = listDegraded;
+    for (const loader of this.loaders.values()) {
+      // [#37604] A loader the list walk above already lost is named once in
+      // `errors` and reported once: none of its items is listed, so its rows'
+      // columns bind nothing, and it is not read a second time.
+      if (lostLoaders.has(loader.contract.name)) continue;
+      if (typeof loader.loadRowBindings !== 'function') {
+        // [#37130 N2] A loader of stored rows that reads no package column
+        // leaves every item it holds answering its registration's binding:
+        // the answer is partial as a row loader that could not be read leaves
+        // it, so a consumer that gates on the binding treats it as unknown.
+        if (loader.contract.protocol === 'datasource:') {
+          degraded = true;
+          errors.push(`${loader.contract.name}: a loader of stored rows that reads no package column (no loadRowBindings): the items it holds answer their registration's binding, not their rows'`);
+        }
+        continue;
+      }
+      try {
+        for (const entry of await loader.loadRowBindings(canonical)) {
+          if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+          // Keyed exactly as `admitLoaderSlots` / `admitLoaderItems` key it.
+          const data = this.servedLoaderBody(loader, entry.data);
+          const key = slotted ? storeSlotKey(canonical, entry.name, entry.packageId ?? indexedItemPackageId(data), data) : entry.name;
+          if (!rowColumns.has(key)) rowColumns.set(key, entry.rowPackageId);
+        }
+      } catch (e) {
+        degraded = true;
+        errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
+        this.reportLoaderReadFailure(loader.contract.name, canonical, e);
+      }
+    }
+    const bindings = this.listedInSlotOrder(canonical, items).map((key): MetadataPackageBinding => {
+      const data = items.get(key);
+      const name = slotted ? storedNameOf(key) : key;
+      const readColumn = this.readRowColumnOf(data);
+      if (readColumn !== undefined) return { name, data, packageId: readColumn, source: 'row' };
+      const keyedColumn: string | null | undefined = rowColumns.has(key) ? rowColumns.get(key) : undefined;
+      if (keyedColumn !== undefined) return { name, data, packageId: keyedColumn, source: 'row' };
+      const registered = slotted ? slotPackageOf(key) : indexedItemPackageId(data);
+      return { name, data, packageId: registered ?? null, source: 'registration' };
+    });
+    return { items: bindings, degraded, errors };
+  }
+
+  /**
+   * [#37039] The package column of the stored row `data` — that very object,
+   * or the body it is a stamped copy of — was read from by {@link loadMany}
+   * (the boot priming pass registers what it hands out, keyed by the body's
+   * stamp); `undefined` when no row loader handed it out.
+   */
+  private readRowColumnOf(data: unknown): string | null | undefined {
+    if (data === null || typeof data !== 'object') return undefined;
+    const loader = this.loadedFrom.get(data);
+    if (typeof loader?.rowPackageIdOf !== 'function') return undefined;
+    const origin = stampedCopyOrigins.get(data);
+    const direct = loader.rowPackageIdOf(data);
+    return direct !== undefined ? direct : origin !== undefined ? loader.rowPackageIdOf(origin) : undefined;
+  }
+
+  /**
+   * [#37130] The slot a stored row's body the boot priming pass re-registers
+   * (`skipSourceLoader`, a body a loader of rows handed out) is filed under,
+   * for a type stored per `(package, name)`: the slot of the row's package
+   * column ({@link readRowColumnOf}) when the body carries a package stamp of
+   * its own and it names another package. That is the key the row loader keys the row by
+   * (`loadManySlots`, the column first), so {@link list} lists the row once
+   * and a read naming the column's package answers it, as on a process that
+   * never primed it; ⛔ never the stamp's slot, under which {@link list} listed
+   * the row a second time. `undefined` (the write rule's key) for every other
+   * write, for a row with an empty column (a legacy row the loader keys by
+   * its body's package, `bindReadRowPackage`), and for an unstamped body (the
+   * plural read stamps a row's body with its column when the body names its
+   * row's key, so one left unstamped is not that row's item by its name).
+   */
+  private primedRowSlot(type: string, name: string, data: unknown, options?: MetadataRegisterOptions): string | undefined {
+    if (options?.skipSourceLoader !== true || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
+    const column = this.readRowColumnOf(data);
+    const stamp = indexedItemPackageId(data);
+    if (typeof column !== 'string' || column === '' || stamp === undefined || stamp === column) return undefined;
+    return storeSlotKey(type, name, column, data);
   }
 
   /**
@@ -1851,6 +2067,11 @@ export class MetadataManager implements IMetadataService {
    * ({@link storeSlotKey}).
    *
    * One loader's own slots do not shadow each other.
+   *
+   * [#37013] The platform's record (`isPlatformOrigin`) is neither: it shadows,
+   * and is shadowed by, the platform's record only. A loader's platform row is
+   * listed beside a held package slot of its name, and a held platform slot
+   * never shadows a loader's package item, as the store keeps the two apart.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
     const prior = new Set(items.keys());
@@ -1864,9 +2085,10 @@ export class MetadataManager implements IMetadataService {
       const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
       const identity = keyIdentityOf(key);
       const member = memberSuffixOf(key);
+      const heldBare = prior.has(identity + member) ? items.get(identity + member) : undefined;
       const shadowed = items.has(key) || (slotPackageOf(key) === undefined
-        ? heldIdentities.has(identity + member)
-        : prior.has(identity + member) && !packageHeldIdentities.has(identity));
+        ? !isPlatformOrigin(entry.data) && heldIdentities.has(identity + member)
+        : prior.has(identity + member) && !isPlatformOrigin(heldBare) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
   }
@@ -1886,9 +2108,10 @@ export class MetadataManager implements IMetadataService {
     const entries: Array<{ name: string; data: unknown; packageId?: string }> = [];
     for (const entry of await loader.loadManySlots(type)) {
       if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+      const data = this.servedLoaderBody(loader, entry.data);
       entries.push(entry.packageId === undefined
-        ? { name: entry.name, data: entry.data }
-        : { name: entry.name, data: entry.data, packageId: entry.packageId });
+        ? { name: entry.name, data }
+        : { name: entry.name, data, packageId: entry.packageId });
     }
     return entries;
   }
@@ -1905,18 +2128,28 @@ export class MetadataManager implements IMetadataService {
     if (typeof loader.loadManyKeyed === 'function') {
       for (const entry of await loader.loadManyKeyed(type)) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        entries.push({ name: entry.name, data: entry.data });
+        entries.push({ name: entry.name, data: this.servedLoaderBody(loader, entry.data) });
       }
       return entries;
     }
     for (const item of await loader.loadMany(type)) {
       const itemAny = item as { name?: unknown } | null;
-      if (itemAny && typeof itemAny.name === 'string' && itemAny.name !== '') entries.push({ name: itemAny.name, data: item });
+      if (itemAny && typeof itemAny.name === 'string' && itemAny.name !== '') entries.push({ name: itemAny.name, data: this.servedLoaderBody(loader, item) });
     }
     return entries;
   }
 
   private async readListUncached(type: string): Promise<ListReadResult> {
+    const { items, degraded, errors } = await this.readListKeyed(type);
+    return { items: this.listedInSlotOrder(type, items).map((key) => items.get(key)), degraded, errors };
+  }
+
+  /**
+   * {@link readListUncached}'s walk, before it is narrowed to bodies: every
+   * item {@link list} answers, under the key the store holds it by, in store
+   * order (the registry's, then each loader's in loader order).
+   */
+  private async readListKeyed(type: string): Promise<{ items: Map<string, unknown>; degraded: boolean; errors: string[]; lostLoaders: Set<string> }> {
     const items = new Map<string, unknown>();
 
     // From in-memory registry
@@ -1939,6 +2172,9 @@ export class MetadataManager implements IMetadataService {
     // alongside the set.
     let degraded = false;
     const errors: string[] = [];
+    // [#37604] The loaders this read lost, by name: `listPackageBindings`
+    // walks the loaders again and names each lost one only once.
+    const lostLoaders = new Set<string>();
     for (const loader of this.loaders.values()) {
       try {
         await this.admitLoaderItems(loader, type, items);
@@ -1954,16 +2190,17 @@ export class MetadataManager implements IMetadataService {
           throw e;
         }
         degraded = true;
+        lostLoaders.add(loader.contract.name);
         errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
         this.reportLoaderReadFailure(loader.contract.name, type, e);
       }
     }
 
-    return { items: this.listedInSlotOrder(type, items), degraded, errors };
+    return { items, degraded, errors, lostLoaders };
   }
 
   /**
-   * [#32517] The order {@link list} answers `items` in. For a bundled type
+   * [#32517] The keys of `items`, in the order {@link list} answers them. For a bundled type
    * stored per `(package, name)`, each slot's member a by-name read answers
    * first — the registry's member written last, else the first a loader
    * admitted (`MemoryLoader.loadManySlots` hands a slot's member saved last
@@ -1974,8 +2211,8 @@ export class MetadataManager implements IMetadataService {
    * execution read) answers in the order it answered then. Every other type:
    * store order.
    */
-  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): unknown[] {
-    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.values());
+  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): string[] {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.keys());
     const registryStore = this.registry.get(type);
     const firsts = new Map<string, string>();
     for (const key of items.keys()) {
@@ -1985,7 +2222,7 @@ export class MetadataManager implements IMetadataService {
       firsts.set(slot, latest !== undefined && registryStore!.has(latest) && items.has(latest) ? latest : key);
     }
     const first = new Set(firsts.values());
-    return [...first, ...[...items.keys()].filter((key) => !first.has(key))].map((key) => items.get(key));
+    return [...first, ...[...items.keys()].filter((key) => !first.has(key))];
   }
 
   /**
@@ -2364,13 +2601,17 @@ export class MetadataManager implements IMetadataService {
   ): Promise<void> {
     // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
-    const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true } =
-      removal ?? (await this.removalOf(type, name, options?.packageId));
+    // [#37013] The platform's withdrawal of its own record takes the name's
+    // package-less slots only, judged with nothing to refuse.
+    const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true; platformOnly?: true } =
+      removal ?? (options?.origin === 'platform' && options.packageId === undefined
+        ? storePlatformRemovalKeys(this.registry.get(type), type, name)
+        : await this.removalOf(type, name, options?.packageId));
     const { keys, packageId } = judged;
     // [#32560] How each loader's delete (and each peer's) is scoped.
     const scope: ClusterMetadataRemoval = packageId !== undefined
       ? { packageId }
-      : judged.packagelessOnly ? { packagelessOnly: true } : {};
+      : judged.packagelessOnly ? { packagelessOnly: true } : judged.platformOnly ? { platformOnly: true } : {};
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete from database-backed loaders that declare write capability, and
     // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
@@ -2464,6 +2705,8 @@ export class MetadataManager implements IMetadataService {
     // slots only. Every other delete keeps its by-name call, byte for byte.
     if (scope.packageId !== undefined) await del.call(loader, type, name, { packageId: scope.packageId });
     else if (scope.packagelessOnly) await del.call(loader, type, name, { packagelessOnly: true });
+    // [#37013] The platform's withdrawal: its own record only.
+    else if (scope.platformOnly) await del.call(loader, type, name, { platformOnly: true });
     else await del.call(loader, type, name);
   }
 
@@ -3371,7 +3614,11 @@ export class MetadataManager implements IMetadataService {
     const meta = item as any;
     // Fall back to current definition (metadata field or the item itself)
     const body = meta.publishedDefinition !== undefined ? meta.publishedDefinition : (meta.metadata ?? item);
-    return this.redactServedBody(type, body);
+    // [#37013] The platform's mark is served on the answer's top level only
+    // when the stored item itself carries it there: a body another writer
+    // stored (a publish snapshot, an authored `metadata` record) is served
+    // without it, at the top level and in every snapshot it nests.
+    return withoutServedPlatformMarks(this.redactServedBody(type, body), carriesPlatformStamp(item));
   }
 
   /**
@@ -3961,7 +4208,7 @@ export class MetadataManager implements IMetadataService {
         try {
             const result = await loader.load(type, name, options);
             if (result.data) {
-                return { data: result.data as T, degraded: false, errors };
+                return { data: this.servedLoaderBody(loader, result.data as T), degraded: false, errors };
             }
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -4038,7 +4285,7 @@ export class MetadataManager implements IMetadataService {
                 : PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function' && typeof loader.loadManySlots === 'function'
                     ? await keyedEntryBodies<T>(loader, type, options)
                     : await loader.loadMany<T>(type, options);
-            for (const item of items) gathered.push({ item, loader });
+            for (const item of items) gathered.push({ item: this.servedLoaderBody(loader, item), loader });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
             // [#5108] Same seam, same verdict as `list()` — see
@@ -4060,6 +4307,8 @@ export class MetadataManager implements IMetadataService {
         results.push(item);
         if (item !== null && typeof item === 'object') {
           this.loadedFrom.set(item, loader);
+          // [#37013] Read here, before any caller changes it: the row's own stamp.
+          if (loader.contract.protocol === 'datasource:' && isPlatformOrigin(item)) this.storedPlatformRows.add(item);
           // [#32986] Read here, before the boot pass stamps it. A type stored
           // per `(package, name)` is not stamped on such a row (#32812).
           if (loader.contract.protocol === 'datasource:' && !PACKAGE_SLOTTED_STORE_TYPES.has(type) && indexedItemPackageId(item) === undefined) {
@@ -4164,13 +4413,13 @@ export class MetadataManager implements IMetadataService {
       try {
         if (typeof loader.loadManyKeyed === 'function') {
           for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push(entry);
+            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push({ ...entry, data: this.servedLoaderBody(loader, entry.data) });
           }
         } else {
           for (const name of await loader.list(type)) {
             if (typeof name !== 'string' || name === '') continue;
             const result = await loader.load(type, name, options);
-            if (result?.data != null) gathered.push({ name, data: result.data as T });
+            if (result?.data != null) gathered.push({ name, data: this.servedLoaderBody(loader, result.data as T) });
           }
         }
         this.reportLoaderReadRecovered(loader.contract.name);
@@ -4216,7 +4465,7 @@ export class MetadataManager implements IMetadataService {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
         const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
         if (items.has(key)) continue;
-        items.set(key, keyedEntryOf(entry));
+        items.set(key, keyedEntryOf({ ...entry, data: this.servedLoaderBody(loader, entry.data) }));
       }
       return;
     }
@@ -4227,7 +4476,7 @@ export class MetadataManager implements IMetadataService {
       if (result?.data == null) continue;
       const key = bundleEntryKey(type, name, result.data) ?? name;
       if (items.has(key)) continue;
-      items.set(key, { name, data: result.data as T });
+      items.set(key, { name, data: this.servedLoaderBody(loader, result.data as T) });
     }
   }
 
@@ -4288,7 +4537,9 @@ export class MetadataManager implements IMetadataService {
       throw new Error(`Loader '${loader.contract?.name}' does not support saving`);
     }
 
-    return loader.save(type, name, data, options);
+    // [#37013] A save is never the platform's registration: stored without
+    // the platform's stamp.
+    return loader.save(type, name, withoutPlatformOrigin(data) as T, options);
   }
 
   /**
@@ -4601,6 +4852,10 @@ export class MetadataManager implements IMetadataService {
             const store = this.registry.get(p.type);
             this.deleteRegistryEntries(p.type, p.event.name, storeRemovalKeys(store, p.type, p.event.name, removal.packageId).keys);
             this.invalidateListCache(p.type);
+          } else if (removal?.platformOnly && p.event.name) {
+            // [#37013] The platform's record only, as the origin dropped it.
+            this.deleteRegistryEntries(p.type, p.event.name, storePlatformRemovalKeys(this.registry.get(p.type), p.type, p.event.name).keys);
+            this.invalidateListCache(p.type);
           } else {
             this.invalidateForForeignWrite(p.type, p.event.name);
           }
@@ -4804,7 +5059,9 @@ export class MetadataManager implements IMetadataService {
 
     // Restore the metadata using the dedicated rollback path so that a single
     // 'revert' history entry is written (instead of a conflicting 'update' entry)
-    let restoredMetadata = targetVersion.metadata;
+    // [#37013] A rollback is never the platform's registration: the restored
+    // version is written without the platform's mark, whatever it held.
+    let restoredMetadata = withoutPlatformOrigin(targetVersion.metadata) as typeof targetVersion.metadata;
     // [#33003] A version restored over an environment row the boot pass
     // stamped is that row (a version a rewrite stored before #33003 carries the
     // host stamp): stored without the stamp, as {@link register} stores it.
@@ -4925,8 +5182,17 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
   const data = entry.data as unknown;
   if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
-  return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+  const stamped = { ...(data as Record<string, unknown>), _packageId: entry.packageId };
+  stampedCopyOrigins.set(stamped, data);
+  return stamped as T;
 }
+
+/**
+ * [#37039] Each body {@link withEntryPackage} stamped, with the loader's body
+ * it copied, so the row that body was read from stays askable
+ * (`MetadataManager.listPackageBindings`).
+ */
+const stampedCopyOrigins = new WeakMap<object, object>();
 
 /**
  * [#32680] A loader's keyed entry as `MetadataManager.loadManyKeyed` answers

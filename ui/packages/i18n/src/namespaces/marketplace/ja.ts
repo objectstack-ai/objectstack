@@ -86,6 +86,8 @@ const ja = {
       versions: "バージョン",
       noApprovedVersions: "承認済みバージョンがありません。",
       prerelease: "プレ",
+      notInstallableHosted: "ホスト環境ではインストール不可",
+      notInstallableHostedReason: "コードプラグインです。ホスト環境ではコードプラグインを実行できません。セルフホストまたは Enterprise のランタイムにインストールしてください。",
       moreOptions: "その他のインストールオプション",
       uninstallFromRuntime: "このランタイムからアンインストール",
       addSampleData: 'サンプルデータを追加',

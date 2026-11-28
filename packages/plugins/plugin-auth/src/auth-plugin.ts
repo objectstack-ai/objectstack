@@ -95,7 +95,8 @@ import { registerMfaRequiredEnrollmentPredicate } from './mfa-required-enrollmen
 import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
-import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
+import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine, type PersonalViewRoutesDeps } from './personal-view-routes.js';
+import { createPersonalViewDoorsService } from './personal-view-door-member.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import {
   IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
@@ -128,6 +129,8 @@ import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import { reportSsoProvidersWithNonBareDomainEntries } from './sso-stored-domain-entries.js';
+import { reportSsoProviderAccessSweep } from './sso-provider-lifecycle.js';
+import { retireDevSeedCredentials, type DevSeedRetirementEngine } from './dev-seed-credential-retirement.js';
 import {
   directSignInNetworkRefusal,
   isDirectSignInDoorNavigation,
@@ -148,6 +151,7 @@ import {
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import {
+  emailPasswordHeldOffByHost,
   providerCredentialIndex,
   providerCredentialsFrom,
   registerSignInMethodFloor,
@@ -155,6 +159,7 @@ import {
   ssoProviderDeleteRefusal,
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
+import { describeEmailPasswordLiveStatus, type AuthLiveStatus } from './auth-settings-live-status.js';
 import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -250,6 +255,15 @@ interface SettingsReadSurface {
     key: string,
     predicate: (input: unknown) => unknown,
     options?: { requestHeaders?: readonly string[] },
+  ): void;
+  /**
+   * State what runs at the top of the namespace's page, read on each page
+   * request (`SettingsService.registerLiveStatus`). Optional, like `subscribe`.
+   * See auth-settings-live-status.ts.
+   */
+  registerLiveStatus?(
+    namespace: string,
+    provider: (input: { ctx: Record<string, unknown>; locale?: string }) => Promise<AuthLiveStatus | undefined>,
   ): void;
 }
 
@@ -701,6 +715,8 @@ export class AuthPlugin implements Plugin {
   private allowListUndeterminedWarned = false;
   /** Set once the settings pass has said that `auth.mfa_required` reads a toggle spelling. */
   private legacyMfaRequiredNoted = false;
+  /** Whether the not-applied stored `email_password_enabled` was said (see `bindAuthSettings`). */
+  private heldOffEmailPasswordNoted = false;
   private allowListUntrustedHeaderWarned = false;
   /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
   private allowListUnreadableReportedFor: string | undefined;
@@ -1075,6 +1091,16 @@ export class AuthPlugin implements Plugin {
     ctx.registerService('tenancy', tenancy);
     this.tenancy = tenancy;
 
+    // [#36506] The personal-view delete door for a kernel with no
+    // `http.server` (a hosted tenant kernel runs `registerRoutes: false` and
+    // owns no socket): the runtime dispatcher's `/personal-views` domain
+    // forwards the request to this slot's `handlePersonalViewDoor`, which runs
+    // the registrar `mountPersonalViewDoor` runs, over the same deps, on a
+    // private table that never listens. Registered unconditionally, so the
+    // door answers wherever the plugin is composed; the self-hosted mount below
+    // is unchanged and nothing is mounted twice.
+    ctx.registerService('personal-views', createPersonalViewDoorsService(() => this.personalViewDoorDeps()));
+
     // The stack's `demoStaff` — decided here, from configuration alone, so the
     // application's seed (which starts before `kernel:ready`) can wait for the
     // accounts it names. See `DemoStaffingService`.
@@ -1324,6 +1350,21 @@ export class AuthPlugin implements Plugin {
         try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
       }
       await reportSsoProvidersWithNonBareDomainEntries(ql, ctx.logger);
+    });
+
+    // Deleting an SSO provider ends the sessions its sign-ins opened and its projected grants: what a provider
+    // that no longer exists left behind (the grants its sign-ins projected,
+    // the live sessions signed in through it) is removed once per boot
+    // (`sso-provider-lifecycle.ts` `sweepDeletedSsoProviderAccess`). Registered
+    // unconditionally: the grants grant wherever they are read. Never throws
+    // into boot.
+    ctx.hook('kernel:ready', async () => {
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+      if (!ql) {
+        try { ql = ctx.getService<IDataEngine>('data'); } catch { ql = undefined; }
+      }
+      await reportSsoProviderAccessSweep(ql, ctx.logger);
     });
 
     // [#23367, ruling A] Record when this deployment started enforcing the
@@ -1793,6 +1834,23 @@ export class AuthPlugin implements Plugin {
         }
         await reportIfNoSignInMethodAtBoot(this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
       }
+    });
+
+    // Outside development mode: retire what the development seed issued to
+    // every stamped account still on its seed password, on `kernel:ready`, so
+    // it has settled before `kernel:listening` opens the socket. Registered
+    // independently of `registerRoutes`: a retired session or key must not act
+    // through any door. A retirement that does not complete THROWS and fails
+    // the boot (`dev-seed-credential-retirement.ts`).
+    ctx.hook('kernel:ready', async () => {
+      let ql: DevSeedRetirementEngine | undefined;
+      try { ql = ctx.getService<DevSeedRetirementEngine>('objectql'); } catch { ql = undefined; }
+      const authManager = this.authManager;
+      await retireDevSeedCredentials({
+        engine: ql,
+        authContext: async () => (authManager ? await authManager.getAuthContext() : undefined),
+        logger: ctx.logger,
+      });
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -2385,6 +2443,7 @@ export class AuthPlugin implements Plugin {
       env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
       // [#30312] A cleared toggle returns to the declaration: judge it there.
       declaredEmailPasswordEnabled: () => this.declaredAuthOptions.emailAndPassword?.enabled !== false,
+      cloudManaged: () => isCloudManaged(),
     };
   }
 
@@ -2537,10 +2596,33 @@ export class AuthPlugin implements Plugin {
             options,
           });
         };
+        // A cloud-managed runtime whose deployment declared email and password
+        // off keeps it off: the host refuses every password door there, so a
+        // stored value that reads on would only advertise a form that signs
+        // nobody in. The save door refuses turning it on (sign-in-method-floor.ts);
+        // a row stored before that check, or a re-save of the manifest default
+        // the save door is never asked about, is not applied. An
+        // `OS_AUTH_EMAIL_PASSWORD_ENABLED` value is the deployment's own
+        // declaration and still applies.
+        let emailPasswordHeldOff = false;
         if (isExplicit('email_password_enabled')) {
-          emailAndPasswordField('email_password_enabled', {
-            enabled: asBoolean(values.email_password_enabled, true),
-          });
+          const enabled = asBoolean(values.email_password_enabled, true);
+          emailPasswordHeldOff = enabled && sources.email_password_enabled !== 'env'
+            && emailPasswordHeldOffByHost(this.signInMethodFloorDeps(ctx, authManager));
+          if (!emailPasswordHeldOff) emailAndPasswordField('email_password_enabled', { enabled });
+        }
+        if (emailPasswordHeldOff && !this.heldOffEmailPasswordNoted) {
+          this.heldOffEmailPasswordNoted = true;
+          // `error`, as for the audience settings below: the console shows the
+          // stored value as saved while the runtime does not apply it.
+          ctx.logger.error(
+            '[auth] auth.email_password_enabled is stored on, and NOT APPLIED: this environment is cloud-managed and its '
+              + 'deployment turns email and password sign-in off, so people sign in through the hosting organisation\'s '
+              + 'identity provider and the sign-in page offers no email and password form. Clear '
+              + 'auth.email_password_enabled (or set it off) in the settings console so the page matches what runs.',
+          );
+        } else if (!emailPasswordHeldOff) {
+          this.heldOffEmailPasswordNoted = false;
         }
         if (isExplicit('signup_enabled')) {
           emailAndPasswordField('signup_enabled', {
@@ -3087,10 +3169,41 @@ export class AuthPlugin implements Plugin {
     // the one-off moves of the toggle-era values onto the levels.
     await this.bindOrganizationAccessPolicy(ctx, settings);
 
-    await applySettings();
+    // The pass a change event started, so the page's statement below reads the
+    // running config after it, not mid-way.
+    let pass: Promise<void> = Promise.resolve();
+    const runPass = (): Promise<void> => (pass = applySettings());
+
+    // Setup → Authentication states what runs when the switch says otherwise:
+    // with nothing stored the switch shows the manifest default while the
+    // running config takes the deployment's declaration. See auth-settings-live-status.ts.
+    if (typeof settings.registerLiveStatus === 'function') {
+      const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
+      try {
+        settings.registerLiveStatus('auth', async ({ ctx: pageCtx, locale }) => {
+          await pass;
+          const manager = this.authManager;
+          if (!manager) return undefined;
+          return describeEmailPasswordLiveStatus({
+            running: manager.getPublicConfig().emailPassword.enabled,
+            shown: await settings.get('auth', 'email_password_enabled', pageCtx),
+            heldOffByHost: emailPasswordHeldOffByHost(floorDeps),
+            locale,
+          });
+        });
+      } catch (err: any) {
+        ctx.logger.warn(
+          '[auth] Setup → Authentication: the live status was NOT registered '
+            + `(${String(err?.message ?? err)}), so where the deployment declares email and password sign-in off `
+            + 'with nothing saved, the page shows the switch on with nothing saying it is off.',
+        );
+      }
+    }
+
+    await runPass();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
-        void applySettings();
+        void runPass();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
     }
@@ -3733,13 +3846,15 @@ export class AuthPlugin implements Plugin {
         '[auth] auth request refused (403 IP_NOT_ALLOWED): the `allowed_ip_ranges` setting (ADR-0069 D5) is set, '
           + 'but the server could not establish this request\'s client address. '
           + (trustProxy
-            ? '`server.trustProxy` is declared, yet the request carried no X-Forwarded-For / X-Real-IP header '
-              + 'and the transport reported no peer address. '
+            ? '`server.trustProxy` is declared, yet no forwarded header it believes and no peer address the '
+              + 'transport reported established one. '
             : 'The transport reported no peer address, and forwarded headers are not believed because '
               + '`server.trustProxy` is not declared. ')
           + 'While the allow-list is set, every request whose address cannot be established is refused. Fix: '
           + 'serve through a transport that reports the socket address, or terminate on a reverse proxy you '
-          + 'control that sets X-Forwarded-For and declare `server.trustProxy: true`; or clear `allowed_ip_ranges`.',
+          + 'control and declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+          + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+          + 'never appends to it; or clear `allowed_ip_ranges`.',
       );
       return;
     }
@@ -3750,8 +3865,9 @@ export class AuthPlugin implements Plugin {
       '[auth] auth request refused (403 IP_NOT_ALLOWED) by the `allowed_ip_ranges` setting (ADR-0069 D5): the '
         + 'allow-list judged the connection\'s peer address, because `server.trustProxy` is not declared and so the '
         + 'request\'s X-Forwarded-For / X-Real-IP header was not believed. If this deployment sits behind a reverse '
-        + 'proxy you control, declare `server.trustProxy: true`; until then the allow-list judges the proxy\'s own '
-        + 'address.',
+        + 'proxy you control, declare it: `server.trustProxy: { networks: [...] }` naming that proxy\'s address or '
+        + 'range, or `server.trustProxy: true` only when that proxy OVERWRITES X-Forwarded-For on every request, '
+        + 'never appends to it. Until then the allow-list judges the proxy\'s own address.',
       { judgedAddress: ip },
     );
   }
@@ -3820,15 +3936,25 @@ export class AuthPlugin implements Plugin {
       );
       return;
     }
-    registerPersonalViewRoutes(httpServer, {
+    registerPersonalViewRoutes(httpServer, this.personalViewDoorDeps());
+    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+  }
+
+  /**
+   * What the personal view door is composed over, on both of its faces: the
+   * self-hosted mount ({@link mountPersonalViewDoor}) and the `personal-views`
+   * slot's member (#36506). The engine, the auth service and the tenancy
+   * posture are read per request.
+   */
+  private personalViewDoorDeps(): PersonalViewRoutesDeps {
+    return {
       getEngine: () => this.authManager?.getDataEngine() as unknown as PersonalViewEngine | undefined,
       resolveCaller: personalViewCallerResolver({
         getEngine: () => this.authManager?.getDataEngine(),
         getAuth: () => (this.authManager ?? undefined) as unknown as RequestAuthService | undefined,
         tenancy: () => this.tenancy ?? undefined,
       }),
-    });
-    ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
+    };
   }
 
   /**

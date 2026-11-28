@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
-import { isFederatedObject } from '@objectstack/core';
+import type { JsonColumnFieldClass, Plugin, PluginContext } from '@objectstack/core';
+import { isFederatedObject, registryObjectPackageDisabled } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -128,6 +128,16 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  */
 type DateBucketingDriver = {
   dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
+};
+
+/**
+ * [#36190] The slice of a SQL driver that names the CLASS of a JSON column on
+ * its deployment, `SqlDriver.jsonColumnFieldClass`. Read structurally, as
+ * {@link DialectNamingDriver} is and for the same reason: which columns are
+ * JSON on this deployment is a property of the SQL driver family's storage.
+ */
+type JsonColumnClassifyingDriver = {
+  jsonColumnFieldClass?(table: string, field: string): unknown;
 };
 
 /**
@@ -1496,6 +1506,27 @@ export class AnalyticsServicePlugin implements Plugin {
     };
 
     /**
+     * [#36190] Which class of JSON column `field` on `objectName` is on this
+     * deployment, asked of the DRIVER that stores the object through the same
+     * `getDriverForObject` seam `sqlDialect` uses: the driver alone knows
+     * whether its single-value media columns are still JSON (the ADR-0104
+     * window). Only the two classes the refusal words are passed on;
+     * `undefined` on every tier that cannot answer (no data engine, a driver
+     * without the member, a throw), which leaves the column unjudged.
+     */
+    const jsonColumnFieldClass = (objectName: string, field: string): JsonColumnFieldClass | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as JsonColumnClassifyingDriver | undefined;
+        if (typeof driver?.jsonColumnFieldClass !== 'function') return undefined;
+        const answered = driver.jsonColumnFieldClass(objectName, field);
+        return answered === 'single-value-media' || answered === 'multi-value-or-json' ? answered : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /**
      * [#21080] The data engine's answer to "is a middleware registered for
      * this object?" (`IObjectQLEngine.hasObjectMiddleware`), resolved per call
      * like every bridge above, so plugin order does not matter.
@@ -1636,6 +1667,7 @@ export class AnalyticsServicePlugin implements Plugin {
                 currencyField?: string;
                 homeAmount?: { field?: string };
               };
+              unitConfig?: { unitMode?: string; unitField?: string };
             }
           | undefined;
         if (!f) return undefined;
@@ -1653,6 +1685,13 @@ export class AnalyticsServicePlugin implements Plugin {
         const homeAmountField = recordCurrencyField !== undefined
           ? f.currencyConfig?.homeAmount?.field
           : undefined;
+        // [ADR-0158 U7 R1] …and a quantity's `unitField` ONLY under
+        // `unitMode: 'record'` on a `number`, the one shape the spec reads it
+        // under: the cube door's record-unit judgment groups by it.
+        const recordUnitField = f.type === 'number' && f.unitConfig?.unitMode === 'record'
+          && typeof f.unitConfig.unitField === 'string' && f.unitConfig.unitField !== ''
+          ? f.unitConfig.unitField
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
@@ -1660,6 +1699,7 @@ export class AnalyticsServicePlugin implements Plugin {
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
           homeAmountField,
+          unitField: recordUnitField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
@@ -1683,6 +1723,9 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#21441] The executing driver's own bucket expression — see
       // `dateBucketSql` above.
       dateBucketSql,
+      // [#36190] The storing driver's JSON-column class — see
+      // `jsonColumnFieldClass` above.
+      jsonColumnFieldClass,
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,
@@ -1751,6 +1794,14 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return engine.getObject?.(objectName) as { enable?: unknown; fields?: unknown } | undefined;
       },
+      // [#35525] The registry's disabled-package predicate — the ONE the data
+      // route asks (`isObjectOfDisabledPackage`) before it answers `404
+      // OBJECT_PACKAGE_DISABLED` — read through core's accessor over the SAME
+      // engine's registry, per call (a disable is reversible and nothing is
+      // cached). An engine or registry that cannot answer hides nothing, as on
+      // the data route. Every object a query reads is asked, for every caller.
+      isObjectPackageDisabled: (objectName: string) =>
+        registryObjectPackageDisabled((dataEngine() as { registry?: unknown } | undefined)?.registry)(objectName),
       draftRowsResolver,
     };
 

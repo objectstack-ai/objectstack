@@ -137,7 +137,7 @@ Create a parent-child relationship between a master and its detail records. A `m
           type: 'master_detail',
           reference: 'order',
           deleteBehavior: 'cascade',
-          inlineEdit: true,
+          inlineEdit: 'grid',
           inlineAmountField: 'line_total',
         },
         product: { label: 'Product', type: 'lookup', reference: 'product' },
@@ -396,7 +396,6 @@ export const supportAgent = defineAgent({
   label: 'Customer Support Agent',
   role: 'Customer Support Agent',
   model: {
-    provider: 'openai',
     model: 'gpt-4o',
     temperature: 0.3,
     maxTokens: 2048

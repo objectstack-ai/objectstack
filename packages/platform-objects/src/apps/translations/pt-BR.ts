@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { ptBRObjects } from './pt-BR.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Português do Brasil (pt-BR) — Setup App Translations
  */
 export const ptBR: TranslationData = {
   objects: ptBRObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('pt-BR'),
   apps: {
     account: {
       label: 'Conta',
@@ -40,7 +43,7 @@ export const ptBR: TranslationData = {
         group_overview: { label: 'Visão geral' },
         group_apps: { label: 'Aplicativos' },
         nav_marketplace_browse: { label: 'Explorar o Marketplace' },
-        nav_marketplace_installed: { label: 'Aplicativos instalados' },
+        nav_packages: { label: 'Pacotes' },
         nav_cloud_connection: { label: 'Conexão com a nuvem' },
         group_people_org: { label: 'Pessoas e organização' },
         group_access_control: { label: 'Controle de acesso' },
@@ -77,6 +80,7 @@ export const ptBR: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Credenciais SCIM' },
         nav_api_keys: { label: 'Chaves de API' },
+        nav_access_directory: { label: 'Cargos e permissões' },
 
         // Central de aprovações = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -97,6 +101,7 @@ export const ptBR: TranslationData = {
         nav_settings_localization: { label: 'Localização' },
         nav_exchange_rates: { label: 'Taxas de câmbio' },
         nav_units_of_measure: { label: 'Unidades de medida' },
+        nav_standard_unit_settings: { label: 'Configurações de unidades padrão' },
         nav_work_calendars: { label: 'Calendários de trabalho' },
         nav_work_calendar_exceptions: { label: 'Exceções de calendário' },
         nav_settings_company: { label: 'Empresa' },
@@ -110,6 +115,7 @@ export const ptBR: TranslationData = {
         nav_settings_knowledge: { label: 'Conhecimento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida dos dados' },
         nav_recycle_bin: { label: 'Lixeira' },
+        nav_public_forms: { label: 'Formulários públicos' },
         nav_notification_preferences: { label: 'Preferências de notificação' },
         nav_notification_templates: { label: 'Modelos de notificação' },
 
@@ -133,7 +139,7 @@ export const ptBR: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Ateliê de metadados para desenvolvedores, analistas e integradores',
       navigation: {
         group_overview: { label: 'Visão geral' },

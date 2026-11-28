@@ -83,7 +83,7 @@ function BreadcrumbLabel({ crumb, isLast }: { crumb: BreadcrumbItemType; isLast:
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-1">
           {isLast ? (
-            <span className="font-semibold">{label}</span>
+            <span className="font-medium">{label}</span>
           ) : (
             <span>{label}</span>
           )}
@@ -162,7 +162,7 @@ ComponentRegistry.register('header-bar',
               className="pl-8 w-[200px] lg:w-[300px]"
             />
             {schema.search.shortcut && (
-              <kbd className="pointer-events-none absolute right-2 top-2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
+              <kbd className="pointer-events-none absolute right-2 top-2 hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-xs font-medium opacity-100 sm:flex">
                 {schema.search.shortcut}
               </kbd>
             )}

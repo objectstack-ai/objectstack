@@ -8,13 +8,13 @@
 
 import * as React from 'react';
 import { cn, Button } from '@object-ui/components';
-import { MessageSquare, PanelRightOpen, PanelRightClose, X } from 'lucide-react';
+import { Activity, MessageSquare, PanelRightOpen, PanelRightClose, X } from 'lucide-react';
 import type { RecordChatterComponentProps, FeedItem, RecordSubscription } from '@object-ui/types';
 import { RecordActivityTimeline } from './RecordActivityTimeline';
 import type { FeedFilterMode } from './RecordActivityTimeline';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useRecordAriaProps } from './renderers/recordComponentAria';
-import { RecordTimelinePanelContext } from './recordTimelineStream';
+import { RecordTimelinePanelContext, RecordViewApprovalsContext } from './recordTimelineStream';
 
 /**
  * The inline timeline's face inside the record page's 动态 card
@@ -94,6 +94,13 @@ export interface RecordChatterPanelProps {
   commentsFailed?: boolean;
   /** Read the failed feed reads again; forwarded to the timeline's Retry. */
   onRetryFeed?: () => void;
+  /**
+   * The panel's heading, in place of 「讨论」, and its empty line, in place of
+   * 「暂无评论」. The renderer names them when the panel holds no comments
+   * (objectstack#36193: the comment panel holds them).
+   */
+  titleLabel?: string;
+  emptyLabel?: string;
   className?: string;
 }
 
@@ -131,6 +138,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
   activityFailed,
   commentsFailed,
   onRetryFeed,
+  titleLabel,
+  emptyLabel,
   className,
 }) => {
   const position = config?.position ?? 'right';
@@ -139,6 +148,10 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
   const defaultCollapsed = (collapseWhenEmpty && items.length === 0) || (config?.defaultCollapsed ?? false);
 
   const { t } = useDetailTranslation();
+  const title = titleLabel ?? t('detail.discussion');
+  // A heading named by the caller (动态, objectstack#36193) takes the stream's icon.
+  const TitleIcon = titleLabel ? Activity : MessageSquare;
+  const empty = emptyLabel ?? t('detail.noCommentsYet');
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   /**
    * The feed's own `aria` bag (objectui#11083). The spec declares `feed` as
@@ -157,6 +170,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
    */
   const feedAria = useRecordAriaProps(config?.feed?.aria);
   const inTimelineCard = React.useContext(RecordTimelinePanelContext) !== null;
+  // objectstack#35723 — 「看审批」 on an approval entry, where the host can open the approvals.
+  const viewApprovals = React.useContext(RecordViewApprovalsContext) ?? undefined;
 
   // A refused or failed read leaves the count unknown, not zero (see the
   // timeline's header), so the collapsed toggle names the panel without one.
@@ -204,8 +219,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4" />
-            <span className="text-sm font-medium">{t('detail.discussion')}</span>
+            <TitleIcon className="h-4 w-4" />
+            <span className="text-sm font-medium">{title}</span>
           </div>
           {collapsible && (
             <Button
@@ -235,6 +250,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onViewApprovals={viewApprovals}
               subscription={subscription}
               onToggleSubscription={onToggleSubscription}
               filterMode={filterMode}
@@ -243,8 +259,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               mentionSuggestions={mentionSuggestions}
               onMentionSuggestionsWanted={onMentionSuggestionsWanted}
               onUploadAttachments={onUploadAttachments}
-              titleLabel={t('detail.discussion')}
-              emptyLabel={t('detail.noCommentsYet')}
+              titleLabel={title}
+              emptyLabel={empty}
               activityDenied={activityDenied}
               commentsDenied={commentsDenied}
               activityFailed={activityFailed}
@@ -276,8 +292,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
           {collapsible && (
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2 text-sm font-medium">
-                <MessageSquare className="h-4 w-4" />
-                {t('detail.discussion')}
+                <TitleIcon className="h-4 w-4" />
+                {title}
               </div>
               <Button
                 variant="ghost"
@@ -303,6 +319,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onToggleReaction={onToggleReaction}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
+              onViewApprovals={viewApprovals}
               subscription={subscription}
               onToggleSubscription={onToggleSubscription}
               filterMode={filterMode}
@@ -311,8 +328,8 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               mentionSuggestions={mentionSuggestions}
               onMentionSuggestionsWanted={onMentionSuggestionsWanted}
               onUploadAttachments={onUploadAttachments}
-              titleLabel={t('detail.discussion')}
-              emptyLabel={t('detail.noCommentsYet')}
+              titleLabel={title}
+              emptyLabel={empty}
               activityDenied={activityDenied}
               commentsDenied={commentsDenied}
               activityFailed={activityFailed}

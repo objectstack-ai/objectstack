@@ -244,7 +244,7 @@ describe('#19542 — the `action` door (validateStackExpressions)', () => {
         label: 'Convert Lead',
         objectName: 'crm_lead',
         icon: 'ArrowRightCircle',
-        locations: ['list_item', 'record_header', 'record_more'],
+        locations: ['record'],
         type: 'flow',
         target: 'crm_convert_lead_wizard',
         refreshAfter: false,
@@ -981,18 +981,22 @@ describe('#19542 — group C: wired, dispatched, and silent by ledger (email_tem
 // ─── The fences ──────────────────────────────────────────────────────────────
 
 describe('#19542 — DARK: what the five crossings did NOT widen', () => {
-  it('`action` and `hook` writes do NOT dispatch the reference-integrity suite', () => {
-    // The one crossing that would turn `runtime-lazy-deps.test.ts` tier 1
-    // («typescript / sucrase load NEVER») from a standing fact into a red: the
-    // suite carries the four body-writes members, and an action/hook write is
-    // exactly the snapshot that WOULD carry an authored JS body for them to
-    // parse. Their bridge is `validateStackExpressions`, which judges CEL.
-    for (const type of ['action', 'hook'] as const) {
-      expect(
-        runtimeAuthoringRulesFor(type).map((r) => r.name),
-        `'${type}' writes must not reach the suite — the body-writes members parse JS`,
-      ).not.toContain('validateReferenceIntegrity');
-    }
+  it('a `hook` write does NOT dispatch the reference-integrity suite, and an `action` write reaches ONE member', () => {
+    // The fence's reason stands: the suite carries the four body-writes
+    // members, which parse JS, and an action/hook write is exactly the snapshot
+    // that WOULD carry an authored body for them to parse (tier 1 of
+    // `runtime-lazy-deps.test.ts`: «typescript / sucrase load NEVER»).
+    // [#35143] An `action` write now dispatches the suite for the binding of an
+    // action to its object, and the per-member `runtimeTypes` is what keeps the
+    // parsers out: exactly `validateObjectReferences` declares `action`, and
+    // none of the body-writes members does. The lazy-deps file gates an action
+    // write carrying a body and reads the require cache to prove it.
+    expect(runtimeAuthoringRulesFor('hook').map((r) => r.name)).not.toContain('validateReferenceIntegrity');
+    expect(runtimeAuthoringRulesFor('action').map((r) => r.name)).toContain('validateReferenceIntegrity');
+    const membersFor = (type: string) =>
+      REFERENCE_INTEGRITY_RULES.filter((m) => (m.runtimeTypes ?? ['flow']).includes(type)).map((m) => m.name);
+    expect(membersFor('action')).toEqual(['validateObjectReferences']);
+    expect(membersFor('hook')).toEqual([]);
   });
 
   it('a `report` write reaches exactly THREE suite members, and a `skill` write none', () => {

@@ -2,8 +2,9 @@
 
 /**
  * objectui#12513 — the Studio home loop. Inside a package the header's first
- * button and the package switcher's first row both return to the Studio
- * landing (`/studio`). The Organization flows empty block's way out to
+ * button and the package switcher's first row both returned to the Studio
+ * landing (`/studio`); objectstack#36501 replaced both with 「‹ Back to app」 (since objectstack#36899 right after the menu toggle),
+ * and the first case below now says so. The Organization flows empty block's way out to
  * Setup › Packaged automation retired with that page's flows half (objectstack
  * ADR-0146 D11, N-28): the block now says where a packaged flow is changed,
  * and links nowhere.
@@ -17,7 +18,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
@@ -85,7 +86,6 @@ const mockClient = vi.hoisted(() => ({
 
 /** What the surface handed the pending-changes sheet, last render. */
 const panel = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
-const chatDock = vi.hoisted(() => ({ mounts: 0 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
@@ -106,13 +106,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: () => {
-    chatDock.mounts += 1;
-    return null;
-  },
-}));
-
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: (props: Record<string, unknown>) => {
     panel.props = props;
@@ -126,11 +119,16 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -183,7 +181,6 @@ beforeEach(() => {
   server.publishedByRef.length = 0;
   server.packageBatches.length = 0;
   panel.props = null;
-  chatDock.mounts = 0;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   // Two packaged flows on the read-only showcase, and the clone, which names no package.
   seed(flow('showcase_urgent_task_alert', 'Urgent task alert', SHOWCASE));
@@ -204,68 +201,29 @@ function renderAt(url: string) {
       <LocationProbe />
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-const location = () => screen.getByTestId('location').textContent ?? '';
-
 describe('Studio home loop (objectui#12513)', () => {
-  it('the header’s first button returns to the Studio landing', async () => {
-    renderAt(`/studio/${SHOWCASE}/automations`);
+  it('the first way out is the way back, first in the package row, not Studio home (objectstack#36501, objectstack#37456)', async () => {
+    // The Studio-home button and the switcher's Studio-home row were removed
+    // with the old switcher: the landing is reached from the app.
+    // objectstack#37456 — the top left's two rows: Studio's row holds the
+    // menu's show / hide control, and the package row starts with the way back.
+    // objectstack#36903, objectstack#36904, objectstack#36905 — on the sharing
+    // overview's page: the Automations, Data and Access pillars' addresses
+    // redirect to the area now.
+    renderAt(`/studio/${SHOWCASE}/owd`);
 
-    const home = await screen.findByTestId('studio-home');
-    expect(home).toHaveAccessibleName('Studio home');
-    // It is the header's first control.
-    const header = screen.getByTestId('studio-shell-header');
-    expect(within(header).getAllByRole('button')[0]).toBe(home);
-
-    fireEvent.click(home);
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
-    expect(location()).toBe('/studio');
+    const back = await screen.findByTestId('studio-package-back');
+    const row = screen.getByTestId('studio-package-row');
+    expect(within(row).getAllByRole('button')[0]).toBe(back);
+    expect(within(screen.getByTestId('studio-brand-row')).getByTestId('studio-menu-toggle')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Studio home' })).toBeNull();
   });
-
-  it('the package switcher’s first row is Studio home, above the package list', async () => {
-    renderAt(`/studio/${SHOWCASE}/automations`);
-
-    fireEvent.click(await screen.findByRole('button', { name: /Showcase/ }));
-    const pkgRow = await screen.findByRole('button', { name: new RegExp(SHOWCASE.replace(/\./g, '\\.')) });
-    const panel = pkgRow.closest('[role="dialog"]') as HTMLElement;
-    expect(panel).not.toBeNull();
-    const row = within(panel).getByTestId('studio-switcher-home');
-    expect(within(panel).getAllByRole('button')[0]).toBe(row);
-    expect(row).toHaveAccessibleName('Studio home');
-    // Control: the package row is in the same panel, after it.
-    expect(row.compareDocumentPosition(pkgRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    fireEvent.click(row);
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
-    expect(location()).toBe('/studio');
-  });
-
-  it('the Organization flows empty block says how to change a packaged flow, links nowhere, and creates nothing', async () => {
-    // It linked to Setup › Packaged automation, whose flows half retired into
-    // Studio (objectstack ADR-0146 D11, N-28), so the sentence says where the
-    // flow is changed instead: in its package, with New similar.
-    server.active.delete('flow/qa_urgent_alert_clone');
-    renderAt('/studio/~org/automations');
-
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent('open its package and use New similar');
-    expect(block).not.toHaveTextContent('Setup');
-    expect(within(block).queryByTestId('auto-empty-open-setup')).toBeNull();
-    expect(within(block).queryAllByRole('link')).toEqual([]);
-    expect(within(block).queryByTestId('auto-empty-new')).toBeNull();
-  });
-
-  it('control: a package’s own empty block offers no Setup link', async () => {
-    server.active.clear();
-    renderAt(`/studio/${SHOWCASE}/automations`);
-
-    const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(within(block).queryByTestId('auto-empty-open-setup')).toBeNull();
-    expect(within(block).queryByRole('link', { name: 'Open in Setup' })).toBeNull();
-  });
+  // objectstack#36903 — the Automations rail's empty blocks went with the rail:
+  // the package-less scope's list offers no create (StudioDesignSurface.packageLessFlows-11553).
 });

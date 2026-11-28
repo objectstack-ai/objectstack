@@ -15,13 +15,16 @@
  * in `StudioDesignSurface.heldDataLeave-26705.test.tsx`; the sheet is a stand-in
  * that asks the host for an object exactly as its security block does
  * (`useSurfaceNavigator`).
+ *
+ * objectstack#36909 — the sheet can name a permission set too; the host opens
+ * its matrix's own address in the package that holds the draft (last describe).
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -50,11 +53,26 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
 });
 
+const PAIR = `${PKG}.custom`;
+/** objectstack#36904 — while set, the package is a read-only base whose `.custom` pair is listed. */
+const pkgs = vi.hoisted(() => ({ readOnlyBase: false }));
+
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
   return {
     ...mod,
-    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: true, namespace: 'acme' }]),
+    fetchPackages: vi.fn(async () => [{ id: 'com.acme.app', name: 'Acme', writable: !pkgs.readOnlyBase, namespace: 'acme' }]),
+    fetchListedPackageManifests: vi.fn(
+      async () =>
+        new Map(
+          pkgs.readOnlyBase
+            ? [
+                ['com.acme.app', { name: 'Acme', writable: false, manifest: { version: '1.0.0' } }],
+                ['com.acme.app.custom', { name: 'Acme (custom)', writable: true, manifest: {} }],
+              ]
+            : [],
+        ),
+    ),
   };
 });
 
@@ -63,23 +81,27 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 // Stands in for the Pending changes sheet: its security block asks the host to
-// open the object a draft names, through the surface channel.
+// open the object (or permission set) a draft names, through the surface channel.
 vi.mock('../../preview/DraftChangesPanel', async () => {
   const { createElement } = await import('react');
   const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
   return {
     DraftChangesPanel: () => {
       const openSurface = useSurfaceNavigator();
+      const requests: Array<{ type: string; name: string }> = [
+        { type: 'object', name: 'acme_task' },
+        { type: 'object', name: 'acme_note' },
+        { type: 'permission', name: 'acme_sales_rep' },
+      ];
       return createElement(
         'div',
         null,
-        ['acme_task', 'acme_note'].map((name) =>
+        requests.map((target) =>
           createElement(
             'button',
-            { key: name, type: 'button', onClick: () => openSurface?.({ type: 'object', name }) },
-            `Pending object/${name}`,
+            { key: `${target.type}/${target.name}`, type: 'button', onClick: () => openSurface?.(target) },
+            `Pending ${target.type}/${target.name}`,
           ),
         ),
       );
@@ -90,7 +112,10 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
+import { fetchListedPackageManifests } from './packages-io';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -137,6 +162,7 @@ beforeEach(() => {
     overlayScope: null,
     effective: type === 'object' && OBJECTS[name] ? JSON.parse(JSON.stringify(OBJECTS[name])) : null,
   }));
+  pkgs.readOnlyBase = false;
   confirmSpy = vi.fn();
   window.confirm = confirmSpy as unknown as typeof window.confirm;
 });
@@ -147,10 +173,16 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-/** The object the header names: its title's tooltip (objectstack#34794). */
+/** A landing marker that names the item it landed on. */
+function Landed({ testId }: { testId: string }) {
+  const { name } = useParams();
+  return <output data-testid={testId}>{name}</output>;
+}
+
+/** The object the header names: its machine name beside the label (objectstack#36904). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', name),
+    () => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-item-api-name')[0]).toHaveTextContent(name),
     { timeout: 8000 },
   );
 }
@@ -158,11 +190,19 @@ async function openObjectIs(name: string): Promise<void> {
 async function openTask(): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
-  window.history.replaceState(null, '', `/studio/${PKG}/data`);
+  // objectstack#36904 — the object designer is the object's address.
+  const at = `/studio/${PKG}/metadata/object/acme_task?package=${PKG}`;
+  window.history.replaceState(null, '', at);
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+    <MemoryRouter initialEntries={[at]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        {/* objectstack#36904 — the pair's own object address (the request's landing on a read-only base). */}
+        <Route path={`/studio/${PAIR}/metadata/object/:name`} element={<output data-testid="pair-landed" />} />
+        {/* objectstack#36909 — a permission set's matrix address, on the base and on its pair. */}
+        <Route path={`/studio/${PKG}/metadata/permission/:name`} element={<Landed testId="base-permission-landed" />} />
+        <Route path={`/studio/${PAIR}/metadata/permission/:name`} element={<Landed testId="pair-permission-landed" />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -171,38 +211,17 @@ async function openTask(): Promise<void> {
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
 async function holdAPicklist(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Priority', type: /^Picklist$/ });
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
 
-const newObject = () => fireEvent.click(within(screen.getByTestId('studio-rail-data')).getByTestId('studio-rail-add'));
 const pendingRequest = (name: string) => fireEvent.click(screen.getByRole('button', { name: `Pending object/${name}` }));
 
-describe('a held Data field guards create and Pending changes (objectstack#26845)', () => {
-  it('New object asks; Cancel opens no dialog and keeps the held field, OK opens it and the create asks nothing', async () => {
-    await openTask();
-    await holdAPicklist();
-
-    confirmSpy.mockReturnValueOnce(false);
-    newObject();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
-    expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByTestId('studio-held')).toBeInTheDocument();
-
-    confirmSpy.mockReturnValueOnce(true);
-    newObject();
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText(t('engine.studio.data.nameLabel', 'en')), {
-      target: { value: 'Ticket' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
-    await openObjectIs('acme_ticket');
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-  });
-
+// objectstack#36904 — the designer has no 「新建」 (the object list's dialog is the
+// create), so what is left to guard here is the Pending changes request, which
+// now opens the object's own address.
+describe('a held Data field guards Pending changes (objectstack#26845)', () => {
   it('a Pending changes request for another object asks; Cancel keeps the held field, OK opens the object', async () => {
     await openTask();
     await holdAPicklist();
@@ -228,13 +247,63 @@ describe('a held Data field guards create and Pending changes (objectstack#26845
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, New object and a Pending changes request never ask', async () => {
+  it('with no edit held, a Pending changes request never asks', async () => {
     await openTask();
 
     pendingRequest('acme_note');
     await openObjectIs('acme_note');
-    newObject();
-    await screen.findByRole('dialog');
     expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#36904 — on a read-only base the Pending changes sheet reviews
+ * the `.custom` pair's drafts (`draftScope`), so an object it names opens on
+ * the pair's address, where an object the pair adds resolves; the base's
+ * address does not name it.
+ */
+describe('a Pending changes request on a read-only base opens the pair\'s address (objectstack#36904)', () => {
+  it('the request for another object lands on /studio/PAIR/metadata/object/NAME', async () => {
+    pkgs.readOnlyBase = true;
+    await openTask();
+    // The pair is read off the package list after the entries read settles.
+    await waitFor(() => expect(fetchListedPackageManifests).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    pendingRequest('acme_note');
+    await screen.findByTestId('pair-landed', undefined, { timeout: 8000 });
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+});
+
+/*
+ * objectstack#36909 — a permission set the sheet names opens its matrix's own
+ * address, in the package that holds the draft (`draftScope`): the package on
+ * a writable base, the `.custom` pair on a read-only one. It used to go
+ * through the retired Access pillar's address.
+ */
+describe('a Pending changes request for a permission set opens its matrix address (objectstack#36909)', () => {
+  it('on a writable base: /studio/PKG/metadata/permission/NAME', async () => {
+    await openTask();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pending permission/acme_sales_rep' }));
+    expect(await screen.findByTestId('base-permission-landed', undefined, { timeout: 8000 })).toHaveTextContent('acme_sales_rep');
+    expect(screen.queryByTestId('pair-permission-landed')).toBeNull();
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  it('on a read-only base with a pair: /studio/PAIR/metadata/permission/NAME', async () => {
+    pkgs.readOnlyBase = true;
+    await openTask();
+    await waitFor(() => expect(fetchListedPackageManifests).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pending permission/acme_sales_rep' }));
+    expect(await screen.findByTestId('pair-permission-landed', undefined, { timeout: 8000 })).toHaveTextContent('acme_sales_rep');
+    expect(screen.queryByTestId('base-permission-landed')).toBeNull();
   });
 });

@@ -11,21 +11,27 @@
  * only `fetch` and the metadata client are stubbed. Pinned, each against a
  * control:
  *
- *  - the translation list marks the served override "Customized (HotCRM)" and
- *    the "only customizations" filter shows it alone;
- *  - the email-template list holds the pair's item beside the base's, marked
- *    "Added", and an override of ANOTHER member of a name marks no row;
+ *  - the translation list shows the served override as "Modified", naming
+ *    HotCRM's pair, and the source filter's "modified and new" shows it alone
+ *    (the App Studio list's Source, objectstack#37918);
+ *  - the email-template list holds the pair's item beside the base's, shown
+ *    "New", and an override of ANOTHER member of a name marks no row;
  *  - the directory's object tile counts the extension, and the header the base's total;
  *  - a failed read draws no mark, no filter and no number, with the server's sentence;
  *  - a base without a pair is unchanged, and Setup (no area) never reads;
  *  - in the cross-package leg an item of a pair is labelled with its base;
- *  - objectstack#30063 — the page tile counts a page's override.
+ *  - objectstack#30063 — the page tile counts a page's override;
+ *  - objectstack#37236 — "customized" is overrides + extensions alone
+ *    (`customizationTotal`): a base whose only change is an arrangement draws
+ *    no header total, and neither list offers it the "customized" filter.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 // The switch column waits on `audienceAnchorsOf`'s dynamic import of this exact
 // specifier (see `ResourceListPage.environmentScope-7611.test.tsx`).
@@ -35,6 +41,8 @@ import { MetadataAreaHostContext, type MetadataAreaHost } from './metadataAreaHo
 const BASE = 'hotcrm';
 const PAIR = 'hotcrm.custom';
 const PLAIN = 'com.example.crm';
+/** objectstack#37236 — a base whose pair's only change is an arrangement. */
+const ARRANGED = 'com.example.arranged';
 
 const LISTS: Record<string, Record<string, unknown>[]> = {
   // A served override is served as the base's item, under the base's id.
@@ -42,6 +50,7 @@ const LISTS: Record<string, Record<string, unknown>[]> = {
     { name: 'crm_en', label: 'CRM English', _packageId: BASE },
     { name: 'crm_de', label: 'CRM German', _packageId: BASE },
     { name: 'plain_en', label: 'Plain English', _packageId: PLAIN },
+    { name: 'arranged_en', label: 'Arranged English', _packageId: ARRANGED },
   ],
   email_template: [
     { name: 'welcome', label: 'Welcome', locale: 'en', _packageId: BASE },
@@ -101,6 +110,7 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
 
 import { MetadataDirectoryPage } from './DirectoryPage';
 import { MetadataResourceListPage } from './ResourceListPage';
+import { useListOrderedNames } from './useListOrderedNames';
 import { registerDefaultMetadataSchemas } from './default-schemas';
 import { t, tFormat } from './i18n';
 
@@ -115,10 +125,24 @@ const HOTCRM_READ = {
   ],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 2, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 2, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
-const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+/** objectstack#37236 — two arrangements, no override, no extension. */
+const ARRANGED_READ = {
+  packageId: ARRANGED,
+  overrides: [],
+  extensions: [],
+  switchedOff: [],
+  arrangements: [
+    { object: 'crm_account', key: 'relatedLists' },
+    { object: 'crm_account', key: 'fieldGroups' },
+  ],
+  contributions: [],
+  counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 2, contributions: 0 },
+};
+const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 let customizationsFail = false;
 /** objectstack#30063 — the read also lists a page's override. */
@@ -141,7 +165,8 @@ const fetchMock = vi.fn(async (url: string) => {
       return json(503, { success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'The customization ledger is unavailable.' } });
     }
     const hotcrm = readListsPage ? withPage(HOTCRM_READ) : HOTCRM_READ;
-    return json(200, { success: true, data: decodeURIComponent(m[1]) === BASE ? hotcrm : EMPTY_READ });
+    const id = decodeURIComponent(m[1]);
+    return json(200, { success: true, data: id === BASE ? hotcrm : id === ARRANGED ? ARRANGED_READ : EMPTY_READ });
   }
   if (u.startsWith('/api/v1/data/sys_metadata_activation')) {
     return json(200, { object: 'sys_metadata_activation', records: [], hasMore: false });
@@ -190,34 +215,49 @@ const marksOf = (rowName: string) =>
   within(screen.getByTestId(`metadata-row-${rowName}`))
     .queryAllByTestId('customization-mark')
     .map((m) => `${m.getAttribute('data-kind')}:${m.textContent}`);
+/** objectstack#37918 — the App Studio list's Source badge of a row: its kind and its words. */
+const sourceOf = (rowName: string) => {
+  const badge = within(screen.getByTestId(`metadata-row-${rowName}`).closest('tr') as HTMLElement).queryByTestId(
+    'metadata-row-source',
+  );
+  return badge ? `${badge.getAttribute('data-source-kind')}:${badge.textContent}` : null;
+};
 const customizationReads = () =>
   fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/customizations')).map(([u]) => String(u));
 
 describe('the All metadata lists mark a base\'s customizations (objectstack#28568)', () => {
-  it('the translation list marks the served override "Customized (HotCRM)", and the filter shows it alone', async () => {
+  it('the translation list shows the served override as "Modified" of HotCRM\'s pair, and "modified and new" shows it alone', async () => {
     mountList(area(BASE), 'translation', `?package=${BASE}`);
-    const only = await screen.findByTestId('metadata-only-customizations');
-    expect(marksOf('crm_en')).toEqual([`customized:${tFormat('engine.customizationMark.customized', 'en-US', { baseName: 'HotCRM' })}`]);
-    expect(marksOf('crm_en')).toEqual(['customized:Customized (HotCRM)']);
-    // CONTROL: the base's item the read does not list carries no mark.
-    expect(marksOf('crm_de')).toEqual([]);
+    // The grid draws its rows once its table is ready (objectstack#36897).
+    await screen.findByTestId('metadata-row-crm_en');
+    await vi.waitFor(() => expect(sourceOf('crm_en')).toBe(`modified:${t('engine.list.source.modified', 'en-US')}`));
+    const badge = within(screen.getByTestId('metadata-row-crm_en').closest('tr') as HTMLElement).getByTestId('metadata-row-source');
+    expect(badge).toHaveAttribute(
+      'title',
+      tFormat('engine.customizationMark.customizedTitle', 'en-US', { baseName: 'HotCRM', pair: PAIR }),
+    );
+    // CONTROL: the base's item the read does not list is system-shipped.
+    expect(sourceOf('crm_de')).toBe(`system:${t('engine.list.source.system', 'en-US')}`);
     // Another package's row stays out of the base's list, as before.
     expect(screen.queryByTestId('metadata-row-plain_en')).toBeNull();
+    // "Only customizations" is the source filter's "modified and new" here.
+    expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
+    cleanup();
 
-    expect(only).toHaveTextContent(tFormat('engine.list.customizations.only', 'en-US', { marked: 1 }));
-    fireEvent.click(only);
-    expect(screen.getByTestId('metadata-row-crm_en')).toBeInTheDocument();
-    expect(screen.queryByTestId('metadata-row-crm_de')).toBeNull();
-    fireEvent.click(only);
-    expect(screen.getByTestId('metadata-row-crm_de')).toBeInTheDocument();
+    mountList(area(BASE), 'translation', `?package=${BASE}&source=runtime`);
+    await screen.findByTestId('metadata-row-crm_en');
+    await vi.waitFor(() => expect(screen.queryByTestId('metadata-row-crm_de')).toBeNull());
+    expect(screen.getByTestId('metadata-source-filter')).toHaveTextContent(
+      tFormat('engine.list.sourceFilter.changed', 'en-US', { count: 1 }),
+    );
   });
 
-  it('the email-template list holds the pair\'s item beside the base\'s, marked "Added"', async () => {
+  it('the email-template list holds the pair\'s item beside the base\'s, shown "New"', async () => {
     mountList(area(BASE), 'email_template', `?package=${BASE}`);
-    await screen.findByTestId('metadata-only-customizations');
-    expect(marksOf('renewal_notice')).toEqual([`added:${t('engine.customizationMark.added', 'en-US')}`]);
+    await screen.findByTestId('metadata-row-renewal_notice');
+    await vi.waitFor(() => expect(sourceOf('renewal_notice')).toBe(`new:${t('engine.list.source.new', 'en-US')}`));
     // The read overrides `welcome` in zh-CN only: the en member is the base's own.
-    expect(marksOf('welcome')).toEqual([]);
+    expect(sourceOf('welcome')).toBe(`system:${t('engine.list.source.system', 'en-US')}`);
   });
 
   it('a failed read draws no mark and no filter, and says the server\'s sentence', async () => {
@@ -226,6 +266,7 @@ describe('the All metadata lists mark a base\'s customizations (objectstack#2856
     const failed = await screen.findByTestId('metadata-customizations-failed');
     expect(failed).toHaveTextContent('The customization ledger is unavailable.');
     // The pair's item is still listed (the list read is its own), unmarked.
+    await screen.findByTestId('metadata-row-renewal_notice');
     expect(marksOf('renewal_notice')).toEqual([]);
     expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
   });
@@ -296,5 +337,60 @@ describe('the All metadata directory counts a base\'s customizations (objectstac
     );
     expect(screen.queryByTestId('directory-customizations-total')).toBeNull();
     expect(screen.queryAllByTestId(/^directory-tile-customized-/)).toEqual([]);
+  });
+});
+
+/** The detail's ‹ › names (`useListOrderedNames`), drawn for a pin to read. */
+function OrderedProbe({ type }: { type: string }) {
+  const ordered = useListOrderedNames(type);
+  return (
+    <output data-testid="ordered" data-status={ordered.status}>
+      {ordered.names.join(',')}
+    </output>
+  );
+}
+
+function mountOrdered(host: MetadataAreaHost, type: string, search: string) {
+  return render(
+    <MetadataAreaHostContext.Provider value={host}>
+      <MemoryRouter initialEntries={[`${host.basePath}/${type}/x${search}`]}>
+        <OrderedProbe type={type} />
+      </MemoryRouter>
+    </MetadataAreaHostContext.Provider>,
+  );
+}
+
+describe('objectstack#37236 — "customized" is overrides + extensions, never an arrangement', () => {
+  it('the directory header draws no total for a base whose only change is an arrangement', async () => {
+    mountDirectory(area(ARRANGED));
+    await vi.waitFor(() => expect(customizationReads()).toEqual([`/api/v1/packages/${ARRANGED}/customizations`]));
+    // Let the read's answer render, then look.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('directory-customizations-failed')).toBeNull();
+    expect(screen.queryByTestId('directory-customizations-total')).toBeNull();
+    expect(screen.queryAllByTestId(/^directory-tile-customized-/)).toEqual([]);
+  });
+
+  it('the list offers no "customized" filter to a base whose only change is an arrangement', async () => {
+    mountList(area(ARRANGED), 'translation', `?package=${ARRANGED}`);
+    await screen.findByTestId('metadata-row-arranged_en');
+    await vi.waitFor(() => expect(customizationReads()).toEqual([`/api/v1/packages/${ARRANGED}/customizations`]));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('metadata-customizations-failed')).toBeNull();
+    expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
+    expect(marksOf('arranged_en')).toEqual([]);
+  });
+
+  it('the detail ‹ › names: "only customizations" is not offered to it, so it filters nothing out', async () => {
+    mountOrdered(area(ARRANGED), 'translation', '?customized=1');
+    await vi.waitFor(() => expect(screen.getByTestId('ordered')).toHaveAttribute('data-status', 'ready'));
+    expect(screen.getByTestId('ordered')).toHaveTextContent(/^arranged_en$/);
+  });
+
+  it('CONTROL: for HotCRM, whose pair overrides, the ‹ › names under "modified and new" keep only the customized row', async () => {
+    // objectstack#37918 — the App Studio list folds "only customizations" into its source filter.
+    mountOrdered(area(BASE), 'translation', '?source=runtime');
+    await vi.waitFor(() => expect(screen.getByTestId('ordered')).toHaveAttribute('data-status', 'ready'));
+    expect(screen.getByTestId('ordered')).toHaveTextContent(/^crm_en$/);
   });
 });

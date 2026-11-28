@@ -39,7 +39,10 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 // record answers 404 to a viewer whose only read was the pending step's.
 let readEnded = false;
 let revokesOnDecision = true;
-const authFetchSpy = vi.fn(async (url: string) => {
+const authFetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+  // The approvals reads go out through the authenticated fetch too; they answer
+  // from the file's wire double below, as before.
+  if (String(url).includes('/approvals/requests')) return fetch(url, init);
   if (revokesOnDecision && /\/actions\/sys_approval_request\/approval_(approve|reject)$/.test(String(url))) readEnded = true;
   return new Response(JSON.stringify({ data: {} }), {
     status: 200,
@@ -139,7 +142,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
       target: '/api/v1/approvals/requests/{id}/approve',
       params: [{ name: 'comment', label: 'Comment', type: 'textarea', required: false }],
       visible: 'record.viewer.can_act || record.viewer.can_override',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Approved.', refreshAfter: true,
     },
     {
@@ -148,7 +151,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
       params: [{ name: 'comment', label: 'Comment', type: 'textarea', required: false }],
       visible: 'record.viewer.can_act || record.viewer.can_override',
       confirmText: 'Reject this request?',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Rejected.', refreshAfter: true,
     },
   ],

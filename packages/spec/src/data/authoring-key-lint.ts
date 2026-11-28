@@ -86,7 +86,7 @@ const EMBEDDED_JSON_TYPED_LIST =
  * Semantic near-misses on `FieldSchema` — a different **word** for the same
  * intent, or a key that was retired outright.
  *
- * Every entry here was found in the wild. The rename half is what `object.form.ts`
+ * Every entry here was found in the wild. The rename half is what `object.metadata-form.ts`
  * had drifted into by #4120; the retired half is the `auditTrail` / `dataQuality`
  * / `encryptionConfig` family pruned in 2026-06 plus the field-level `index` flag
  * removed in the 16.x line (#2377). Edit distance cannot reach most of these
@@ -127,8 +127,8 @@ export const FIELD_KEY_GUIDANCE: Readonly<
   startingNumber: { why: 'never a FieldSchema key. An autonumber counter resets per rendered prefix, which `autonumberFormat` itself determines.' },
   validation: { why: 'field-level predicates are not a FieldSchema key — author a `validation` metadata item on the object, which carries its own message.' },
   errorMessage: { why: 'pairs with the `validation` key that never existed; a `validation` metadata item carries its own message.' },
-  audit: { why: 'the `auditTrail` family was pruned in 2026-06 as dead in both layers. Use `trackHistory` for the activity timeline.' },
-  auditTrail: { why: 'pruned in 2026-06 as dead in both layers. Use `trackHistory` for the activity timeline.' },
+  audit: { why: 'the `auditTrail` family was pruned in 2026-06 as dead in both layers. Delete the key: a changed field\'s old → new values already show on the record activity timeline by default, and `fieldHistory: false` is this field\'s off switch (`fieldHistory: true` opts a media or structured-JSON field in).' },
+  auditTrail: { why: 'pruned in 2026-06 as dead in both layers. Delete the key: a changed field\'s old → new values already show on the record activity timeline by default, and `fieldHistory: false` is this field\'s off switch (`fieldHistory: true` opts a media or structured-JSON field in).' },
   pii: { why: 'the `dataQuality` governance family was pruned in 2026-06 as dead in both layers — it enforced nothing.' },
   dataQuality: { why: 'pruned in 2026-06 as dead in both layers, and its leftover `DataQualityRules` schema was deleted from the public API too — it enforced nothing.' },
   encrypted: { why: 'the `encryptionConfig` family was pruned in 2026-06: it implied at-rest protection that never happened. The real channel is `type: \'secret\'`.' },

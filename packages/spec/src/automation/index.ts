@@ -6,12 +6,22 @@ export * from './flow.zod';
 // registration refusal reads the same table the flow parse refuses with.
 export { FLOW_RESERVED_NODE_TYPES, reservedFlowNodeTypeRefusal } from './flow-reserved-node-types';
 export * from './region-slots';
+// [ADR-0051 §3.4] The node types a business-altitude flow drawing folds away,
+// read by the docs viewer and by the i18n walk that demands the drawn labels;
+// and which out-edges of a decision that viewer lists as its branches.
+export {
+  FLOW_TECHNICAL_NODE_TYPES,
+  isFlowTechnicalNodeType,
+  FLOW_DECISION_DEFAULT_BRANCH_LABEL,
+  flowDecisionEdgeBranch,
+  type FlowDecisionEdgeBranch,
+} from './flow-altitude';
 export * from './control-flow.zod';
 export * from './io-node-config.zod';
 export * from './builtin-node-config.zod';
 export * from './schemaless-node-config.zod';
 export * from './flow-function.zod';
-export { flowForm } from './flow.form';
+export { flowForm } from './flow.metadata-form';
 export * from './execution.zod';
 export * from './webhook.zod';
 export * from './approval.zod';
@@ -98,5 +108,8 @@ export * from './flow-text-slot-template';
 // option-collision parse refusal, `translateFlow`, the reference lint and the
 // i18n extractor alike.
 export * from './flow-screen-option-key';
+// [#35928] The record-change trigger's token grammar — the one reading of a
+// `triggerType` the trigger binds by and the record-update preview asks.
+export * from './record-change-trigger-events';
 export * from './bpmn-interop.zod';
 export * from './bpmn-mapping';

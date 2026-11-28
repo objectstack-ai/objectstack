@@ -35,8 +35,10 @@ import { z } from 'zod';
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
-import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
-import { ObjectStackProtocolImplementation, zodIssuesToMetadataIssues } from './protocol.js';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID } from '@objectstack/spec/data';
+import { getMetadataTypeSchema, PLUGIN_UI_REQUIRED_KEY_MISSING, PluginSchema, registerMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { ObjectStackProtocolImplementation, seedRequestValidationError, zodIssuesToMetadataIssues } from './protocol.js';
+import { decorateMetadataItem } from './metadata-diagnostics.js';
 import { ZOD_UNION_DEFAULT_MESSAGE } from './protocol-metadata-issues.js';
 
 interface Row {
@@ -670,5 +672,152 @@ describe('#26711 the view write door refuses an unknown top-level key', () => {
         const served = (await protocol.getMetaItem({ type: 'view', name: 'task_list' })).item;
         expect(served._diagnostics?.valid).toBe(false);
         expect(JSON.stringify(served._diagnostics)).toContain('zzz_junk_key');
+    });
+});
+
+describe('#35500 a member that is itself a bare union of kinds explains nothing', () => {
+    const kindsOnly = z.object({
+        u: z.union([z.union([z.string(), z.number()]), z.union([z.boolean(), z.array(z.string())])]),
+    });
+    const issuesOf = (schema: z.ZodTypeAny, value: unknown) => {
+        const r = schema.safeParse(value);
+        expect(r.success, 'the fixture must actually fail to parse').toBe(false);
+        return (r as { error: { issues: unknown[] } }).error.issues;
+    };
+
+    it('the union is said once — not one bare entry per member', () => {
+        expect(zodIssuesToMetadataIssues(issuesOf(kindsOnly, { u: {} }))).toEqual([
+            { path: 'u', message: ZOD_UNION_DEFAULT_MESSAGE, code: 'invalid_union' },
+        ]);
+    });
+
+    it('a nested union carrying its own sentence is still heard', () => {
+        const sentence = 'Write a string or a number.';
+        const schema = z.object({ u: z.union([z.union([z.string(), z.number()], { error: sentence }), z.boolean()]) });
+        expect(zodIssuesToMetadataIssues(issuesOf(schema, { u: {} }))).toEqual([
+            { path: 'u', message: sentence, code: 'invalid_union' },
+        ]);
+    });
+
+    it('CONTROL — a member with a located cause is still selected and expanded', () => {
+        const schema = z.object({ u: z.union([z.union([z.string(), z.number()]), z.object({ a: z.string() }).strict()]) });
+        expect(zodIssuesToMetadataIssues(issuesOf(schema, { u: { a: 1 } })).map((e) => [e.path, e.code])).toEqual([['u.a', 'invalid_type']]);
+    });
+});
+
+/**
+ * #36594 — a spec refusal's registered code reaches the save door's 422.
+ *
+ * A spec rule that owns an ADR-0112 code stamps it on its zod issue as
+ * `params.code`, beside the fields that say which fix applies; zod's own issue
+ * code for every such rule is `'custom'`. The 422 entry kept `path`, `message`
+ * and that `'custom'` and dropped `params`, so a client of the door could not
+ * tell one refusal from another except by its English sentence. The 422 entry
+ * now carries the registered refusal; `code` is unchanged.
+ *
+ * Only the 422: the read path's `_diagnostics.errors[]` and the seed refusal's
+ * `seedApplied.issues[]` publish the entry as exactly `path` / `message` /
+ * `code` (`MetadataValidationResultSchema`, the publish response), so they stay
+ * that shape. `err.issues` is the 422 body's `issues` member as sent: the REST
+ * error answer spreads it unchanged (`packages/rest/src/error-response.ts`).
+ */
+describe('#36594 the save door\'s 422 entry carries the registered refusal on `params`', () => {
+    const detailWithReadonlyMaster = () => ({
+        name: 'work_order_item',
+        label: 'Work Order Item',
+        sharingModel: 'controlled_by_parent',
+        fields: {
+            order: { name: 'order', type: 'master_detail', label: 'Order', reference: 'work_order', required: true, readonly: true },
+            note: { name: 'note', type: 'text', label: 'Note' },
+        },
+    });
+    const CBP_PARAMS = { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape: 'master-not-writable' };
+
+    it('CONTROLLED_BY_PARENT_MASTER_INVALID: an object save names the code and its shape; `code` stays \'custom\'', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        const err = await rejection(save(protocol, detailWithReadonlyMaster(), 'work_order_item', 'object'));
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.status).toBe(422);
+        expect(err.issues).toEqual([{ path: 'fields', message: expect.any(String), code: 'custom', params: CBP_PARAMS }]);
+        expect(rows.size).toBe(0);
+    });
+
+    it('CONTROL — an issue zod raised without params gets no `params` member', async () => {
+        const { protocol } = makeProtocol();
+        const body = { ...detailWithReadonlyMaster(), label: 42 };
+
+        const err = await rejection(save(protocol, body, 'work_order_item', 'object'));
+
+        expect(err.status).toBe(422);
+        const label = err.issues.find((i: any) => i.path === 'label');
+        expect(label).toEqual({ path: 'label', message: expect.any(String), code: 'invalid_type' });
+        expect(Object.prototype.hasOwnProperty.call(label, 'params')).toBe(false);
+    });
+
+    it('a BigInt, a cycle, a function and NaN in a refusal\'s params are left out, and the door still answers 422', async () => {
+        // The door judges a type by the schema `getMetadataTypeSchema` resolves, and a
+        // registered override wins over the built-in one; restored below.
+        const builtin = getMetadataTypeSchema('object')!;
+        const cyclic: Record<string, unknown> = {};
+        cyclic.self = cyclic;
+        registerMetadataTypeSchema('object', z.any().superRefine((_v, ctx) => {
+            ctx.addIssue({
+                code: 'custom', path: ['fields'], message: 'refused',
+                params: { ...CBP_PARAMS, big: BigInt(1), cyclic, fn: () => 1, nan: Number.NaN, count: 2, flag: true },
+            });
+        }));
+        try {
+            const { protocol } = makeProtocol();
+
+            const err = await rejection(save(protocol, detailWithReadonlyMaster(), 'work_order_item', 'object'));
+
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(err.status).toBe(422);
+            expect(err.issues).toEqual([{ path: 'fields', message: 'refused', code: 'custom', params: { ...CBP_PARAMS, count: 2, flag: true } }]);
+            expect(() => JSON.stringify({ issues: err.issues })).not.toThrow();
+        } finally {
+            registerMetadataTypeSchema('object', builtin);
+        }
+        expect(getMetadataTypeSchema('object')).toBe(builtin);
+    });
+
+    it('PLUGIN_UI_REQUIRED_KEY_MISSING: the real `PluginSchema` refusal, through the mapper the door calls, names the code and the missing key', () => {
+        // No metadata type the save door accepts parses with `PluginSchema` on
+        // this tree (a type name it does not know is refused `INVALID_REQUEST`
+        // before any schema runs), so this pins the mapper with the door's option.
+        const parsed = PluginSchema.safeParse({ id: 'com.example.panel', name: 'Panel', version: '1.0.0', type: 'ui', slug: 'panel' });
+        expect(parsed.success).toBe(false);
+
+        expect(zodIssuesToMetadataIssues(parsed.error!.issues, { refusalParams: true })).toEqual([{
+            path: 'staticPath',
+            message: expect.stringMatching(new RegExp(`^${PLUGIN_UI_REQUIRED_KEY_MISSING}: `)),
+            code: 'custom',
+            params: { code: PLUGIN_UI_REQUIRED_KEY_MISSING, key: 'staticPath' },
+        }]);
+    });
+
+    it('params whose `code` is not a registered error code are not a refusal: internal markers stay off the wire', () => {
+        const issue = (params: unknown) => ({ code: 'custom', path: ['a'], message: 'm', params });
+
+        for (const params of [{ readAsWritten: true }, { retiredComponentType: 'x' }, { code: 'NOT_A_REGISTERED_CODE' }, { code: 7 }, ['code'], null]) {
+            const [entry] = zodIssuesToMetadataIssues([issue(params)], { refusalParams: true });
+            expect(entry).toEqual({ path: 'a', message: 'm', code: 'custom' });
+        }
+    });
+
+    it('READ PATH — `_diagnostics.errors[]` on a stored object with the same refusal carries no `params`', () => {
+        const decorated: any = decorateMetadataItem('object', detailWithReadonlyMaster());
+
+        expect(decorated._diagnostics.valid).toBe(false);
+        expect(decorated._diagnostics.errors).toEqual([{ path: 'fields', message: expect.any(String), code: 'custom' }]);
+    });
+
+    it('SEED — the seed refusal behind `seedApplied.issues[]` carries no `params`', () => {
+        const err: any = seedRequestValidationError([{ code: 'custom', path: ['seeds', 0], message: 'm', params: CBP_PARAMS }]);
+
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(err.issues).toEqual([{ path: 'seeds.0', message: 'm', code: 'custom' }]);
     });
 });

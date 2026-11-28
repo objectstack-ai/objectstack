@@ -17,7 +17,7 @@
  * `action:button` and `action:menu` run it through the shared
  * `useAutoTriggerOnce` (`auto-trigger.ts`); `action:icon` did not read it at
  * all. A `?runAction=` deep link that `ObjectView` armed and CONSUMED for a
- * `list_toolbar` action rendered as an icon therefore did nothing: no run, no
+ * `list` action rendered as an icon therefore did nothing: no run, no
  * notice, and no URL left to retry from.
  *
  * The contract the fix routes `action:icon` into is the one `auto-trigger.ts`
@@ -38,12 +38,14 @@
  * spilled into the menu would be run by the menu, not by the icon.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type MockInstance } from 'vitest';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionContext, ActionDef, ActionResult } from '@object-ui/core';
-import { ActionProvider } from '@object-ui/react';
+import { ActionProvider, SchemaRenderer } from '@object-ui/react';
+import { undeclaredNode } from '@object-ui/test-support';
 // Module-scope side-effect imports — `action:bar` resolves its members through
 // the ComponentRegistry at render time, and the light `dom` project does not
 // load the `@object-ui/components` graph. Module scope, not a `beforeAll`, per
@@ -52,6 +54,7 @@ import '../action-bar';
 import '../action-button';
 import '../action-icon';
 import { toast } from '../../../ui/sonner';
+import { resetStaticParamsWarnings } from '../static-params';
 
 type Handler = Mock<(action: ActionDef, ctx: ActionContext) => Promise<ActionResult>>;
 
@@ -65,7 +68,7 @@ const ICON = {
   type: 'api',
   icon: 'plus',
   component: 'action:icon',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** The same declaration rendered by the default member renderer — the control. */
@@ -73,7 +76,7 @@ const BUTTON = {
   name: 'create_button',
   label: 'Create button',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** A declared, evaluable predicate that is false, so the gate really runs. */
@@ -103,7 +106,7 @@ function Bar({ actions }: { actions: Member[] }) {
   return (
     // eslint-disable-next-line react-hooks/static-components -- ComponentRegistry.get returns a registered renderer (stable reference), not a component created during render
     <C
-      schema={{ type: 'action:bar', location: 'list_toolbar', maxVisible: 10, mobileMaxVisible: 10, actions }}
+      schema={{ type: 'action:bar', location: 'list', maxVisible: 10, mobileMaxVisible: 10, actions }}
     />
   );
 }
@@ -238,3 +241,84 @@ describe("the icon's own declared visible gate outranks the flag (objectui#4191,
 function renderBar(actions: Member[]) {
   return render(tree(actions));
 }
+
+// ── objectstack#37266 — the shared label guard ──────────────────────────────
+//
+// `action:icon` reads its label through `renderableLabel`
+// (`../renderable-label.ts`), the guard `action:button` reads through (ruling A
+// on objectstack#36717), and so does the node-level-params warning in
+// `../static-params.ts`. Unguarded, an icon with no `icon` threw on
+// `label.charAt` and one with an icon wrote `[object Object]` into its
+// `aria-label`.
+
+describe('action:icon — a non-string label renders no text and never throws (objectstack#37266)', () => {
+  // Scoped to this describe. The file's own rows drive `action:icon` as an
+  // `action:bar` member with an `api` handler; these mount the icon node alone
+  // through `SchemaRenderer` with a `run` handler, as a page does.
+  const LOCALE_MAP = { en: 'Approve', 'zh-CN': '批准' };
+  let run: Handler;
+  let warn: MockInstance<(...args: unknown[]) => void>;
+  beforeEach(() => {
+    run = vi.fn(async () => ({ success: true }));
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    resetStaticParamsWarnings();
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    cleanup();
+  });
+  function mount(schema: Record<string, unknown>) {
+    return render(
+      <ActionProvider handlers={{ run }} onToast={vi.fn()}>
+        <SchemaRenderer schema={undeclaredNode(schema)} />
+      </ActionProvider>,
+    );
+  }
+  const labelWarnings = () => warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
+  const assertNothingLeaked = () => {
+    expect(document.body.innerHTML).not.toContain('[object Object]');
+    expect(document.body.textContent).not.toContain('批准');
+    expect(document.body.textContent).not.toContain('Approve');
+  };
+
+  it('no `icon`: renders the unlabelled initial, named by `name`, and still runs with no label', async () => {
+    mount({ type: 'action:icon', id: 'icon_label_guard', name: 'approve', actionType: 'run', label: LOCALE_MAP });
+    const button = screen.getByRole('button', { name: 'approve' });
+    expect(button.textContent).toBe('?');
+    assertNothingLeaked();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
+
+    const warned = labelWarnings().map((args) => String(args[0]));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('action:icon "icon_label_guard"');
+  });
+
+  it('with an `icon`: the accessible name is `name`, never `[object Object]`', () => {
+    mount({ type: 'action:icon', id: 'icon_label_named', name: 'approve', icon: 'check', actionType: 'run', label: LOCALE_MAP });
+    expect(screen.getByRole('button')).toHaveAttribute('aria-label', 'approve');
+    assertNothingLeaked();
+  });
+
+  it('a nameless action with node-level object `params`: the static-params warning prints no `[object Object]`', async () => {
+    mount({ type: 'action:icon', actionType: 'run', label: LOCALE_MAP, params: { stage: 'won' } });
+    fireEvent.click(screen.getByRole('button'));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const paramsWarning = warn.mock.calls.map((args) => String(args[0])).find((m) => m.includes('node-level'));
+    expect(paramsWarning).toBeDefined();
+    expect(paramsWarning).toContain('action "(unnamed)"');
+    expect(warn.mock.calls.some((args) => String(args[0]).includes('[object Object]'))).toBe(false);
+  });
+
+  it('CONTROL: a string label is the initial, the accessible name, and the runner label', async () => {
+    mount({ type: 'action:icon', id: 'icon_label_string', name: 'approve', actionType: 'run', label: 'Approve' });
+    const button = screen.getByRole('button', { name: 'Approve' });
+    expect(button.textContent).toBe('A');
+    fireEvent.click(button);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBe('Approve');
+    expect(labelWarnings()).toHaveLength(0);
+  });
+});

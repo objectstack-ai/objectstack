@@ -14,7 +14,7 @@ import {
   LazyIcon,
   toKebabIconName,
 } from '@object-ui/components';
-import { ExternalLink, PanelRightOpen, Trash2, X } from 'lucide-react';
+import { ClipboardPaste, Copy, Eraser, ExternalLink, History, PanelRightOpen, Trash2, X } from 'lucide-react';
 import type { BulkActionDef } from '@object-ui/types';
 import { useObjectTranslation } from '@object-ui/react';
 import {
@@ -37,6 +37,10 @@ import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '.
 const CONTEXT_MENU_FALLBACKS: Record<string, string> = {
   'table.open': 'Open',
   'detail.openInNewTab': 'Open in new tab',
+  'detail.fieldHistory': 'Change history',
+  'table.copyCell': 'Copy',
+  'table.pasteCell': 'Paste',
+  'table.clearCell': 'Clear',
 };
 
 function useContextMenuTranslation() {
@@ -48,11 +52,31 @@ function useContextMenuTranslation() {
 }
 
 /**
- * ONE row's context menu: Open, Open in new tab, then every action the row's
- * cell offers — the "⋮" items and the inline primaries the cell's width budget
- * keeps out of the "⋮". Same resolver ({@link useRowActionPlan}), same items
- * ({@link RowActionMenuItems}), same handlers (so the same confirm dialogs);
- * the only input read differently is the inline budget, `0` here.
+ * What the table does with the data cell the menu opened on
+ * (objectstack#36289): the `cell` member of `renderRowContextMenu`'s context.
+ * An absent action is one the table refuses on this cell.
+ */
+export interface RowContextMenuCell {
+  copy?: () => void;
+  paste?: () => void;
+  clear?: () => void;
+  /**
+   * Whether the field's type takes pasted text at all; `false` draws Paste
+   * unavailable even where the cell may be edited.
+   */
+  pasteable: boolean;
+}
+
+/**
+ * ONE row's context menu, in two sections (objectstack#36289). Above, when
+ * the menu opened on a data cell: that cell's Copy, Paste, Clear and Change
+ * history, each drawn unavailable (or, for Change history, left out) where
+ * the cell refuses it. Below, the row's: Open, Open in new tab, then every
+ * action the row's cell offers — the "⋮" items and the inline primaries the
+ * cell's width budget keeps out of the "⋮". Same resolver
+ * ({@link useRowActionPlan}), same items ({@link RowActionMenuItems}), same
+ * handlers (so the same confirm dialogs); the only input read differently is
+ * the inline budget, `0` here.
  */
 export const RowContextMenuItems: React.FC<{
   /** Exactly the props the row's "⋮" cell renders with. */
@@ -61,12 +85,58 @@ export const RowContextMenuItems: React.FC<{
   onOpen?: () => void;
   /** The record URL the row links to. Absent ⇒ no Open in new tab item. */
   newTabHref?: string | null;
-}> = ({ menu, onOpen, newTabHref }) => {
+  /**
+   * Open the change history of the field whose cell the menu opened on
+   * (objectstack#36290), at the point the item was chosen. Absent ⇒ no
+   * Change history item.
+   */
+  onFieldHistory?: (at: { x: number; y: number }) => void;
+  /** The data cell the menu opened on. Absent ⇒ no Copy, Paste or Clear item. */
+  cell?: RowContextMenuCell;
+}> = ({ menu, onOpen, newTabHref, onFieldHistory, cell }) => {
   const t = useContextMenuTranslation();
   const plan = useRowActionPlan(menu, 0);
   const hasOpen = !!onOpen || !!newTabHref;
+  const hasCellSection = !!cell || !!onFieldHistory;
+  const hasRowSection = hasOpen || plan.menuCount > 0;
   return (
     <>
+      {cell && (
+        <>
+          <DropdownMenuItem disabled={!cell.copy} onClick={() => cell.copy?.()} data-testid="row-context-cell-copy">
+            <Copy className="mr-2 h-4 w-4" />
+            {t('table.copyCell')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!cell.paste || !cell.pasteable}
+            onClick={() => cell.paste?.()}
+            data-testid="row-context-cell-paste"
+          >
+            <ClipboardPaste className="mr-2 h-4 w-4" />
+            {t('table.pasteCell')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!cell.clear} onClick={() => cell.clear?.()} data-testid="row-context-cell-clear">
+            <Eraser className="mr-2 h-4 w-4" />
+            {t('table.clearCell')}
+          </DropdownMenuItem>
+        </>
+      )}
+      {onFieldHistory && (
+        <DropdownMenuItem
+          onClick={(e) => {
+            // A pointer click opens the card where it was; the keyboard has no
+            // pointer, so the card opens at the item.
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const pointer = e.clientX !== 0 || e.clientY !== 0;
+            onFieldHistory(pointer ? { x: e.clientX, y: e.clientY } : { x: rect.left, y: rect.top });
+          }}
+          data-testid="row-context-field-history"
+        >
+          <History className="mr-2 h-4 w-4" />
+          {t('detail.fieldHistory')}
+        </DropdownMenuItem>
+      )}
+      {hasCellSection && hasRowSection && <DropdownMenuSeparator data-testid="row-context-cell-separator" />}
       {onOpen && (
         <DropdownMenuItem onClick={() => onOpen()} data-testid="row-context-open">
           <PanelRightOpen className="mr-2 h-4 w-4" />

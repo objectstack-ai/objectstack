@@ -27,6 +27,7 @@ import * as identityObjects from '../../identity/index.js';
 import * as auditObjects from '../../audit/index.js';
 import * as metadataObjects from '../../metadata/index.js';
 import * as systemObjects from '../../system/index.js';
+import * as workObjects from '../../work/index.js';
 import { SysMetadataCommitObject } from '@objectstack/metadata-core';
 
 // Objects the extract config (scripts/i18n-extract.config.ts) imports —
@@ -55,8 +56,10 @@ const OWNED_OBJECTS = new Set([
   // metadata (sys_view_definition retired as inert, ADR-0131 D13)
   'sys_metadata', 'sys_metadata_history', 'sys_metadata_audit', 'sys_metadata_commit',
   // system
-  'sys_setting', 'sys_platform_setting', 'sys_secret', 'sys_setting_audit', 'sys_platform_setting_audit', 'sys_migration', 'sys_exchange_rate', 'sys_unit',
+  'sys_setting', 'sys_platform_setting', 'sys_secret', 'sys_setting_audit', 'sys_platform_setting_audit', 'sys_migration', 'sys_exchange_rate', 'sys_unit', 'sys_standard_unit_setting',
   'sys_work_calendar', 'sys_work_calendar_exception',
+  // work — the built-in tasks and notes
+  'sys_task', 'sys_note',
 ]);
 
 describe('objects translation bundle ownership (ADR-0029 D8)', () => {
@@ -125,7 +128,7 @@ describe('no two visible fields of one platform object share a label in any loca
     ar: arObjects, de: deObjects, fr: frObjects, ko: koObjects, 'pt-BR': ptBRObjects, ru: ruObjects,
     'zh-Hant': zhHantObjects,
   } as Record<string, Record<string, any>>;
-  const defs = [identityObjects, auditObjects, metadataObjects, systemObjects, { SysMetadataCommitObject }]
+  const defs = [identityObjects, auditObjects, metadataObjects, systemObjects, workObjects, { SysMetadataCommitObject }]
     .flatMap((mod) => Object.values(mod as Record<string, any>))
     .filter((v) => v && typeof v === 'object' && typeof v.name === 'string' && OWNED_OBJECTS.has(v.name) && v.fields);
 

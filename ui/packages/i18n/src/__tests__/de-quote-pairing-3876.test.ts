@@ -452,7 +452,55 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 120 once objectstack-ai/objectstack#35688 added `fields.tags.add`, the
     // grid cell editor's row adding the typed tag („{{value}}“) — one
     // interpolated span, user input.
-    expect(okSpans, 'correctly paired spans').toBe(120);
+    // 121 once objectstack-ai/objectstack#35955 added
+    // `console.objectView.draft.saveToViewConfirm`, the shared-view save's
+    // question naming the view („{{name}}“) — one interpolated span, view data.
+    // 123 once objectstack-ai/objectstack#36011 added
+    // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, the
+    // factory-view restore's question and result naming the view („{{name}}“)
+    // — two interpolated spans, view data.
+    // 124 once objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, the palette's row creating a record
+    // from the typed words („{{query}}“) — one interpolated span, user input.
+    // 125 once objectstack-ai/objectstack#36363 added `designMode.menu.iconHint`,
+    // the menu editor's icon field naming an example icon („briefcase“) — one
+    // literal span.
+    // 127 once objectstack-ai/objectstack#36370 added `kanban.laneMenu.hideHint`
+    // and `list.optionsMenu.kanbanHiddenLanesHint`, the board's two lines naming
+    // the lane hidden cards land in („Nicht kategorisiert“) — two literal spans.
+    // 128 once objectstack-ai/objectstack#36364 added `designMode.menu.newItemLeft`,
+    // the design mode naming a new dashboard it could not remove („{{name}}“)
+    // — one interpolated span, the name the reader gave it.
+    // 129 once objectstack-ai/objectstack#36364's report half added
+    // `designMode.menu.newReportLeft`, the same sentence for a new report
+    // („{{name}}“) — one interpolated span.
+    // 133 once objectstack-ai/objectstack#36366 added `designMode.pins`: the
+    // header-buttons panel naming the 「More」 menu („Mehr“, twice) and the
+    // arranged action a save refuses („{{name}}“, twice), four spans.
+    // 134 once objectstack-ai/objectstack#36758 named the design mode by its
+    // door in `empty.appMenuEmptyDescription` („Layout
+    // gestalten“) — one literal span.
+    // 133 once objectstack-ai/objectstack#36692 retired the design mode's
+    // new-report flow, and with it `designMode.menu.newReportLeft` („{{name}}“)
+    // — one interpolated span fewer.
+    // 134 once objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`,
+    // the ban dialog's line naming the action that is off („Besitzer ändern“) —
+    // one literal span.
+    // 132 once objectstack-ai/objectstack#36739 folded the first-run
+    // checklist's name, language, timezone and currency rows into one
+    // `organizationBasics` row: the old `organizationName.todo` („{{name}}“)
+    // and `timezone.todo` („heute“) lines went with them, two spans fewer.
+    // 133 once objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`,
+    // the offer to ask about the record in view instead („{{target}}“) — one
+    // interpolated span.
+    // 135 once objectstack-ai/objectstack#36794 added `grid.import.referenceOutOfScope`
+    // („{{value}}“) and `grid.import.scopeEntry` („{{value}}“), the Import
+    // Wizard's line for a lookup value under another parent — two interpolated spans.
+    // 129 once objectstack-ai/objectstack#37682 retired the build chat's keys:
+    // `console.ai.empty.editApp.title`, `chatbot.plan.iterateOrNew.question` and
+    // `.extend`, `chatbot.plan.suggestedFieldLegend`, `chatbot.build.nextStepQuote`
+    // and `chatbot.build.draftPosture` — six spans fewer.
+    expect(okSpans, 'correctly paired spans').toBe(129);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -569,8 +617,37 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // after objectstack-ai/objectstack#35357 added
     // `approvalsInbox.slaCalendarNotFound`, one more matched pair. 120 / 120 / 0
     // after objectstack-ai/objectstack#35688 added `fields.tags.add`, one more
-    // matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 120, close: 120, rdq: 0 });
+    // matched pair. 121 / 121 / 0 after objectstack-ai/objectstack#35955 added
+    // `console.objectView.draft.saveToViewConfirm`, one more matched pair.
+    // 123 / 123 / 0 after objectstack-ai/objectstack#36011 added
+    // `console.objectView.restoreFactoryConfirm` and `restoreFactoryDone`, two
+    // more matched pairs.
+    // 124 / 124 / 0 after objectstack-ai/objectstack#36286 added
+    // `console.commandPalette.createAs`, one more matched pair.
+    // 125 / 125 / 0 after objectstack-ai/objectstack#36363 added
+    // `designMode.menu.iconHint`, one more matched pair.
+    // 127 / 127 / 0 after objectstack-ai/objectstack#36370 added
+    // `kanban.laneMenu.hideHint` and `list.optionsMenu.kanbanHiddenLanesHint`,
+    // two more matched pairs.
+    // 128 / 128 / 0 after objectstack-ai/objectstack#36364 added
+    // `designMode.menu.newItemLeft`, one more matched pair.
+    // 129 / 129 / 0 after its report half added `designMode.menu.newReportLeft`,
+    // one more matched pair.
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36366 added
+    // `designMode.pins`, four more matched pairs.
+    // 134 / 134 / 0 after objectstack-ai/objectstack#36758 named the design
+    // mode „Layout gestalten“ in `empty.appMenuEmptyDescription`, one more pair.
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36692 retired
+    // `designMode.menu.newReportLeft`, one matched pair fewer.
+    // 134 / 134 / 0 after objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`.
+    // 132 / 132 / 0 after objectstack-ai/objectstack#36739 removed the
+    // checklist's `organizationName.todo` and `timezone.todo`, two pairs fewer.
+    // 133 / 133 / 0 after objectstack-ai/objectstack#36999 added `console.ai.focus.switchPrompt`.
+    // 135 / 135 / 0 after objectstack-ai/objectstack#36794 added `grid.import.referenceOutOfScope`
+    // and `grid.import.scopeEntry`.
+    // 129 / 129 / 0 after objectstack-ai/objectstack#37682 retired six build-chat
+    // keys, one matched pair each.
+    expect({ open, close, rdq }).toEqual({ open: 129, close: 129, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

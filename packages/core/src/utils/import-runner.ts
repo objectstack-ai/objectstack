@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { coerceRow, type CoerceContext, type ReferenceMaster, type RefResolver, type RefMatch } from './import-coerce.js';
 import type { ExportFieldMeta } from './import-field-meta.js';
-import type { ValidationMessageTranslator } from '@objectstack/spec/system';
+import { renderValidationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 import {
   canServeApiOperation, isMultiValueField, isUniqueDeclared, isVirtualSearchField, referenceTargetOf, resolveDisplayField,
   STRUCTURED_JSON_TYPES,
@@ -89,6 +89,8 @@ export interface ImportRowResult {
   /**
    * [#25582] Every cell error of a failed row, one element per failed cell in
    * column order, each `{ field, code, message }` (`ImportRowResultSchema.errors`),
+   * plus `scope` on a `reference_out_of_scope` cell (the row's own columns the
+   * lookup was resolved within, #36794),
    * so one import names every bad cell instead of one per re-import. Filled
    * only from `coerceRow`'s cell errors, where `field` / `code` / `error` above
    * are element 0. ⛔ Never on a validate-verdict row or a refused write: their
@@ -816,6 +818,34 @@ const yieldToEventLoop = (): Promise<void> =>
   });
 
 /**
+ * [#36794] Whether a scoped lookup read was refused because its scope names a
+ * target field the caller cannot read: the field-predicate guard's
+ * `PermissionDeniedError` (`details.reason: 'field_predicate_denied'`, the one
+ * reason every such guard answers) naming at least one scope field. Read off
+ * the error's declared `details`, never its message.
+ */
+function isScopeFieldDenial(e: unknown, scope: Readonly<Record<string, unknown>>): boolean {
+  const details = (e as { details?: { reason?: unknown; fields?: unknown } } | null)?.details;
+  if (details?.reason !== 'field_predicate_denied' || !Array.isArray(details.fields)) return false;
+  return details.fields.some((f) => typeof f === 'string' && Object.prototype.hasOwnProperty.call(scope, f));
+}
+
+/**
+ * [#36794] Whether a scoped lookup read was refused because its scope names a
+ * target field the engine cannot filter by (a `formula`): the filter seam's
+ * refusal (`code: 'INVALID_FIELD'`, the code both filter doors declare) naming
+ * at least one scope field in its `fields`. Read off the error's declared
+ * properties, never its message, so any other refusal of the read (no read
+ * grant on the target, a driver fault) is not taken for this one.
+ */
+function isScopeFilterRefusal(e: unknown, scope: Readonly<Record<string, unknown>>): boolean {
+  const err = e as { code?: unknown; fields?: unknown; details?: { fields?: unknown } } | null;
+  if (err?.code !== 'INVALID_FIELD') return false;
+  const fields = Array.isArray(err.fields) ? err.fields : Array.isArray(err.details?.fields) ? err.details!.fields : [];
+  return (fields as unknown[]).some((f) => typeof f === 'string' && Object.prototype.hasOwnProperty.call(scope, f));
+}
+
+/**
  * [#27465] The refusal of a match key naming a field that holds a list or a
  * structured value, or `undefined` when every named field can be a key.
  *
@@ -832,11 +862,14 @@ const yieldToEventLoop = (): Promise<void> =>
  * map does not carry is judged by nobody, as cell coercion passes it through.
  *
  * One rule, two callers: the import door refuses the request with it
- * (`prepareImportRequest`, `400 INVALID_REQUEST`) before any row, and
- * {@link runImport} fails every row with it for a caller that reaches the
- * runner without that door (the connector pull writes a mapping's
- * `upsertKey` straight through), before any row is read or written.
- * `keyedBy` names what the caller read the key from.
+ * (`prepareImportRequest`, `400 INVALID_REQUEST`, this `message`) before any
+ * row, and {@link runImport} fails every row on its `fields` for a caller that
+ * reaches the runner without that door (the connector pull writes a mapping's
+ * `upsertKey` straight through), before any row is read or written. The row
+ * sentence is the runner's own catalog entry by field label
+ * (`validation.field.import_multi_value_match_key`), in the caller's locale
+ * when it passes one and English otherwise, as the other sentences of the row
+ * report are. `keyedBy` names what the door read the key from.
  */
 export function multiValueMatchKeyRefusal(
   matchFields: string[] | string[][],
@@ -981,6 +1014,12 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
       .filter((f) => !scope || !Object.prototype.hasOwnProperty.call(scope, f));
     const lookup = async (): Promise<RefMatch> => {
       let match: RefMatch = {};
+      // [#36794] Whether any candidate read ran to an answer, and whether a read
+      // was refused because the scope names a target field the engine cannot
+      // filter by (a formula). A scoped lookup none of whose reads answered, and
+      // at least one of whose refusals said so, never asked its question.
+      let asked = false;
+      let scopeUnfilterable = false;
       for (const f of candidates) {
         try {
           const r = await p.findData(findArgsBase({
@@ -990,11 +1029,27 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             // more conditions on the same read, run as the same caller.
             query: { object: referenceObject, where: { [f]: display, ...(scope ?? {}) }, limit: 2 },
           }));
+          asked = true;
           const recs = findRows(r);
           if (recs.length === 0) continue;
           if (recs.length > 1) { match = { ambiguous: true, matchedField: f }; break; }
           if (recs[0]?.id != null) { match = { id: String(recs[0].id), matchedField: f }; break; }
-        } catch { /* field absent on target object — try the next candidate */ }
+        } catch (e) {
+          // [#36794] A scope naming a target field the caller cannot read is
+          // refused by the field-predicate guard, so this miss says nothing
+          // about where the value lives: report it as such, never as a record
+          // that lives under another parent.
+          if (scope && isScopeFieldDenial(e, scope)) { match = { scopeDenied: true }; break; }
+          if (scope && isScopeFilterRefusal(e, scope)) scopeUnfilterable = true;
+          /* field absent on target object — try the next candidate */
+        }
+      }
+      // Any other refusal (no read grant on the target, a driver fault, a scope
+      // cell the field's type cannot take) keeps the plain sentence: nothing says
+      // the scope column was the cause. [#37717] It is still a lookup that asked
+      // nothing, so it is marked as one and never probed without the scope.
+      if (scope && !asked && !match.scopeDenied) {
+        match = scopeUnfilterable ? { scopeUnqueryable: true } : { scopeUnanswered: true };
       }
       return match;
     };
@@ -1069,6 +1124,66 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     timezone: typeof context?.timezone === 'string' && context.timezone
       ? String(context.timezone) : undefined,
   };
+
+  /** A field's LABEL, or its API name where the field has none. */
+  const fieldLabel = (f: string): string => metaMap.get(f)?.label?.trim() || f;
+  /**
+   * The sentence a {@link rowsSharingKey} row is refused with, in the importing
+   * principal's locale through the same catalog and override hook as the cell
+   * failures beside it (`validation.field.import_duplicate_match_key`). The
+   * key set is named by field LABEL, the API name only where a field has none,
+   * as the cell failures name their column; the row numbers are kept. The API
+   * names ride along as `{{field}}` for a deployment override that wants them;
+   * no built-in sentence prints them.
+   */
+  const duplicateMatchKeyMessage = (rowNos: readonly number[], keySet: readonly string[]): string =>
+    renderValidationMessage(
+      {
+        messageKey: 'import_duplicate_match_key',
+        label: keySet.map(fieldLabel).join(' + '),
+        field: keySet.join(' + '),
+        params: { rows: rowNos.join(', ') },
+      },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  /**
+   * The importer's two other ROW refusals, read the same way as
+   * {@link duplicateMatchKeyMessage}: a row blank on every ordered key set
+   * (`validation.field.import_blank_match_key`, the sets by label, a set's
+   * fields joined with ` + ` and the sets with `; `), and a match key naming a
+   * field that holds a list or a structured value
+   * (`validation.field.import_multi_value_match_key`, those fields by label,
+   * joined with `, `). `{{field}}` carries the same names as API names. The
+   * locale and the override hook are the caller's: a caller that passes no
+   * `context.locale` reads English, and one that passes no `translate` gets no
+   * deployment override (the connector and datasource pulls pass neither).
+   */
+  const blankMatchKeyMessage = (sets: readonly (readonly string[])[]): string =>
+    renderValidationMessage(
+      {
+        messageKey: 'import_blank_match_key',
+        label: sets.map((set) => set.map(fieldLabel).join(' + ')).join('; '),
+        field: sets.map((set) => set.join(' + ')).join('; '),
+      },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  const multiValueMatchKeyMessage = (fields: readonly string[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', '), field: fields.join(', ') },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  /**
+   * The ROW refusal for a row whose match key finds more than one stored
+   * record (`AMBIGUOUS_MATCH`), read the same way as its siblings above:
+   * `validation.field.import_ambiguous_match`, the key set the row was matched
+   * by in `{{label}}` (field LABELS joined with ` + `) and its API names in
+   * `{{field}}`. Like the siblings, it names no object.
+   */
+  const ambiguousMatchMessage = (keySet: readonly string[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_ambiguous_match', label: keySet.map(fieldLabel).join(' + '), field: keySet.join(' + ') },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
 
   /**
    * [#26133] The rows of this import that share a match key, each mapped to
@@ -1559,9 +1674,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     // here; this answers the callers that reach the runner without it.
     const refusedKey = writeMode === 'insert' ? undefined : multiValueMatchKeyRefusal(matchFields, metaMap);
     if (refusedKey) {
+      const error = multiValueMatchKeyMessage(refusedKey.fields);
       for (let i = 0; i < rows.length; i++) {
         results[i] = {
-          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error: refusedKey.message,
+          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error,
         };
       }
       errCount = rows.length;
@@ -1580,14 +1696,14 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
           errCount++;
           results[i] = {
             row: rowNo, ok: false, action: 'failed', field: first.field, code: first.code, error: first.message,
-            errors: errors.map(({ field, code, message }) => ({ field, code, message })),
+            errors: errors.map(({ field, code, message, scope }) => ({ field, code, message, ...(scope ? { scope } : {}) })),
           };
         } else if (shared) {
           // [#26133] Another row of this import carries the same key.
           errCount++;
           results[i] = {
             row: rowNo, ok: false, action: 'failed', code: 'DUPLICATE_MATCH_KEY',
-            error: `Rows ${shared.rowNos.join(', ')} of this import have the same match key (${shared.keySet.join(' + ')}), so none of them was written: keep one row per key and import again`,
+            error: duplicateMatchKeyMessage(shared.rowNos, shared.keySet),
           };
         } else {
           // [#22183] This row's write context: the kept option values ride along.
@@ -1600,7 +1716,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
             ({ match: existing, keySet: matchedKeySet } = await findExisting(data));
             if (existing === 'ambiguous') {
               errCount++;
-              results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: `matchFields matched more than one ${objectName} record` };
+              results[i] = { row: rowNo, ok: false, action: 'failed', code: 'AMBIGUOUS_MATCH', error: ambiguousMatchMessage(matchedKeySet) };
               handled = true;
             } else if (existing === 'blank' && blankKeyIsRowError) {
               // Ordered key sets: a row no set can identify is an error, never
@@ -1608,7 +1724,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               errCount++;
               results[i] = {
                 row: rowNo, ok: false, action: 'failed', code: 'BLANK_MATCH_KEY',
-                error: `The row has no match key: every key set in matchFields (${keySets.map((set) => set.join(' + ')).join('; ')}) has a blank field on it`,
+                error: blankMatchKeyMessage(keySets),
               };
               handled = true;
             } else if (existing === 'blank' && (skipBlankMatchKey || writeMode === 'update')) {

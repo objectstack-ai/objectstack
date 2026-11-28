@@ -47,7 +47,8 @@
  * The fixture makes both helpers wrap: `task` has a list view (merged into its
  * `listViews`), and `project`'s field group names `task` (objectstack#35889:
  * the group, not the FK's `inlineEdit`, inlines a child), so `project` gets a
- * derived form `subforms` entry.
+ * derived `groupSubforms` entry (objectstack-ai/objectstack#36425: no longer
+ * merged into a `form`).
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -132,7 +133,7 @@ function mount(served: Record<string, unknown[]>) {
   };
 }
 
-type Def = { name: string; fields?: Record<string, unknown>; listViews?: Record<string, unknown>; form?: { subforms?: unknown[] } };
+type Def = { name: string; fields?: Record<string, unknown>; listViews?: Record<string, unknown>; groupSubforms?: unknown[] };
 const byName = (list: unknown[], name: string) => (list as Def[]).find((o) => o.name === name);
 
 /** Wait until both helpers have had something to wrap. */
@@ -140,7 +141,7 @@ async function untilComposed(ctx: () => Ctx) {
   await waitFor(() => {
     const task = byName(ctx().objects, 'task');
     expect(task?.listViews?.['task.all']).toBeTruthy();
-    expect(byName(ctx().objects, 'project')?.form?.subforms).toHaveLength(1);
+    expect(byName(ctx().objects, 'project')?.groupSubforms).toHaveLength(1);
   });
 }
 
@@ -200,7 +201,7 @@ describe('MetadataProvider: the composed `objects` list keeps its identity (obje
     expect(m.ctx().objects).not.toBe(first);
     // Still composed: the merge and the subform pass ran over the new list.
     expect(byName(m.ctx().objects, 'task')?.listViews?.['task.all']).toBeTruthy();
-    expect(byName(m.ctx().objects, 'project')?.form?.subforms).toHaveLength(1);
+    expect(byName(m.ctx().objects, 'project')?.groupSubforms).toHaveLength(1);
   });
 
   it('LIVE CONTROL: replacing the stored views hands back a new list carrying the change', async () => {

@@ -36,7 +36,7 @@ import { SeedSchema } from '../data/seed.zod';
 import { MappingSchema } from '../data/mapping.zod';
 import { PicklistSchema } from '../data/picklist.zod';
 
-import { ViewMetadataSchema } from '../ui/view.zod';
+import { ViewMetadataSchema, FormSchema } from '../ui/view.zod';
 import { PageSchema } from '../ui/page.zod';
 import { DashboardSchema } from '../ui/dashboard.zod';
 import { AppSchema } from '../ui/app.zod';
@@ -72,6 +72,8 @@ import { PositionSchema } from '../identity/position.zod';
 import { AgentSchema } from '../ai/agent.zod';
 import { ToolSchema } from '../ai/tool.zod';
 import { SkillSchema } from '../ai/skill.zod';
+import { AiContextSchema } from '../ai/ai-context.zod';
+import { KnowledgeSourceSchema } from '../ai/knowledge-source.zod';
 
 import type { MetadataType } from './metadata-plugin.zod';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from './metadata-plugin.zod';
@@ -112,6 +114,7 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   // served by no read path. Every consumer of this entry — saveMetaItem's 422
   // gate and the read-time diagnostics badge — inherits that refusal here.
   view: ViewMetadataSchema,
+  form: FormSchema, // ADR-0159: the authored `form` item; projected old shapes are never parsed by it (D5)
   page: PageSchema,
   dashboard: DashboardSchema,
   app: AppSchema,
@@ -204,6 +207,8 @@ const BUILTIN_METADATA_TYPE_SCHEMAS: Partial<Record<MetadataType, z.ZodType>> = 
   agent: AgentSchema,
   tool: ToolSchema,
   skill: SkillSchema,
+  ai_context: AiContextSchema,
+  knowledge_source: KnowledgeSourceSchema,
 };
 
 /**

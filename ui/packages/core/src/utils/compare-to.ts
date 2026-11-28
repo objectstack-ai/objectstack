@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { resolveDateMacros } from './date-macros.js';
+import { resolveDateMacros, resolvePeriodKeyTokens } from './date-macros.js';
 
 /**
  * Period-over-period comparison config for dashboard widgets.
@@ -133,6 +133,24 @@ function lastPeriodBefore(token: string, now: Date): string | undefined {
   return isoShift(lastStart, { years: -1 });
 }
 
+/**
+ * The ISO week key just before the one `{current_iso_week}` resolves to at
+ * `now` (objectstack#35395). A period key is not a date macro, so no token
+ * rename moves it, and left as written the server resolves it to THIS week:
+ * the comparison series filtered the same week as the current one. It is
+ * written as the literal key instead, which every resolver passes through.
+ * Week 1 steps back into the previous ISO year's last week, W53 when that
+ * year starts on a Thursday (or a Wednesday in a leap year), else W52.
+ */
+function previousIsoWeekKey(now: Date): string {
+  const [year, week] = resolvePeriodKeyTokens('{current_iso_week}', now).split('-W').map(Number);
+  if (week > 1) return `${year}-W${String(week - 1).padStart(2, '0')}`;
+  const prev = year - 1;
+  const jan1 = new Date(Date.UTC(prev, 0, 1)).getUTCDay();
+  const leap = (prev % 4 === 0 && prev % 100 !== 0) || prev % 400 === 0;
+  return `${prev}-W${jan1 === 4 || (leap && jan1 === 3) ? 53 : 52}`;
+}
+
 const WHOLE_TOKEN_RE = /^\$?\{([a-zA-Z0-9_]+)\}$/;
 const ROLLING_DAYS_RE = /^(\d+)_days_(ago|from_now)$/;
 
@@ -213,13 +231,17 @@ function hasRollingWindow(value: unknown): boolean {
 }
 
 /**
- * Replace every `{token}` / `${token}` in `value` with what `replace` returns
- * for it, in ONE pass, so no replacement is replaced again.
+ * Replace every string in `value` that is one whole `{token}` / `${token}`
+ * with what `replace` returns for it, in ONE pass, so no replacement is
+ * replaced again. A string that merely contains a token is a literal
+ * (`resolveDateMacros` leaves it as written), so it is not renamed either:
+ * the comparison query filters on the same literal as the current one.
  */
 function substituteTokens<T>(value: T, replace: (token: string) => string | undefined): T {
   if (value == null) return value;
   if (typeof value === 'string') {
-    return value.replace(/\$?\{([a-zA-Z0-9_]+)\}/g, (m, tok) => replace(tok) ?? m) as any;
+    const tok = wholeToken(value);
+    return (tok === undefined ? value : replace(tok) ?? value) as any;
   }
   if (Array.isArray(value)) return value.map((v) => substituteTokens(v, replace)) as any;
   if (typeof value === 'object') {
@@ -242,7 +264,8 @@ function substituteTokens<T>(value: T, replace: (token: string) => string | unde
  *   (objectstack#30140), and `{N_days_ago}` … `{today}` becomes
  *   `{(2N+1)_days_ago}` … `{(N+1)_days_ago}` (objectstack#30197). Then
  *   `next_month_*` / `next_quarter_*` become `current_*`, and `{yesterday}` /
- *   `last_*` become the period before them ({@link lastPeriodBefore}). Each
+ *   `last_*` become the period before them ({@link lastPeriodBefore}), and
+ *   `{current_iso_week}` becomes last week's key ({@link previousIsoWeekKey}). Each
  *   token is substituted once, so no window moves back twice.
  */
 export function shiftFilterByCompareTo<T = any>(
@@ -262,7 +285,8 @@ export function shiftFilterByCompareTo<T = any>(
       now.getMinutes(),
       now.getSeconds(),
     );
-    return resolveDateMacros(filter, shifted);
+    // The period key too: the same ISO week of the shifted day, not this one.
+    return resolvePeriodKeyTokens(resolveDateMacros(filter, shifted), shifted);
   }
   // previousPeriod. The rolling pair goes first, so it claims its `{today}`
   // before the generic `today` → `yesterday` swap can; the `{K_day(s)_ago}`
@@ -274,6 +298,7 @@ export function shiftFilterByCompareTo<T = any>(
   const substituted = substituteTokens(rolled, (tok) => {
     const renamed = PREVIOUS_PERIOD_TOKENS[tok];
     if (renamed) return `{${renamed}}`;
+    if (tok === 'current_iso_week') return previousIsoWeekKey(now);
     return lastPeriodBefore(tok, now);
   });
   return resolveDateMacros(substituted, now);
@@ -309,7 +334,7 @@ export function compareToTrendLabelKey(
   if (/current_quarter_|quarter_start|quarter_end/.test(json)) return 'vsLastQuarter';
   if (/next_month_(start|end)/.test(json)) return 'vsThisMonth';
   if (/current_month_|month_start|month_end/.test(json)) return 'vsLastMonth';
-  if (/current_week_|week_start|week_end/.test(json)) return 'vsLastWeek';
+  if (/current_week_|week_start|week_end|current_iso_week/.test(json)) return 'vsLastWeek';
   if (hasRollingWindow(filter)) return 'vsPreviousPeriod';
   if (/\btoday\b/.test(json)) return 'vsYesterday';
   return 'vsPreviousPeriod';

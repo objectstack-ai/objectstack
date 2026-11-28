@@ -27,7 +27,7 @@
  *
  * This is the "bridge" component that connects UIActionSchema metadata to the UI,
  * enabling server-driven action rendering at every location the spec declares:
- * list_toolbar, list_item, record_header, record_more, record_related and
+ * list, record_row, record, record_page, record_related and
  * record_section. (`global_nav` used to close that list; it was retired from
  * `ACTION_LOCATIONS` in @objectstack/spec 17.0.0-rc.6 — objectstack#6888 — as a
  * location no running-app surface ever rendered. The enum this component
@@ -38,7 +38,7 @@
  * ```tsx
  * <SchemaRenderer schema={{
  *   type: 'action:bar',
- *   location: 'record_header',
+ *   location: 'record_page',
  *   actions: [
  *     { name: 'mark_complete', label: 'Mark Complete', type: 'script', icon: 'check', component: 'action:button' },
  *     { name: 'delete', label: 'Delete', type: 'api', icon: 'trash', variant: 'danger', component: 'action:button' },
@@ -51,7 +51,7 @@ import React, { forwardRef, useMemo } from 'react';
 import { ComponentRegistry, isActionSwitchedOff } from '@object-ui/core';
 import type { UIActionSchema, ActionBarSchema, ActionComponent } from '@object-ui/types';
 import { ACTION_LOCATIONS, actionRendersAt } from '@object-ui/types';
-import { useCondition, toPredicateInput, useCapabilityGate, useConfigBagEvaluator } from '@object-ui/react';
+import { useCondition, toPredicateInput, useCapabilityGate, useConfigBagEvaluator, useDrawsAction } from '@object-ui/react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { cn } from '../../lib/utils';
 import { useIsMobile } from '../../hooks/use-mobile';
@@ -128,6 +128,9 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
     const isMobile = useIsMobile();
     // [ADR-0066 D4 / framework#3923] Shared capability gate — see below.
     const mayInvoke = useCapabilityGate();
+    // [ADR-0160 D7] An `ask_ai` action is drawn only where the provider has an
+    // in-app assistant to hand its record to.
+    const drawsAction = useDrawsAction();
     // The `SchemaRenderer` memo's `properties` evaluation, for the members this
     // bar draws itself (objectui#10290) — see `renderMember` below.
     const evaluateBag = useConfigBagEvaluator();
@@ -144,12 +147,12 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
       const actions: UIActionSchema[] = schema.actions || [];
       // [ADR-0066 D4 / framework#3923] Capability gate — this bar filters its
       // own set instead of going through `ActionEngine.getActionsForLocation`,
-      // so without this a `list_toolbar` action declaring a capability nobody
+      // so without this a `list` action declaring a capability nobody
       // holds rendered as a live button. Same rule as the engine; unknown
       // capabilities fail OPEN (see `useCapabilityGate`).
       // [objectstack#27504] …and an action this installation switched off is
       // not offered either: the served activation state, beside the same gate.
-      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions) && !isActionSwitchedOff(a));
+      const permitted = actions.filter(a => mayInvoke((a as any)?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a));
       // Placement is `actionRendersAt`'s call, not ours (objectui#3142): an
       // action renders here only if it DECLARES this location. This bar used
       // to show a locationless action at every location, which is how an
@@ -192,7 +195,7 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
         });
       }
       return deduped;
-    }, [schema.actions, schema.location, mayInvoke]);
+    }, [schema.actions, schema.location, mayInvoke, drawsAction]);
 
     // System actions: always go into the overflow menu, deduped by name,
     // never filtered by location (they're chrome, not business logic).

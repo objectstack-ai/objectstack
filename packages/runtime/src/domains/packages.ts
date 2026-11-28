@@ -38,11 +38,19 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from 
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
 // activation ledger's one reader (`@objectstack/core`).
 import { customizationBasePackageId } from '@objectstack/spec/kernel';
+// [#36626, ADR-0146 D10] The arrangement keys an extension writes, read through
+// the spec's one reading of the frozen list (`CUSTOM_ARRANGEMENT_KEYS`), the one
+// the registry fold and the doors' judge read.
+import { CUSTOM_ARRANGEMENT_KEYS, extensionArrangementKeys } from '@objectstack/spec/data';
 import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
 // every package write door below, never restated here.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+// [ADR-0161 K4, guard two] Source admission, asked for each knowledge source a
+// duplicate would copy (`refuseDuplicatedKnowledgeSources`).
+import { KNOWLEDGE_SOURCE_ADMISSION_SERVICE, authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
+import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
 // refusal. The install branch asks the predicate ahead of its generic catch,
@@ -148,6 +156,9 @@ import { ManifestSchema, SEMVER_2_0_0_VERSION_PATTERN, manifestIdRefusal } from 
 // parameter a door does not read (`packages/rest/src/query-allowlist.ts`),
 // asked by every write door (`refusePackageWriteDoorQuery`, #26857).
 import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
+// [ADR-0161 K4, guard one] The `/meta` type-level write admission, asked by the
+// package verbs that reach a `knowledge_source` (`refuseKnowledgeSourcePackageWrite`).
+import { metaTypeWriteRefusal } from '@objectstack/rest';
 // [commit 0862063ba] The repo's ONE coercion for a query parameter its schema declares
 // `z.boolean()`, from the module whose header is the authority on the rule
 // (`packages/runtime/src/query-param.ts`). Imported, never restated: the list
@@ -190,6 +201,7 @@ import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 // the spec's one reference arbiter: never a second parser.
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
 import { referenceTargetOf } from '@objectstack/spec/data';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -273,6 +285,11 @@ export type PackagesDomainProtocol =
          * from the producer's own signature.
          */
         getMetaItemForExecution?: ObjectStackProtocolImplementation['getMetaItemForExecution'];
+        /**
+         * [ADR-0161 K4, guard one] The pending-draft listing the knowledge
+         * source gate reads, typed from the producer's own signature.
+         */
+        listDrafts?: ObjectStackProtocolImplementation['listDrafts'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -400,6 +417,253 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
             handled: true,
             response: deps.error('Managing packages requires the `manage_metadata` capability.', 403),
         };
+    }
+    return null;
+}
+
+/** The governed type {@link refuseKnowledgeSourcePackageWrite} asks about. */
+const KNOWLEDGE_SOURCE_PACKAGE_TYPE = 'knowledge_source';
+
+/**
+ * Where a package can hold a knowledge source, for {@link refuseKnowledgeSourcePackageWrite}:
+ *
+ *  - `drafts`: its pending drafts;
+ *  - `items`: the items it holds, as the per-package layer lists them;
+ *  - `history`: its commit timeline, read by the verbs that rewrite items from
+ *    it. The per-commit revert reads the one commit named (`commitId`), the
+ *    rollback every commit.
+ */
+type KnowledgeSourcePackageReach = 'drafts' | 'items' | 'history';
+
+/**
+ * [ADR-0161 K4, guard one, at the package doors] A write to a package that
+ * holds a `knowledge_source` asks `manage_knowledge_sources` beside
+ * `manage_metadata`, as the `/meta` doors do for one item.
+ *
+ * The package doors act on many items at once: publish-drafts makes every
+ * pending draft live, discard-drafts and revert drop them, the commit revert
+ * and the rollback rewrite items from the timeline, duplicate copies a
+ * package's items into a new one, adopt-orphans binds items to it, and enable,
+ * disable and delete decide whether its items are served at all. Where one of
+ * those items is a knowledge source the verb does to it what a `/meta` write
+ * would. So the rule is stated on the package and is the same at every door
+ * that writes an existing package: one that holds a knowledge source is
+ * written by a holder of the capability that write asks
+ * (`metaTypeWriteRefusal`, the one decision).
+ *
+ * Asked right after {@link requireManageMetadata} and the wall, and before
+ * anything is written. A holder of the capability, and the engine's own call
+ * (`isSystem`), are answered without a read. For anyone else the package is
+ * read ({@link KnowledgeSourcePackageReach}); one that holds no knowledge
+ * source is untouched by this gate, so the doors behave as before for it.
+ *
+ * Fail direction: closed. A read that throws refuses the verb `503`; nothing
+ * was changed. A protocol with no such listing cannot hold the items the
+ * listing would name, so an absent member is not a refusal: it is the
+ * capability probe every door of this file already asks.
+ *
+ * Not asked by the install door (`POST /packages`): a packaged source arrives
+ * by that door's own admission, as ADR-0161 K4 leaves it. Not asked by the
+ * ensure-customization door either: it writes nothing of the package its path
+ * names, and the pair it creates is empty.
+ */
+async function refuseKnowledgeSourcePackageWrite(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    input: {
+        packageId: string;
+        /** The refused write, as the message names it, e.g. `Deleting package "x"`. */
+        action: string;
+        reach: readonly KnowledgeSourcePackageReach[];
+        /** With `history`: the one commit the verb reverts. Absent: the whole timeline. */
+        commitId?: string;
+    },
+): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return null;
+    const refusal = metaTypeWriteRefusal('POST', KNOWLEDGE_SOURCE_PACKAGE_TYPE, ec);
+    if (!refusal) return null;
+
+    const { packageId, action } = input;
+    let found: string | undefined;
+    try {
+        const protocol = await resolveProtocol(deps, context);
+        found = await knowledgeSourceInPackageReach(protocol, input);
+    } catch (e) {
+        return {
+            handled: true,
+            response: deps.error(
+                `${action} is refused: whether package "${packageId}" holds a knowledge source could not be read `
+                + `(${clientFacingFailureText(e, 'the listing failed')}), and a change that reaches one requires the `
+                + '`manage_knowledge_sources` capability. Nothing was changed; try again.',
+                503,
+            ),
+        };
+    }
+    if (found === undefined) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `${action} is refused: package "${packageId}" holds ${found}, and creating, changing or removing a `
+            + 'knowledge source requires the `manage_knowledge_sources` capability beside `manage_metadata`. '
+            + 'Nothing was changed. Ask someone who holds that capability to do this.',
+            refusal.status,
+        ),
+    };
+}
+
+/** The metadata store objects the knowledge-source listings read. */
+const KNOWLEDGE_SOURCE_ITEM_STORE = 'sys_metadata';
+const KNOWLEDGE_SOURCE_HISTORY_STORE = 'sys_metadata_commit';
+
+/**
+ * Whether a listing failed because this host has no metadata store to list:
+ * the store's table was never created (`isMissingTableError`, the predicate the
+ * protocol's own overlay reads use), or the engine holds no such object
+ * (`OBJECT_NOT_FOUND` carrying the store's own name). A store that does not
+ * exist holds no draft, item or commit, so the listing's answer is "none" and
+ * the door goes on as it does on that host today.
+ *
+ * Conservative in the direction the protocol's rule is: only those two
+ * positively identified shapes read as absent. Every other failure is a
+ * listing that could not be read, and the gate refuses.
+ */
+function knowledgeSourceStoreIsAbsent(error: unknown, store: string): boolean {
+    if (isMissingTableError(error, store)) return true;
+    for (let node: any = error, depth = 0; node !== null && typeof node === 'object' && depth < 8; node = node.cause, depth += 1) {
+        if (node.code === 'OBJECT_NOT_FOUND' && node.object === store) return true;
+    }
+    return false;
+}
+
+/**
+ * The knowledge sources a package holds, read from the per-package layer
+ * (`getMetaItemsPerPackage`): the package's own items, never another
+ * package's item served under the same name. A protocol with no such layer,
+ * and a host with no metadata store ({@link knowledgeSourceStoreIsAbsent}),
+ * answer none. Throws when the listing throws for any other reason.
+ */
+async function packageKnowledgeSourceItems(protocol: PackagesDomainProtocol, packageId: string): Promise<any[]> {
+    if (typeof protocol.getMetaItemsPerPackage !== 'function') return [];
+    try {
+        const listed: any = await protocol.getMetaItemsPerPackage({ type: KNOWLEDGE_SOURCE_PACKAGE_TYPE, packageId });
+        return Array.isArray(listed?.items) ? listed.items : [];
+    } catch (e) {
+        if (knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_ITEM_STORE)) return [];
+        throw e;
+    }
+}
+
+/**
+ * The first knowledge source a verb's reach holds, as a phrase the refusal
+ * can name, or `undefined` when the reach holds none. Throws when a listing
+ * throws; the gate refuses then.
+ */
+async function knowledgeSourceInPackageReach(
+    protocol: PackagesDomainProtocol | undefined,
+    input: { packageId: string; reach: readonly KnowledgeSourcePackageReach[]; commitId?: string },
+): Promise<string | undefined> {
+    if (!protocol) return undefined;
+    const { packageId, reach } = input;
+    const isKnowledgeSource = (type: unknown): boolean =>
+        typeof type === 'string' && (PLURAL_TO_SINGULAR[type] ?? type) === KNOWLEDGE_SOURCE_PACKAGE_TYPE;
+    const named = (name: unknown): string => (typeof name === 'string' && name ? ` "${name}"` : '');
+
+    if (reach.includes('drafts') && typeof protocol.listDrafts === 'function') {
+        let drafts: Array<{ type: string; name: string }> = [];
+        try {
+            drafts = (await protocol.listDrafts({ packageId, type: KNOWLEDGE_SOURCE_PACKAGE_TYPE }))?.drafts ?? [];
+        } catch (e: any) {
+            // `INVALID_REQUEST` is the listing's own answer for an id no
+            // installed package and no draft carries: there is nothing pending
+            // to reach, and the door answers that id as it always has. A host
+            // with no metadata store holds no draft either.
+            if (e?.code !== 'INVALID_REQUEST' && !knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_ITEM_STORE)) throw e;
+        }
+        const draft = drafts.find((d) => isKnowledgeSource(d?.type));
+        if (draft) return `a pending draft of the knowledge source${named(draft.name)}`;
+    }
+    if (reach.includes('items')) {
+        const items = await packageKnowledgeSourceItems(protocol, packageId);
+        if (items.length > 0) return `the knowledge source${named(items[0]?.name)}`;
+    }
+    if (reach.includes('history') && typeof protocol.listCommits === 'function') {
+        let commits: any[] = [];
+        try {
+            commits = (await protocol.listCommits({ packageId })) ?? [];
+        } catch (e) {
+            if (!knowledgeSourceStoreIsAbsent(e, KNOWLEDGE_SOURCE_HISTORY_STORE)) throw e;
+        }
+        const one = input.commitId === undefined ? undefined : commits.find((c) => c?.id === input.commitId);
+        // A named commit the timeline lists is judged alone; one it does not
+        // list, and the rollback, are judged on the whole timeline.
+        for (const commit of one ? [one] : commits) {
+            const item = (Array.isArray(commit?.items) ? commit.items : []).find((i: any) => isKnowledgeSource(i?.type));
+            if (item) return `the knowledge source${named(item.name)} in its commit history`;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * [ADR-0161 K4, guard two, at the duplicate door] A duplicate saves each of
+ * the source package's knowledge sources again, in the copy, and the caller
+ * is the author of every one of them. So each is admitted for that caller
+ * before anything is copied, by the predicate the `/meta` save asks
+ * (`authoredKnowledgeSourceRefusal`): the caller must themselves be allowed to
+ * search what the source indexes. The first source refused refuses the whole
+ * duplicate with the predicate's own status and sentence; nothing was copied.
+ *
+ * Asked of every caller but the engine's own call, a holder of
+ * `manage_knowledge_sources` included: the capability says who may author a
+ * source, and this says what a given author may index.
+ *
+ * The item is judged as the source package holds it. The copy renames the
+ * package's objects, and the renamed object carries the same fields, so the
+ * source's own object is the one whose rules the caller can be asked about
+ * before the copy exists.
+ *
+ * Fail direction: closed, as the predicate's is. A listing that throws
+ * refuses `503`; a protocol with no per-package listing holds nothing to
+ * judge.
+ */
+async function refuseDuplicatedKnowledgeSources(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    protocol: PackagesDomainProtocol,
+    packageId: string,
+): Promise<HttpDispatcherResult | null> {
+    const ec: any = context?.executionContext;
+    if (ec?.isSystem) return null;
+    const action = `Duplicating package "${packageId}"`;
+    let items: any[] = [];
+    try {
+        items = await packageKnowledgeSourceItems(protocol, packageId);
+    } catch (e) {
+        return {
+            handled: true,
+            response: deps.error(
+                `${action} is refused: the knowledge sources of the package could not be read `
+                + `(${clientFacingFailureText(e, 'the listing failed')}), and each one a duplicate copies is admitted for `
+                + 'the caller first. Nothing was copied; try again.',
+                503,
+            ),
+        };
+    }
+    for (const item of items) {
+        const refused = await authoredKnowledgeSourceRefusal({
+            type: KNOWLEDGE_SOURCE_PACKAGE_TYPE,
+            item,
+            executionContext: ec,
+            resolveKnowledgeService: () =>
+                deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+        });
+        if (refused) {
+            return {
+                handled: true,
+                response: deps.error(`${action} is refused, and nothing was copied. ${refused.message}`, refused.status),
+            };
+        }
     }
     return null;
 }
@@ -2828,6 +3092,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Enabling package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Enabling package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Enabling package "${id}"`);
@@ -2891,6 +3161,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Disabling package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Disabling package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Disabling package "${id}"`);
@@ -2966,6 +3242,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Publishing package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#22113] ADR-0070 D2: a code or installed package is read-only, so
             // this door refuses it BEFORE `publishPackage`, which would otherwise
@@ -3008,6 +3290,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Publishing the drafts of package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Publishing the drafts of package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.publishPackageDrafts === 'function') {
@@ -3443,7 +3731,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Draft publishing not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_draft_publish_unsupported');
         }
 
         // POST /packages/:id/discard-drafts → drop every pending DRAFT bound
@@ -3459,6 +3747,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Discarding the drafts of package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Discarding the drafts of package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
@@ -3482,7 +3776,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Draft discarding not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_draft_discard_unsupported');
         }
 
         // ── ADR-0067: package-scoped commit history & rollback ──────────
@@ -3510,7 +3804,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit history not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_history_unsupported');
         }
 
         // POST /packages/:id/commits/:commitId/revert → revert ONE commit
@@ -3533,6 +3827,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting commit "${commitId}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Reverting commit "${commitId}"`, reach: ['drafts', 'items', 'history'], commitId,
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
@@ -3551,7 +3851,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit revert not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_revert_unsupported');
         }
 
         // POST /packages/:id/rollback  body { commitId } → roll the package
@@ -3563,6 +3863,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Rolling back package "${id}"`, reach: ['drafts', 'items', 'history'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.rollbackToPackageCommit === 'function') {
@@ -3584,7 +3890,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.errorFromThrown(e, 500) };
                 }
             }
-            return { handled: true, response: deps.error('Commit rollback not supported', 501) };
+            return catalogNotImplemented(deps, _context, 'packages_commit_rollback_unsupported');
         }
 
         // POST /packages/:id/revert → revert package to last published state
@@ -3594,6 +3900,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Reverting package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#22090] A package's members live in one of two places, and each
             // is reverted by the service that holds it. A Studio-authored
@@ -3665,8 +3977,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages/:id/customizations → [#28411, ADR-0146 D8 item 4] what
         // this deployment changed on an installed base: its `.custom` pair's
         // served overrides, the members the pair adds to the base's objects,
-        // the base's items switched off in the activation ledger, and the
-        // fields and flows other packages contribute to it (#28722). See
+        // the arrangements the pair's extensions write (#36626), the base's
+        // items switched off in the activation ledger, and the fields and
+        // flows other packages contribute to it (#28722). See
         // {@link readPackageCustomizations}.
         if (parts.length === 2 && parts[1] === 'customizations' && m === 'GET') {
             // The read authority of `GET /packages/:id`, the same gate, asked
@@ -3719,6 +4032,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Adopting orphaned metadata into package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Adopting orphaned metadata into package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             // [#24813] ADR-0070 D2: a package the deployment ships is not a
             // base, so nothing is adopted into it. `reassignOrphanedMetadata`
@@ -3732,7 +4051,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const readOnly = requireWritablePackage(deps, qlService, id, 'adopt items into'); if (readOnly) return readOnly;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.reassignOrphanedMetadata !== 'function') {
-                return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_orphan_adoption_unsupported');
             }
             try {
                 const actor = resolvePackageWriteActor(_context);
@@ -3764,6 +4083,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Duplicating package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Duplicating package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Duplicating package "${id}"`);
@@ -3771,7 +4096,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.duplicatePackage !== 'function') {
-                return { handled: true, response: deps.error('Package duplication not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_duplication_unsupported');
             }
             const targetPackageId = typeof body?.targetPackageId === 'string' ? body.targetPackageId.trim() : '';
             if (!targetPackageId) {
@@ -3781,6 +4106,11 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // the target package record (`installPackage`) ahead of its copy
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
+            // [ADR-0161 K4, guard two] Each knowledge source the copy would
+            // hold is admitted for this caller, before the copy's package
+            // record is minted.
+            const sourceAdmission = await refuseDuplicatedKnowledgeSources(deps, _context, protocol, id);
+            if (sourceAdmission) return sourceAdmission;
             try {
                 const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.duplicatePackage({
@@ -3811,6 +4141,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Ensuring the customization package of "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4] Not asked `manage_knowledge_sources`, as the install
+            // door is not: this door writes nothing of the base and creates an
+            // empty pair, so no knowledge source is created, changed or removed
+            // by it (pinned in `packages-ensure-customization.test.ts`).
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Ensuring the customization package of "${id}"`);
@@ -3837,7 +4171,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.ensureCustomizationPackage !== 'function') {
-                return { handled: true, response: deps.error('Customization package ensure not supported', 501) };
+                return catalogNotImplemented(deps, _context, 'packages_customization_ensure_unsupported');
             }
             try {
                 const result = await protocol.ensureCustomizationPackage({ basePackageId: id });
@@ -3916,6 +4250,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Updating package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Updating package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Updating package "${id}"`);
@@ -4018,6 +4358,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Deleting package "${id}"`);
             if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // where this verb reaches asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Deleting package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
             // [cloud#3814 D1] Declared replicas on the Redis driver: this change
             // would reach the serving replica only. Refused before anything is written.
             const oneReplica = await refuseMultiReplicaPackageChange(deps, _context, `Deleting package "${id}"`);
@@ -4311,7 +4657,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  */
 /**
  * [#28411, ADR-0146 D8 item 4, D3] The answer of `GET /packages/:id/customizations`
- * for the installed base `baseId`: four lists, each read from the one owner
+ * for the installed base `baseId`: five lists, each read from the one owner
  * of its fact, and their lengths. Served rows and ledger rows only; ⛔ no diff
  * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
  *
@@ -4324,6 +4670,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  *    and folds nothing into an `extend` body), so its `fields`, `validations`
  *    and `indexes` ARE the members it adds: no diff against the base's
  *    definition is needed, and none is made.
+ *  - **arrangements** — [#36626, ADR-0146 D10] the same contributors' whole
+ *    arrangements: each key of `CUSTOM_ARRANGEMENT_KEYS` the body writes
+ *    ({@link extensionArrangementKeys}, the reading the registry fold and the
+ *    doors' judge share), one entry per object and key, named and never
+ *    copied. A stored `object_extension` row is registered as this same
+ *    contributor, its whole parsed body (`registerStoredObjectExtension`), so
+ *    a tab list the record page saves into the pair is read here.
  *  - **switchedOff** — the activation ledger's rows recording the base as their
  *    package with `active: false`, through the ledger's one reader
  *    ({@link listPackageMetadataActivations}). A composition with no ledger
@@ -4335,7 +4688,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  *
  * No per-organization axis (ADR-0131 D6): every source is environment-level,
  * so every caller the read gate admits gets the same answer. A base with no
- * pair package answers empty overrides and extensions, and nothing here
+ * pair package answers empty overrides, extensions and arrangements, and nothing here
  * creates the pair.
  */
 async function readPackageCustomizations(
@@ -4351,6 +4704,9 @@ async function readPackageCustomizations(
     const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
+    type Arrangement = GetPackageCustomizationsResponse['arrangements'][number];
+    const arrangements: Arrangement[] = [];
+    const arranged = new Set<string>();
     const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
     for (const pairId of pairIdsToRead) {
         for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
@@ -4371,6 +4727,14 @@ async function readPackageCustomizations(
                         fields: Array.isArray(index?.fields) ? index.fields.filter((f: unknown): f is string => typeof f === 'string') : [],
                     });
                 }
+                // [#36626] Each arrangement the extension writes, by its key: one
+                // entry per object and key, whichever of the base's pairs writes it.
+                for (const key of extensionArrangementKeys(body)) {
+                    const seen = `${name}\u0000${key}`;
+                    if (arranged.has(seen)) continue;
+                    arranged.add(seen);
+                    arrangements.push({ object: name, key });
+                }
             }
         }
     }
@@ -4378,6 +4742,8 @@ async function readPackageCustomizations(
     extensions.sort((a, b) => a.object.localeCompare(b.object)
         || kindOrder[a.kind] - kindOrder[b.kind]
         || (a.name ?? '').localeCompare(b.name ?? ''));
+    const keyOrder = (key: Arrangement['key']) => CUSTOM_ARRANGEMENT_KEYS.indexOf(key);
+    arrangements.sort((a, b) => a.object.localeCompare(b.object) || keyOrder(a.key) - keyOrder(b.key));
 
     let ledgerRegistered = true;
     try {
@@ -4398,11 +4764,13 @@ async function readPackageCustomizations(
         packageId: baseId,
         overrides,
         extensions,
+        arrangements,
         switchedOff,
         contributions,
         counts: {
             overrides: overrides.length,
             extensions: extensions.length,
+            arrangements: arrangements.length,
             switchedOff: switchedOff.length,
             contributions: contributions.length,
         },

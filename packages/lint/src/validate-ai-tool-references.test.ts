@@ -3,12 +3,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   validateAiToolReferences as validateAiToolReferencesUnrecorded,
+  AI_SKILL_CONTEXT_OMITTED,
+  AI_SKILL_CONTEXT_UNKNOWN,
   AI_SKILL_TOOL_UNRESOLVED,
 } from './validate-ai-tool-references.js';
 import {
   MCP_DOOR_TOOL_NAMES,
   MCP_FILE_TOOL_NAMES,
   PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOLS_BY_PACKAGE,
   PLATFORM_TOOL_FAMILY_PREFIXES,
 } from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
@@ -359,10 +362,62 @@ describe('validate-ai-tool-references', () => {
   });
 
   /**
+   * [ADR-0160 D4] `get_record_context` is served by the MCP door and
+   * registered by cloud `service-ai` for the in-app assistant, so a skill kept
+   * out of MCP (`mcpPrompt: false`) that reads a pack resolves it. Before the
+   * cloud registration joined the registry, the rule reported it as an
+   * MCP-only name (ADR-0160's implementation split note).
+   */
+  it('resolves get_record_context on a mcpPrompt: false skill, as on one MCP projects (ADR-0160 D4)', () => {
+    for (const mcpPrompt of [false, true, undefined]) {
+      const findings = validateAiToolReferences({
+        skills: [{
+          name: 'account_brief',
+          ...(mcpPrompt === undefined ? {} : { mcpPrompt }),
+          tools: ['get_record_context', 'get_record_contexts'],
+        }],
+      });
+      // The control: a neighbour spelling nobody registers is still reported.
+      expect(findings.map((f) => f.path), String(mcpPrompt)).toEqual(['skills[0].tools[1]']);
+    }
+  });
+
+  /**
    * The chat's confirmed record write (cloud#3565; it replaced cloud#3383's
    * `draft_record`): a skill naming `create_record` / `update_record` resolves;
    * a near name nobody registers does not, and neither does the retired name.
    */
+  /**
+   * The `ask` product's data tools the MCP door does not register. A skill
+   * offered over MCP with `instructions` that binds one is withheld from
+   * every MCP `prompts/list` (`skillBindingServed`, `@objectstack/mcp`), so
+   * the rule names the tool, though the name resolves.
+   */
+  it('names an ask tool no MCP connection serves, on a skill MCP would project, as the reason it is withheld', () => {
+    const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
+    expect(askOnly.sort()).toEqual(['aggregate_data', 'query_data', 'visualize_data']);
+    const playbook = { name: 'policy_inquiry', instructions: 'Answer from the policy clauses.' };
+    const findings = validateAiToolReferences({
+      skills: [{ ...playbook, tools: ['query_records', 'aggregate_data', 'search_knowledge'] }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['skills[0].tools[1]']);
+    expect(findings[0].message).toContain('"aggregate_data" is served by the in-product agents but by no MCP connection');
+    expect(findings[0].hint).toContain('`mcpPrompt: false`');
+
+    // The controls: MCP projects none of these skills, so none loses a prompt.
+    for (const skill of [
+      { ...playbook, mcpPrompt: false, tools: ['aggregate_data'] },
+      { name: 'no_playbook', tools: ['aggregate_data'] },
+      { ...playbook, instructions: '   ', tools: ['aggregate_data'] },
+      { ...playbook, active: false, tools: ['aggregate_data'] },
+    ]) {
+      expect(validateAiToolReferences({ skills: [skill] }), JSON.stringify(skill)).toEqual([]);
+    }
+    // The door serves `search_knowledge` and the build product's tools may be
+    // a host's authoring family, so neither costs a projected skill its prompt.
+    expect(validateAiToolReferences({ skills: [{ ...playbook, tools: ['search_knowledge', 'verify_build'] }] })).toEqual([]);
+  });
+
   it('resolves the service-ai-studio record-write pair', () => {
     expect(
       validateAiToolReferences({ skills: [{ name: 's', tools: ['create_record', 'update_record'] }] }),
@@ -495,6 +550,7 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
       '`url`, `modal` or `form` action is UI-only',
       'advisory-first ratchet',
       'never at the runtime publish gate',
+      'withheld from every `prompts/list`',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
@@ -525,6 +581,7 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
     expect(converted.some((f) => f.message.startsWith('Tool family '))).toBe(true);
     expect(converted.some((f) => f.message.includes('does not become an AI tool'))).toBe(true);
     expect(converted.some((f) => f.message.includes('resolves to no stack, platform or materialised action tool'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('is served by the in-product agents but by no MCP connection'))).toBe(true);
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
@@ -542,6 +599,7 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     expect(converted.some((f) => f.hint.startsWith('Drop `mcpPrompt: false`'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Opt "'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Back "'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Set `mcpPrompt: false`'))).toBe(true);
     for (const f of converted) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
@@ -554,5 +612,164 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     expect(text).toContain('the ADR-0109 default path');
     expect(text).toContain('at least 40 characters');
     expect(text).toContain('a runtime plugin outside the platform registry provides the name');
+    // The ask tools the explanation names are exactly the ones the door lacks.
+    const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
+    expect(text).toContain(`(${askOnly.sort().map((n) => `\`${n}\``).join(', ')})`);
+  });
+});
+
+describe('[ADR-0160 D8] a skill\'s context pack reference', () => {
+  const policyPack = { name: 'policy_document', label: 'Policy document', object: 'policy' };
+  const reviewPack = { name: 'policy_review', label: 'Policy review', object: 'policy' };
+  const casePack = { name: 'case_brief', label: 'Case brief', object: 'case' };
+  const skill = (extra: Record<string, unknown>) => ({
+    name: 'policy_inquiry',
+    label: 'Policy inquiry',
+    instructions: 'Answer questions about one policy.',
+    tools: ['get_record_context'],
+    ...extra,
+  });
+  const contextFindings = (stack: Record<string, unknown>) =>
+    validateAiToolReferences(stack).filter((f) => f.rule !== AI_SKILL_TOOL_UNRESOLVED);
+
+  it('reports a context that names no pack the stack defines, located on the key', () => {
+    const findings = contextFindings({ aiContexts: [policyPack], skills: [skill({ context: 'policy_documnt' })] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'warning', 'skills[0].context']]);
+    expect(findings[0].message).toContain('"policy_documnt"');
+    expect(findings[0].message).toContain('Did you mean "policy_document"?');
+  });
+
+  it('CONTROL — a context that names a pack the stack defines is clean, even beside a second pack on its object', () => {
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ context: 'policy_document' })] })).toEqual([]);
+  });
+
+  it('a stack with no packs reports the reference as unknown', () => {
+    expect(contextFindings({ skills: [skill({ context: 'policy_document' })] }).map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+  });
+
+  it('advises a skill that binds get_record_context without context when an object has several packs (ADR-0160 D1, point 1)', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, casePack, reviewPack], skills: [skill({})] });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[AI_SKILL_CONTEXT_OMITTED, 'warning', 'skills[0]']]);
+    expect(findings[0].message).toContain("object 'policy' has 2 packs (policy_document, policy_review)");
+    expect(findings[0].message).not.toContain('case');
+  });
+
+  it('a wildcard that matches get_record_context is a binding for the advisory too', () => {
+    const findings = contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_*'] })] });
+    expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_OMITTED]);
+  });
+
+  it('CONTROL — no advisory when every object has one pack, or when the skill does not bind the tool', () => {
+    expect(contextFindings({ aiContexts: [policyPack, casePack], skills: [skill({})] })).toEqual([]);
+    expect(contextFindings({ aiContexts: [policyPack, reviewPack], skills: [skill({ tools: ['get_record'] })] })).toEqual([]);
+  });
+
+  describe('[ADR-0150 D3] a pack another package of the artifact ships, judged in the per-package pass', () => {
+    // The stack the CLI's per-package pass hands a package (`packageBodyAsStack`):
+    // the package's own body, its manifest, and the artifact's `packages[]`.
+    const shipper = { id: 'com.acme.shipper', name: 'shipper', version: '1.0.0', aiContexts: [policyPack] };
+    const reader = (extra: Record<string, unknown>) => ({
+      id: 'com.acme.reader',
+      name: 'reader',
+      version: '1.0.0',
+      skills: [skill({ context: 'policy_document' })],
+      ...extra,
+    });
+    const asPackageStack = (body: Record<string, unknown>, others: Record<string, unknown>[] = [shipper]) => ({
+      ...body,
+      manifest: body,
+      packages: [...others, body].map((manifest) => ({ manifest })),
+    });
+    const dependsOnShipper = { dependencies: { 'com.acme.shipper': '^1.0.0' } };
+
+    it('a pack a declared dependency ships resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader(dependsOnShipper)))).toEqual([]);
+    });
+
+    it('CONTROL — the own-stack pack resolves: no warning', () => {
+      expect(contextFindings(asPackageStack(reader({ aiContexts: [policyPack] }), []))).toEqual([]);
+    });
+
+    it('CONTROL — a pack no holder ships still warns, beside a declared dependency', () => {
+      const body = reader({ ...dependsOnShipper, skills: [skill({ context: 'no_such_pack' })] });
+      const findings = contextFindings(asPackageStack(body));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"no_such_pack"');
+    });
+
+    it('CONTROL — a sibling package\'s pack outside the closure still warns, naming the holder and the remedy', () => {
+      const findings = contextFindings(asPackageStack(reader({})));
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].hint).toContain('Declare a dependency');
+    });
+
+    it('two packages in the closure shipping the pack: warns, nothing picked', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings.map((f) => f.rule)).toEqual([AI_SKILL_CONTEXT_UNKNOWN]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+      // The `ambiguous-in-closure` arm itself: with neither package in the
+      // closure the rule answers `outside-closure`, which names both holders too.
+      expect(findings[0].message).toContain('more than one holder in reach');
+      expect(findings[0].message).not.toContain('outside this package');
+      expect(findings[0].hint).not.toContain('Declare a dependency');
+    });
+
+    it('a stack that names no package, two packages shipping the pack: the fix names no package of its own', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = contextFindings({
+        skills: [skill({ context: 'policy_document' })],
+        packages: [shipper, twin].map((manifest) => ({ manifest })),
+      });
+      expect(findings.map((f) => [f.rule, f.path])).toEqual([[AI_SKILL_CONTEXT_UNKNOWN, 'skills[0].context']]);
+      expect(findings[0].message).toContain('"com.acme.shipper"');
+      expect(findings[0].message).toContain('"com.acme.twin"');
+      expect(findings[0].message).toContain('more than one holder in reach');
+      for (const line of [findings[0].message, findings[0].hint]) {
+        expect(line).not.toContain('this package');
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    });
+
+    it('CONTROL — a stack with a package, two holders in its closure: the fix names that package', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const body = reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } });
+      const findings = contextFindings(asPackageStack(body, [shipper, twin]));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].hint).toContain('this package');
+    });
+
+    it('each refusal verdict and fix is one line of at most 200 characters', () => {
+      const twin = { ...shipper, id: 'com.acme.twin', name: 'twin' };
+      const findings = [
+        ...contextFindings(asPackageStack(reader({}))),
+        ...contextFindings(asPackageStack(reader({ dependencies: { 'com.acme.shipper': '^1.0.0', 'com.acme.twin': '^1.0.0' } }), [shipper, twin])),
+      ];
+      expect(findings).toHaveLength(2);
+      for (const f of findings) {
+        for (const line of [f.message, f.hint]) {
+          expect(line).not.toContain('\n');
+          expect(line.length, line).toBeLessThanOrEqual(200);
+        }
+      }
+    });
+  });
+
+  it('each verdict and fix is one line of at most 200 characters', () => {
+    const findings = contextFindings({
+      aiContexts: [policyPack, reviewPack],
+      skills: [skill({ context: 'policy_documnt' }), skill({ name: 'other' })],
+    });
+    expect(findings.map((f) => f.rule).sort()).toEqual([AI_SKILL_CONTEXT_OMITTED, AI_SKILL_CONTEXT_UNKNOWN]);
+    for (const f of findings) {
+      for (const line of [f.message, f.hint]) {
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
+    }
   });
 });

@@ -1,0 +1,67 @@
+{
+  "name": "@objectstack/knowledge-turso",
+  "version": "19.0.0-next.2",
+  "license": "Apache-2.0",
+  "description": "libSQL (Turso) knowledge adapter for ObjectStack: an open vector store in a libSQL file of its own, for local development and deployments not on PostgreSQL.",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "dev": "tsc -w",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/knowledge-turso --project tsconfig.test.json"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@objectstack/core": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/service-knowledge": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "knowledge",
+    "rag",
+    "turso",
+    "libsql",
+    "sqlite",
+    "vector-search"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/knowledge-turso"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

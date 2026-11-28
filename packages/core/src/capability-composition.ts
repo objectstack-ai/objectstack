@@ -57,9 +57,10 @@
  * readers: importing this module loads nothing.
  */
 
-import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import { PLATFORM_ALWAYS_ON_CAPABILITIES, PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import { readEnvWithDeprecation } from '@objectstack/types';
-import { CAPABILITY_PROVIDERS } from './capability-providers.js';
+import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from './capability-providers.js';
+import type { CapabilityIdentities, KnowledgeStoreSpec } from './capability-providers.js';
 import { resolveStackCollection } from './stack-collections.js';
 
 type Bag = Record<string, unknown>;
@@ -75,8 +76,31 @@ export interface ServedCapabilities {
    * The tokens the stack itself declares — the "required" intent
    * (#1597): under `serve` a declared token whose provider cannot be provided
    * is a hard boot error, where a token the platform appended is best-effort.
+   * A token the stack's items mount ({@link stackItemCapabilities}) is
+   * declared too: the items ask for their reader as `requires` would.
    */
   readonly declared: ReadonlySet<string>;
+  /** The declared tokens the stack's items mount and its `requires` does not list. */
+  readonly byItems: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0161 K8, item 12] The capability tokens the stack's ITEMS mount: each
+ * token whose provider row in `PLATFORM_CAPABILITY_PROVIDERS`
+ * (`@objectstack/spec`) names a `mountedBy` collection the stack holds an item
+ * of — the top level, then each package body (`resolveStackCollection`). Today
+ * one row: `knowledge`, by `knowledgeSources`, so a stack shipping a
+ * `knowledge_source` is served the knowledge service and the deployment's
+ * store without `requires: ['knowledge']`. Through the same provider entry as
+ * the token: the item adds the token, and the token's row mounts the provider.
+ */
+export function stackItemCapabilities(stack: unknown): string[] {
+  const tokens: string[] = [];
+  for (const [token, row] of Object.entries(PLATFORM_CAPABILITY_PROVIDERS)) {
+    const collection = row.mountedBy?.collection;
+    if (collection !== undefined && resolveStackCollection(stack, collection).length > 0) tokens.push(token);
+  }
+  return tokens;
 }
 
 /**
@@ -119,9 +143,20 @@ export function resolveServedCapabilities(
     readonly preset?: string;
     /** The host's process-level default tokens, appended before the slate. */
     readonly hostDefaults?: readonly string[];
+    /**
+     * The tokens the stack's items mount ({@link stackItemCapabilities}),
+     * appended after the declared ones and read as declared.
+     */
+    readonly itemTokens?: readonly string[];
   } = {},
 ): ServedCapabilities {
   const tokens = [...new Set(declaredTokens)];
+  const byItems = new Set<string>();
+  for (const token of opts.itemTokens ?? []) {
+    if (tokens.includes(token)) continue;
+    tokens.push(token);
+    byItems.add(token);
+  }
   const declared: ReadonlySet<string> = new Set(tokens);
   if (tokens.includes('auth') && !tokens.includes('email')) tokens.push('email');
   for (const token of opts.hostDefaults ?? []) {
@@ -136,7 +171,7 @@ export function resolveServedCapabilities(
     if (!tokens.includes('queue')) tokens.unshift('queue');
     if (!tokens.includes('job')) tokens.unshift('job');
   }
-  return { tokens, declared };
+  return { tokens, declared, byItems };
 }
 
 /** What {@link resolveCapabilityArgument} reads to build one provider's argument. */
@@ -153,6 +188,19 @@ export interface CapabilityArgumentInput {
   readonly providerModule?: Readonly<Record<string, unknown>>;
   /** The environment the mail and SMS readers read. Defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The platform database this boot resolved, when it resolved one itself:
+   * its driver kind (`postgres`, `sqlite`, `turso`, …) and URL. Read by the
+   * `knowledge` store choice ({@link resolveKnowledgeStore}); absent, the
+   * choice reads `OS_DATABASE_URL`, else `DATABASE_URL`, from `env`.
+   */
+  readonly database?: CapabilityDatabase;
+}
+
+/** The platform database a boot resolved, as {@link CapabilityArgumentInput.database} carries it. */
+export interface CapabilityDatabase {
+  readonly driver?: string;
+  readonly url?: string;
 }
 
 /** One provider's constructor argument. */
@@ -208,6 +256,13 @@ function providerReader<A extends unknown[]>(
  *    and on a configuration the schema refuses, an inline secret included.
  *  - `storage`: the local adapter at {@link resolveStorageLocalRootEnv}'s root,
  *    else `.objectstack/data/uploads` ({@link resolveStorageCapabilityArg}).
+ *  - `knowledge`: `{ deploymentAdapter }`, the adapter id of the store
+ *    {@link resolveKnowledgeStore} chooses and {@link resolveCapabilityExtras}
+ *    mounts beside the service — the deployment's-store mark (ADR-0161 K4): a
+ *    source that names no adapter binds to it. A service option, not an
+ *    adapter-contract member; the store itself is told nothing. Read from the
+ *    same {@link CapabilityArgumentInput.database} as the store's choice, so
+ *    the two agree.
  *  - any other token: no argument.
  *
  * A throw is the boot's to report: whether it fails the boot or is logged is
@@ -239,7 +294,106 @@ export function resolveCapabilityArgument(token: string, input: CapabilityArgume
     const storage = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
     return { argument: storage.options, localStorageRoot: storage.localRoot };
   }
+  if (token === 'knowledge') {
+    return { argument: { deploymentAdapter: resolveKnowledgeStore(input).store.adapterId } };
+  }
   return { argument: undefined };
+}
+
+// ── extras ────────────────────────────────────────────────────────────────
+
+/** One extra provider a served boot mounts after a token's main provider, and what it is built with. */
+export interface CapabilityExtra {
+  readonly pkg: string;
+  readonly export: string;
+  readonly identities: CapabilityIdentities;
+  /** Construct the provider with this, or with no argument when `undefined`. */
+  readonly argument?: unknown;
+  /**
+   * The package is an optional dependency of the boots that mount it: one
+   * that cannot import it warns and goes on without it, on `os serve` and on
+   * the verification handle alike.
+   */
+  readonly optional?: boolean;
+}
+
+/**
+ * The extra providers a served boot mounts for `token` after its main
+ * provider, each with its constructor argument — the rule `os serve` and the
+ * handle both read in place of a row's `extras`.
+ *
+ *  - `knowledge`: the one vector store {@link resolveKnowledgeStore} chooses
+ *    for the platform database.
+ *  - any other token: its row's `extras`, each with no argument.
+ *
+ * Each boot skips an extra it already holds (`providesCapability`), as it
+ * does for a row's `extras`.
+ */
+export function resolveCapabilityExtras(token: string, input: CapabilityArgumentInput): CapabilityExtra[] {
+  if (token === 'knowledge') {
+    const { store, argument } = resolveKnowledgeStore(input);
+    return [
+      { pkg: store.pkg, export: store.export, identities: store.identities, argument, ...(store.optional ? { optional: true } : {}) },
+    ];
+  }
+  return (CAPABILITY_PROVIDERS[token]?.extras ?? []).map((extra) => ({ ...extra }));
+}
+
+// ── knowledge ─────────────────────────────────────────────────────────────
+
+/** A PostgreSQL URL, as the pgvector store reads one. */
+const POSTGRES_URL = /^postgres(ql)?:\/\//i;
+
+/**
+ * The vector store `requires: ['knowledge']` mounts beside the knowledge
+ * service, and what it is constructed with (ADR-0161):
+ *
+ *  - the platform database is PostgreSQL — its resolved driver is `postgres`,
+ *    or its URL is a `postgres://` / `postgresql://` one — ⇒ `pgvector`
+ *    (`@objectstack/knowledge-pgvector`), handed that URL, so the store's
+ *    tables live in the platform's own database, in a schema of their own;
+ *  - any other database ⇒ `turso` (`@objectstack/knowledge-turso`), a libSQL
+ *    file of its own: `knowledge.db` in the directory the boot keeps the
+ *    default platform database in, and never that database's file —
+ *    `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it),
+ *    else the app's `.objectstack/data/`. A database named by URL does not
+ *    move it. The operator can name another store in the `knowledge.turso_url`
+ *    setting, which the store holds to that data directory and refuses when
+ *    it carries a NUL byte, written out or percent-encoded, before it reaches
+ *    the libSQL client. An in-memory platform database (`:memory:`, or the
+ *    `memory` driver) gets an in-memory store (`:memory:`).
+ *
+ * The database is the one the boot resolved ({@link CapabilityArgumentInput.database});
+ * a boot that resolved none (a host whose own plugin provides the driver)
+ * is judged by `OS_DATABASE_URL`, else `DATABASE_URL` — the variables the
+ * pgvector store reads its URL from.
+ */
+export function resolveKnowledgeStore(input: CapabilityArgumentInput): {
+  store: KnowledgeStoreSpec;
+  argument: Record<string, unknown>;
+} {
+  const env = input.env ?? (typeof process !== 'undefined' ? process.env : {});
+  const url = input.database
+    ? input.database.url?.trim()
+    : (env.OS_DATABASE_URL?.trim() || env.DATABASE_URL?.trim() || undefined);
+  const postgres = input.database?.driver === 'postgres' || (url !== undefined && POSTGRES_URL.test(url));
+  if (postgres) {
+    return {
+      store: KNOWLEDGE_STORE_PROVIDERS.pgvector,
+      argument: url !== undefined && POSTGRES_URL.test(url) ? { url } : {},
+    };
+  }
+  // An in-memory platform database keeps nothing past the process, and its
+  // store keeps nothing either: a file beside it would outlive every row it
+  // indexes (the verification handle boots an in-memory SQLite).
+  if (url === ':memory:' || input.database?.driver === 'memory') {
+    return { store: KNOWLEDGE_STORE_PROVIDERS.turso, argument: { url: ':memory:' } };
+  }
+  const home = env.OS_HOME?.trim();
+  return {
+    store: KNOWLEDGE_STORE_PROVIDERS.turso,
+    argument: { projectRoot: input.packageRoot, ...(home ? { stateDir: home } : {}), urlFromSettings: true },
+  };
 }
 
 // ── storage ───────────────────────────────────────────────────────────────

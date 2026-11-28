@@ -121,21 +121,72 @@ export type BookGroup = {
 };
 
 /**
+ * The refusal for an audience that names both gates (ADR-0046 §6.7).
+ *
+ * The two object forms are alternatives, never a conjunction: `audienceAllows`
+ * reads one of them. Before this refusal the older `{ permissionSet }` arm,
+ * a plain object, accepted `{ permissionSet, systemPermission }` and stripped
+ * the capability without a word — the author believed the book was gated on a
+ * capability and it was gated on one set. The refusal is narrow on purpose:
+ * only the second gate key is refused, so no other shape that parsed before is
+ * refused now. Every authoring door meets it at the parse (`defineStack`, the
+ * `/meta` save), which is why it lives here and not in a lint rule: a
+ * `defineStack` config is parsed before any rule runs, so a rule would never
+ * see the key.
+ */
+const BOOK_AUDIENCE_ONE_GATE =
+  'A book audience names ONE gate, and this one names two: `permissionSet` and `systemPermission`. '
+  + 'Keep `systemPermission` when the readers are everyone who holds a capability through any '
+  + 'permission set (the form for an app\'s manual, matching the app\'s `requiredPermissions`); keep '
+  + '`permissionSet` when the readers are the holders of that one set. Delete the other key.';
+
+/**
  * Access audience for a book — a reference into the permission model
  * (ADR-0046 §6.7, vocabulary per ADR-0090). The gate is a capability
- * reference (a permission-set name), never a distribution one: books ship in
- * packages, and packages own permission sets but never positions (ADR-0090
- * D9) — a package gating its Admin Guide to its own `crm_admin` set keeps
- * provenance and uninstall semantics intact (ADR-0086).
+ * reference, never a distribution one: books ship in packages, and packages
+ * own permission sets but never positions (ADR-0090 D9) — a package gating
+ * its Admin Guide to its own `crm_admin` set keeps provenance and uninstall
+ * semantics intact (ADR-0086).
+ *
+ * Two gated forms:
+ *  - `{ permissionSet }` — the reader holds that ONE named set;
+ *  - `{ systemPermission }` — the reader holds that capability (a
+ *    `systemPermissions` token, ADR-0066 D1) through ANY set, the same answer
+ *    an app's `requiredPermissions: [token]` gets in a session (on a delegated
+ *    OAuth grant the delegating person's own capabilities decide, whatever the
+ *    token carries — ADR-0090 D10). This is the form for a
+ *    manual that belongs to an app gated on a capability several sets grant
+ *    (Setup's `setup.access`): a set name would shut out every other holder.
+ *
+ * An audience names one of the two, never both: the pair is refused at the
+ * parse ({@link BOOK_AUDIENCE_ONE_GATE}).
  */
 export const BookAudienceSchema = lazySchema(() =>
   z.union([
     z.literal('org'), // default — inherits the package grant (§3.6)
     z.literal('public'), // ≡ the built-in `guest` position (ADR-0090 D9): anonymous, indexable
-    z.object({ permissionSet: z.string() }), // capability-gated, e.g. { permissionSet: 'crm_admin' }
+    z.object({
+      permissionSet: z.string(), // gated on one named set, e.g. { permissionSet: 'crm_admin' }
+      // Declared only to be refused: see BOOK_AUDIENCE_ONE_GATE. Without it this
+      // plain arm accepted `{ permissionSet, systemPermission }` and stripped the
+      // capability, so the book was gated on the set alone.
+      systemPermission: z
+        .never({ error: () => BOOK_AUDIENCE_ONE_GATE })
+        .optional()
+        .describe('Not accepted beside `permissionSet`: an audience names one gate'),
+    }),
+    strictObject(
+      {
+        surface: 'this book audience',
+        history: 'A `{ permissionSet }` audience that also named `systemPermission` used to parse as the '
+          + 'set form with the capability dropped, so the book was gated on the set alone.',
+        guidance: { permissionSet: BOOK_AUDIENCE_ONE_GATE },
+      },
+      { systemPermission: z.string() },
+    ).describe("Readers holding this capability through any permission set, e.g. { systemPermission: 'setup.access' }"),
   ]),
 );
-export type BookAudience = 'org' | 'public' | { permissionSet: string };
+export type BookAudience = 'org' | 'public' | { permissionSet: string } | { systemPermission: string };
 
 export const BookSchema = lazySchema(() =>
   strictObject({
@@ -469,20 +520,36 @@ export interface AudienceCaller {
    * genuinely returned nothing.
    */
   permissionSets?: readonly string[];
+  /**
+   * The capabilities the caller effectively holds — the `systemPermissions`
+   * list the `/meta` read gate's `requiredPermissions` arms read, so a
+   * `{ systemPermission }` book opens, in a session, exactly for whoever can
+   * open an app gated on that token. A transport acting for someone else (the
+   * MCP door on a delegated OAuth grant) fills it with THAT person's
+   * capabilities, not the token's. Absent/undefined means "unknown" and
+   * `{ systemPermission }` audiences DENY (fail closed, ADR-0049).
+   */
+  systemPermissions?: readonly string[];
 }
 
 /**
  * Whether a caller may read content published under `audience`:
  * `'public'` → always; `'org'` (or unset — §3.6 default) → any authenticated
  * principal; `{ permissionSet }` → an authenticated principal that holds the
- * named set. Unknown/unresolvable set holdings deny (fail closed).
+ * named set; `{ systemPermission }` → an authenticated principal that holds
+ * the named capability. Unknown/unresolvable holdings deny (fail closed).
  */
 export function audienceAllows(audience: BookAudience | undefined, caller: AudienceCaller): boolean {
   if (isPublicAudience(audience)) return true;
   if (!caller.authenticated) return false;
   if (audience === undefined || audience === 'org') return true;
-  if (typeof audience === 'object' && typeof audience.permissionSet === 'string') {
-    return Array.isArray(caller.permissionSets) && caller.permissionSets.includes(audience.permissionSet);
+  if (typeof audience === 'object' && typeof (audience as { permissionSet?: unknown }).permissionSet === 'string') {
+    const set = (audience as { permissionSet: string }).permissionSet;
+    return Array.isArray(caller.permissionSets) && caller.permissionSets.includes(set);
+  }
+  if (typeof audience === 'object' && typeof (audience as { systemPermission?: unknown }).systemPermission === 'string') {
+    const capability = (audience as { systemPermission: string }).systemPermission;
+    return Array.isArray(caller.systemPermissions) && caller.systemPermissions.includes(capability);
   }
   return false; // unknown future shape → fail closed
 }

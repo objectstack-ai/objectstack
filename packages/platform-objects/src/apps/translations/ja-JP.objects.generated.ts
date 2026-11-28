@@ -176,7 +176,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "利用停止",
-        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。",
+        description: "このユーザーを利用停止にしますか？利用停止になるとサインアウトされ、解除されるまでサインインできず、API キーも拒否されます。OAuth アクセストークンとトークンの更新も同様に拒否されます。解除後はキーが再び使えるようになります。利用停止により、このユーザーが責任者である AI サービスアカウントも停止され、登録した OAuth アプリケーションは無効化、発行した SCIM 認証情報は失効します。利用停止を解除してもこれらは元に戻りません。",
         successMessage: "ユーザーを利用停止にしました",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             helpText: "このユーザーの直属の上長。組織が異なるマネージャー、自分自身の指定、レポートラインが循環する、または深さの上限を超える指定はサーバー側で拒否されます。"
           }
         }
+      },
+      remove_user_manager: {
+        label: "マネージャーを解除",
+        confirmText: "このユーザーのマネージャーを解除しますか?マネージャーを再設定するまで、このユーザーには報告先がありません。承認ルーティングと own_and_reports レコードスコープもこの変更に従います。",
+        successMessage: "マネージャーを解除しました"
       },
       list_platform_admins: {
         label: "プラットフォーム管理者",
@@ -491,6 +496,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "失効理由",
         help: "セッションが失効した理由（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset など）。"
+      },
+      sso_provider_id: {
+        label: "SSO プロバイダー",
+        help: "このセッションのサインインに使われた SSO プロバイダー（ある場合）。そのプロバイダーを削除するとセッションは終了します。システム管理。"
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -4496,6 +4505,42 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "稼働カレンダー",
     pluralLabel: "稼働カレンダー",
@@ -4616,6 +4661,91 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           title: "カレンダー例外はまだありません",
           message: "祝日または振替出勤日ごとに 1 行追加するか、ファイルから 1 年分をインポートします。"
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "タスク",
+    pluralLabel: "タスク",
+    description: "担当者と期限のある、やるべきこと。",
+    fields: {
+      title: {
+        label: "タイトル"
+      },
+      description: {
+        label: "説明"
+      },
+      status: {
+        label: "ステータス",
+        options: {
+          todo: "未着手",
+          in_progress: "進行中",
+          done: "完了"
+        }
+      },
+      due_at: {
+        label: "期限"
+      },
+      assignee_id: {
+        label: "担当者"
+      },
+      completed_at: {
+        label: "完了日時",
+        help: "ステータスが「完了」になるとプラットフォームが記録し、「完了」でなくなると消去します。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "自分の担当",
+        emptyState: {
+          title: "担当のタスクはありません",
+          message: "あなたが担当する未完了のタスクがここに表示されます。"
+        }
+      },
+      created_by_me: {
+        label: "自分が作成",
+        emptyState: {
+          title: "タスクはまだありません",
+          message: "作成したタスクがここに表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのタスク"
+      }
+    }
+  },
+  sys_note: {
+    label: "メモ",
+    pluralLabel: "メモ",
+    description: "メモ：タイトルと書式付きの本文。",
+    fields: {
+      title: {
+        label: "タイトル"
+      },
+      body: {
+        label: "本文"
+      },
+      heading: {
+        label: "見出し",
+        help: "タイトル。タイトルが空のときは本文の最初の行です。プラットフォームが管理します。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "自分のメモ",
+        emptyState: {
+          title: "メモはまだありません",
+          message: "作成したメモがここに表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのメモ"
       }
     }
   }

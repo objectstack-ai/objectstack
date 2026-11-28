@@ -18,10 +18,11 @@
  *    highlights (the strip of four that followed is gone since
  *    objectstack#35891);
  *  - Target 7, the bottom bar: the header's actions drawn below the body, in
- *    their bar face — the host's Edit, the primary and the `⋯`, however many
- *    actions the page declares (objectstack#34595; this file pinned Edit
- *    after the declared actions before); the header draws no action row of
- *    its own;
+ *    their bar face — the primary and the next declared action, however many
+ *    the page declares; the `⋯` at the top bar's right end holds the rest and
+ *    Edit (objectstack#36151; before, the bar was [Edit][primary][⋯],
+ *    objectstack#34595); with no declared action no bar is drawn; the header
+ *    draws no action row of its own;
  *  - Target 8, a page pushed from its parent's related row: its 「‹」 names
  *    where it returns, the parent record (「‹ Mira Costa」), and it and the
  *    path row's parent go back in the history, to the parent, whose own 「‹」
@@ -43,7 +44,8 @@ import { RelatedCountStore } from '@object-ui/components';
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // The wire is the global `fetch` this file stubs; the authenticated fetch hands its requests to it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -86,7 +88,7 @@ const action = (name: string, label: string) => ({
   label,
   type: 'api',
   target: '/api/v1/noop',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 function objectsWith(actions: unknown[]) {
@@ -218,8 +220,22 @@ async function barDrawn(): Promise<HTMLElement> {
   );
 }
 
+/** The record's `⋯` at the top bar's right end (objectstack#36151). */
+const topMore = () => pageBar()!.querySelector('[data-record-phone-more] button[aria-label="More actions"]') as HTMLButtonElement | null;
+
+async function topMoreDrawn(): Promise<HTMLButtonElement> {
+  return waitFor(
+    () => {
+      const more = topMore();
+      expect(more).toBeTruthy();
+      return more as HTMLButtonElement;
+    },
+    { timeout: 5000 },
+  );
+}
+
 async function moreItems(): Promise<string[]> {
-  fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), {
+  fireEvent.pointerDown(await topMoreDrawn(), {
     button: 0,
     ctrlKey: false,
     pointerType: 'mouse',
@@ -321,11 +337,11 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(document.body.textContent).toContain('Austin');
   });
 
-  it('the bottom bar: [Edit][Convert Lead][⋯] with the declared second action in the ⋯; the header draws no action row (objectstack#34595)', async () => {
+  it('the bottom bar: [Convert Lead][Assign], the page\'s actions only; the header draws no action row (objectstack#36151)', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
     const toolbar = await barDrawn();
     expect(toolbar.getAttribute('data-page-header-actions-face')).toBe('bar');
-    expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']);
+    expect(barButtons()).toEqual(['Convert Lead', 'Assign']);
     // The header above the body has no toolbar of its own, and the bar is
     // below the body, not in it.
     const header = document.querySelector('[data-record-page-root] header') as HTMLElement;
@@ -333,17 +349,63 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(within(header).queryByRole('toolbar')).toBeNull();
     expect(header.contains(actionBar())).toBe(false);
     expect(actionBar()!.contains(header)).toBe(false);
+    // The `⋯` is the top bar's last control, not the bottom bar's, and it
+    // holds Edit with the host's chrome.
+    expect(actionBar()!.querySelector('button[aria-label="More actions"]')).toBeNull();
+    const more = await topMoreDrawn();
+    expect(pageBar()!.querySelector('[data-record-top-bar-controls]')!.lastElementChild!.contains(more)).toBe(true);
     const items = await moreItems();
-    expect(items).toContain('Assign');
-    expect(items).not.toContain('Edit');
+    expect(items).toEqual(expect.arrayContaining(['Edit', 'Share']));
+    expect(items).not.toContain('Convert Lead');
+    expect(items).not.toContain('Assign');
   });
 
-  it('the bottom bar with one declared action: [Edit][Convert Lead][⋯] (objectstack#34595)', async () => {
+  it('a third declared action folds into the top bar\'s ⋯, after Refresh and before Edit (objectstack#36151)', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], objectsWith([action('convert', 'Convert Lead'), action('assign', 'Assign'), action('call', 'Log Call')]));
+    await barDrawn();
+    expect(barButtons()).toEqual(['Convert Lead', 'Assign']);
+    const items = await moreItems();
+    expect(items.indexOf('Log Call')).toBeGreaterThanOrEqual(0);
+    expect(items.indexOf('Log Call')).toBeLessThan(items.indexOf('Edit'));
+  });
+
+  it('the bottom bar with one declared action: [Convert Lead] alone, the whole row (objectstack#36151)', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], objectsWith([action('convert', 'Convert Lead')]));
     await barDrawn();
-    const buttons = barButtons();
-    expect(buttons.slice(0, 2)).toEqual(['Edit', 'Convert Lead']);
-    expect(buttons.length).toBeLessThanOrEqual(3);
+    expect(barButtons()).toEqual(['Convert Lead']);
+    const only = actionBar()!.querySelector('[role="toolbar"] > button') as HTMLButtonElement;
+    expect(only.className.split(/\s+/)).toContain('flex-1');
+  });
+
+  it('no declared action: no bottom bar is drawn, and Edit is in the top bar\'s ⋯ (objectstack#36151)', async () => {
+    const onEdit = vi.fn();
+    const objects = objectsWith([]);
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}/record/r-1`]}>
+        <MetadataCtx.Provider value={metadataFor(objects)}>
+          <Routes>
+            <Route
+              path="/apps/:appName/:objectName/record/:recordId"
+              element={<RecordDetailView dataSource={makeDataSource() as never} objects={objects} onEdit={onEdit} />}
+            />
+          </Routes>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await topMoreDrawn();
+    await waitFor(() => expect(document.body.textContent).toContain('mira@atlas.test'));
+    // The host's bar element is there, and empty: `empty:hidden` leaves it out.
+    expect(actionBar()).toBeTruthy();
+    expect(actionBar()!.childElementCount).toBe(0);
+    expect(actionBar()!.className.split(/\s+/)).toContain('empty:hidden');
+    // 「更多」→「编辑」 is the Edit the bar's first button was: it opens the
+    // record's edit, as before.
+    fireEvent.pointerDown(topMore()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    const edit = within(menu).getByRole('menuitem', { name: 'Edit' });
+    expect(edit.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(edit);
+    await waitFor(() => expect(onEdit).toHaveBeenCalledWith({ id: 'r-1' }, LEAD));
   });
 
   it('a page pushed from its parent\'s related row: 「‹ Mira Costa」 goes back to the parent, whose 「‹」 reads 「Leads」', async () => {
@@ -406,10 +468,12 @@ describe('the record page on a phone (objectstack#27058)', () => {
     expect(back.textContent).toBe('#L-1');
   });
 
-  it('control: at 1440 px the desktop bar (⊟) and the header\'s own action row, no bottom bar', async () => {
+  it('control: at 1440 px the desktop bar and the header\'s own action row, no bottom bar', async () => {
     setWidth(1440);
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`]);
-    await screen.findByRole('group', { name: 'Panels' }, { timeout: 5000 });
+    await screen.findByTestId('record-page-crumb', undefined, { timeout: 5000 });
+    // objectstack#35890 — the rail's ⊟ is retired with it.
+    expect(screen.queryByRole('group', { name: 'Panels' })).toBeNull();
     expect(actionBar()).toBeNull();
     // objectstack#35593 — the header's row is the page's one top row: its
     // group sits in the top bar's action slot.
@@ -434,7 +498,8 @@ describe('the record page on a phone (objectstack#27058)', () => {
  *  - phone, approval-locked: the bar is the same group, Approve the only
  *    filled button and pressable; an approval lock draws no Edit
  *    (objectstack#35593, #35419);
- *  - control: the same page with no request keeps [Edit][Convert Lead][⋯].
+ *  - control: the same page with no request draws [Convert Lead][Assign],
+ *    Edit pressable in the top bar's `⋯` (objectstack#36151).
  */
 const APPROVAL_OBJECT = 'sys_approval_request';
 const REQUEST_ID = 'req-35016';
@@ -549,30 +614,33 @@ describe('one ⋯ per screen on a record pending approval (objectstack#35016)', 
     expect(items).not.toContain('Edit');
   });
 
-  it('control: no request, the bar keeps [Edit][Convert Lead][⋯] with Edit pressable', async () => {
+  it('control: no request, the bar is [Convert Lead][Assign] and Edit is pressable in the top bar\'s ⋯', async () => {
     stubApprovals(null);
     mountApprovalPage();
     await barDrawn();
-    expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']);
-    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
-    expect(first.disabled).toBe(false);
+    expect(barButtons()).toEqual(['Convert Lead', 'Assign']);
     expect(screen.queryByTestId('declared-actions-decision-menu')).toBeNull();
+    fireEvent.pointerDown(await topMoreDrawn(), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Edit' }).getAttribute('aria-disabled')).not.toBe('true');
   });
 });
 
 /**
  * objectstack#35099 — the phone bar's first slot goes to a pressable action
  * whatever turns Edit off, not only the approval lock (objectstack#35016,
- * pinned above):
+ * pinned above). Since objectstack#36151 Edit is in the top bar's `⋯` on a
+ * phone whether it is on or off; these pin that an Edit that is off is still
+ * drawn there, off:
  *
  *  - `userActions.edit.disabledWhen` holding on the record;
  *  - `editLockedByState` — every field the edit form shows read-only by its
  *    `readonlyWhen` — with its badge still drawn as the reason;
  *
- * each time Edit sits in the bar's `⋯`, still drawn and still off, and the
- * first declared action leads the bar. Controls: the desktop row keeps Edit
- * greyed in place for all three reasons, and a `disabledWhen` that does not
- * hold leaves Edit leading the bar, pressable.
+ * each time Edit sits in the top bar's `⋯`, still drawn and still off, and
+ * the first declared action leads the bar. Controls: the desktop row keeps
+ * Edit greyed in place for all three reasons, and a `disabledWhen` that does
+ * not hold leaves Edit in the `⋯`, pressable.
  */
 const LOCKS_NEW = "record.status == 'new'";
 
@@ -610,10 +678,10 @@ async function desktopRowEdit(): Promise<HTMLButtonElement> {
 
 async function expectEditInBarOverflowOff() {
   await barDrawn();
-  await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign', 'More actions']));
+  await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign']));
   const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
   expect(first.disabled).toBe(false);
-  fireEvent.pointerDown(within(actionBar()!).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  fireEvent.pointerDown(await topMoreDrawn(), { button: 0, ctrlKey: false, pointerType: 'mouse' });
   const menu = await screen.findByRole('menu');
   // By accessible name: an entry that says why it is off carries the reason
   // as a second line, and its name stays the label (objectstack#35135).
@@ -626,23 +694,24 @@ describe('a phone bar never leads with an Edit that is off, for any reason (obje
     __resetRecordApprovalsStore();
   });
 
-  it('phone, edit.disabledWhen holds: Edit is in the bar\'s ⋯, off, and Convert Lead leads', async () => {
+  it('phone, edit.disabledWhen holds: Edit is in the top bar\'s ⋯, off, and Convert Lead leads', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
     await expectEditInBarOverflowOff();
   });
 
-  it('phone, editLockedByState: Edit is in the bar\'s ⋯, off, Convert Lead leads, and the badge states why', async () => {
+  it('phone, editLockedByState: Edit is in the top bar\'s ⋯, off, Convert Lead leads, and the badge states why', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadLockedByState());
     await waitFor(() => expect(screen.getByTestId('record-state-lock').textContent).toBe('Not editable in its current state'), { timeout: 5000 });
     await expectEditInBarOverflowOff();
   });
 
-  it('control, phone: a disabledWhen that does not hold keeps [Edit][Convert Lead][⋯] with Edit pressable', async () => {
+  it('control, phone: a disabledWhen that does not hold leaves Edit pressable in the top bar\'s ⋯', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit("record.status == 'closed'"));
     await barDrawn();
-    await waitFor(() => expect(barButtons()).toEqual(['Edit', 'Convert Lead', 'More actions']));
-    const first = actionBar()!.querySelector('[role="toolbar"] button') as HTMLButtonElement;
-    expect(first.disabled).toBe(false);
+    await waitFor(() => expect(barButtons()).toEqual(['Convert Lead', 'Assign']));
+    fireEvent.pointerDown(await topMoreDrawn(), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Edit' }).getAttribute('aria-disabled')).not.toBe('true');
   });
 
   it('control, desktop: edit.disabledWhen keeps Edit greyed in place in the header row', async () => {
@@ -680,7 +749,7 @@ describe('a phone bar never leads with an Edit that is off, for any reason (obje
  *  - desktop: the header row's Edit is described by the reason, and its
  *    wrapper opens it as a tooltip; the `⋯`'s Delete shows it as its second
  *    line;
- *  - phone: the bar's `⋯` entry for Edit shows it as its second line.
+ *  - phone: the top bar's `⋯` entry for Edit shows it as its second line.
  *
  * Controls: the approval band and the state-lock badge explain their own
  * locks, so an Edit they turn off gives no second, generic reason; a
@@ -712,7 +781,7 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     expect(edit.parentElement!.hasAttribute('data-disabled-reason')).toBe(true);
   });
 
-  it('phone, edit.disabledWhen holds: the bar\'s ⋯ entry for Edit shows the reason', async () => {
+  it('phone, edit.disabledWhen holds: the top bar\'s ⋯ entry for Edit shows the reason', async () => {
     mountPage([`/apps/${APP}/${LEAD}/record/r-1`], leadWithDisabledEdit(LOCKS_NEW));
     await expectEditInBarOverflowOff();
     const menu = screen.getByRole('menu');
@@ -764,5 +833,36 @@ describe('a disabledWhen-greyed Edit or Delete says why (objectstack#35135)', ()
     const row = more.closest('[role="toolbar"]') as HTMLElement;
     expect(within(row).queryByRole('button', { name: 'Edit' })).toBeNull();
     expect(screen.queryByText(PREDICATE_REASON)).toBeNull();
+  });
+});
+
+describe('the phone bottom bar reads the object\'s record scope arrangement (objectstack#36366)', () => {
+  /** The three-action lead, with `actionLayout` on the lead object. */
+  function arranged(actionLayout: unknown) {
+    const [lead, ...rest] = objectsWith([
+      action('convert', 'Convert Lead'),
+      action('assign', 'Assign'),
+      action('call', 'Log Call'),
+    ]) as unknown as Array<Record<string, unknown>>;
+    return [{ ...lead, actionLayout }, ...rest] as never;
+  }
+
+  it('the pinned actions are the bar\'s buttons, in pin order; `more` leads the top bar\'s ⋯ in its order, before Edit', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], arranged({ record: { pinned: ['call', 'convert'], more: ['assign'] } }));
+    const toolbar = await barDrawn();
+    expect(toolbar.getAttribute('data-page-header-actions-face')).toBe('bar');
+    expect(barButtons()).toEqual(['Log Call', 'Convert Lead']);
+    const items = await moreItems();
+    expect(items).not.toContain('Log Call');
+    expect(items).not.toContain('Convert Lead');
+    expect(items.indexOf('Assign')).toBeGreaterThanOrEqual(0);
+    expect(items.indexOf('Assign')).toBeLessThan(items.indexOf('Edit'));
+  });
+
+  it('`pinned: []` draws no bar button: every action is in the top bar\'s ⋯', async () => {
+    mountPage([`/apps/${APP}/${LEAD}/record/r-1`], arranged({ record: { pinned: [] } }));
+    const items = await moreItems();
+    expect(items).toEqual(expect.arrayContaining(['Convert Lead', 'Assign', 'Log Call', 'Edit']));
+    expect(actionBar()?.querySelectorAll('[role="toolbar"] > button').length ?? 0).toBe(0);
   });
 });

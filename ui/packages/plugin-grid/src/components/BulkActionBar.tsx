@@ -10,8 +10,8 @@ import React from 'react';
 import { Button } from '@object-ui/components';
 import { Trash2 } from 'lucide-react';
 import { LazyIcon, toKebabIconName } from '@object-ui/components';
-import { useObjectTranslation, usePredicateScope, useCapabilityGate } from '@object-ui/react';
-import { isActionSwitchedOff } from '@object-ui/core';
+import { useObjectTranslation, usePredicateScope, useCapabilityGate, useDrawsAction } from '@object-ui/react';
+import { isActionSwitchedOff, isAskAiAction } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
@@ -41,6 +41,14 @@ function isBulkDefOffered(
   if (!hasVisibilityGate(def)) return true;
   return partitionBulkRows(def, selectedRows, { scope, fields: objectFields as never }).eligible.length > 0;
 }
+
+/**
+ * objectstack#35403 — the reserved selection-bar name of the built-in bulk
+ * Change Owner, dispatched to the host's `onBulkChangeOwner` (never the action
+ * runner), as the built-in `delete` is dispatched to `onBulkDelete`. The
+ * `sys_` prefix keeps it apart from every author-declared action name.
+ */
+export const CHANGE_OWNER_BULK_ACTION = 'sys_change_owner';
 
 /** A legacy string bulk action, with the destructive styling its name implies. */
 export interface LegacyBulkActionItem {
@@ -92,6 +100,10 @@ export function useBulkActionItems(input: {
 }): BulkActionItems {
   const { selectedRows, actions, actionDefs, objectFields } = input;
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] An `ask_ai` action runs on one record, so the bulk bar never
+  // offers one (objectstack#37142), with or without an in-app assistant. The
+  // type of a def promoted from an object action is on its `actionDef`.
+  const drawsAction = useDrawsAction();
   const scope = usePredicateScope();
   // `language` keys the memo on the active language itself, so the label
   // follows a switch whatever identity `t` keeps across it.
@@ -101,18 +113,25 @@ export function useBulkActionItems(input: {
       (d) =>
         mayInvoke(d?.requiredPermissions)
         && !isActionSwitchedOff(d)
+        && drawsAction(d)
+        && !isAskAiAction(d)
+        && !isAskAiAction(d?.actionDef)
         && isBulkDefOffered(d, selectedRows, scope, objectFields),
     );
     const legacy = (Array.isArray(actions) ? actions : []).map((action) => {
       const actionStr = String(action).toLowerCase();
       return {
         name: action,
-        label: actionStr === 'delete' ? t('grid.delete', { defaultValue: 'Delete' }) : formatActionLabel(action),
+        label: actionStr === 'delete'
+          ? t('grid.delete', { defaultValue: 'Delete' })
+          : action === CHANGE_OWNER_BULK_ACTION
+            ? t('grid.changeOwner', { defaultValue: 'Change Owner' })
+            : formatActionLabel(action),
         destructive: actionStr.includes('delete') || actionStr.includes('remove') || actionStr.includes('destroy'),
       };
     });
     return { defs, legacy };
-  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke, t, language]);
+  }, [actionDefs, actions, selectedRows, scope, objectFields, mayInvoke, drawsAction, t, language]);
 }
 
 /** A rich def reads as destructive by its variant or by the delete operation it runs. */

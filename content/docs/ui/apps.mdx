@@ -822,6 +822,22 @@ in 17.1). Both the app and `branding` are strict: a top-level `logo` or `theme` 
 refused with a pointer to `branding`, and a misspelled key inside `branding` is
 refused rather than dropped.
 
+### The app's icon
+
+An app looks the same wherever the Console draws its icon — Home's app tiles, the
+app switcher and its pill, the phone's app list and drawer header, Studio's package
+chip and the command palette's "Switch app" items:
+
+- **`branding.logo`** is drawn when declared.
+- Otherwise the app's **`icon`** is drawn as a glyph on a solid square: the hex
+  `branding.primaryColor` when declared, else a colour of the app's own, picked from
+  the objects' palette (`OBJECT_COLORS` without `gray`) by the app's `name`. The same
+  name gets the same colour on every load, for every viewer and in every environment.
+
+The picked colour is for the icon only and is never written back: an app without a
+`primaryColor` keeps the platform's default `--primary` on its buttons. To choose the
+colour, declare `branding.primaryColor`.
+
 ## Contributing navigation to another app
 
 A package can add menu entries to an app it does not own with

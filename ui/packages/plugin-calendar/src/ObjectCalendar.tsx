@@ -26,6 +26,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { ObjectCalendarSchema, DataSource, CalendarConfig } from '@object-ui/types';
 import { errorCodeIs } from '@object-ui/types';
 import { CalendarView, type CalendarViewEvent } from './CalendarView';
+import { isTailwindColorToken } from './eventColorToken';
 import { getVisibleDateRange } from './visibleDays';
 import {
   anchorDateFromResult,
@@ -50,6 +51,7 @@ import {
   useFilterScope,
   useResolvedFilter,
   classifyLoadError,
+  usePredicateScope,
 } from '@object-ui/react';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -77,6 +79,8 @@ import {
   toast,
 } from '@object-ui/components';
 import {
+  fieldReadOnlyByHand,
+  fieldStaticallyReadOnlyByHand,
   buildExpandFields,
   convertSortToQueryParams,
   getRecordDisplayName,
@@ -412,6 +416,7 @@ interface QuickCreateFieldDef {
   type?: unknown;
   required?: unknown;
   readonly?: unknown;
+  uiReadonly?: unknown;
   system?: unknown;
   defaultValue?: unknown;
   options?: unknown;
@@ -484,9 +489,31 @@ function requiredFieldsQuickCreateCannotFill(fieldsMeta: unknown, provided: Read
   for (const [name, def] of quickCreateFieldEntries(fieldsMeta)) {
     if (!name || provided.has(name) || !def?.required) continue;
     if (def.readonly === true || def.system === true || def.type === 'autonumber') continue;
+    // A field read-only by hand (`uiReadonly`) is left out of the write, as
+    // the create dialog leaves it out (objectstack#37448): the server applies
+    // its `defaultValue`, and without one the write would be refused for it.
+    if (fieldStaticallyReadOnlyByHand(def)) {
+      if (def.defaultValue === undefined || def.defaultValue === null) unfillable.push(name);
+      continue;
+    }
     if (!quickCreateFill(def)) unfillable.push(name);
   }
   return unfillable;
+}
+
+/**
+ * The fields the quick-create dialog writes itself — the title field and the
+ * date fields — that are read-only by hand on every record (`readonly` or
+ * `uiReadonly`, the static half of `fieldStaticallyReadOnlyByHand`; a create
+ * is judged by the static half only, objectstack#37448). The dialog cannot
+ * leave them out of its own write, so where one is locked the gesture goes to
+ * the host's full create form, which leaves it off.
+ */
+function quickCreateLockedOwnFields(config: ObjectCalendarConfig, fieldsMeta: unknown): string[] {
+  const defs = new Map(quickCreateFieldEntries(fieldsMeta));
+  return [config.titleField || 'name', config.startDateField, config.endDateField]
+    .filter((key): key is string => !!key)
+    .filter((key) => fieldStaticallyReadOnlyByHand(defs.get(key)));
 }
 
 /**
@@ -1106,14 +1133,16 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       const startDate = record[startDateField];
       const endDate = endDateField ? record[endDateField] : null;
       const title = resolveTitle(record);
-      // Last rung stays where it was: a value no option colours is handed on
-      // RAW, so `CalendarView.resolveEventColor` still recognises a Tailwind
-      // utility string and still hashes a plain category label onto its
-      // theme-aware 8-stop palette. Retiring that would repaint every existing
-      // calendar whose `colorField` points at a plain categorical field, which
-      // is well beyond this fix.
+      // Only a declared colour paints (objectstack#36882): the option colour
+      // or a colour literal (the shared ladder), else a value that already is
+      // a Tailwind colour utility. Any other value, a category label or a
+      // palette family name stored as data alike, hands on nothing, and
+      // `CalendarView` paints its default event colour. A family name an
+      // author DECLARES on an option arrives through rung 1 and paints that
+      // family's tint there.
       const colorRaw = colorField ? record[colorField] : undefined;
-      const color = resolveColorFieldValue(colorRaw) ?? colorRaw;
+      const color = resolveColorFieldValue(colorRaw)
+        ?? (isTailwindColorToken(colorRaw) ? colorRaw : undefined);
       const id = record.id || record._id || `event-${index}`;
 
       // NO VALUE in the declared start field means the record has no date —
@@ -1290,6 +1319,13 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   };
   const quickCreateGranted = resolveAffordance('calendarQuickCreate', writeAffordanceSource).allowed;
   const rescheduleGranted = resolveAffordance('calendarReschedule', writeAffordanceSource).allowed;
+  // The static half of the one hand-lock verdict on the date fields a drag
+  // writes (`readonly` / `uiReadonly`): a locked start field closes the drag, a
+  // locked end field the resize handle. The conditional half is judged per
+  // record at the drop (`handleEventDropDefault`).
+  const lockFieldDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
+  const startFieldLocked = !!calendarConfig && fieldStaticallyReadOnlyByHand(lockFieldDefs?.[calendarConfig.startDateField]);
+  const endFieldLocked = !!calendarConfig?.endDateField && fieldStaticallyReadOnlyByHand(lockFieldDefs?.[calendarConfig.endDateField]);
 
   // Default drag-to-reschedule handler. When the caller hasn't provided an
   // `onEventDrop`, persist the new dates back to the data source so dragging
@@ -1299,6 +1335,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   // before the early returns for `loading` / `error` / `!calendarConfig`,
   // otherwise React detects a hook-order change when those conditions
   // flip across re-renders (e.g. tab switching between board → calendar).
+  // The host's predicate scope, as the edit dialog binds it (objectstack#36806).
+  const predicateScope = usePredicateScope();
   const handleEventDropDefault = useCallback(async (record: any, newStart: Date, newEnd?: Date) => {
     if (!calendarConfig) return;
     const { startDateField, endDateField } = calendarConfig;
@@ -1315,6 +1353,19 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
       sameInstant(newStart, record?.[startDateField]) &&
       (!writesEnd || sameInstant(newEnd as Date, record?.[endDateField as string]))
     ) {
+      return;
+    }
+
+    // A drag is an edit by hand: a date field locked over THIS record — the
+    // one hand-lock verdict (`readonlyWhen`, the hand lock `uiReadonlyWhen`;
+    // the static half closed the gesture below) — takes no write, and a fresh
+    // array identity puts the event back where the record has it.
+    const lockDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
+    if (
+      fieldReadOnlyByHand(lockDefs?.[startDateField], record, { scope: predicateScope }) ||
+      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record, { scope: predicateScope }))
+    ) {
+      setData((prev) => prev.slice());
       return;
     }
 
@@ -1389,7 +1440,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           })
         : tt('form.recordNotFoundOrHidden', "This record doesn't exist, or you don't have access to it.");
     }
-  }, [calendarConfig, schema.objectName, dataSource, data, tt, t, labels, objectSchema]);
+  }, [calendarConfig, schema.objectName, dataSource, data, tt, t, labels, objectSchema, predicateScope]);
 
   // Quick-create state: clicking an empty day cell opens a small dialog
   // pre-filled with that date. On submit, dataSource.create() inserts a
@@ -1430,7 +1481,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
         ),
       )
     : [];
-  const quickCreateCanSucceed = quickCreateUnfillable.length === 0;
+  const quickCreateLockedOwn = calendarConfig ? quickCreateLockedOwnFields(calendarConfig, objectSchema?.fields) : [];
+  const quickCreateCanSucceed = quickCreateUnfillable.length === 0 && quickCreateLockedOwn.length === 0;
 
   // …and where it cannot, the same gesture opens the host's FULL create form
   // with the day it was made on (the triage direction on objectui#12291): a
@@ -1440,7 +1492,10 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
   const handOffToCreateForm = useCallback((start: Date, end?: Date) => {
     if (!calendarConfig || !schema.objectName || !onEdit) return;
     const fieldDefs = objectSchema?.fields as Record<string, { type?: unknown } | undefined> | undefined;
-    onEdit(quickCreateDateValues(calendarConfig, fieldDefs, start, end));
+    // A date field read-only by hand is not prefilled: the form leaves it off.
+    const locked = new Set(quickCreateLockedOwnFields(calendarConfig, objectSchema?.fields));
+    const values = quickCreateDateValues(calendarConfig, fieldDefs, start, end);
+    onEdit(Object.fromEntries(Object.entries(values).filter(([key]) => !locked.has(key))));
   }, [calendarConfig, schema.objectName, onEdit, objectSchema]);
 
   // The two quick-create gestures (an empty-day click, a week / day range
@@ -1479,6 +1534,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     // an object with any other one hands the gesture to the host's full form.
     for (const [name, def] of quickCreateFieldEntries(objectSchema?.fields)) {
       if (!name || name in payload || !def?.required) continue;
+      // Read-only by hand: left out, so the server applies its default.
+      if (fieldStaticallyReadOnlyByHand(def)) continue;
       const fill = quickCreateFill(def);
       if (fill) payload[name] = fill.value;
     }
@@ -1755,7 +1812,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           onEventDrop={
             onEventDrop
               ? (event, newStart, newEnd) => onEventDrop(event.data, newStart, newEnd)
-              : rescheduleGranted
+              : rescheduleGranted && !startFieldLocked
                 ? (event, newStart, newEnd) => {
                     void handleEventDropDefault(event.data, newStart, newEnd);
                   }
@@ -1764,7 +1821,7 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
           onTimeRangeSelect={rangeSelectCreate}
           // With no `endDateField` the end is not stored, so no gesture may
           // move it on its own: no resize-end handle is drawn.
-          endEditable={Boolean(calendarConfig.endDateField)}
+          endEditable={Boolean(calendarConfig.endDateField) && !endFieldLocked}
         />
       </div>
       {/* objectui#7210 — a month drawn from the first N rows of a larger set

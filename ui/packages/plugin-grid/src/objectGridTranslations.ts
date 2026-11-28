@@ -44,6 +44,9 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // dropped under the console's draft preview (objectstack#34898).
   // Byte-identical to the `en` pack.
   'grid.grouping.draftOnly': 'Not grouped by {{fields}}: it exists only in the draft until you publish.',
+  // …and the note over a group list the server cut to its page size
+  // (objectstack#37278). Byte-identical to the `en` pack.
+  'grid.grouping.moreGroupsNotLoaded': 'More groups were not loaded: this view has more groups than the server returns in one read, so only some are listed.',
   // Reused by the grouped-view pager (falls back here when no I18nProvider).
   'table.rowsPerPage': 'Rows per page',
   'table.pageInfo': 'Page {{current}} of {{total}}',
@@ -54,8 +57,7 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'table.nextPage': 'Next page',
   'table.lastPage': 'Last page',
   // The default inline-edit saves' success toast (objectui#12303), counted in
-  // the rows the server accepted — the `table.modified` unit the table's
-  // "Save All" bar counts in.
+  // the rows the server accepted.
   'table.saved': '{{count}} row saved',
   'table.saved_one': '{{count}} row saved',
   'table.saved_other': '{{count}} rows saved',
@@ -118,6 +120,7 @@ const GRID_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'grid.readOnlyReason.objectReadOnly': 'These records can\'t be edited here.',
   'grid.readOnlyReason.noPermission': 'You don\'t have permission to edit these records.',
   'grid.readOnlyReason.approvalLocked': 'This record is locked while it\'s in approval.',
+  'grid.readOnlyReason.checking': 'Checking whether this record can be edited…',
   'grid.readOnlyReason.noRecordPermission': 'You don\'t have permission to edit this record.',
   // objectstack#35685 — the confirm before a list cell moves a state-machine
   // field (`objectGridStateConfirm`). Byte-identical to the `en` pack.

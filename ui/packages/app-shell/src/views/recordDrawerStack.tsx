@@ -41,7 +41,6 @@
 import {
   Fragment,
   createContext,
-  createElement,
   useCallback,
   useContext,
   useEffect,
@@ -55,20 +54,22 @@ import {
 } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { ChevronRight } from 'lucide-react';
-import { getIcon } from '../utils/getIcon.js';
+import { ChevronRight, MessageCircle } from 'lucide-react';
 import {
   NavigationOverlay,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
   RecordHeaderBarContext,
   type RecordHeaderBar,
+  ObjectIconTile,
+  RecordTopBarButton,
+  Skeleton,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
+import { useChatDockControl } from '../layout/chatDockControl.js';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
+import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
 import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,
@@ -87,6 +88,8 @@ import {
   type RecordDrawerApi,
   type RecordPaneApi,
   type RecordPaneBarApi,
+  recordPaneWidth,
+  recordPreviewWidthKey,
 } from './recordDrawerContext.js';
 
 export {
@@ -477,6 +480,7 @@ export function RecordStackDrawer({
   storageKey,
   objects,
   mainContent,
+  listObjectName,
   stepScope,
   onClose,
   onOpenAsPage,
@@ -490,6 +494,12 @@ export function RecordStackDrawer({
   objects: ReadonlyArray<unknown>;
   /** The list the pane opens from (`NavigationOverlay.mainContent`). */
   mainContent?: ReactNode;
+  /**
+   * The object of the list's rows (objectstack#36015): the root marks its row
+   * in the list only when it is a record of that object, not a record a lookup
+   * chip opened. Absent ⇒ the root is always the list's row.
+   */
+  listObjectName?: string;
   /**
    * The root level's set by name — the list view it came from — for the
    * counter's tooltip, unless the level names its own set (its group).
@@ -509,6 +519,27 @@ export function RecordStackDrawer({
     () => (onOpenAsPage ? { openAsPage: () => onOpenAsPage(path) } : null),
     [onOpenAsPage, path],
   );
+  // objectstack#36998 — the drawer card sits over the right end of the
+  // console's top bar, where the assistant's one standing entry (「Ask AI」)
+  // is, and over the assistant's drawer. So the bar carries the entry itself,
+  // drawn where that entry is (a layout hosting the assistant hands a dock
+  // handle only while the runtime serves AI): it opens the record shown as
+  // its full page, as ⤢ does, then opens the assistant beside it.
+  const dock = useChatDockControl();
+  const assistantEntry = dock && pane ? (
+    <RecordTopBarButton
+      label={t('home.askAI', { defaultValue: 'Ask AI' })}
+      onClick={() => {
+        pane.openAsPage();
+        // ui ADR-0057 Amendment A5 — the entry's opening, as the top bar's.
+        if (dock.openEntry) dock.openEntry();
+        else dock.open();
+      }}
+      data-testid="record-pane-open-assistant"
+    >
+      <MessageCircle className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
+  ) : null;
   // The bar's slot for the record's ⊟, and the titles the records drawn
   // reported, by level key: the breadcrumb names the record, and an ancestor
   // that was not opened with a title is still named by the one it reported.
@@ -520,8 +551,10 @@ export function RecordStackDrawer({
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
   const [headerClaimed, setHeaderClaimed] = useState(false);
+  // objectstack#36149 / objectstack#36201 — the pane is the side preview: the
+  // record's name first, one labelled action, Edit and the id's copy in `⋯`.
   const headerBar = useMemo<RecordHeaderBar>(
-    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed }),
+    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed, preview: true }),
     [headerTitleSlot, headerActionSlot],
   );
   const currentObject = current?.objectName;
@@ -549,25 +582,36 @@ export function RecordStackDrawer({
       : objectName;
   };
   const shortId = (recordId: string) => `#${recordId.length > 12 ? `${recordId.slice(0, 8)}…` : recordId}`;
-  const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
+  const knownTitleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title;
+  // An ancestor was the shown record before, so its page reported its name (or
+  // its short id, for a record with none); the short id is left only for an
+  // ancestor never drawn, which a deep link opens under the shown one.
+  const titleOf = (level: RecordDrawerLevel) => knownTitleOf(level) || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  // The record row's icon: the object's, as the full page draws it.
-  const rootIconName = current ? (defOf(current.objectName) as { icon?: unknown } | undefined)?.icon : undefined;
-  const rootIcon = typeof rootIconName === 'string'
-    ? createElement(getIcon(rootIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
+  // The record row's icon: the object's tile, as the full page draws it
+  // (objectstack#35985 — white glyph on the object's colour, gray without one).
+  const rootDef = current ? (defOf(current.objectName) as { icon?: unknown; color?: unknown } | undefined) : undefined;
+  const rootIcon = typeof rootDef?.icon === 'string'
+    ? <ObjectIconTile icon={rootDef.icon} color={typeof rootDef.color === 'string' ? rootDef.color : undefined} />
     : null;
   // objectstack#35853 — the bar's record row: the icon, then the record's
   // name and tags as the record header draws them into the slot; until it
   // does (a record with no header, a read in flight), the bar's own name.
+  // objectstack#36235 — the page reports that name once it holds the record
+  // (the short id only for a record with nothing to be named by); while the
+  // read is in flight the row draws a placeholder, never the raw id.
+  const currentTitle = current ? knownTitleOf(current) : undefined;
   const recordRow = current ? (
     <>
       {rootIcon}
-      {!headerClaimed && (
-        <span className="min-w-0 truncate text-base font-semibold text-foreground" data-record-drawer-title="">
-          {titleOf(current)}
+      {!headerClaimed && (currentTitle ? (
+        <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
+          {currentTitle}
         </span>
-      )}
+      ) : (
+        <Skeleton className="h-5 w-32 shrink-0" data-record-drawer-title-pending="" aria-hidden="true" />
+      ))}
       <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
     </>
   ) : undefined;
@@ -614,7 +658,7 @@ export function RecordStackDrawer({
         if (!next) onClose();
       }}
       mainContent={mainContent}
-      activeListRecordId={path[0]?.recordId ?? null}
+      activeListRecordId={path[0] && (listObjectName === undefined || path[0].objectName === listObjectName) ? path[0].recordId : null}
       storageKey={storageKey}
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}
@@ -622,7 +666,12 @@ export function RecordStackDrawer({
       actionSlotRef={setHeaderActionSlot}
       recordRow={recordRow}
       onExpand={pane ? () => pane.openAsPage() : undefined}
-      toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
+      toggles={
+        <>
+          <span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />
+          {assistantEntry}
+        </>
+      }
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
@@ -938,9 +987,10 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  // The pane's own width (objectstack#27545): an authored one, else `md`.
-  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
-    ?? overlayWidthFor('md', rootDef);
+  // The pane's own width (objectstack#27545): an authored width or size
+  // bucket, else the side preview's 460 (`recordPaneWidth`, objectstack#36149).
+  const rootNavigation = (rootDef as { navigation?: unknown } | undefined)?.navigation;
+  const rootWidth = recordPaneWidth(rootNavigation, rootDef);
 
   return (
     <RecordDrawerContext.Provider value={api}>
@@ -949,7 +999,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? `drawer-width:${root.objectName}` : undefined}
+        storageKey={root ? recordPreviewWidthKey(root.objectName, rootNavigation) : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

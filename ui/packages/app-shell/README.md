@@ -450,7 +450,9 @@ to draw the same header. Below `sm` it draws the icon, the title and the actions
 the secondary line is hidden there.
 
 Its props are the exported `ConsolePageHeaderProps`: `title` (required),
-`subtitle`, `icon` (a rendered element, sized by the chip), `actions`,
+`subtitle`, `icon` (a rendered element, sized by the chip), `iconTile` (an
+icon that draws its own square, such as `ObjectIconTile`, drawn as given in
+place of `icon`), `actions`,
 `foldedActions`, `accentColor`, `sticky`, `className` and `data-testid`. The
 secondary line is `subtitle`; there is no `description` prop.
 
@@ -595,18 +597,18 @@ trip is required to edit a draft.
 
 ### New dataset beside the Studio's dataset pickers (objectstack#27518)
 
-The Interfaces pillar provides `StudioDatasetAuthoringContext`
-(`src/views/studio-design/datasetCreate.tsx`): the package being edited and the
-pillar's draft-saved signal. A dataset picker that finds it (the New report
-dialog's `ReportCreateFields` and the dashboard widget inspector) reads the
-draft-overlaid dataset catalog (`useDatasetCatalog(…, { previewDrafts: true })`),
-lists the package's datasets first, and renders `DatasetCreateEntry`: a **New
-dataset** button whose dialog saves a `dataset` draft in the package through
-the draft door (the spec's create seed, the picked object, a dimension per
-group-by field and a `sum` measure per total), re-reads the catalog and binds
-the new name. While no dataset reads one of the package's objects, the entry
-says so. Outside the Studio there is no context: Setup's editors keep the
-published catalog and offer no entry.
+`StudioDatasetAuthoringContext` (`src/views/studio-design/datasetCreate.tsx`)
+carries the package being edited and a draft-saved signal. A dataset picker
+that finds it (the dashboard widget inspector) reads the draft-overlaid dataset
+catalog (`useDatasetCatalog(…, { previewDrafts: true })`), lists the package's
+datasets first, and renders `DatasetCreateEntry`: a **New dataset** button
+whose dialog saves a `dataset` draft in the package through the draft door
+(the spec's create seed, the picked object, a dimension per group-by field and
+a `sum` measure per total), re-reads the catalog and binds the new name. While
+no dataset reads one of the package's objects, the entry says so. Without the
+context there is no entry and the catalog is the published one. Its provider
+was Studio's Interfaces pillar, retired by objectstack#36502, so no surface
+provides it today.
 
 ### AI chat conversation key (ADR-0057)
 
@@ -629,28 +631,40 @@ Inside a running app, workspace admins get an "Edit app" button in the top bar
 (`AppHeader`) — and, at the end of the app switcher's dropdown, an "Edit APP in
 Studio" row to the same target — that deep-links to the app's owning package on
 the Studio design surface. When the current route names a specific interface — a
-dashboard, page, or report — it opens straight to that surface in the Interfaces
-pillar (`/studio/:packageId/interfaces?surface=<type>:<name>`); on an object
-route it opens that object in the Data pillar
-(`/studio/:packageId/data?surface=object:<name>`), and at the app root the
-package's Data tab (`/studio/:packageId/data`).
+dashboard, page, or report — it opens that item's page in Studio's "All
+metadata" area (`/studio/:packageId/metadata/<type>/<name>`), where it is read
+and edited as metadata; interfaces themselves are designed in the running app,
+since objectstack#36502 retired Studio's Interfaces pillar. On an object route
+it opens that object's designer full-screen on its own address
+(`/studio/:packageId/metadata/object/<name>`, objectstack#36904), and at the
+app root the package's Studio home, which lands on the package's object list
+(`/studio/:packageId/metadata/object`; the retired Data pillar's
+`/studio/:packageId/data` redirects there). An old
+`/studio/:packageId/interfaces` link lands on the object list with a one-line
+notice that interface editing moved into the app.
 The route-type → surface-type decision lives in `appStudioRoutePath`. It is the
 reverse of the builder's "Open app" bridge (ADR-0080): the entry only renders
 for admins and only when the app has an owning package (`_packageId`), and
 package writability stays a server-side concern — a read-only package opens in
 Studio as browse-only. For a read-only package the button draws an eye with the
 words "Open {app} in Studio" (ADR-0146 D5) instead of the pencil.
+From 768 px up, where no top bar is drawn, the sidebar's app menu carries the
+same entry on the same target and posture (`useAppStudioEntry`): "Edit app"
+behind a pencil, or "View in Studio" behind an eye for a read-only package.
+Beside it, "Design layout" turns on the shell's design mode, which edits the
+app's layout (its menu, header pins and page arrangement) in place; the mode's
+bar carries the same name.
 
-The way back is Studio's own "Open app" button in the workbench top bar
-(`StudioOpenApp`). It reads the `?surface=` Studio has in focus — the same
-target "Edit app" hands over — and lands on that object's list
-(`/apps/:app/<object>`), on that dashboard, page or report, or else on the
-app's home, in the same tab. A package with several published apps gets a
-picker; a package whose only app is still a draft gets no button.
-
-Studio's package switcher never lists a kernel package (ADR-0016 §3.8): neither
-one whose manifest carries `scope: system | cloud` nor a row served with that
-`scope` flat. There is no toggle that shows them.
+The way back is the 「‹ Back to app」 link at the left end of Studio's top bar
+(`StudioBackToApp`), followed by the app's name and the "Studio" mark. Entered
+from an app, it names that app and returns to the page the author left, query
+included (`utils/appReturnPage.ts`, recorded by `ConsoleLayout`, held in module
+memory only). Opened directly (a new tab, a reload), it names the package's
+first published app and lands on its home. A package with no published app (a
+draft-only app counts as none) reads 「‹ Back to app」 with no name and goes to
+the console's declared landing (`useHomePath()`). Leaving with unsaved work in a
+pillar asks first. Studio's top bar has no package switcher: another package is
+opened from its app or from the Studio landing.
 
 The sidebar's ⋯ menu offers the same bridge per entry: the **Design** entry of an
 `object`, `dashboard` or `page` navigation entry, and of the matching favorites,
@@ -779,21 +793,26 @@ On the declared page:
   rule already switched off has no served projection, so its clone continues
   in the pre-filled New form, which asks for the criteria.
 
-### Package-less flows (`/studio/~org/automations`)
+### Package-less flows (`/studio/~org/metadata/flow`)
 
 A flow that belongs to no package — a clone of a packaged flow is one, by
 ADR-0126 §7.1 — matches no package scope, so Studio gives it one scope of its
-own: `/studio/~org/automations` (`studioOrgScopePath()`, segment
-`STUDIO_ORG_SCOPE_SEGMENT`). It is the same `StudioDesignSurface` with no
-package under it, reached from the Studio home and from the package switcher.
-Its Automations rail lists every flow whose served `_packageId` names no
-package, opens each one editable, and saves package-less drafts; its Publish
-promotes those drafts one by one through the single-item publish door, because
-the package batch publish cannot reach a draft bound to no package. It offers
-no other pillar and no "New" flow. `~` is outside every package-id alphabet,
-so the segment can never name a package. A `?surface=flow:` deep link that
-names a flow the open rail does not hold opens no other flow in its place;
-from a package's pillar, a package-less flow is opened in this scope instead.
+own, segment `STUDIO_ORG_SCOPE_SEGMENT` (`~org`): its own leg of the "All
+metadata" area. The list is `/studio/~org/metadata/flow?source=runtime` and a
+flow opens full-screen in the flow designer at
+`/studio/~org/metadata/flow/<name>?source=runtime` (`studioOrgScopePath()`,
+`orgScopeFlowOf()`). It is the same `StudioDesignSurface` with no package under
+it, reached from the Studio home and the left menu. The list holds every flow
+whose served `_packageId` names no package and offers no create; each flow opens
+editable and saves package-less drafts. An empty list says how a packaged flow
+is changed instead (in its package, with New similar). Publish promotes the
+scope's drafts one by one through the single-item publish door, because the
+package batch publish cannot reach a draft bound to no package. `~` is outside
+every package-id alphabet, so the segment can never name a package. A package's
+address naming a package-less flow opens it in this scope; one naming a flow
+nowhere held says so and opens no other flow. The retired
+`/studio/~org/automations` addresses (with or without `?surface=flow:<name>`)
+redirect to the list or the flow (objectstack#36903).
 
 ### Access matrix (package-scoped)
 
@@ -1393,6 +1412,15 @@ adapter syncs both flows. The legacy `objectui-nav-pins` localStorage key is
 migrated on first mount and then removed. Content favorites (20) and nav
 pins (20) each have an independent cap. See the guide below for details.
 
+An AI conversation can be a content favorite too (`type: 'conversation'`, id
+`conversation:ID`, with `conversationId` and `agent`), starred from the
+assistant drawer. Its sidebar row opens the drawer in place
+on that conversation, and follows its `href` (the conversation's `/ai…`
+address) only where no drawer can take it. The sidebar reads each favorite
+conversation once: the label follows the conversation's title, and a
+conversation the server answers is gone or not this user's is drawn
+unavailable, stays removable, and opens nothing.
+
 The sidebar's Pinned section keeps the user's order, stored with the pins:
 `pinnedIds` lists them in it, a new pin joins the end, and
 `reorderPins(orderedIds)` saves a new order. The sidebar passes both to
@@ -1412,17 +1440,56 @@ record search. Its open state and the command that opens it are provided by
 
 `CommandPalette` has two scopes. Inside an app it takes `apps`, `activeApp`,
 `objects`, `onAppChange` and an optional `dataSource`, and searches that app.
-`<CommandPalette scope="studio" />` takes no other prop: it is the palette of the
-`/studio` landing, a frame outside every app, which the console mounts under its
-own `CommandPaletteProvider`. It leaves out every app-scoped group and the
-full-search command (their links start with `/apps/APP`), and lists the Studio's
-packages, their objects and their flows, each opening its Studio page. The
+`<CommandPalette scope="studio" />` is the palette of Studio, outside every app.
+It leaves out every app-scoped group and the full-search command (their links
+start with `/apps/APP`), and lists the Studio's packages, their objects and their
+flows, each opening its Studio page. On the `/studio` landing the console mounts
+it with no other prop, under its own `CommandPaletteProvider`.
+
+On a Studio design page, `StudioDesignSurface` mounts it itself, with an optional
+`surface` prop (a `StudioPaletteSurface`; objectstack#36900). The surface mounts
+its own `CommandPaletteProvider` unless a host above it already mounts one.
+
+- `renderGroups({ query, open, onLoadingChange })` returns the page's own groups:
+  `StudioPaletteGroups`, which draws the left menu's six groups (the menu's data
+  shared through `StudioMenuDataProvider`, read once per page). On a package each
+  group also holds every item of its types, read from the type's list as its
+  list page reads it. They are drawn above the packages and mounted only while
+  the palette is open. `open` closes the palette and opens a Studio address;
+  `onLoadingChange` keeps the empty result on "Searching…" while a list is read.
+- `packageScope: true` (a package's page) drops every package's objects and
+  flows: the page's groups list that package's items instead.
+- `open(to)` is the page's departure (`openStudioPaletteAddress`). It asks the
+  shell's unsaved-edits seam (`confirmUnsavedLeave`), so every registered editor
+  is asked about, the "All metadata" item page included, then navigates. A pick
+  of the page already open on another query re-enters it once the router shows
+  that query; a pick of the page already shown only closes the palette.
+
+The
 header's search trigger is drawn wherever a provider is mounted, so `AppHeader`
 with `variant="studio"` shows it there. Inside an app, on every route
 (`system/*` included) from the `lg` breakpoint up, `AppHeader` draws it as the
 bar's middle zone, centered between the left group and the utility cluster. In
 the `home`, `orgs` and `studio` frames, and below `lg` (as an icon button), it
 sits at the utility cluster's left edge.
+
+Inside an app, while the query finds records, the palette shows the selected
+hit on the right, read-only: its title and the object's declared
+`highlightFields`, as the record pointer card draws them (a palette narrower
+than 45rem shows the results alone). Once something is typed, the end of the
+list offers "New OBJECT" for the app's objects the query names and "Create
+"words" as OBJECT" for up to three of them, the page's own object first; each
+opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
+words in its title field. An object is offered exactly where its list offers
+New. A footer names what Enter does to the selected entry.
+
+With nothing typed, the palette leads with a "Current page" group: on an
+object's list, the list's favorites entry and "Add view"; on a record page, the
+record's star and "Edit". Each row runs the page's own control and is listed
+only while the page draws that control. "Add view" and "Edit" are published by
+the page beside the control (`usePublishPageCommand`, `chrome/paletteCommands.ts`)
+with the control's own handler and verdict, so an Edit the header draws off is
+listed off, with the header's reason.
 
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';

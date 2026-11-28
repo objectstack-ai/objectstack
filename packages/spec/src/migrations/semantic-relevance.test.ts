@@ -62,6 +62,8 @@ const EXPECTED_RELEVANCE: Readonly<Record<string, readonly string[]>> = {
   '18:job-timeout-unit-in-key': ['jobs'],
   '18:mapping-lookup-params-retired': ['mappings'],
   '18:permission-restore-purge-bits-retired': ['permissions'],
+  '19:action-locations-page-parts-retired': ['actions', 'objects', 'pages'],
+  '19:agent-model-provider-retired': ['agents'],
 };
 
 /** The keys the evaluation reads as carriers of other definitions, never as a family. */
@@ -84,11 +86,12 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
     expect(actual).toEqual(EXPECTED_RELEVANCE);
   });
 
-  it('is 27 entries: 5 of protocol 17 and 22 of protocol 18', () => {
+  it('is 29 entries: 5 of protocol 17, 22 of protocol 18 and 2 of protocol 19', () => {
     const keys = Object.keys(EXPECTED_RELEVANCE);
-    expect(keys).toHaveLength(27);
+    expect(keys).toHaveLength(29);
     expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
     expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(22);
+    expect(keys.filter((k) => k.startsWith('19:'))).toHaveLength(2);
   });
 
   it('the table names only registered entries (anti-vacuity for the comparison above)', () => {
@@ -244,7 +247,7 @@ describe('the answer is three-valued, and only a positive proof is `absent` (EVA
 
 describe('todos reports every entry; absentTodos names the proven-absent subset (CHAIN)', () => {
   const TO = Math.max(...MIGRATION_MAJORS);
-  /** A stack that declares objects only — none of the first batch's keys. */
+  /** A stack that declares objects only — none of the first batch's keys (one protocol-19 entry asks about `objects`). */
   const OBJECTS_ONLY = {
     manifest: { id: 'com.example.relevance', name: 'relevance', version: '1.0.0', type: 'app' },
     objects: [{ name: 'rel_thing', label: 'Thing', fields: { title: { type: 'text', label: 'Title' } } }],
@@ -267,7 +270,11 @@ describe('todos reports every entry; absentTodos names the proven-absent subset 
 
   it('on a stack declaring none of the batch\'s keys, absentTodos names exactly the questioned entries', () => {
     const result = applyMetaMigrations(structuredClone(OBJECTS_ONLY), MIGRATION_SUPPORT_FLOOR, TO);
-    const expectedAbsent = crossed(MIGRATION_SUPPORT_FLOOR, TO).filter((k) => k in EXPECTED_RELEVANCE);
+    // An entry that asks about `objects` (an object carries its own actions,
+    // objectstack#36495) is relevant to this stack, so it is not absent.
+    const expectedAbsent = crossed(MIGRATION_SUPPORT_FLOOR, TO).filter(
+      (k) => k in EXPECTED_RELEVANCE && !EXPECTED_RELEVANCE[k]!.includes('objects'),
+    );
     expect(expectedAbsent.length).toBeGreaterThan(0);
     expect(ids(result.absentTodos)).toEqual(expectedAbsent);
     expect(result.hops.flatMap((h) => ids(h.absentTodos))).toEqual(ids(result.absentTodos));

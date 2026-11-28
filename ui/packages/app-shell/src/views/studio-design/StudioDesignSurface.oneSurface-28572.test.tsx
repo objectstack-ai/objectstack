@@ -12,30 +12,25 @@
  * holds), `DraftChangesPanel`, and the session.
  *
  * Pinned:
- *  - the Interfaces rail lists the base's items and the pair's added item as
- *    one list: the override the read lists is marked "customized", the
- *    pair's own item "added", every other row nothing;
- *  - "only customizations" lists exactly those two;
- *  - the package switcher gives the pair no row, and names it under the base;
+ *  - the Data rail lists the pair's added object, marked, and opening it names
+ *    the pair;
  *  - a pillar URL of the pair lands on the base, its query kept; the pair's
  *    "All metadata" URL is NOT sent to the base (no loop);
- *  - New on the read-only base asks the ensure door, writes the item into the
- *    pair the door named, links no nav entry, and opens it naming the pair;
- *  - an added item opens writable: its edit saves at the pair, declaring no
- *    override, with no Customize and no read-only link;
- *  - the Data rail lists the pair's added object, marked, opening it names
- *    the pair;
  *  - the rails ask no list of a third package: what it contributes comes from
  *    the base's one customization read (objectstack#29786, below);
  *  - CONTROL: a base with no pair reads no pair list, and draws no mark and
  *    no filter.
+ *
+ * The Interfaces rail's pins (one list of the base's and the pair's
+ * dashboards, "only customizations", New into the pair, contributed nav
+ * entries and a contributor-only package's text) retired with that pillar,
+ * objectstack#36502.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const BASE = 'com.example.hotcrm';
@@ -83,20 +78,21 @@ vi.mock('sonner', () => ({
 }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
-vi.mock('./StudioMetadataArea', () => ({
-  StudioMetadataArea: ({ packageId }: { packageId: string | null }) => (
-    <div data-testid="metadata-area" data-package={packageId ?? ''} />
-  ),
-}));
+// objectstack#36904 — the REAL area: it mounts the object designer.
 
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -162,8 +158,9 @@ const READ = {
   overrides: [{ type: 'dashboard', name: 'pipeline', basedOn: '4.0.0' }],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
+  arrangements: [],
   contributions: [],
-  counts: { overrides: 1, extensions: 1, switchedOff: 0, contributions: 0 },
+  counts: { overrides: 1, extensions: 1, switchedOff: 0, arrangements: 0, contributions: 0 },
 };
 /**
  * objectstack#29786 — what the third package contributes to the base: a nav
@@ -215,7 +212,7 @@ const SERVED_APP = {
     { id: 'nav_knowledge', type: 'url', label: 'Knowledge base', url: '/kb2' },
   ],
 };
-const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
+const EMPTY_READ = { packageId: BASE, overrides: [], extensions: [], switchedOff: [], arrangements: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, arrangements: 0, contributions: 0 } };
 
 /** The base's own lists, by type. The override is served under the base's name (ADR-0146 D8 item 2). */
 const BASE_LISTS: Record<string, Array<Record<string, unknown>>> = {
@@ -364,230 +361,42 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,
   );
 }
 
-const ifRail = () => screen.getByTestId('studio-rail-interfaces');
-const dataRail = () => screen.getByTestId('studio-rail-data');
-/** The rail row that opens `type:name` (its tooltip is `type · name`). */
-const rowOf = (rail: HTMLElement, type: string, name: string) => within(rail).queryByTitle(`${type} · ${name}`);
-const markOf = (row: HTMLElement | null) => row?.querySelector('[data-testid="customization-mark"]')?.getAttribute('data-kind') ?? null;
 
-async function interfacesReady(): Promise<void> {
-  await waitFor(() => expect(rowOf(ifRail(), 'dashboard', 'wins')).not.toBeNull(), { timeout: 8000 });
-  await waitFor(() => expect(markOf(rowOf(ifRail(), 'dashboard', 'wins'))).toBe('added'), { timeout: 8000 });
-}
-
-describe('the Interfaces rail lists a base and its pair as one list (objectstack#28572)', () => {
-  it('marks the served override "customized" and the pair’s own item "added", and nothing else', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    // The nav entry opens the overridden dashboard: marked from the read.
-    expect(markOf(rowOf(ifRail(), 'dashboard', 'pipeline'))).toBe('customized');
-    // The base's own dashboard, which the read does not list.
-    expect(rowOf(ifRail(), 'dashboard', 'forecast')).not.toBeNull();
-    expect(markOf(rowOf(ifRail(), 'dashboard', 'forecast'))).toBeNull();
-    // Listed once each: the pair's copy of the override is the base's row.
-    expect(within(ifRail()).getAllByTitle('dashboard · pipeline')).toHaveLength(1);
-  });
-
-  it('"only customizations" lists exactly the customized and the added item', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    const only = within(ifRail()).getByTestId('studio-rail-customizations-only');
-    expect(only).toHaveTextContent(tFormat('engine.list.customizations.only', 'en', { marked: 2 }));
-    expect(only).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(only);
-    expect(only).toHaveAttribute('aria-pressed', 'true');
-    const rows = within(ifRail())
-      .getAllByRole('button')
-      .map((b) => b.getAttribute('title'))
-      .filter((title): title is string => !!title && title.includes(' · '));
-    expect(rows.sort()).toEqual(['dashboard · pipeline', 'dashboard · wins']);
-
-    fireEvent.click(only);
-    await waitFor(() => expect(rowOf(ifRail(), 'dashboard', 'forecast')).not.toBeNull());
-  });
-
-  it('an added item opens writable: its edit saves at the pair, declaring no override', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    fireEvent.click(rowOf(ifRail(), 'dashboard', 'wins')!);
-    await waitFor(() => expect(screen.getByTestId('board-label')).toHaveTextContent('Wins'), { timeout: 8000 });
-    const header = screen.getByTestId('if-item-header');
-    expect(within(header).getByTestId('studio-pair-item-chip')).toHaveTextContent(
-      tFormat('engine.studio.customize.addedIn', 'en', { pair: PAIR }),
+// objectstack#36904 — the object designer has no rail: the base's object list
+// marks the pair's rows (`ResourceListPage`), and a pair's object opens at the
+// pair's own address.
+describe('the pair’s URLs (objectstack#28572)', () => {
+  // The package switcher's case (the pair has no row, named under its base)
+  // left with the switcher, objectstack#36501; the Studio landing's cards
+  // fold the pair the same way (`foldCustomizationPairs`).
+  // objectstack#36904 — the pair's old object address opens the object's
+  // designer on the pair's own address (`dataPillarRedirect`), read at the
+  // pair, its owner (objectstack#28584).
+  it('the pair’s old object address opens the object at the pair', async () => {
+    renderAt(`/studio/${encodeURIComponent(PAIR)}/data?surface=object:hotcrm_custom_survey`);
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toMatch(
+        new RegExp(`^/studio/${encodeURIComponent(PAIR)}/metadata/object/hotcrm_custom_survey`),
+      ),
     );
-    expect(within(header).queryByTestId('studio-customize')).toBeNull();
-    expect(within(header).queryByTestId('studio-readonly-link')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'patch the board' }));
-    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
-    const [saved] = srv.saves;
-    expect(saved!.path).toBe('/api/v1/meta/dashboard/wins');
-    expect(new URLSearchParams(saved!.search).get('package')).toBe(PAIR);
-    expect(saved!.body).toStrictEqual({ name: 'wins', label: 'Wins (ours)', widgets: [] });
-    // An added item is the pair's already: the door is not asked.
-    expect(srv.ensure).toEqual([]);
-  });
-
-  it('New on the read-only base asks the ensure door, writes into the pair it names, and links no nav entry', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    await userEvent.click(await within(ifRail()).findByTestId('if-create-menu'));
-    // objectstack#30059 — the "+" also adds navigation entries now (customizing
-    // the app into the pair); creating an item still links none.
-    expect(screen.getByTestId('if-add-nav-url')).toBeInTheDocument();
-    await userEvent.click(await screen.findByTestId('if-create-dashboard'));
-    const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent(tFormat('engine.studio.interfaces.create.descriptionInPair', 'en', { baseName: 'HotCRM' }));
-    fireEvent.change(within(dialog).getByPlaceholderText(t('engine.studio.interfaces.create.dashboardNamePlaceholder', 'en')), {
-      target: { value: 'Churn watch' },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
-
-    await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
-    expect(srv.ensure).toEqual([200]);
-    const [saved] = srv.saves;
-    expect(saved!.path).toBe('/api/v1/meta/dashboard/churn_watch');
-    expect(new URLSearchParams(saved!.search).get('package')).toBe(PAIR);
-    // No app save: the base's navigation stays as installed.
-    expect(srv.saves.some((s) => s.path.startsWith('/api/v1/meta/app/'))).toBe(false);
-
-    // It opens at once, naming the pair, and the rail lists it as added.
-    await waitFor(() => expect(within(screen.getByTestId('if-item-header')).getByTestId('studio-pair-item-chip')).toBeInTheDocument(), {
-      timeout: 8000,
-    });
-    await waitFor(() => expect(markOf(rowOf(ifRail(), 'dashboard', 'churn_watch'))).toBe('added'), { timeout: 8000 });
-  });
-});
-
-describe('the rail mark never takes the row’s name (objectstack#29693, objectstack#30070)', () => {
-  it('prints one short word with no fill and no glyph: its full text is its name and leads its tooltip', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    const row = rowOf(ifRail(), 'dashboard', 'pipeline')!;
-    await waitFor(() => expect(markOf(row)).toBe('customized'), { timeout: 8000 });
-    const mark = within(row).getByTestId('customization-mark');
-    const label = tFormat('engine.customizationMark.customized', 'en', { baseName: 'HotCRM' });
-    expect(mark).toHaveAttribute('data-compact');
-    expect(mark).toHaveAccessibleName(label);
-    expect(mark.getAttribute('title')?.split('\n')[0]).toBe(label);
-    expect(mark.textContent).toBe(t('engine.customizationMark.customizedShort', 'en'));
-    expect(within(row).queryByText(label)).toBeNull();
-    const added = within(rowOf(ifRail(), 'dashboard', 'wins')!).getByTestId('customization-mark');
-    expect(added).toHaveAccessibleName(t('engine.customizationMark.added', 'en'));
-    expect(added.textContent).toBe(t('engine.customizationMark.added', 'en'));
-    // A status, not a control: no filled block, no glyph that reads as an add button.
-    for (const m of [mark, added]) {
-      expect(m.querySelector('svg')).toBeNull();
-      expect(m.className).not.toMatch(/(^|\s)bg-/);
-    }
-  });
-});
-
-describe('the Data rail lists the pair’s objects with the base’s (objectstack#28572)', () => {
-  it('marks the pair’s object "added"; the base’s objects carry no mark; opening it names the pair', async () => {
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Survey')).toBeInTheDocument(), { timeout: 8000 });
-    const survey = within(dataRail()).getByText('Survey').closest('button');
-    await waitFor(() => expect(markOf(survey)).toBe('added'), { timeout: 8000 });
-    // The extension the pair adds to `crm_account` is no override and no
-    // added item: the object is the base's, unmarked.
-    expect(markOf(within(dataRail()).getByText('Account').closest('button'))).toBeNull();
-    expect(markOf(within(dataRail()).getByText('Deal').closest('button'))).toBeNull();
-
-    fireEvent.click(survey!);
-    await waitFor(
-      () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-pair-item-chip')).toBeInTheDocument(),
-      { timeout: 8000 },
-    );
-  });
-});
-
-describe('the package switcher and the pair’s URLs (objectstack#28572)', () => {
-  it('the switcher gives the pair no row, and names it under its base', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await waitFor(() => expect(document.querySelector('[data-slot="pkg-name"]')).toHaveTextContent('HotCRM'), { timeout: 8000 });
-    fireEvent.click(document.querySelector('[data-slot="pkg-name"]')!.closest('button')!);
-    await waitFor(() => expect(screen.getAllByTestId('studio-switcher-row').length).toBeGreaterThan(0), { timeout: 8000 });
-    const rows = screen.getAllByTestId('studio-switcher-row');
-    expect(rows.map((r) => r.getAttribute('data-package'))).toEqual([BASE, ADDON]);
-    expect(within(rows[0]!).getByTestId('studio-switcher-pair')).toHaveTextContent(
-      tFormat('engine.studio.pkg.withPair', 'en', { pair: PAIR }),
-    );
-  });
-
-  it('a pillar URL of the pair lands on the base’s surface, its query kept', async () => {
-    renderAt(`/studio/${encodeURIComponent(PAIR)}/interfaces?surface=dashboard:wins`);
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(new RegExp(`^/studio/${BASE}/interfaces\\?`)));
-    // The item the pair adds opens once the pair is known, at the pair.
-    await waitFor(() => expect(screen.getByTestId('board-label')).toHaveTextContent('Wins'), { timeout: 8000 });
-    expect(within(screen.getByTestId('if-item-header')).getByTestId('studio-pair-item-chip')).toBeInTheDocument();
+    await screen.findByTestId('data-object-header', undefined, { timeout: 8000 });
+    const layers = () => srv.reads.filter((r) => r.startsWith('/api/v1/meta/object/hotcrm_custom_survey/layers'));
+    await waitFor(() => expect(layers()).not.toEqual([]), { timeout: 8000 });
+    for (const read of layers()) expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
   });
 
   it('the pair’s "All metadata" URL stays on the pair: it is not sent to the base, so nothing loops', async () => {
     renderAt(`/studio/${encodeURIComponent(PAIR)}/metadata`);
-    const area = await screen.findByTestId('metadata-area', undefined, { timeout: 8000 });
-    expect(area).toHaveAttribute('data-package', PAIR);
+    await screen.findByTestId('studio-metadata-area', undefined, { timeout: 8000 });
     await new Promise((r) => setTimeout(r, 300));
     expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(PAIR)}/metadata`);
-  });
-});
-
-describe('a third package’s lists are never asked (objectstack#28722, objectstack#29786)', () => {
-  it('the rails ask no list of another package, and with no contribution served no row names one', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
-    expect(within(ifRail()).queryByText(/acme/i)).toBeNull();
-  });
-});
-
-describe('CONTROL: a base with no pair is unchanged (objectstack#28572)', () => {
-  it('reads no pair list, and draws no mark and no filter', async () => {
-    srv.pairListed = false;
-    renderAt(`/studio/${BASE}/interfaces`);
-    await waitFor(() => expect(rowOf(ifRail(), 'dashboard', 'forecast')).not.toBeNull(), { timeout: 8000 });
-    await new Promise((r) => setTimeout(r, 300));
-    expect(srv.reads.filter((r) => r.includes(`package=${encodeURIComponent(PAIR)}`))).toEqual([]);
-    expect(within(ifRail()).queryByTestId('customization-mark')).toBeNull();
-    expect(within(ifRail()).queryByTestId('studio-rail-customizations-only')).toBeNull();
-    expect(rowOf(ifRail(), 'dashboard', 'wins')).toBeNull();
-  });
-});
-
-describe('an item the pair adds reads its layers at the pair (objectstack#28584)', () => {
-  // A layered read naming no package is refused (409) for a name two packages
-  // hold, and a read naming the base finds nothing the base does not hold: the
-  // pair's own item is read at the pair, its owner.
-  const layersOf = (type: string, name: string) =>
-    srv.reads.filter((r) => r.startsWith(`/api/v1/meta/${type}/${name}/layers`));
-
-  it('the Data pillar reads the pair’s object at the pair', async () => {
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Survey')).toBeInTheDocument(), { timeout: 8000 });
-    fireEvent.click(within(dataRail()).getByText('Survey').closest('button')!);
-    await waitFor(() => expect(layersOf('object', 'hotcrm_custom_survey')).not.toEqual([]), { timeout: 8000 });
-    for (const read of layersOf('object', 'hotcrm_custom_survey')) {
-      expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
-    }
-  });
-
-  it('the Interfaces pillar reads the pair’s dashboard at the pair', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    fireEvent.click(rowOf(ifRail(), 'dashboard', 'wins')!);
-    await waitFor(() => expect(screen.getByTestId('board-label')).toHaveTextContent('Wins'), { timeout: 8000 });
-    await waitFor(() => expect(layersOf('dashboard', 'wins')).not.toEqual([]), { timeout: 8000 });
-    for (const read of layersOf('dashboard', 'wins')) {
-      expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
-    }
   });
 });
 
@@ -601,64 +410,9 @@ describe('items another package contributes are drawn greyed, with the package (
   const contributed = (root: HTMLElement, kind: string, name: string) =>
     root.querySelector<HTMLElement>(`[data-contributed="${kind}"][data-testid="contributed-${kind}-${name}"]`);
 
-  it('Interfaces: a nav entry draws in the group it names, which is no longer empty; an undeclared group’s entry draws at the top level and says so', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    await waitFor(() => expect(contributed(ifRail(), 'nav', 'nav_cases')).not.toBeNull(), { timeout: 8000 });
-
-    const cases = contributed(ifRail(), 'nav', 'nav_cases')!;
-    expect(cases).toHaveTextContent('nav_cases');
-    expect(within(cases).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
-    expect(within(cases).getByTestId('contribution-mark')).toHaveAttribute('data-package', ADDON);
-    expect(cases.className).toMatch(/opacity-70/);
-    // Under the app's own "Service" group, which held nothing of its own.
-    // The group's header is a button; the group is the element that holds it and its rows.
-    const group = within(ifRail()).getByText('Service').closest('button')!.parentElement!;
-    expect(group).toContainElement(cases);
-    expect(within(ifRail()).queryByText(t('engine.studio.if.emptyGroup', 'en'))).toBeNull();
-
-    const knowledge = contributed(ifRail(), 'nav', 'nav_knowledge')!;
-    expect(knowledge).not.toBeNull();
-    expect(group).not.toContainElement(knowledge);
-    expect(knowledge.getAttribute('title')).toContain(
-      tFormat('engine.studio.contributed.undeclaredGroup', 'en', { group: 'ghost_group' }),
-    );
-    // Another app's entry is not this app's.
-    expect(contributed(ifRail(), 'nav', 'nav_elsewhere')).toBeNull();
-    // Contributed entries are no nav entries of the base: no row of the tree's own (`type · name`) names them.
-    expect(within(ifRail()).queryByTitle(/nav_cases$/)).toBeNull();
-  });
-
-  it('Interfaces: a contributed entry opens the contributing package', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    await waitFor(() => expect(contributed(ifRail(), 'nav', 'nav_cases')).not.toBeNull(), { timeout: 8000 });
-    fireEvent.click(contributed(ifRail(), 'nav', 'nav_cases')!);
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(ADDON)}/interfaces`));
-  });
-
-  it('CONTROL: with nothing contributed, the declared empty group still says it is empty', async () => {
-    srv.contributed = true;
-    const answer = CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length);
-    try {
-      renderAt(`/studio/${BASE}/interfaces`);
-      await interfacesReady();
-      await waitFor(() => expect(within(ifRail()).getByText(t('engine.studio.if.emptyGroup', 'en'))).toBeInTheDocument(), {
-        timeout: 8000,
-      });
-      expect(ifRail().querySelector('[data-contributed]')).toBeNull();
-    } finally {
-      CONTRIBUTIONS.push(...answer);
-    }
-  });
-
   it('Data: the contributed field is marked in the Form layout, once, and its properties are read-only while the base’s are not', async () => {
     srv.contributed = true;
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Account')).toBeInTheDocument(), { timeout: 8000 });
-    fireEvent.click(within(dataRail()).getByText('Account').closest('button')!);
+    renderAt(`/studio/${BASE}/metadata/object/crm_account`);
     fireEvent.click(await screen.findByText(t('engine.studio.data.tab.form', 'en'), undefined, { timeout: 8000 }));
 
     const card = await waitFor(
@@ -670,7 +424,8 @@ describe('items another package contributes are drawn greyed, with the package (
       { timeout: 8000 },
     );
     expect(card).toHaveTextContent('Acme score');
-    // Never a drag source, yet still a card a click selects: not announced as disabled.
+    // objectstack#36505: arranged in the pair's layout like any field, and a
+    // card a click selects: not announced as disabled.
     expect(card).not.toHaveAttribute('aria-disabled', 'true');
     expect(within(card).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
     expect(card.getAttribute('title')).toBe(
@@ -688,41 +443,14 @@ describe('items another package contributes are drawn greyed, with the package (
     );
 
     // CONTROL: the base's own field opens in the pair's display-property mode, not read-only.
-    fireEvent.click(screen.getByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label: 'Account Name' })));
+    // objectstack#36505: its card is arranged in the pair, so it reads as draggable.
+    fireEvent.click(screen.getByLabelText(tFormat('engine.studio.designer.fieldAria', 'en', { label: 'Account Name' })));
     await waitFor(() => expect(screen.getByTestId('data-field-inspector').querySelector('[data-disabled-reason]')).toBeNull());
   });
 
-  it('Automations: a contributed flow draws in its object’s group, an object with no flow of the base’s gets one, and a row opens the contributor', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/automations`);
-    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
-    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
-
-    const accountGroup = within(autoRail).getByTestId('auto-rail-group-crm_account');
-    const sync = contributed(autoRail, 'flow', 'acme_sync')!;
-    expect(accountGroup).toContainElement(sync);
-    expect(within(sync).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
-    expect(within(autoRail).getByTestId('auto-rail-group-crm_deal')).toContainElement(
-      contributed(autoRail, 'flow', 'acme_deal_watch'),
-    );
-    // The base ships no flow: the rail does not say "no flows".
-    expect(within(autoRail).queryByText(t('engine.studio.auto.none', 'en'))).toBeNull();
-
-    fireEvent.click(sync);
-    await waitFor(() =>
-      expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(ADDON)}/automations?surface=`),
-    );
-    expect(screen.getByTestId('location').textContent).toContain('acme_sync');
-  });
-
-  it('one reader: no request beyond the base’s customization read names the contributing package', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/automations`);
-    const autoRail = await screen.findByTestId('studio-rail-automations', undefined, { timeout: 8000 });
-    await waitFor(() => expect(contributed(autoRail, 'flow', 'acme_sync')).not.toBeNull(), { timeout: 8000 });
-    expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
-    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`)).length).toBeGreaterThan(0);
-  });
+  // objectstack#36903 — the Automations rail that drew another package's
+  // flows on the base's objects is gone with the rail; the flow list
+  // (`ResourceListPage`) is where a type's items are listed.
 });
 
 /**
@@ -731,123 +459,3 @@ describe('items another package contributes are drawn greyed, with the package (
  * reads; a package that only contributes says what it adds, as the owner's
  * served read lists it.
  */
-describe('contributed nav entries show their served label, and a contributor says what it adds (objectstack#29851)', () => {
-  const contributed = (root: HTMLElement, name: string) =>
-    root.querySelector<HTMLElement>(`[data-contributed="nav"][data-testid="contributed-nav-${name}"]`);
-
-  it('a unique id shows its served label with the id as a second line; a shared id keeps the bare id', async () => {
-    srv.contributed = true;
-    srv.servedFold = true;
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    await waitFor(() => expect(contributed(ifRail(), 'nav_cases')).not.toBeNull(), { timeout: 8000 });
-    const cases = contributed(ifRail(), 'nav_cases')!;
-    await waitFor(() => expect(within(cases).getByTestId('contributed-label')).toHaveTextContent('Cases'));
-    expect(within(cases).getByTestId('contributed-id')).toHaveTextContent('nav_cases');
-    // Two served entries share `nav_knowledge`: no label is guessed.
-    const knowledge = contributed(ifRail(), 'nav_knowledge')!;
-    expect(within(knowledge).getByTestId('contributed-label')).toHaveTextContent('nav_knowledge');
-    expect(within(knowledge).queryByTestId('contributed-id')).toBeNull();
-    // No request of its own: the app item is never read for a package that has an app.
-    expect(srv.reads.filter((r) => r.startsWith('/api/v1/meta/app/crm_app') && !r.includes('/layers'))).toEqual([]);
-  });
-
-  it('CONTROL: with no served fold, the row keeps the id alone', async () => {
-    srv.contributed = true;
-    renderAt(`/studio/${BASE}/interfaces`);
-    await interfacesReady();
-    await waitFor(() => expect(contributed(ifRail(), 'nav_cases')).not.toBeNull(), { timeout: 8000 });
-    const cases = contributed(ifRail(), 'nav_cases')!;
-    expect(within(cases).getByTestId('contributed-label')).toHaveTextContent('nav_cases');
-    expect(within(cases).queryByTestId('contributed-id')).toBeNull();
-  });
-
-  /** The package-list reads this harness's surface sends for an app-less package, with or without the empty state's reads. */
-  const SURFACE_PACKAGE_LIST_READS = 2;
-  const NO_APP = () => t('engine.studio.if.noApp', 'en');
-  const ADDS_TWO = () => tFormat('engine.studio.if.contributesOther', 'en', { count: 2, package: 'HotCRM' });
-
-  async function contributorRailSays(): Promise<HTMLElement> {
-    renderAt(`/studio/${ADDON}/interfaces`);
-    const rail = await screen.findByTestId('if-no-app-rail', undefined, { timeout: 8000 });
-    return rail;
-  }
-
-  it('a contributor-only package says what it adds to the owner’s app, from two reads, and opens the owner', async () => {
-    srv.contributed = true;
-    srv.addonContributes = true;
-    const rail = await contributorRailSays();
-    await waitFor(() => expect(rail).toHaveTextContent(ADDS_TWO()), { timeout: 8000 });
-    expect(rail).toHaveTextContent(t('engine.studio.if.noOwnApp', 'en'));
-    expect(rail).not.toHaveTextContent(NO_APP());
-    const pane = screen.getByTestId('if-contributes-elsewhere');
-    expect(pane).toHaveTextContent(t('engine.studio.if.noOwnAppTitle', 'en'));
-    expect(pane).toHaveTextContent(ADDS_TWO());
-    // The request budget: one owner lookup and one customization read for the one target,
-    // and no package-list request of its own: the surface's reads are reused, as many as
-    // the CONTROL below (a package declaring nothing) sends.
-    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
-    expect(srv.reads.filter((r) => r === '/api/v1/meta/app/crm_app')).toHaveLength(1);
-    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toHaveLength(1);
-    fireEvent.click(within(pane).getByTestId('if-open-owner'));
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(BASE)}/interfaces`));
-  });
-
-  async function keepsTodaysText(): Promise<void> {
-    const rail = await contributorRailSays();
-    await waitFor(() => expect(rail).toHaveTextContent(NO_APP()), { timeout: 8000 });
-    // Let the reads settle: the text still says what it said.
-    await new Promise((r) => setTimeout(r, 300));
-    expect(rail).toHaveTextContent(NO_APP());
-    expect(screen.queryByTestId('if-contributes-elsewhere')).toBeNull();
-    expect(screen.getByText(t('engine.studio.if.noAppTitle', 'en'))).toBeInTheDocument();
-  }
-
-  it('FALLBACK: a disabled package (the owner lists none of its entries) keeps today’s text', async () => {
-    srv.contributed = true;
-    srv.addonContributes = true;
-    srv.addonDisabled = true;
-    await keepsTodaysText();
-  });
-
-  it('FALLBACK: a missing target app keeps today’s text, and the owner is never read', async () => {
-    srv.contributed = true;
-    srv.addonContributes = true;
-    srv.targetApp = 'missing';
-    await keepsTodaysText();
-    expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toEqual([]);
-  });
-
-  it('FALLBACK: a failed app read or a failed owner read keeps today’s text', async () => {
-    srv.contributed = true;
-    srv.addonContributes = true;
-    srv.targetApp = 'fails';
-    await keepsTodaysText();
-    cleanup();
-    srv.targetApp = 'served';
-    srv.ownerReadFails = true;
-    await keepsTodaysText();
-  });
-
-  it('FALLBACK: 0 entries for the declared app keeps today’s text', async () => {
-    srv.contributed = true;
-    srv.addonContributes = true;
-    // The owner serves the add-on's field, flow and `other_app` entry, but no entry on `crm_app`.
-    const answer = CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length);
-    CONTRIBUTIONS.push(...answer.filter((c) => !(c.kind === 'nav' && 'app' in c && c.app === 'crm_app')));
-    try {
-      await keepsTodaysText();
-      expect(srv.reads.filter((r) => r.startsWith(`/api/v1/packages/${BASE}/customizations`))).toHaveLength(1);
-    } finally {
-      CONTRIBUTIONS.splice(0, CONTRIBUTIONS.length, ...answer);
-    }
-  });
-
-  it('CONTROL: a package with no app that declares no contribution reads nothing more', async () => {
-    srv.addonContributes = true;
-    srv.declaredApp = '';
-    await keepsTodaysText();
-    expect(srv.reads.filter((r) => r.startsWith('/api/v1/meta/app/'))).toEqual([]);
-    expect(srv.reads.filter((r) => r === '/api/v1/packages')).toHaveLength(SURFACE_PACKAGE_LIST_READS);
-  });
-});

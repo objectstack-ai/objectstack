@@ -36,11 +36,17 @@ import { MCPServerRuntime, setRuntimeObjectView, setRuntimeStdioPrincipal } from
 import { PACKAGE_VERSION, DEFAULT_SERVER_VERSION } from './package-version.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
 import type { ToolRegistry } from './types.js';
-import { objectSchemaReadDelegateSource, type ObjectSchemaMaskSecuritySurface } from '@objectstack/metadata-core';
+import {
+  objectSchemaReadDelegateSource,
+  packageResolutionClosure,
+  type ObjectSchemaMaskSecuritySurface,
+  type PackageClosureRegistry,
+} from '@objectstack/metadata-core';
 import {
   callerObjectView,
   createStdioDataBridge,
   enforceApiExposure,
+  engineObjectPackageDisabled,
   GATED_ACTIONS,
   serveStoredMetadataHashes,
   serveStoredMetadataRow,
@@ -48,6 +54,8 @@ import {
   stdioObjectView,
   type StdioObjectReads,
   type StdioDatasetToolsService,
+  type StdioKnowledgeToolsService,
+  type StdioRecordContextToolsService,
   type StdioProtocolObjectReads,
   type StoredHashDigest,
 } from './stdio-data-bridge.js';
@@ -197,6 +205,37 @@ function datasetToolsService(ctx: PluginContext): StdioDatasetToolsService | und
 }
 
 /**
+ * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+ * executor (`knowledgeTools`), else `undefined` (no knowledge service, or one
+ * without it). A lookup that throws is "not served", as for
+ * {@link datasetToolsService}.
+ */
+function knowledgeToolsService(ctx: PluginContext): StdioKnowledgeToolsService | undefined {
+  let service: Partial<StdioKnowledgeToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioKnowledgeToolsService>>('knowledge');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.knowledgeTools === 'function' ? (service as StdioKnowledgeToolsService) : undefined;
+}
+
+/**
+ * [ADR-0160 D4] The `record-context` service when it serves the
+ * `get_record_context` executor (`recordContextTools`), else `undefined`. A
+ * lookup that throws is "not served", as for {@link knowledgeToolsService}.
+ */
+function recordContextToolsService(ctx: PluginContext): StdioRecordContextToolsService | undefined {
+  let service: Partial<StdioRecordContextToolsService> | undefined;
+  try {
+    service = ctx.getService<Partial<StdioRecordContextToolsService>>('record-context');
+  } catch {
+    return undefined;
+  }
+  return service && typeof service.recordContextTools === 'function' ? (service as StdioRecordContextToolsService) : undefined;
+}
+
+/**
  * [ADR-0150 D2/D6] The manifest namespace of an installed package, by its id,
  * read from the engine's registry at the moment a face is derived: the
  * namespace a package-held skill's prompt name and agent's name carry
@@ -213,6 +252,26 @@ function installedPackageNamespace(ctx: PluginContext): (packageId: string) => s
     }
     const manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
     return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+  };
+}
+
+/**
+ * [ADR-0150 D3 step 2, ADR-0160 D8] A package's resolution closure — its
+ * declared dependency closure plus every `sys` package — walked by the one
+ * walk (`packageResolutionClosure`) over the engine's registry when a
+ * package-held skill's `context` names no pack of its own package. A host with
+ * no engine answers the empty closure: the skill then resolves only its own
+ * package's pack.
+ */
+function installedPackageResolutionClosure(ctx: PluginContext): (packageId: string) => ReadonlySet<string> {
+  return (packageId) => {
+    let registry: PackageClosureRegistry | undefined;
+    try {
+      registry = ctx.getService<{ registry?: PackageClosureRegistry }>('objectql')?.registry;
+    } catch {
+      return new Set<string>();
+    }
+    return registry ? packageResolutionClosure(registry, packageId) : new Set<string>();
   };
 }
 
@@ -817,6 +876,12 @@ export class MCPServerPlugin implements Plugin {
           // registered during `init()`, so an absence now is final (ADR-0116),
           // and the tools must be registered before the transport attaches.
           datasetTools: datasetToolsService(ctx),
+          // [ADR-0149 D2] Read on the same schedule: `search_knowledge`
+          // registers only where the kernel holds a knowledge service.
+          knowledgeTools: knowledgeToolsService(ctx),
+          // [ADR-0160 D4] Read on the same schedule: `get_record_context`
+          // registers only where the kernel holds a record-context service.
+          recordContextTools: recordContextToolsService(ctx),
           // [ADR-0149 D2] The i18n service the saved datasets are localized
           // with, resolved at each use as the protocol is; a host that
           // registers none serves them untranslated.
@@ -839,8 +904,10 @@ export class MCPServerPlugin implements Plugin {
       // the one `bridgeResources` was registered with.
       // [#25138] …beside the protocol's by-name read, which the gate asks
       // first, as `bridge.get` asks it.
+      // [#36689] …and the engine registry's disabled-package question, which
+      // the gate asks of every caller, as `bridge.get` asks it.
       const gateReads: StdioObjectReads | undefined = metadataService
-        ? { metadataService, protocol: protocolReads }
+        ? { metadataService, protocol: protocolReads, isObjectPackageDisabled: engineObjectPackageDisabled(scopedQl) }
         : undefined;
       getRecord = async (objectName, recordId) => {
         const ec = await resolvePrincipal();
@@ -893,6 +960,17 @@ export class MCPServerPlugin implements Plugin {
       );
     }
 
+    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
+    // tool is also what declares the `tools` capability, and the SDK refuses to
+    // register capabilities once a transport is attached. Every bridge on this
+    // server is complete before the transport claims stdin/stdout.
+    // [ADR-0160 D8] …and before the prompts: the prompt bridge offers a skill's
+    // record argument only where this server registers `get_record_context`,
+    // which it reads from the tools registered by then.
+    if (dataBridge) {
+      this.runtime.bridgeDataTools(dataBridge);
+    }
+
     if (metadataService) {
       // [#25245] The object resources read the view `list_objects` /
       // `describe_object` answer from (`stdioObjectView`), never the metadata
@@ -924,15 +1002,14 @@ export class MCPServerPlugin implements Plugin {
       // so a runtime `PUT /api/v1/meta/skill/<name>` reaches this surface.
       // [ADR-0150 D6] …and each package-held skill and agent named by its face
       // (`NS-NAME`), its package's namespace read from the engine's registry.
-      await this.runtime.bridgePrompts(metadataService, mergedRead, installedPackageNamespace(ctx));
-    }
-
-    // [#8034] BEFORE `start()`, with the resources and prompts: registering a
-    // tool is also what declares the `tools` capability, and the SDK refuses to
-    // register capabilities once a transport is attached. Every bridge on this
-    // server is complete before the transport claims stdin/stdout.
-    if (dataBridge) {
-      this.runtime.bridgeDataTools(dataBridge);
+      // [ADR-0160 D8] …and a skill's `context` resolved from its package
+      // through that package's closure, read from the same registry.
+      await this.runtime.bridgePrompts(
+        metadataService,
+        mergedRead,
+        installedPackageNamespace(ctx),
+        installedPackageResolutionClosure(ctx),
+      );
     }
 
     if (shouldStart) {

@@ -174,17 +174,6 @@ export const ProjectViews = defineView({
       },
     },
   },
-  // The default form — what the create and edit surfaces render.
-  form: {
-    type: 'simple',
-    data,
-    sections: [
-      { name: 'project', label: 'Project', columns: 2, fields: ['name', 'account', 'status', 'health', 'owner'] },
-      { name: 'budget_schedule', label: 'Budget & Schedule', columns: 2, fields: ['budget', 'spent', 'start_date', 'end_date'] },
-    ],
-    // No subforms here: the Tasks subtable is derived from the data model —
-    // showcase_task.project declares `inlineEdit: true`, so every standard
-    // Project form auto-renders it. (A view could still add `subforms` to
-    // override the derived columns/order.)
-  },
+  // No form here: the create and edit forms lay a project out by the object's
+  // `fieldGroups` (data/objects/project.object.ts).
 });

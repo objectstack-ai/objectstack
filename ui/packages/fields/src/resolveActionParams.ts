@@ -333,6 +333,7 @@ export const RESOLVED_ONLY_PARAM_KEYS: Readonly<Record<string, string>> = (() =>
     lookupColumns: fromField,
     lookupFilters: fromField,
     lookupPageSize: fromField,
+    allowCreate: fromField,
     dependsOn: fromField,
   };
 })();
@@ -462,6 +463,13 @@ interface RuntimeField {
   lookupFilters?: unknown[];
   lookup_filters?: unknown[];
   lookupPageSize?: number;
+  /**
+   * `@objectstack/spec`'s `FieldSchema.allowCreate`: whether the picker offers
+   * quick-create. Copied onto a field-backed lookup param with the picker keys
+   * above, so `allowCreate: false` on the field keeps "+ New" out of the
+   * param's picker too.
+   */
+  allowCreate?: boolean;
   dependsOn?: unknown[];
 }
 
@@ -486,7 +494,7 @@ export interface ResolveActionParamsContext {
   ) => string;
   /**
    * Row record providing default values for params with `defaultFromRow` set.
-   * Used by list_item actions (edit/delete dialogs) so the dialog opens with
+   * Used by record_row actions (edit/delete dialogs) so the dialog opens with
    * the row's current values pre-filled.
    */
   row?: Record<string, unknown>;
@@ -882,6 +890,11 @@ export function resolveActionParam(
         lookupColumns: field.lookupColumns,
         lookupFilters: field.lookupFilters ?? field.lookup_filters,
         lookupPageSize: field.lookupPageSize,
+        // The field's quick-create switch travels with its other picker
+        // settings: without it a field that says `allowCreate: false` still
+        // drew "+ New" in an action's picker, and the record made there could
+        // be one the action must refuse.
+        allowCreate: field.allowCreate,
         dependsOn: field.dependsOn,
       }
     : {};

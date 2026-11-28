@@ -80,12 +80,13 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
 
-// An authoring-capable AI agent IS deployed in every case, so "Build with AI"
-// is held back only by the capability gate under test and never by the
-// unrelated cloud#816 agent-availability gate.
+// An authoring-capable AI agent IS deployed in every case, so no case here
+// is shaped by the unrelated cloud#816 agent-availability gate. With it served,
+// Home draws neither "Build with AI" nor "Build an app" (objectstack#37227):
+// the builder chip the gate withholds is "Start with a template".
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [{ name: 'builder' }] }),
+  useAgents: () => ({ agents: [{ name: 'build' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => true,
 }));
@@ -255,6 +256,18 @@ function renderHome(permissions: MePermissionsResponse) {
   );
 }
 
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
+
 describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
   beforeEach(() => {
     navigateMock.mockReset();
@@ -262,10 +275,10 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
   });
 
   describe('the ruled case — admin by role, no `manage_metadata`', () => {
-    it('disables both builder CTAs and says why, in the user’s language', async () => {
+    it('disables the builder CTA and says why, in the user’s language', async () => {
       renderHome(eePayload(OWNER_CAPS));
 
-      expect(screen.getByTestId('home-build-app')).toBeDisabled();
+      expect(screen.queryByTestId('home-build-app')).toBeNull();
       expect(screen.getByTestId('home-start-template')).toBeDisabled();
       // The reason is reachable from each withheld chip — its tooltip wrapper
       // and an `aria-describedby` on the button (objectui#12601, the
@@ -274,7 +287,6 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       // `HomePage.greetingAndApps-12601.test.tsx`.
       const reason = screen.getByTestId('home-authoring-gate-reason');
       expect(reason).toHaveTextContent('«home.build.noCapability»');
-      expect(screen.getByTestId('home-build-app')).toHaveAttribute('aria-describedby', reason.id);
       expect(screen.getByTestId('home-start-template')).toHaveAttribute('aria-describedby', reason.id);
     });
 
@@ -282,10 +294,9 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       const user = userEvent.setup();
       renderHome(eePayload(OWNER_CAPS));
 
-      await user.click(screen.getByTestId('home-build-app'));
       await user.click(screen.getByTestId('home-start-template'));
 
-      // `/studio` is where the new-package dialog lives; reaching it was the
+      // The marketplace is where a template is installed; reaching it was the
       // whole defect. A disabled button must not merely look inert.
       expect(navigateMock).not.toHaveBeenCalled();
     });
@@ -304,20 +315,23 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
   });
 
   describe('the capability present — nothing is withheld', () => {
-    it('leaves every authoring CTA live and routes "Build an app" to /studio', async () => {
+    it('leaves every authoring CTA live, and draws neither build entry (objectstack#37227)', async () => {
       const user = userEvent.setup();
       renderHome(eePayload([...OWNER_CAPS, 'manage_metadata']));
 
-      const build = screen.getByTestId('home-build-app');
-      expect(build).toBeEnabled();
-      expect(screen.getByTestId('home-start-template')).toBeEnabled();
+      const template = screen.getByTestId('home-start-template');
+      expect(template).toBeEnabled();
       expect(screen.getByTestId('browse-marketplace-btn')).toBeInTheDocument();
-      expect(screen.getByTestId('home-build-with-ai')).toBeInTheDocument();
+      // The build agent is served and the session may author: before
+      // objectstack#37227 both "Build an app" and "Build with AI" stood here.
+      expect(screen.queryByTestId('home-build-app')).toBeNull();
+      expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
       // No reason line when there is nothing to explain.
       expect(screen.queryByTestId('home-authoring-gate-reason')).toBeNull();
 
-      await user.click(build);
-      expect(navigateMock).toHaveBeenCalledWith('/studio');
+      await user.click(template);
+      expect(navigateMock).toHaveBeenCalledWith('/apps/setup/system/marketplace');
+      expect(navigateMock).not.toHaveBeenCalledWith('/studio');
     });
   });
 
@@ -332,7 +346,6 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       // doctrine `useCapabilityGate` states for ADR-0066 gates).
       renderHome(eePayload(undefined));
 
-      expect(screen.getByTestId('home-build-app')).toBeEnabled();
       expect(screen.getByTestId('home-start-template')).toBeEnabled();
       expect(screen.queryByTestId('home-authoring-gate-reason')).toBeNull();
     });
@@ -348,7 +361,6 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       // gate exactly like any other reported set that lacks the capability.
       renderHome(eePayload([]));
 
-      expect(screen.getByTestId('home-build-app')).toBeDisabled();
       expect(screen.getByTestId('home-start-template')).toBeDisabled();
       expect(screen.getByTestId('home-authoring-gate-reason')).toHaveTextContent(
         '«home.build.noCapability»',
@@ -357,9 +369,12 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
   });
 
   describe('the zero-app workspace', () => {
+    let restoreWidth = () => {};
     beforeEach(() => {
       appsFixture = [];
+      restoreWidth = atPhoneWidth();
     });
+    afterEach(() => restoreWidth());
 
     it('explains the posture instead of telling the owner to build something', () => {
       // This branch renders before the builder cover exists, and its admin copy
@@ -375,11 +390,19 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
       expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
     });
 
-    it('keeps the ordinary admin welcome when the capability IS held', () => {
+    it('keeps the admin welcome when the capability IS held, without "Build with AI" or its promise (objectstack#37227)', () => {
       renderHome(eePayload([...OWNER_CAPS, 'manage_metadata']));
 
       expect(screen.queryByTestId('home-authoring-gate-reason-empty')).toBeNull();
-      expect(screen.getByTestId('home-build-with-ai')).toBeInTheDocument();
+      // objectstack#37227 — with the build agent deployed the welcome makes no
+      // build promise: the no-apps title and the NoAi copy (no ask agent here).
+      expect(screen.getByText('«home.noAppsTitle»')).toBeInTheDocument();
+      expect(screen.getByText('«home.welcomeAdminDescriptionNoAi»')).toBeInTheDocument();
+      expect(screen.queryByText('«home.welcome»')).toBeNull();
+      // The phone's zero-app welcome, a maker the build agent serves: the
+      // build CTA stood here before; "Ask AI" stays withheld for a maker.
+      expect(screen.queryByTestId('home-build-with-ai')).toBeNull();
+      expect(screen.queryByText('«home.buildWithAI»')).toBeNull();
     });
   });
 });

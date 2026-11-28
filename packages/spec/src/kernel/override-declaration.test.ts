@@ -103,6 +103,7 @@ const EXTRA_FIXTURES: Partial<Record<MetadataType, Record<string, unknown>>> = {
   app: { name: 'crm', label: 'CRM', navigation: [] },
   doc: { name: 'crm_lead_guide', content: '# Lead Guide' },
   book: { name: 'crm_guide', groups: [{ key: 'start', label: 'Start', include: 'crm_*' }] },
+  form: { name: 'crm_lead.web_to_lead', object: 'crm_lead', type: 'simple', sections: [{ fields: [{ field: 'name' }] }] },
 };
 
 function fixtureFor(type: MetadataType): Record<string, unknown> {
@@ -123,10 +124,10 @@ const LIST_OVERLAY = {
 };
 
 describe('the stored body — every overridable type carries `overrides` through its metadata schema', () => {
-  it('the overridable list is the thirteen types ADR-0146 D2 names', () => {
+  it('the overridable list is the thirteen types ADR-0146 D2 names, and `form` (ADR-0159 D2)', () => {
     expect([...OVERRIDABLE_METADATA_TYPES].sort()).toEqual([
       'action', 'app', 'book', 'dashboard', 'dataset', 'doc', 'email_template',
-      'flow', 'mapping', 'page', 'report', 'translation', 'view',
+      'flow', 'form', 'mapping', 'page', 'report', 'translation', 'view',
     ]);
   });
 

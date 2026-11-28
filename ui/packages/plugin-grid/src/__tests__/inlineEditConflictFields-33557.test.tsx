@@ -23,7 +23,7 @@
  * field's own before and after, no list).
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -133,7 +133,6 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', editable: false },
       { field: 'estimate_hours', label: 'Estimate', type: 'number' },
@@ -152,7 +151,10 @@ function renderGrid(server: ReturnType<typeof makeServer>) {
 
 const rowOf = (title: string) => screen.getByText(title).closest('tr') as HTMLElement;
 
-/** Stage a new value on the cell of the row titled `title` that reads `from`, the way a user types it. */
+/**
+ * Type a new value on the cell of the row titled `title` that reads `from` and
+ * commit it with Enter: select-first, a commit is the save (objectstack#35827).
+ */
 async function editCell(title: string, from: string, to: string) {
   const td = await waitFor(() => {
     const cell = Array.from(rowOf(title).querySelectorAll('td')).find(
@@ -162,11 +164,11 @@ async function editCell(title: string, from: string, to: string) {
     return cell as HTMLElement;
   });
   fireEvent.click(td);
-  const input = await waitFor(() => {
-    const el = td.querySelector('input') as HTMLInputElement | null;
-    if (!el) throw new Error('editor not open');
-    return el;
-  });
+  fireEvent.doubleClick(td);
+  // The editor mounts on the cell's overlay layer (objectstack#35688).
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  const input = td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: to } });
   fireEvent.keyDown(input, { key: 'Enter' });
   await waitFor(() => expect(within(rowOf(title)).getByText(to)).toBeInTheDocument());
@@ -177,11 +179,19 @@ async function staleRowSave(edits: Array<[from: string, to: string]>) {
   renderGrid(server);
   await waitFor(() => expect(screen.getByText('Ingest pipeline')).toBeInTheDocument());
   server.writeAsOtherUser('t1', { estimate_hours: 77, owner_note: 'blocked' });
-  for (const [from, to] of edits) await editCell('Ingest pipeline', from, to);
-  fireEvent.click(within(rowOf('Ingest pipeline')).getByTitle('Save row'));
-  const dialog = await screen.findByRole('alertdialog');
-  expect(server.statuses).toEqual([409]);
-  return dialog;
+  // Each commit is its own save. A refused cell is kept on its row and goes
+  // out again with the row's next commit, so the last save carries every edit.
+  let dialog: HTMLElement | null = null;
+  for (const [i, [from, to]] of edits.entries()) {
+    if (dialog) {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    }
+    await editCell('Ingest pipeline', from, to);
+    dialog = await screen.findByRole('alertdialog');
+    expect(server.statuses).toEqual(Array(i + 1).fill(409));
+  }
+  return dialog!;
 }
 
 describe('a multi-field grid row conflict lists each field (objectstack#33557)', () => {

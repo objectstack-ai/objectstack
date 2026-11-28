@@ -1,10 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ExecutionContext } from '../kernel/execution-context.zod';
-import type {
-  KnowledgeDocument,
-  KnowledgeHit,
-} from '../ai/knowledge-document.zod';
+import type { KnowledgeHit } from '../ai/knowledge-document.zod';
 import type { KnowledgeSource } from '../ai/knowledge-source.zod';
 import type { IKnowledgeAdapter } from './knowledge-adapter';
 
@@ -14,7 +11,7 @@ import type { IKnowledgeAdapter } from './knowledge-adapter';
  * `@objectstack/service-knowledge`.
  *
  * The service routes requests to one of many `IKnowledgeAdapter`
- * plugins (RAGFlow, LlamaIndex, Dify, …), wraps search results with a
+ * plugins (in-memory, pgvector, libSQL, …), wraps search results with a
  * permission-aware filter that uses the caller's `ExecutionContext`,
  * and drives event-based sync from ObjectQL.
  *
@@ -29,8 +26,39 @@ export interface KnowledgeSearchOptions {
    * source the caller is allowed to see is queried.
    */
   sourceIds?: string[];
-  /** Max number of hits to return. Adapters may cap further. */
+  /**
+   * Max number of hits to return. Adapters may cap further. Under
+   * `granularity: 'record'` it counts records (or `groupBy` groups), not
+   * passages.
+   */
   topK?: number;
+  /**
+   * What one hit stands for (ADR-0161 K1, record-level return).
+   *
+   * - `'chunk'` (the default): one hit per matching passage, as before.
+   * - `'record'`: one hit per record — the best-scoring passage of the
+   *   record, so `topK` counts records. Each hit returned is checked against
+   *   the record as it reads now: a record that was deleted, left the
+   *   source's `where`, or changed since it was indexed is not returned, and
+   *   its document is repaired in the background — except in a source with
+   *   `refresh.onRecordChange: false`, whose index an external indexer owns:
+   *   there the hit is only not returned.
+   *
+   * The return type does not change: still `KnowledgeHit[]`.
+   */
+  granularity?: 'chunk' | 'record';
+  /**
+   * Group record-level hits by the value of this metadata field instead of by
+   * record — "which policies", not "which clauses" — keeping the best hit of
+   * each group; the group value is the hit's `metadata[groupBy]`, and hits
+   * with the same value form one group whichever source they come from. Implies
+   * `granularity: 'record'`; passing it with `granularity: 'chunk'` (or
+   * passing an empty name, or an unknown `granularity`) is refused with
+   * `code: 'VALIDATION_ERROR'`, `status: 400`. An `object` source that does not list the field in its
+   * `metadataFields` answers no hits for this search (never ungrouped), and
+   * neither does a record with no value for it.
+   */
+  groupBy?: string;
   /** Adapter-specific filter (passed opaquely). */
   filter?: Record<string, unknown>;
   /**
@@ -41,6 +69,36 @@ export interface KnowledgeSearchOptions {
    * `IDataEngine`.
    */
   executionContext?: ExecutionContext;
+  /**
+   * Search only inside these records (ADR-0161 K8, item 17, as its dated note
+   * of 2026-11-25 shapes it). Each entry names an object and record ids of it:
+   *
+   * - **The object a source indexes**: only the documents of those records
+   *   are searched in that source.
+   * - **A parent object**: only the documents whose lookup to it holds one of
+   *   those ids are searched, in a source that lists that lookup (a `lookup`
+   *   or `master_detail` field pointing at the object) in its
+   *   `metadataFields` — "the clauses of this policy". A source that lists no
+   *   such field, or two or more of them, is not reached by the entry; a
+   *   parent two hops away is not reached either.
+   *
+   * Several entries are a union: a document is searched when any entry holds
+   * for it. A source no entry reaches is not searched.
+   *
+   * - **Absent**: no scope, as before this option.
+   * - **Empty** (`[]`), or an entry whose `ids` is empty: nothing is in scope,
+   *   and the search answers no hits. Never read as "no scope".
+   *
+   * **Bounds.** At most 10 entries, each with at most 500 ids; `object` and
+   * every id a non-empty string, and no other key on an entry. A scope past
+   * them is refused before any adapter is called, with a coded error
+   * (ADR-0112: `code: 'VALIDATION_ERROR'`, `status: 400`).
+   *
+   * A ranking scope, not the access decision: every hit is still re-read as
+   * the caller, and an entry that reaches nothing answers the same empty
+   * answer a source withheld from the caller gives.
+   */
+  scope?: Array<{ object: string; ids: string[] }>;
 }
 
 /** Options accepted by `IKnowledgeService.reindexSource`. */
@@ -63,6 +121,38 @@ export interface KnowledgeReindexResult {
   ok: boolean;
   /** Free-form diagnostics. */
   message?: string;
+  /**
+   * Documents the walk did not push because the adapter already holds them
+   * with the same `docHash` (ADR-0161 K8, item 2). `0` when the adapter has
+   * no `listDocuments`, whose walk pushes every document. Absent from a result
+   * of an implementation that predates the field.
+   */
+  skipped?: number;
+  /**
+   * Documents deleted by the purge that follows a complete walk: listed by
+   * the adapter before the walk, not seen in it, and confirmed gone by a
+   * re-read of their row (ADR-0161 K8, item 1). `null` when no purge ran:
+   * no data engine bound, a refused
+   * `limit`, a walk with `limit` or `dryRun`, a failed walk, a source with
+   * `refresh.onRecordChange: false`, an adapter without `listDocuments`, or a
+   * listing that failed. A number, with `ok: false`, when the purge stopped
+   * part-way: the deletions made before it stopped. Absent from a result of an
+   * implementation that predates the field.
+   */
+  purged?: number | null;
+  /**
+   * Documents removed from the index instead of written, because they cannot
+   * be indexed as the source's split asks — today a `whole` document whose
+   * token estimate is over the embedder's input budget, which is never
+   * truncated. `0` when none was. Absent from a result of an implementation
+   * that predates the field.
+   */
+  failed?: number;
+  /**
+   * Which documents those were and why, in walk order, bounded by the
+   * service (`failed` counts them all). Absent when `failed` is absent.
+   */
+  failures?: Array<{ documentId: string; reason: string }>;
 }
 
 /**
@@ -70,7 +160,11 @@ export interface KnowledgeReindexResult {
  *
  * Every adapter plugin calls `registerAdapter(id, this)` during its
  * `start()` hook. Sources reference adapters by id; unknown ids cause
- * `search` / `indexDocument` to throw early with a clear error.
+ * `search` / `reindexSource` to throw early with a clear error.
+ *
+ * There is no member that pushes a document (ADR-0161 K1): the service
+ * assembles every document itself, from the records of the object a source
+ * names, on a record change and on a reindex.
  */
 export interface IKnowledgeService {
   /** Register (or replace) an adapter under the given id. */
@@ -89,15 +183,9 @@ export interface IKnowledgeService {
   /** Look up a single source. Returns `undefined` when not registered. */
   getSource(sourceId: string): KnowledgeSource | undefined;
 
-  /** Index (insert or replace) a document into the source's adapter. */
-  indexDocument(sourceId: string, doc: KnowledgeDocument): Promise<void>;
-  /** Remove a document from the source's adapter. */
-  deleteDocument(sourceId: string, documentId: string): Promise<void>;
-
   /**
-   * Bulk reindex a source from its declared origin. Object sources
-   * walk the underlying object via `IDataEngine`; file / http sources
-   * delegate to the adapter's own ingestion.
+   * Bulk reindex a source: walk the object it names via `IDataEngine` and
+   * hand every assembled document to its adapter.
    */
   reindexSource(sourceId: string, opts?: KnowledgeReindexOptions): Promise<KnowledgeReindexResult>;
 

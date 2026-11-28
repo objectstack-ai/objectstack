@@ -131,27 +131,32 @@ describe('ObjectGrid — a masked column opens no inline editor (objectui#10583)
       name: 'over an object `text` field',
       render: () =>
         renderGrid(
-          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true, singleClickEdit: true },
+          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true },
           makeDataSource(ROWS, { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, pin: { type: 'text', label: 'PIN' } }),
         ),
     },
     {
       name: 'over no field def (inline rows)',
       render: () =>
-        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true, singleClickEdit: true }),
+        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true }),
     },
   ];
 
   for (const c of cases) {
-    it(`view \`type: 'password'\` ${c.name} — click and Enter open no editor; the text control edits`, async () => {
+    it(`view \`type: 'password'\` ${c.name} — double-click and Enter open no editor; the text control edits`, async () => {
       c.render();
       await waitFor(() => expect(screen.queryByText(CONTROL_VALUE)).not.toBeNull());
 
+      // Select-first (objectstack#35827): a click selects, and a double-click
+      // or Enter on the selected cell is what would open an editor.
       const masked = cellUnder('PIN');
       expect(masked.textContent, 'CONTROL: the authored password type drew the mask').toContain(MASK);
       fireEvent.click(masked);
-      fireEvent.keyDown(masked, { key: 'Enter' });
-      expect(masked.querySelector('input, textarea'), 'no editor in the masked cell').toBeNull();
+      fireEvent.doubleClick(masked);
+      const catcher = document.querySelector<HTMLInputElement>('[data-slot="cell-type-catcher"]');
+      if (catcher) fireEvent.keyDown(catcher, { key: 'Enter' });
+      expect(masked.hasAttribute('data-editing-cell'), 'no editor in the masked cell').toBe(false);
+      expect(masked.querySelector('textarea, input:not([data-slot="cell-type-catcher"])'), 'no editor in the masked cell').toBeNull();
       expect(rawInAnEditor(RAW.pin), 'no editor holds the raw value').toBe(false);
       expect(document.body.innerHTML, 'the raw value is nowhere in the DOM').not.toContain(RAW.pin);
 
@@ -159,8 +164,9 @@ describe('ObjectGrid — a masked column opens no inline editor (objectui#10583)
       // Held by reference: once it edits, its text lives in an input value.
       const control = cellUnder('Name');
       fireEvent.click(control);
+      fireEvent.doubleClick(control);
       await waitFor(() =>
-        expect(control.querySelector('input, textarea'), 'CONTROL: the text cell edits').not.toBeNull(),
+        expect(control.querySelector('textarea, input:not([data-slot="cell-type-catcher"])'), 'CONTROL: the text cell edits').not.toBeNull(),
       );
     });
   }

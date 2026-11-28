@@ -180,9 +180,9 @@ const dataSource = {
 };
 const record = (name) => async () => { window.__dispatched.push(name); return { success: true }; };
 const rowActionDefs = [
-  { name: 'submit_approval', label: '提交审批', locations: ['list_item'] },
-  { name: 'make_quote', label: '生成报价单', locations: ['list_item'] },
-  { name: 'clone_opportunity', label: '复制', locations: ['list_item'] },
+  { name: 'submit_approval', label: '提交审批', locations: ['record_row'] },
+  { name: 'make_quote', label: '生成报价单', locations: ['record_row'] },
+  { name: 'clone_opportunity', label: '复制', locations: ['record_row'] },
 ];
 const bulkActionDefs = [
   { name: 'mass_update', label: '批量更新' },
@@ -233,8 +233,8 @@ function Header() {
     actions: { create: () => {} }, t, listActions: [], toolbarActionsWithDeepLink: [],
     identityImportEnabled: false, objectCanImport: false, importVisible: false, importDisabled: false,
     setShowImport: () => {}, listFavorite: null, isEnvironmentList: false,
-    toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
-    viewAccess: { refusal: null },
+    toolbarBar: { type: 'action:bar', location: 'list', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
+    viewAccess: { refusal: null }, createLabel: '新建商机',
   });
   return h(ObjectViewPageHeader, {
     objectDef: { name: 'opportunity', label: '商机', pluralLabel: '商机', icon: 'briefcase' },
@@ -249,7 +249,7 @@ function Header() {
     isEnvironmentList: false,
     headerToolbarActions: [],
     environmentEntitlements: undefined,
-    toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
+    toolbarBar: { type: 'action:bar', location: 'list', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
     listFavorite: null,
     foldedHeaderActions: chrome.foldedHeaderActions,
   });
@@ -390,6 +390,16 @@ async function openFixturePage(page: Page, html: string): Promise<void> {
   await page.unroute(FIXTURE_URL);
 }
 
+/**
+ * What a mount waits for, matching one element on every face: the list's row
+ * (the side record's heading reads 「商机 1」 too), or, on a record page with
+ * no list, its heading.
+ */
+const mounted = (page: Page, c: Case) =>
+  c.face === 'tab'
+    ? page.getByRole('heading', { name: '商机 1', exact: true })
+    : page.locator('tr').getByText('商机 1', { exact: true });
+
 async function mount(page: Page, viewport: { width: number; height: number }, c: Case = {}): Promise<void> {
   await page.setViewportSize(viewport);
   // The list asks for its next window while its scroll box is near its end,
@@ -404,7 +414,7 @@ async function mount(page: Page, viewport: { width: number; height: number }, c:
       (window as unknown as { __case: Case }).__case = value;
     }, c);
     await page.addScriptTag({ content: bundle, type: 'module' });
-    await page.getByText('商机 1', { exact: true }).waitFor({ timeout: 30_000 });
+    await mounted(page, c).waitFor({ timeout: 30_000 });
     await styleUntilStable(page);
   }
   await openFixturePage(page, '<!doctype html><html><head><style>html,body{margin:0}</style><style id="tailwind"></style></head><body><div id="root"></div></body></html>');
@@ -414,7 +424,7 @@ async function mount(page: Page, viewport: { width: number; height: number }, c:
     try { window.sessionStorage.clear(); } catch { /* a fresh page holds nothing */ }
   }, { value: c, css: stylesheet });
   await page.addScriptTag({ content: bundle, type: 'module' });
-  await page.getByText('商机 1', { exact: true }).waitFor({ timeout: 30_000 });
+  await mounted(page, c).waitFor({ timeout: 30_000 });
   await styleUntilStable(page);
 }
 

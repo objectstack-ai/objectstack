@@ -26,9 +26,10 @@ import type { NavigationContribution } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
 
-// Marketplace entries (browse / installed) moved to
-// @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
-// the nav lives and dies with the capability — no plugin, no entry).
+// The marketplace's Browse entry lives in @objectstack/cloud-connection's
+// marketplace plugins (cloud ADR-0009: the nav lives and dies with the
+// capability — no plugin, no entry). What is installed is listed by this
+// package's own Packages entry below (objectstack#36834).
 export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
@@ -38,26 +39,45 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_system_overview', type: 'dashboard', label: 'System Overview', dashboardName: 'system_overview', icon: 'activity' },
     ],
   },
-  // No `group_apps` entry ships from this package.
-  //
-  // No unfiltered Packages entry (#25098, ruling 甲 amending #23892 B): the
-  // full `developer:packages` list is a development surface, so its door is in
-  // Studio only. The Studio that every boot serves is the console's own, at
-  // `/_console/studio` (the `@objectstack/studio` app is not default-loaded,
-  // so `studio.app.ts`'s Overview → Packages entry is served only where a host
-  // loads that app). There, the landing's "All packages" link opens the
-  // unfiltered page, and each package card's Manage (like the top-bar
-  // switcher's "Package info & settings") opens the package's detail sheet,
-  // with Disable / Enable (#35196, pinned on the console side by
-  // `BuilderLanding.packagesDoor-35196.test.tsx`). Setup reaches installed
-  // packages through the marketplace-filtered "Installed Apps" door
-  // (`nav_marketplace_installed`, `developer:packages` with
-  // `params: { source: 'marketplace' }`), which
-  // `@objectstack/cloud-connection` contributes to this group wherever the
-  // marketplace capability is present. `setup-packages-door.test.ts` pins
-  // what this package ships for each app.
-  //
-  // And no Packaged Actions entry (objectstack#34724, the ADR-0146 D4
+  {
+    app: 'setup',
+    group: 'group_apps',
+    priority: BASE_PRIORITY,
+    items: [
+      // objectstack#36834 — Setup's one door to what is installed, amending
+      // ruling 甲 of #25098 (which kept the full package list in Studio only,
+      // as a development surface). The entry opens the same
+      // `developer:packages` page with `params: { face: 'admin' }`, which the
+      // sidebar sends as the query string: the page's ADMINISTRATION face —
+      // every package of every source (with a Source filter on the page),
+      // enable / disable, delete with the keep-data choice, and New Package,
+      // which lands in Studio on the new package. The authoring actions
+      // (import, publish, revert, discard drafts, adopt loose items, manifest
+      // edit) stay on the face Studio opens: the landing's "All packages" link
+      // and each package card's Manage, unchanged.
+      //
+      // It replaces the marketplace-filtered "Installed Apps" entry
+      // (`nav_marketplace_installed`, retired from
+      // `@objectstack/cloud-connection`'s `MARKETPLACE_INSTALLED_UI_BUNDLE`):
+      // marketplace installs are this list under Source = marketplace, and an
+      // old `?source=marketplace` link still opens that face filtered.
+      //
+      // Gated like Setup's other administration entries (All Settings, Public
+      // Forms): `manage_platform_settings`. The server's gates on the package
+      // routes stay the authority (`manage_metadata` on every write).
+      // `setup-packages-door.test.ts` pins what this package ships for each app.
+      {
+        id: 'nav_packages',
+        type: 'component',
+        label: 'Packages',
+        componentRef: 'developer:packages',
+        params: { face: 'admin' },
+        icon: 'package',
+        requiredPermissions: ['manage_platform_settings'],
+      },
+    ],
+  },
+  // No Packaged Actions entry (objectstack#34724, the ADR-0146 D4
   // amendment of 2026-11-17): a packaged action's on/off switch for this
   // deployment is on the action, in its app in Studio (the object's Actions
   // view, a standalone action's item page), the way D4 put the flow switch on
@@ -94,6 +114,23 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       { id: 'nav_teams', type: 'object', label: 'Teams', objectName: 'sys_team', icon: 'users-round' },
       { id: 'nav_organizations', type: 'object', label: 'Organizations', objectName: 'sys_organization', icon: 'building-2', requiresService: 'org-scoping' },
       { id: 'nav_invitations', type: 'object', label: 'Invitations', objectName: 'sys_invitation', icon: 'mail' },
+    ],
+  },
+  {
+    app: 'setup',
+    group: 'group_access_control',
+    // [ADR-0084, amended 2026-11-26, question 5] The environment directory —
+    // positions, capabilities, permission sets and sharing rules across every
+    // package — left Studio's menu for this group: Setup holds what is global.
+    // Priority 100 keeps it first, where plugin-security's catalog entries were.
+    // Gate: `studio.access`, the Studio entry that admitted a principal to the
+    // directory before it moved, so moving it widens nobody's view; the Setup
+    // app's `setup.access` applies on top. Its items still open in Studio
+    // (ADR-0146 D1). The console binds the ref to its page (app-shell
+    // `builtinComponents`).
+    priority: 100,
+    items: [
+      { id: 'nav_access_directory', type: 'component', label: 'Positions and Permissions', componentRef: 'security:access-directory', icon: 'key-round', requiredPermissions: ['studio.access'] },
     ],
   },
   {
@@ -139,6 +176,10 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides (every member reads,
       // organization admins write), and Setup itself already needs `setup.access`.
       { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
+      // [ADR-0158 U6, Open item 10] The decimal places each standard unit
+      // displays with in the organization, next to the organization's own
+      // units. No `requiredPermissions`, for the same reason as the entry above.
+      { id: 'nav_standard_unit_settings', type: 'object', label: 'Standard Unit Settings', objectName: 'sys_standard_unit_setting', viewName: 'all_settings', icon: 'ruler' },
       // [ADR-0157 D1, D3] Working calendars and their holidays, beside the
       // other organization reference data Localization governs. The exceptions
       // get their own entry because their list page is the import door for a
@@ -170,7 +211,9 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // entry is not drawn. `features` is a root every nav entry binds.
       { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'], visible: 'features.cloudManaged != true' },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_knowledge', type: 'url', label: 'Knowledge', url: '/apps/setup/system/settings/knowledge', icon: 'book-open', requiredPermissions: ['manage_platform_settings'] },
+      // `nav_settings_knowledge` is contributed by `@objectstack/service-knowledge`
+      // with the `knowledge` namespace, which is offered only where that
+      // service is mounted — so the entry lives and dies with it.
       // `lifecycle` is `@objectstack/objectql`'s manifest (ADR-0057), offered
       // wherever a settings service is mounted, like the entries above.
       { id: 'nav_settings_lifecycle', type: 'url', label: 'Data Lifecycle', url: '/apps/setup/system/settings/lifecycle', icon: 'timer', requiredPermissions: ['manage_platform_settings'] },
@@ -180,6 +223,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // per object (`manageRecycleBin`), and the page lists only the objects
       // whose bin the caller manages.
       { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
+      // objectstack#36444 — every public form of the environment (a form anyone
+      // fills in without signing in): switch one on or off, copy its address,
+      // open it. Operations only; Studio designs the forms. For system
+      // administrators: the page asks the same capability.
+      { id: 'nav_public_forms', type: 'component', label: 'Public Forms', componentRef: 'forms:public-forms', icon: 'file-text', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

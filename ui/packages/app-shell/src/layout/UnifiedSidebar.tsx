@@ -39,7 +39,7 @@ import {
   ChevronRight,
   LayoutGrid,
   Layers,
-  Pin,
+  Search,
 } from 'lucide-react';
 import { NavigationRenderer, hasVisibleNavigationItems, type NavItemActionContext } from '@object-ui/layout';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
@@ -52,6 +52,10 @@ import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { ContentItemTile, favoriteItemObject } from './contentItemTile.js';
+import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
+import { readRecentObjects } from '../console/home/readRecentObjects.js';
+import { appSegmentOf } from '../console/home/appLastOpened.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -75,13 +79,41 @@ import {
 } from './ContextSelectors.js';
 import { AppMark } from './AppMark.js';
 import { CONSOLE_BELOW_TOP_BAR } from './consoleTopBar.js';
-import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
+import { LocalizedSidebarTrigger } from './LocalizedSidebarTrigger.js';
+import { SidebarAppMenu, SidebarDocsPortalMenu } from './SidebarAppMenu.js';
+import { InboxBell } from './InboxBell.js';
+import { AccountMenu } from './AccountMenu.js';
+import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
+import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
+import {
+  CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+  SIDEBAR_EDGE_ZONE,
+  SIDEBAR_RESIZING_FRAME,
+  useConsoleSidebarRail,
+  useConsoleSidebarRailPanel,
+} from './consoleSidebarRail.js';
+import { SidebarWidthHandle } from './SidebarWidthHandle.js';
+import { useWorkspacePreference } from '../utils/workspacePreference.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { useChatDockControl } from './chatDockControl.js';
+import { conversationFavoriteTarget, useUnavailableConversationFavorites } from './conversationFavorites.js';
+import { resolveAiApiBase } from '../hooks/aiApiBase.js';
+import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
+import { useSidebarFooterSlot } from './sidebarFooterSlot.js';
+import { SidebarDocsNavTarget } from './sidebarDocsNavSlot.js';
+
+/**
+ * The app's menu as the design mode edits it (objectstack#36363). Loaded on
+ * the mode's first use: it brings the metadata client and the package doors
+ * the menu's write needs, which no other sidebar row reads.
+ */
+const DesignModeMenu = React.lazy(() => import('./DesignModeMenu.js'));
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -158,6 +190,26 @@ interface UnifiedSidebarProps {
    * every width, collapsed to the primitive's icon rail.
    */
   railOverlay?: boolean;
+  /**
+   * objectstack#37150 — the route is one of the app's documentation pages
+   * (`isAppDocsPath`): the body holds the docs' navigation, which the page
+   * draws into `SidebarDocsNavTarget`, in place of the app's menu and its
+   * recent items (objectstack#35424). The head and the foot are unchanged.
+   */
+  docsNav?: boolean;
+  /**
+   * objectstack#37197 — the docs portal (`/docs…`, `DocsPortalShell`), a page
+   * in no app: from 768 px up the shell's head and foot as in an app, with a
+   * neutral 「Documentation」 menu (the viewer's apps, none checked) where an
+   * app's name menu is, and the docs tree the page draws as the body. Nothing
+   * here resolves, marks or remembers an app.
+   */
+  docsPortal?: boolean;
+  /**
+   * With `docsPortal`: whether a command palette is mounted for the search
+   * field to open (the portal mounts Home's, which needs a host app).
+   */
+  docsPortalSearch?: boolean;
 }
 
 function isMetadataDirectoryItem(item: NavigationItem): boolean {
@@ -175,7 +227,36 @@ function isOverviewGroup(item: NavigationItem): boolean {
   return id === 'overview' || label === 'overview';
 }
 
-export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSidebarProps) {
+/**
+ * The ⋯ menu every entry carries (objectui#12427), as the `renderItemAction`
+ * the navigation renderer calls per row. Built once per pin store and app
+ * (objectstack#37575), so the memoised rows see the same callback across
+ * renders.
+ */
+function navItemActionRenderer(
+  togglePin: ReturnType<typeof useNavPins>['togglePin'],
+  activeApp: Parameters<typeof sidebarItemDesignPath>[1],
+) {
+  return (item: NavigationItem, row: NavItemActionContext) => (
+    <SidebarItemMenu
+      label={row.label}
+      href={row.href}
+      external={row.external}
+      isFavorite={!!item.pinned}
+      onToggleFavorite={() => togglePin(item.id, !item.pinned, item, row.basePath)}
+      designPath={sidebarItemDesignPath(item, activeApp)}
+    />
+  );
+}
+
+export function UnifiedSidebar({
+  activeAppName,
+  onAppChange,
+  railOverlay = false,
+  docsNav = false,
+  docsPortal = false,
+  docsPortalSearch = false,
+}: UnifiedSidebarProps) {
   const { isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { t, language } = useObjectTranslation();
@@ -190,12 +271,34 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   const resolveNavTargetIcon = useNavTargetIcon();
   const resolveNavTargetColor = useNavTargetColor();
   // Collapsed, the console's sidebar is hidden and its menu floats over the
-  // content (objectstack#35062); below the fold width it collapses on its own
-  // (objectstack#27593), and `useResponsiveSidebar` folds and unfolds it.
+  // content (objectstack#35062); a window starts in the reader's choice for
+  // its side of the threshold, else expanded from 1280 px and collapsed below
+  // (objectstack#36112), and `useResponsiveSidebar` gives it that state.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const sidebarRef = React.useRef<HTMLDivElement | null>(null);
   const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
-  const keepOpenLabel = t('sidebar.keepOpen', { defaultValue: 'Keep sidebar open' });
+  // objectstack#36227 — from 768 px up the reader drags the docked sidebar's
+  // right edge to resize it; this browser keeps the width, and the menu
+  // floating over a collapsed sidebar takes it too.
+  const [keptWidth, setKeptWidth] = useWorkspacePreference(
+    CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+    'user',
+    CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  );
+  const [dragWidth, setDragWidth] = React.useState<number | null>(null);
+  const sidebarWidth = dragWidth ?? keptWidth;
+  // objectstack#36112 — from 768 px up the console draws no top bar: the
+  // sidebar starts at the top of the window and carries the app menu, the
+  // search and the bell in its head, and the account at its foot. The docs
+  // portal is the one page in no app that draws the same (objectstack#37197).
+  const shellChrome = rail.desktop && (context === 'app' || docsPortal);
+  // objectstack#36362 — while the design mode is on, its bar is above the
+  // sidebar, and the menu shows the app's own entries only: the person's
+  // Favorites are not the app's to change.
+  const designMode = useDesignModeActive();
+  const { openCommandPalette } = useCommandPalette();
+  const paletteMounted = useCommandPaletteProviderMounted();
+  const hasCommandPalette = paletteMounted && (!docsPortal || docsPortalSearch);
 
   // Swipe-from-left-edge gesture to open sidebar on mobile
   React.useEffect(() => {
@@ -233,16 +336,14 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   }, [routeKey, isMobile, setOpenMobile]);
 
   const { recentItems: allRecentItems } = useRecentItems();
-  // A Studio package entry is labelled from the package list (objectui#11863),
-  // which this sidebar does not load, so it is left out here rather than drawn
-  // as its id. The Studio landing lists the recent packages.
-  const recentItems = allRecentItems.filter(item => item.type !== 'package');
   // A recent entry's text is the item's own, resolved on this render
   // (objectui#11678); the entry stores identity only.
   const recentLabel = useRecentItemLabel();
-  const { favorites, removeFavorite, reorderFavorites } = useFavorites();
+  const { favorites, removeFavorite, reorderFavorites, refreshLabel: refreshFavoriteLabel } = useFavorites();
+  const chatDock = useChatDockControl();
 
-  const { apps: metadataApps } = useMetadata();
+  const metadata = useMetadata();
+  const { apps: metadataApps } = metadata;
   const apps = metadataApps || [];
   // objectui#7256 — every "Home" row below follows the product's DECLARED
   // landing, so the sidebar cannot offer a second home the top bar disowns.
@@ -251,7 +352,19 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // direct navigation to /apps/account still renders.
   const activeApps = apps.filter((a: any) => a.active !== false && a.hidden !== true);
   // ADR-0048 (A) — route segment may be a package id; match by it (name fallback).
-  const activeApp = matchAppBySegment(apps.filter((a: any) => a.active !== false), activeAppName || currentAppName) || activeApps[0];
+  const enabledApps = apps.filter((a: any) => a.active !== false);
+  const activeApp = matchAppBySegment(enabledApps, activeAppName || currentAppName) || activeApps[0];
+  // A Studio package entry is labelled from the package list (objectui#11863),
+  // which this sidebar does not load, so it is left out here rather than drawn
+  // as its id. The Studio landing lists the recent packages. From 768 px up
+  // the list is this app's own (objectstack#36112, 「这个应用里的最近使用」):
+  // an entry was opened in the app its address names, resolved as the router
+  // resolves it; Home lists every app's. The phone drawer is unchanged.
+  const recentItems = allRecentItems.filter(
+    (item) =>
+      item.type !== 'package' &&
+      (isMobile || (!!activeApp && matchAppBySegment(enabledApps, appSegmentOf(item.href)) === activeApp)),
+  );
   // `type: 'action'` nav items dispatch through here (framework#4509). The
   // sidebar renders inside ConsoleShell's GlobalActionRuntimeProvider, so this
   // resolves to the fully-wired console runner — confirm/param/result dialogs
@@ -298,11 +411,22 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // The template context every navigation href here resolves with; the area
   // election below matches routes with it too, so it agrees with the drawn
   // highlight.
-  const navTemplateContext = {
-    currentUserId: user?.id ?? null,
-    currentOrgId: activeOrganization?.id ?? null,
-    contextValues,
-  };
+  //
+  // objectstack#37575 — kept by content, not rebuilt per render: every row of
+  // the menu takes it as a prop and is memoised (`NavigationItemRenderer`), so
+  // a fresh object here redrew all of them each time the shell re-rendered.
+  // `contextValues` is a fresh map every render, so it is keyed by its text.
+  const contextValuesKey = JSON.stringify(contextValues);
+  const currentUserId = user?.id ?? null;
+  const currentOrgId = activeOrganization?.id ?? null;
+  const navTemplateContext = React.useMemo(
+    () => ({
+      currentUserId,
+      currentOrgId,
+      contextValues: JSON.parse(contextValuesKey) as Record<string, string>,
+    }),
+    [currentUserId, currentOrgId, contextValuesKey],
+  );
 
   // Area management.
   //
@@ -513,6 +637,8 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // holds (`PhoneAppHome`), so the page lists what the sidebar lists, in its
   // order, under the same gates.
   const phoneHomeSlot = usePhoneAppHomeSlot();
+  // objectstack#36739 — what the host draws at the sidebar's bottom.
+  const footerSlot = useSidebarFooterSlot();
 
   // One ⋯ menu on every entry, in place of the pin action (objectui#12427):
   // its first entry adds the entry to Favorites or removes it, through the
@@ -520,16 +646,10 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // draws no per-entry control (objectui#1055) and pinning stays off. Its
   // Design entry opens what the app bar's Edit app opens for the entry, in the
   // app whose navigation this is (objectui#12520).
-  const renderNavItemAction = (item: NavigationItem, row: NavItemActionContext) => (
-    <SidebarItemMenu
-      label={row.label}
-      href={row.href}
-      external={row.external}
-      isFavorite={!!item.pinned}
-      onToggleFavorite={() => togglePin(item.id, !item.pinned, item, row.basePath)}
-      designPath={sidebarItemDesignPath(item, activeApp)}
-    />
-  );
+  //
+  // objectstack#37575 — one callback across renders while the pin store and
+  // the app are the same, for the same reason as `navTemplateContext` above.
+  const renderNavItemAction = React.useMemo(() => navItemActionRenderer(togglePin, activeApp), [togglePin, activeApp]);
 
   // The favorites that are not navigation entries (an object, a record, a
   // dashboard, a page or an app the user starred) are rows of the same
@@ -546,25 +666,76 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // rows are the user's to order: dragged, they keep the order on every device
   // (the favorites store's `reorderFavorites`). A phone, which draws no drag,
   // keeps them in that order.
+  // The objects the Recent, Favorites and Starred rows name, asked in ONE
+  // presence read; a name not answered `read` is asked nothing by name
+  // (objectstack#34692, as Home's recent rows).
+  const contentObjectNames = [
+    ...new Set(
+      [
+        ...favorites.map((f) => favoriteItemObject(f)),
+        ...recentItems.slice(0, 5).map((r) => recentItemObject(r)),
+      ].filter((name): name is string => !!name),
+    ),
+  ].sort();
+  const contentObjectReading = readRecentObjects(metadata, contentObjectNames);
+  const contentTile = (kind: string, objectName?: string, icon?: string) => (
+    <ContentItemTile
+      kind={kind}
+      objectName={objectName}
+      objectRead={!objectName || contentObjectReading(objectName) === 'read'}
+      icon={icon}
+      targetIcon={resolveNavTargetIcon}
+      targetColor={resolveNavTargetColor}
+      size={isMobile ? 'md' : 'sm'}
+      className="-mx-0.5"
+    />
+  );
   const contentFavorites = favorites
     .filter(f => f.type !== 'nav')
     .filter(f => f.type !== 'view' || matchAppBySegment(apps.filter((a: any) => a.active !== false), favoriteAppSegment(f.href)) === activeApp)
     .slice(0, 8);
+  // objectstack#37863 — a favourite conversation's row opens the drawer in
+  // place on it (the target its history row opens), and its address only where
+  // no drawer takes it: no host, the app's AI inquiry page (A4), or a click
+  // that asks for a new tab. A conversation the server answers is gone or not
+  // this user's is drawn unavailable and opens nothing; its ⋯ still removes it.
+  const unavailableConversations = useUnavailableConversationFavorites(
+    contentFavorites,
+    resolveAiApiBase(),
+    refreshFavoriteLabel,
+  );
+  const openConversationFavorite = (item: FavoriteItem, event: React.MouseEvent) => {
+    const target = conversationFavoriteTarget(item);
+    if (!target) return;
+    if (unavailableConversations.has(item.id)) {
+      event.preventDefault();
+      return;
+    }
+    if (!chatDock || chatDock.askPageActive) return;
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    chatDock.open(target);
+    if (isMobile) setOpenMobile(false);
+  };
   const contentFavoriteRow = (item: FavoriteItem, drag?: FavoriteRowDragProps) => {
+    const unavailable = unavailableConversations.has(item.id);
+    const unavailableText = t('sidebar.conversationUnavailable', { defaultValue: 'This conversation is no longer available' });
     return (
       <>
-        <SidebarMenuButton asChild tooltip={item.label}>
-          <Link to={item.href} {...(drag ?? {})}>
-            {item.type === 'view' ? (
-              // `createElement`: the looked-up icon is a value, which
-              // react-hooks/static-components refuses in tag position.
-              React.createElement(getIcon(item.icon), { className: 'h-4 w-4 shrink-0 text-muted-foreground' })
-            ) : (
-              <span className="text-muted-foreground">
-                {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : item.type === 'page' ? '📄' : '📋'}
-              </span>
-            )}
+        <SidebarMenuButton asChild tooltip={unavailable ? `${item.label} · ${unavailableText}` : item.label}>
+          <Link
+            to={item.href}
+            {...(drag ?? {})}
+            onClick={item.type === 'conversation' ? (event) => openConversationFavorite(item, event) : undefined}
+            aria-disabled={unavailable || undefined}
+            data-unavailable={unavailable || undefined}
+            className={unavailable ? 'text-muted-foreground line-through decoration-muted-foreground/60' : undefined}
+          >
+            {/* objectstack#36141 — the menu's tiles: an object, one of its
+                views or records is that object's tile, the rest neutral. */}
+            {contentTile(item.type, favoriteItemObject(item), item.type === 'view' ? item.icon : undefined)}
             <span className="truncate">{item.label}</span>
+            {unavailable ? <span className="sr-only">{`(${unavailableText})`}</span> : null}
           </Link>
         </SidebarMenuButton>
         <SidebarItemMenu
@@ -644,7 +815,20 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
 
            {/* App Navigation tree. `locale` is the same `language` the area
                labels above resolve in, so an entry label written as an inline
-               locale map reads the viewer's entry too (objectui#11299). */}
+               locale map reads the viewer's entry too (objectui#11299).
+               objectstack#36363 — while the design mode is on, the app's
+               menu is drawn by its editor instead (an app whose menu is split
+               in areas keeps its menu: the card edits `navigation`). */}
+           {designMode && where === 'sidebar' && context === 'app' && activeApp && areas.length === 0 ? (
+             <React.Suspense fallback={null}>
+               <DesignModeMenu
+                 app={activeApp}
+                 basePath={basePath}
+                 resolveTargetLabel={resolveNavTargetLabel}
+                 resolveTargetIcon={resolveNavTargetIcon}
+               />
+             </React.Suspense>
+           ) : (
            <NavigationRenderer
              items={processedNavigation}
              basePath={basePath}
@@ -652,14 +836,14 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              checkPermission={checkPerm}
              checkCapability={checkCap}
              checkDocTarget={checkDocTarget}
-             enablePinning={!isMobile}
+             enablePinning={!isMobile && !designMode}
              // On a phone no row draws a per-entry control (objectui#1055),
              // the drawer's or the app home's; the pins that once offered an
              // entry to the bottom bar are gone with it (objectstack#35882).
              renderItemAction={isMobile ? undefined : renderNavItemAction}
              // The app home lists the menu alone: no Favorites section there
-             // (objectstack#35881).
-             extraFavorites={where === 'home' ? undefined : contentFavoriteRows}
+             // (objectstack#35881), nor while the design mode is on (objectstack#36362).
+             extraFavorites={where === 'home' || designMode ? undefined : contentFavoriteRows}
              pinnedOrder={pinnedIds}
              onPinnedReorder={reorderPins}
              resolveTargetLabel={resolveNavTargetLabel}
@@ -670,15 +854,20 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              t={t}
              templateContext={navTemplateContext}
            />
+           )}
     </>
   );
 
   return (
-    <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
+    <div
+      data-testid="console-sidebar-frame"
+      className={cn(railPanel.frameClassName, dragWidth !== null && SIDEBAR_RESIZING_FRAME)}
+      style={rail.desktop ? ({ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties) : undefined}
+    >
     <Sidebar
       ref={sidebarRef}
       collapsible={railPanel.collapsible}
-      className={cn(CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
+      className={cn((!rail.desktop || designMode) && CONSOLE_BELOW_TOP_BAR, railPanel.panelClassName)}
       {...railPanel.panelProps}
     >
       {/* Mobile-only drawer header — the app's glyph and name (objectui#12201
@@ -702,7 +891,54 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
           </div>
         </SidebarHeader>
       )}
+      {shellChrome && (activeApp || docsPortal) && (
+        <SidebarHeader className="gap-1 p-2 pb-1" data-testid="sidebar-shell-head">
+          <div className="flex min-w-0 items-center gap-1">
+            {docsPortal ? (
+              // objectstack#37197 — the portal is in no app: a neutral head
+              // that opens the app list, with no app checked.
+              <SidebarDocsPortalMenu onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange?.(segment))} />
+            ) : (
+              <SidebarAppMenu
+                activeAppName={activeAppName ?? activeApp.name}
+                onAppChange={(segment) => confirmUnsavedLeave(() => onAppChange?.(segment))}
+              />
+            )}
+            <LocalizedSidebarTrigger
+              className="text-muted-foreground"
+              aria-label={t('sidebar.collapse', { defaultValue: 'Collapse sidebar' })}
+              data-testid="sidebar-collapse"
+            />
+          </div>
+          <div className="flex min-w-0 items-center gap-1">
+            {hasCommandPalette && (
+              <button
+                type="button"
+                data-testid="action:command-palette:open"
+                aria-label={t('console.search', { defaultValue: 'Search…' })}
+                aria-keyshortcuts="Meta+K Control+K"
+                onClick={openCommandPalette}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border bg-background/60 px-2.5 text-muted-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="flex-1 truncate text-left text-xs">{t('console.search', { defaultValue: 'Search…' })}</span>
+                <kbd className="pointer-events-none inline-flex h-5 items-center gap-0.5 rounded border bg-background px-1.5 text-xs font-medium text-muted-foreground">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </button>
+            )}
+            <InboxBell />
+          </div>
+        </SidebarHeader>
+      )}
       <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
+        {docsPortal || (docsNav && context === 'app' && activeApp) ? (
+          // objectstack#37150 — an app's docs page: the docs' own navigation,
+          // drawn here by the page (it carries its own landmark). The docs
+          // portal's tree, likewise (objectstack#37197).
+          <SidebarDocsNavTarget />
+        ) : (
+        <>
         {/* The sidebar's one navigation landmark, so assistive tech can jump
             to it. The `Sidebar` primitive draws a plain `div` (and a dialog on
             a phone) and is Shadcn-synced, so the landmark rides inside its
@@ -739,9 +975,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={recentLabel(item)}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'report' ? '📈' : '📄'}
-                           </span>
+                           {contentTile(item.type, recentItemObject(item))}
                            <span className="truncate">{recentLabel(item)}</span>
                          </Link>
                        </SidebarMenuButton>
@@ -822,9 +1056,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
                      <SidebarMenuItem key={item.id}>
                        <SidebarMenuButton asChild tooltip={item.label}>
                          <Link to={item.href}>
-                           <span className="text-muted-foreground">
-                             {item.type === 'dashboard' ? '📊' : item.type === 'page' ? '📄' : '📋'}
-                           </span>
+                           {contentTile(item.type, favoriteItemObject(item))}
                            <span className="truncate">{item.label}</span>
                          </Link>
                        </SidebarMenuButton>
@@ -844,40 +1076,31 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
            </>
          )}
         </nav>
+        </>
+        )}
       </SidebarContent>
-      {/* "Keep sidebar open": in the floated menu it puts the sidebar back
-          beside the content and keeps it there (on the fold, for this
-          browser); in a sidebar kept open on a narrow window it is pressed,
-          and turns the fold back on (objectstack#35062). */}
-      {railPanel.keepOpenControl && (
-        <SidebarFooter className="border-t border-sidebar-border">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                data-testid="sidebar-keep-open"
-                aria-pressed={railPanel.keepOpenControl.pressed}
-                isActive={railPanel.keepOpenControl.pressed}
-                tooltip={keepOpenLabel}
-                onClick={railPanel.keepOpenControl.onPress}
-              >
-                <Pin className="h-4 w-4" />
-                <span>{keepOpenLabel}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+      {shellChrome && (
+        <SidebarFooter className="gap-1 border-t border-sidebar-border p-2">
+          {footerSlot?.('sidebar')}
+          <AccountMenu trigger="sidebar" />
         </SidebarFooter>
       )}
-      {/* No footer trigger: the app bar's left slot holds the shell's one
-          sidebar trigger at every width (objectui#12429). */}
+      {/* No footer trigger: from 768 px up the trigger is the head's collapse
+          button and, while collapsed, the page header's expand button; on a
+          phone the app bar's left slot holds it. */}
+      {railPanel.docked && (
+        <SidebarWidthHandle width={sidebarWidth} onPreview={setDragWidth} onCommit={setKeptWidth} />
+      )}
     </Sidebar>
     {/* objectstack#35062 — the window's left edge while the sidebar is
         hidden: resting the pointer on it, or a press, floats the menu. For
-        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+        the pointer only; the keyboard has the page header's expand button
+        and ⌘B, which dock the sidebar. */}
     {railPanel.edgeZoneProps && (
       <div
         data-testid="console-sidebar-edge"
         aria-hidden="true"
-        className={cn(SIDEBAR_EDGE_ZONE, CONSOLE_BELOW_TOP_BAR)}
+        className={cn(SIDEBAR_EDGE_ZONE, rail.desktop && !designMode ? 'top-0 h-svh' : CONSOLE_BELOW_TOP_BAR)}
         {...railPanel.edgeZoneProps}
       />
     )}
@@ -889,6 +1112,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
             data-testid="phone-app-home-nav"
           >
             {renderAppMenu('home')}
+            {footerSlot?.('phoneAppHome')}
           </nav>,
           phoneHomeSlot,
         )

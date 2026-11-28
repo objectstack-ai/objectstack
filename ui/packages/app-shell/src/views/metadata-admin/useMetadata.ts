@@ -25,6 +25,7 @@ import { createConsoleMetadataClient } from './metadataClientFactory.js';
 import { dropPublishedViewList, installViewListDrop } from './viewListDrop.js';
 import { emitSaveAdvisories, type TranslateFn } from '../../providers/saveAdvisoryToast.js';
 import type { FormViewSpec } from './form-spec.js';
+import type { MetadataListView } from '@objectstack/spec/ui';
 
 /**
  * A declarative **type-level** action surfaced on a metadata type by the
@@ -51,7 +52,7 @@ export interface MetadataTypeAction {
   icon?: string;
   /** Button visual variant. */
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'link';
-  /** Locations where this action is visible (list_toolbar, record_header, …). */
+  /** Locations where this action is visible (list, record_page, …). */
   locations?: string[];
   /** Confirmation prompt shown before execution. */
   confirmText?: string;
@@ -119,6 +120,12 @@ export interface RichMetadataTypeEntry {
    * refuses one with no member source instead of assuming `fields`.
    */
   form?: FormViewSpec;
+  /**
+   * The type's Studio list layout (objectstack#36860, the spec's
+   * `METADATA_LIST_REGISTRY`): its columns, headers in the request locale.
+   * Absent for a type with no declared list. Read by `servedListColumns`.
+   */
+  list?: MetadataListView;
   /** UI hints (icon, color, etc.) the framework may include. */
   ui?: Record<string, unknown>;
 }

@@ -282,8 +282,9 @@ describe('SHARED_RECORD_IDS_CASE_SET — each wrong reading of the leaf fails th
 describe('SHARED_RECORD_IDS_CASE_SET — D-0, the same set as today\'s list', () => {
   it('the D-0 list is G read from the grant rows the way plugin-sharing reads it today, and the leaf answers its rows', () => {
     const grants = rowsOf(set, 'sys_record_share');
-    // Today's read: one find under { object_name, recipient_type: 'user', recipient_id },
-    // then grantedRecordIds — nullish ids dropped, the rest stringified, the empty string dropped.
+    // The read plugin-sharing made before its switch (ADR-0155 plan step 6): one find under
+    // { object_name, recipient_type: 'user', recipient_id }, then nullish ids dropped, the rest
+    // stringified, the empty string dropped. The leaf's blank-id guard (FixedInnerRead) owes the same.
     const today = grants
       .filter((g) => g.object_name === 'srid_doc' && g.recipient_type === 'user' && g.recipient_id === 'u1')
       .map((g) => g.record_id)

@@ -39,6 +39,9 @@ export default defineConfig({
       // rule's report against its wording: judged as the checkout states the
       // rule, so a change of wording fails this suite, not a run.
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../lint/src/index.ts') },
+      // The masking variable a masking-off round sets (`schema-masking.ts`) is
+      // the name the checkout's metadata plane reads, never a stale build's.
+      { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts') },
     ],
   },
 });

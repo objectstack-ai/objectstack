@@ -537,6 +537,25 @@ directly. `datetime` on PostgreSQL/MySQL keeps the native `now()`, which is
 already UTC — the driver pins every MySQL connection with
 `SET time_zone = '+00:00'`.
 
+SQLite refuses an expression default on `ALTER TABLE … ADD COLUMN` once the
+table holds a row. So when a `NOW()` field is added to a SQLite table that
+already has rows (local or Turso), the schema sync does three things. It adds
+the column nullable with **no** default. In the same transaction, it fills the
+existing rows with the instant of the sync, the value the default would have
+given them. It then reports the default as owed drift: `set_column_default`,
+plus `tighten_not_null` when the field declares `storage: { notNull: true }`.
+
+On a local SQLite database the owed default is a `safe` entry. A table rebuild
+applies it, unattended under `autoMigrate: 'safe'`, on publish, or at an
+artifact-pinned boot; `os migrate apply` applies it for an object a package
+provides. The NOT NULL is destructive: it needs
+`os migrate apply --allow-destructive`, and an artifact-pinned boot is refused
+until it is applied. A Turso remote database does not run that table rebuild,
+so both entries stay listed by `os migrate plan`.
+
+The same `set_column_default` is reported for any SQLite column whose field
+declares `NOW()` but which carries no default at all.
+
 Both `os generate migration` formats reproduce the PostgreSQL arm of this
 translation, so a table built from a generated migration carries the same
 default as one the driver creates. That holds for a plain literal

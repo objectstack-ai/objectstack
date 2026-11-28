@@ -91,11 +91,18 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AutomationsPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -149,9 +156,11 @@ afterEach(() => {
 
 function renderPillar() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/${FLOW.name}`]}>
+        <AutomationsPillar packageId={PKG} flowName={FLOW.name} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
 }
 
@@ -165,13 +174,14 @@ describe('Automations page — the edge condition shows the draft\'s served verd
     await waitFor(() => expect(screen.queryByTestId('flow-edge-server-error')).toBeNull());
   });
 
-  it('the verdict follows the draft: after the autosave of a fixed condition the refusal goes', async () => {
+  it('the verdict follows the save: after the Save of a fixed condition the refusal goes (objectstack#36511)', async () => {
     renderPillar();
     fireEvent.click(await screen.findByRole('button', { name: 'select e2' }, { timeout: 8000 }));
     await screen.findByTestId('flow-edge-server-error', {}, { timeout: 8000 });
     const readsBefore = server.draftReads;
 
     fireEvent.click(screen.getByRole('button', { name: 'fix e2' }));
+    await pressStudioSave();
 
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 6000 });
     await waitFor(() => expect(server.draftReads).toBeGreaterThan(readsBefore), { timeout: 6000 });

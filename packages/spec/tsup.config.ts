@@ -20,15 +20,15 @@ type Plugin = NonNullable<Options['esbuildPlugins']>[number];
  *  - `lazySchema(fn)` allocates a Proxy, defers `fn` to first use;
  *  - `strictObject(shape, …)` builds a closed zod object (construction only —
  *    the unknown-key error closure runs at parse time, not now);
- *  - `defineForm(cfg)` parses STATIC author-time data through `FormViewSchema`
+ *  - `defineMetadataForm(cfg)` parses STATIC author-time data through `FormViewSchema`
  *    — pure computation whose only observable effect is a throw on invalid
  *    static input, which this package's own build (`gen:schema` under
  *    OS_EAGER_SCHEMAS) and tests still exercise.
  */
-const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set(['lazySchema', 'strictObject', 'defineForm']);
+const PURE_CONSTRUCTORS: ReadonlySet<string> = new Set(['lazySchema', 'strictObject', 'defineMetadataForm']);
 
 /** A file that never names a marked constructor is handed back untouched, unparsed. */
-const NAMES_A_PURE_CONSTRUCTOR = /\b(?:lazySchema|strictObject|defineForm)\b/;
+const NAMES_A_PURE_CONSTRUCTOR = /\b(?:lazySchema|strictObject|defineMetadataForm)\b/;
 
 const PURE_ANNOTATION = '/* @__PURE__ */ ';
 
@@ -100,6 +100,220 @@ export function annotatePureCalls(source: string, fileName: string): string | un
 }
 
 /**
+ * The built-ins that WRITE to their first argument. An initializer that hands
+ * one of them an object it did not just create (`Object.assign(FooSchema, {
+ * create })`) changes that object, which stays reachable through its own name;
+ * dropping the unused declaration would drop the write with it.
+ */
+const MUTATES_FIRST_ARGUMENT: ReadonlySet<string> = new Set([
+  'Object.assign',
+  'Object.defineProperty',
+  'Object.defineProperties',
+  'Object.setPrototypeOf',
+  'Reflect.set',
+  'Reflect.defineProperty',
+  'Reflect.deleteProperty',
+  'Reflect.setPrototypeOf',
+]);
+
+const PURE_IIFE_OPEN = `${PURE_ANNOTATION}(() => (`;
+const PURE_IIFE_CLOSE = '))()';
+
+/** Strip the type-only wrappers TypeScript allows around an expression. */
+function unwrapTypeOnly(node: ts.Expression): ts.Expression {
+  let n = node;
+  while (
+    ts.isParenthesizedExpression(n) ||
+    ts.isAsExpression(n) ||
+    ts.isSatisfiesExpression(n) ||
+    ts.isNonNullExpression(n) ||
+    ts.isTypeAssertionExpression(n)
+  ) {
+    n = n.expression;
+  }
+  return n;
+}
+
+/**
+ * An expression whose evaluation no bundler can read as a side effect, so a
+ * wrapper around it would only add bytes: literals, names, functions, and
+ * object and array literals built from those.
+ */
+function isTriviallyPure(node: ts.Expression): boolean {
+  const n = unwrapTypeOnly(node);
+  if (
+    ts.isStringLiteral(n) ||
+    ts.isNumericLiteral(n) ||
+    ts.isBigIntLiteral(n) ||
+    ts.isNoSubstitutionTemplateLiteral(n) ||
+    ts.isRegularExpressionLiteral(n) ||
+    ts.isIdentifier(n) ||
+    ts.isArrowFunction(n) ||
+    ts.isFunctionExpression(n) ||
+    n.kind === ts.SyntaxKind.TrueKeyword ||
+    n.kind === ts.SyntaxKind.FalseKeyword ||
+    n.kind === ts.SyntaxKind.NullKeyword
+  ) {
+    return true;
+  }
+  if (ts.isPrefixUnaryExpression(n) && ts.isNumericLiteral(n.operand)) return true;
+  if (ts.isArrayLiteralExpression(n)) return n.elements.every((e) => !ts.isSpreadElement(e) && isTriviallyPure(e));
+  if (ts.isObjectLiteralExpression(n)) {
+    return n.properties.every((p) => {
+      if (ts.isShorthandPropertyAssignment(p)) return true;
+      if (ts.isMethodDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p)) {
+        return !ts.isComputedPropertyName(p.name);
+      }
+      if (!ts.isPropertyAssignment(p)) return false;
+      if (ts.isComputedPropertyName(p.name) && !ts.isStringLiteral(p.name.expression)) return false;
+      return isTriviallyPure(p.initializer);
+    });
+  }
+  return false;
+}
+
+/**
+ * A call of one of {@link PURE_CONSTRUCTORS} whose arguments are trivially
+ * pure (`lazySchema(() => …)`): its own annotation already covers it whole.
+ */
+function isMarkedConstructorCall(node: ts.Expression): boolean {
+  const n = unwrapTypeOnly(node);
+  if (!ts.isCallExpression(n)) return false;
+  const callee = n.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.name)
+      ? callee.name.text
+      : undefined;
+  return name !== undefined && PURE_CONSTRUCTORS.has(name) && n.arguments.every((a) => isTriviallyPure(a));
+}
+
+/** A first argument this call created itself: a write to it reaches nothing else. */
+function isFreshValue(node: ts.Expression | undefined): boolean {
+  if (node === undefined) return true;
+  const n = unwrapTypeOnly(node);
+  return (
+    ts.isObjectLiteralExpression(n) ||
+    ts.isArrayLiteralExpression(n) ||
+    ts.isArrowFunction(n) ||
+    ts.isFunctionExpression(n) ||
+    ts.isCallExpression(n) ||
+    ts.isNewExpression(n)
+  );
+}
+
+/**
+ * Whether `init` (outside the functions it defines) hands a built-in in
+ * {@link MUTATES_FIRST_ARGUMENT} an object it did not create.
+ */
+function writesToAnExistingObject(init: ts.Expression): boolean {
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found || ts.isFunctionLike(n)) return;
+    if (ts.isCallExpression(n)) {
+      const callee = n.expression;
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        MUTATES_FIRST_ARGUMENT.has(`${callee.expression.text}.${callee.name.text}`) &&
+        !isFreshValue(n.arguments[0])
+      ) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(init);
+  return found;
+}
+
+/**
+ * Wrap the initializer of every MODULE-SCOPE variable in a PURE-annotated
+ * arrow that is called at once — `const X = PURE (() => (init))()` — so a
+ * consumer's bundler may drop a declaration its entry never reads, whatever
+ * the initializer is built from. Returns `undefined` when nothing is wrapped.
+ *
+ * ## Why every initializer, and not more marked constructors
+ *
+ * A PURE annotation covers the CALL it marks, not that call's arguments, its
+ * receiver or the calls chained on its result. A module-scope constant derived
+ * from another one — `new Set([...PageComponentType.options,
+ * ...Object.keys(ComponentPropsMap)])` — evaluates a spread and two property
+ * reads, so a bundler keeps it, and with it every schema it names, in every
+ * bundle of the module that declares it. Measured on objectstack `ce4d8c7d`
+ * with rolldown 1.2.15 (the console's bundler): a consumer importing only
+ * `resolveI18nLabel` from `./ui` kept 235 KB gzipped of this package before
+ * this pass, and under 1 KB after it. An arrow called at once with no
+ * arguments is the one call whose purity covers everything inside it, so one
+ * annotation covers the whole initializer, chains and spreads included.
+ *
+ * ## What may not be wrapped
+ *
+ * Dropping an unused declaration is unobservable only while evaluating its
+ * initializer writes to nothing that outlives it. Two writes do:
+ *
+ *  - a built-in in {@link MUTATES_FIRST_ARGUMENT} handed an object the
+ *    initializer did not create: `export const ApiEndpoint =
+ *    Object.assign(ApiEndpointSchema, { create })` adds `create` to
+ *    `ApiEndpointSchema` itself. Those initializers are left as they are;
+ *  - a call that registers into a store some other code reads later. Two
+ *    families do, at module scope, and both are wrapped because dropping one
+ *    loses nothing a reader can ask for:
+ *    - `withRefusalHead(prescription, head)` (6 constants in
+ *      `data/query.zod.ts`) puts the head of a refusal constant in a
+ *      process-wide map on `globalThis`. Only code that raises that same
+ *      constant reads the map, and that code reads the constant, so a bundle
+ *      that can raise the text keeps the initializer that registered it;
+ *    - every strict object (`strictObject`, `strictObjectError` and the schema
+ *      helpers built on them) pushes its declaration into a process-wide
+ *      store. Only this package's tests and `scripts/build-schemas.ts` read
+ *      the store, and they load the sources, never a bundle of them.
+ *
+ * `scripts/pure-schema-construction.test.ts` holds that account. It lists
+ * every module-level store a function in this package's sources writes (by
+ * name, through a member chain, a type-only cast, `globalThis`, or the result
+ * of a module-level function such as `registry()`), each with its reason; it
+ * marks the stores that are registrations; and it reads every module-scope
+ * initializer and refuses one whose load-time calls reach a registration by a
+ * name that store's reason does not cover (a module-scope
+ * `registerMetadataTypeSchema(…)` reds it). Calls are matched by name, not
+ * resolved, and a helper that writes only to its own parameter is not a
+ * store, so this is a guard against the known shapes, not a proof.
+ *
+ * Function bodies are not touched: they run when called, not at load.
+ */
+export function wrapModuleScopeInitializers(source: string, fileName: string): string | undefined {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  const spans: Array<[number, number]> = [];
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    if (statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const init = declaration.initializer;
+      if (init === undefined || isTriviallyPure(init) || isMarkedConstructorCall(init) || writesToAnExistingObject(init)) {
+        continue;
+      }
+      spans.push([init.getStart(file), init.end]);
+    }
+  }
+  if (spans.length === 0) return undefined;
+  let out = '';
+  let from = 0;
+  for (const [start, end] of spans) {
+    out += source.slice(from, start) + PURE_IIFE_OPEN + source.slice(start, end) + PURE_IIFE_CLOSE;
+    from = end;
+  }
+  return out + source.slice(from);
+}
+
+/** Both passes: wrap the initializers, then mark the constructor calls inside and outside them. */
+export function markPureConstruction(source: string, fileName: string): string | undefined {
+  const wrapped = wrapModuleScopeInitializers(source, fileName);
+  return annotatePureCalls(wrapped ?? source, fileName) ?? wrapped;
+}
+
+/**
  * [#10031] Annotate deferred schema construction as pure IN THE EMITTED
  * BUNDLES, so a CONSUMER's bundler may drop the schema consts its entry never
  * reaches (`sideEffects: false` in package.json is the other half — it lets a
@@ -122,7 +336,8 @@ export function annotatePureCalls(source: string, fileName: string): string | un
  * `check:meta-url-spelling` gate).
  *
  * WHERE the annotation goes is `annotatePureCalls` above: real calls only,
- * never text. `scripts/pure-schema-construction.test.ts` builds the
+ * never text; `wrapModuleScopeInitializers` then covers each module-scope
+ * initializer whole (its docblock says why, and what it leaves alone). `scripts/pure-schema-construction.test.ts` builds the
  * `./migrations` entry through this plugin and holds its published
  * `MIGRATIONS_BY_MAJOR` equal to the source value.
  */
@@ -131,7 +346,7 @@ export const pureSchemaConstruction: Plugin = {
   setup(build) {
     build.onLoad({ filter: /src[\\/].*\.(ts|mts)$/ }, async (args) => {
       const source = await readFile(args.path, 'utf8');
-      const contents = annotatePureCalls(source, args.path);
+      const contents = markPureConstruction(source, args.path);
       if (contents === undefined) return undefined;
       return { contents, loader: 'ts' };
     });
@@ -321,7 +536,7 @@ const oneModuleGraph: Plugin = {
     build.onLoad({ filter: /.*/, namespace: NODE_SIDE }, async (args) => {
       const file = join(cwd, args.path);
       const source = await readFile(file, 'utf8');
-      return { contents: annotatePureCalls(source, file) ?? source, loader: 'ts', resolveDir: dirname(file) };
+      return { contents: markPureConstruction(source, file) ?? source, loader: 'ts', resolveDir: dirname(file) };
     });
   },
 };

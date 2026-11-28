@@ -176,7 +176,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "停權使用者",
-        description: "要停權該使用者嗎？停權後會立即登出，在解除停權前無法再次登入，其 API 金鑰也會被拒絕，OAuth 存取權杖與權杖續期同樣被拒絕。解除停權後這些金鑰恢復可用。",
+        description: "要停權該使用者嗎？停權後會立即登出，在解除停權前無法再次登入，其 API 金鑰也會被拒絕，OAuth 存取權杖與權杖續期同樣被拒絕。解除停權後這些金鑰恢復可用。停權還會暫停該使用者負責的 AI 服務帳號、停用其註冊的 OAuth 應用程式並撤銷其建立的 SCIM 憑證；解除停權不會恢復這些。",
         successMessage: "使用者已停權",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
             helpText: "該使用者的直接彙報物件。伺服器端會拒絕不在同一組織的經理、把使用者指派給自己，以及會形成環路或超出彙報鏈深度上限的關係。"
           }
         }
+      },
+      remove_user_manager: {
+        label: "移除經理",
+        confirmText: "要移除此使用者的經理嗎?在重新設定經理之前,此使用者不向任何人匯報;審批路由與 own_and_reports 記錄範圍會隨之變更。",
+        successMessage: "已移除經理"
       },
       list_platform_admins: {
         label: "平台管理員",
@@ -491,6 +496,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "撤銷原因",
         help: "工作階段被撤銷的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
+      },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此工作階段登入時所經由的 SSO 提供方（如有）。刪除該提供方會結束此工作階段。由系統管理。"
       },
       active_organization_id: {
         label: "目前組織"
@@ -4496,6 +4505,42 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "工作日曆",
     pluralLabel: "工作日曆",
@@ -4616,6 +4661,91 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           title: "還沒有日曆例外",
           message: "每個假日或補班日登錄一列，或從檔案匯入一整年的資料。"
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "任務",
+    pluralLabel: "任務",
+    description: "待辦的事項，附負責人與到期時間。",
+    fields: {
+      title: {
+        label: "標題"
+      },
+      description: {
+        label: "說明"
+      },
+      status: {
+        label: "狀態",
+        options: {
+          todo: "待辦",
+          in_progress: "進行中",
+          done: "完成"
+        }
+      },
+      due_at: {
+        label: "到期時間"
+      },
+      assignee_id: {
+        label: "負責人"
+      },
+      completed_at: {
+        label: "完成時間",
+        help: "狀態變為「完成」時由平台寫入，離開「完成」時清除。"
+      },
+      owner_id: {
+        label: "擁有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "指派給我的",
+        emptyState: {
+          title: "沒有指派給你的任務",
+          message: "指派給你的未完成任務會顯示在這裡。"
+        }
+      },
+      created_by_me: {
+        label: "我建立的",
+        emptyState: {
+          title: "尚無任務",
+          message: "你建立的任務會顯示在這裡。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_note: {
+    label: "備忘",
+    pluralLabel: "備忘",
+    description: "備忘：一個標題和一段帶格式的內文。",
+    fields: {
+      title: {
+        label: "標題"
+      },
+      body: {
+        label: "內文"
+      },
+      heading: {
+        label: "顯示標題",
+        help: "標題；標題為空時取內文第一行。由平台維護。"
+      },
+      owner_id: {
+        label: "擁有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "我的",
+        emptyState: {
+          title: "尚無備忘",
+          message: "你寫的備忘會顯示在這裡。"
+        }
+      },
+      all: {
+        label: "全部"
       }
     }
   }

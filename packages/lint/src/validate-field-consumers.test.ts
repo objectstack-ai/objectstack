@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { CubeSchema } from '@objectstack/spec/data';
+import { CubeSchema, ObjectSchema } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
@@ -1860,6 +1860,69 @@ describe('[#32628] validateFieldConsumers — a field permission\'s key is a car
   });
 });
 
+describe('[#37502] validateFieldConsumers — a related list\'s columns are fields of the child it lists', () => {
+  /**
+   * `company` lists its `contact` rows; both declare `phone`. A view on `probe`
+   * wakes the rule (a stack of objects alone is not judged) and draws nothing
+   * of the two. `name` is each object's title, exempt.
+   */
+  const company = (relatedLists?: unknown[]): AnyRec => ({
+    name: 'company',
+    fields: { name: { type: 'text' }, phone: { type: 'phone' } },
+    ...(relatedLists ? { relatedLists } : {}),
+  });
+  const contact: AnyRec = {
+    name: 'contact',
+    fields: {
+      name: { type: 'text' },
+      phone: { type: 'phone' },
+      email: { type: 'email' },
+      company: { type: 'lookup', reference: 'company' },
+    },
+  };
+  const stack = (relatedLists?: unknown[]): AnyRec => ({
+    objects: [company(relatedLists), contact, { name: 'probe', fields: { name: { type: 'text' } } }],
+    views: [{ list: { data: { object: 'probe' }, columns: [] } }],
+  });
+
+  /** The `object.field` of every finding, sorted. */
+  const reported = (s: AnyRec): string[] =>
+    validateFieldConsumers(s).map((f) => `${f.object}.${f.field}`).sort();
+
+  it('the fixture is a related list the object schema accepts, in both name spellings', () => {
+    for (const list of ['contact', 'contact.company']) {
+      expect(ObjectSchema.safeParse(company([{ list, columns: ['name', 'phone'] }])).success, list).toBe(true);
+    }
+  });
+
+  it('baseline: with no related list, both `phone` fields are reported', () => {
+    expect(reported(stack())).toEqual(['company.phone', 'contact.company', 'contact.email', 'contact.phone']);
+  });
+
+  it('⛔ a column credits the CHILD\'s field: the parent\'s same-name `phone` is still reported', () => {
+    expect(reported(stack([{ list: 'contact', columns: ['name', 'phone'] }]))).toContain('company.phone');
+  });
+
+  it('the child\'s own column counts as a consumer of the child\'s field', () => {
+    expect(reported(stack([{ list: 'contact', columns: ['name', 'phone'] }]))).toEqual(
+      ['company.phone', 'contact.company', 'contact.email'],
+    );
+  });
+
+  it('`child.field` names the same child, and the relationship the list joins on', () => {
+    expect(reported(stack([{ list: 'contact.company', columns: ['phone', 'email'] }]))).toEqual(['company.phone']);
+  });
+
+  it('a bare-string entry carries no columns and credits nothing', () => {
+    expect(reported(stack(['contact']))).toEqual(['company.phone', 'contact.company', 'contact.email', 'contact.phone']);
+  });
+
+  it('⛔ a list of a child this stack does not declare credits no column to the parent', () => {
+    // Another package's object: its fields are unknown here, so the column lands on no object.
+    expect(reported(stack([{ list: 'task', columns: ['phone'] }]))).toContain('company.phone');
+  });
+});
+
 describe('[#22161] one-line verdicts — field-no-consumers, the same-name clause bounded', () => {
   /** `n` objects each declaring `description`, with a view naming only `owner`'s name field. */
   const sharedName = (n: number, carried = false): AnyRec => ({
@@ -1941,5 +2004,31 @@ describe('[#22161] one-line fixes — field-no-consumers, the carrier sites boun
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
     }
+  });
+});
+
+/**
+ * #37448 (N8) — `uiReadonlyWhen` is deliberately NOT in `BEHAVIOUR_SEGMENTS`.
+ * That set earns behaviour back only inside a display root or segment, and the
+ * key is authorable only on a field definition under `objects`, which
+ * `bucketFor` already reads as behaviour; `readonlyWhen` is listed because the
+ * inline-grid column (under a `columns` display segment) carries it too, and
+ * that column declares no hand lock. What holds the verdict is this pin.
+ */
+describe('[#37448] validateFieldConsumers — a field-lock predicate reads the fields it names', () => {
+  /** `x` is named by nothing but the lock predicate each case adds to `y`. */
+  const verdictOfX = (lock: AnyRec): string | undefined =>
+    validateFieldConsumers({
+      objects: [{ name: 'o', fields: { name: { type: 'text' }, x: { type: 'text' }, y: { type: 'text', ...lock } } }],
+      views: [{ list: { data: { object: 'o' }, columns: [{ field: 'y' }] } }],
+    }).find((f) => f.object === 'o' && f.field === 'x')?.verdict;
+
+  it('baseline: unnamed, `x` is reported', () => {
+    expect(verdictOfX({})).toBe('inert');
+  });
+
+  it('the hand lock `uiReadonlyWhen` reads its operand, as the server lock `readonlyWhen` does', () => {
+    expect(verdictOfX({ readonlyWhen: "record.x == 'done'" })).toBeUndefined();
+    expect(verdictOfX({ uiReadonlyWhen: "record.x == 'done'" })).toBeUndefined();
   });
 });

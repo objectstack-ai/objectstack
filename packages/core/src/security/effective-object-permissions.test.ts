@@ -885,24 +885,30 @@ describe('buildEffectiveFieldPermissions (#25866)', () => {
     expect(widened).toEqual({ 'deal.amount': { readable: true, editable: true } });
   });
 
-  // [ADR-0066 ⑧, ruling of record 6573563853] A set holding the super-user
-  // bypass on an object votes on every field of it: `viewAllRecords` reads,
-  // `modifyAllRecords` reads and edits — the same sets `superuserBypassSets`
-  // (`@objectstack/plugin-security`) names, through `holdsSuperuserBypass`.
-  it('a super-user set votes on every declared field of its object; a plain set does not', () => {
+  // [ADR-0066 ⑧, v19, #36055] `viewAllFields` is the only "every field"
+  // vote: it reads every declared field of its object, never edits. View All
+  // and Modify All widen records only and cast no field vote.
+  it('a viewAllFields set votes read on every declared field of its object; a super-user or plain set does not', () => {
     const mask = { fields: { 'deal.amount': { readable: false, editable: false }, 'lead.score': { readable: false, editable: false } } };
-    expect(buildEffectiveFieldPermissions([{ objects: { '*': { modifyAllRecords: true } } }, mask])).toEqual({
-      'deal.amount': { readable: true, editable: true },
-      'lead.score': { readable: true, editable: true },
+    expect(buildEffectiveFieldPermissions([{ objects: { '*': { viewAllFields: true } } }, mask])).toEqual({
+      'deal.amount': { readable: true, editable: false },
+      'lead.score': { readable: true, editable: false },
     });
-    expect(buildEffectiveFieldPermissions([{ objects: { deal: { viewAllRecords: true } } }, mask])).toEqual({
+    expect(buildEffectiveFieldPermissions([{ objects: { deal: { viewAllFields: true } } }, mask])).toEqual({
       'deal.amount': { readable: true, editable: false },
       'lead.score': { readable: false, editable: false },
     });
     // An explicit entry shadows the same set's wildcard, as at row level.
-    expect(buildEffectiveFieldPermissions([{ objects: { '*': { viewAllRecords: true }, deal: { allowRead: true } } }, mask]))
+    expect(buildEffectiveFieldPermissions([{ objects: { '*': { viewAllFields: true }, deal: { allowRead: true } } }, mask]))
       .toEqual({ 'deal.amount': { readable: false, editable: false }, 'lead.score': { readable: true, editable: false } });
-    // Control: no bypass bit, no vote — union without deny is unchanged.
+    // View All and Modify All cast no field vote, by name or by the wildcard.
+    for (const objects of [{ '*': { modifyAllRecords: true } }, { deal: { viewAllRecords: true, modifyAllRecords: true } }]) {
+      expect(buildEffectiveFieldPermissions([{ objects }, mask])).toEqual({
+        'deal.amount': { readable: false, editable: false },
+        'lead.score': { readable: false, editable: false },
+      });
+    }
+    // Control: no bit, no vote — union without deny is unchanged.
     expect(buildEffectiveFieldPermissions([{ objects: { deal: { allowRead: true, allowEdit: true } } }, mask])).toEqual({
       'deal.amount': { readable: false, editable: false },
       'lead.score': { readable: false, editable: false },

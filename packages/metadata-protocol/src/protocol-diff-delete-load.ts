@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, healOldShapeFormRowRemovals, type OldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import {
     historyRowsOfMember,
@@ -67,6 +68,8 @@ import { captureStoredExpressionChange, fillStoredExpressionChange } from './pro
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
+import { isPlatformRecordRow } from '@objectstack/metadata';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * [#33308] The row slot a `sys_metadata` row is: its bound package, or `null`
@@ -454,7 +457,7 @@ export class ProtocolDiffDeleteLoadFacet {
     }
 
     /** [#28355] The body of {@link deleteMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'declinesStoredRow' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'readItemActiveRows' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken'>, request: DeleteMetaItemRequest): Promise<{
+    static async deleteMetaItemUnaudited(host: Pick<ProtocolHost, 'assertLockAllowsDelete' | 'declinesStoredRow' | 'dropObjectStorage' | 'dropStorageRemainingRowsRefusal' | 'emitMetadataMutation' | 'engine' | 'environmentId' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'originGatedRemovalRefusal' | 'packagedArtifactOwner' | 'packagedBaseRefusal' | 'packagelessAddress' | 'packagelessDraftAddress' | 'packagelessOverlayWriteRefusal' | 'readItemActiveRows' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'refusePackagedBaseRemoval' | 'registryAllowsOverlay' | 'restoreArtifactRegistryView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'shouldDropStorage' | 'storedParentForToken' | 'applyRegistryWriteThrough' | 'readActiveOverlayRows' | 'storedOverlayEntries' | 'expandStoredViewContainers'>, request: DeleteMetaItemRequest): Promise<{
             success: boolean;
             message?: string;
             reset?: boolean;
@@ -753,11 +756,34 @@ export class ProtocolDiffDeleteLoadFacet {
                 // are refused naming them, and a name only disabled packages hold
                 // is refused naming none, never one row removed. Over no stored
                 // row too (the delete and the draft discard answered the no-op
-                // receipt). A package-unbound row at the address is the
-                // environment's own, and its removal is left as it was.
+                // receipt). A package-unbound row at the address of a name
+                // an enabled package holds, or no package holds, is removed
+                // as it was.
+                //
+                // [ADR-0150 D3, the 2026-11-26 note] …but a package-unbound
+                // row or draft of a name ONLY disabled packages hold is
+                // their customization, hidden with them: the delete and the
+                // draft discard are refused, with the enable as the remedy.
+                // The delete removed the hidden row, so the next enable
+                // served the package's item without it. A draft discard
+                // reads the draft rows, so where a package-unbound row or
+                // draft is stored it judges the holders over the active
+                // rows too, as the draft save does: a customization that is
+                // the ACTIVE row, or a holder that holds only an active row,
+                // answers that remedy, never `?package=` nor the receipt.
                 if (request.packageId == null) {
+                    const active = targetState === 'draft'
+                        ? await host.packagelessAddress(singularTypeForRepo, request.name, member, 'active')
+                        : undefined;
                     const holderRefusal = packagelessHolderRefusal(
-                        host, 'delete', request.type, singularTypeForRepo, request.name, member, rowsAtAddress,
+                        host, 'delete', request.type, singularTypeForRepo, request.name, member,
+                        active !== undefined && (rowsAtAddress.unbound || active.unbound)
+                            ? {
+                                candidates: [...new Set([...rowsAtAddress.candidates, ...active.candidates])],
+                                unbound: rowsAtAddress.unbound,
+                                customized: active.unbound,
+                            }
+                            : rowsAtAddress,
                     );
                     if (holderRefusal) {
                         addressRefusal = holderRefusal;
@@ -788,13 +814,29 @@ export class ProtocolDiffDeleteLoadFacet {
                 // below nor its "already at artifact default" / "nothing to
                 // delete" claim holds. A delete naming none never lands here:
                 // it addresses a row the read above found.
-                if (!current && request.packageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
+                //
+                // [#35524, epic ruling 6781691009, contract review S2 option
+                // (b)] …and a draft discard naming no package at the row-held
+                // base's draft address over a stored package-unbound draft
+                // ({@link packagelessRowHeldBaseDraftAddress}): it addresses the
+                // base's draft, as the discard naming the base does, so with no
+                // base draft it answers that discard's receipt, naming the
+                // package-unbound draft still stored, never "No pending draft"
+                // while one is. Only that address is `none` with a
+                // package-unbound draft stored: `packagelessDraftAddress` makes
+                // a stored package-unbound draft the address itself (`draft`,
+                // key `null`) wherever it does not move to a base.
+                const receiptPackageId = request.packageId
+                    ?? (draftAddress?.kind === 'none' && draftAddress.into !== null && rowsAtAddress.unbound
+                        ? draftAddress.into
+                        : null);
+                if (!current && receiptPackageId != null && (rowsAtAddress.candidates.length > 0 || rowsAtAddress.unbound)) {
                     return {
                         success: true,
                         reset: false,
                         message: targetState === 'draft'
-                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
-                            : `No row of ${request.type}/${request.name} is bound to package '${request.packageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
+                            ? `No pending draft of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was discarded: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'draft')}.`
+                            : `No row of ${request.type}/${request.name} is bound to package '${receiptPackageId}', so nothing was deleted: ${remainingRowsPhrase(rowsAtAddress.candidates, rowsAtAddress.unbound, 'row')}.`,
                     };
                 }
                 // [#23495] …and a draft discard naming no package, of an item
@@ -877,7 +919,27 @@ export class ProtocolDiffDeleteLoadFacet {
                     ? ((await host.storedParentForToken(ref, request.parentVersion, current.hash)) ?? current.hash)
                     : current.hash;
 
-                const result = await repo.delete(ref, {
+                // [ADR-0159 D5, card ② item 5] A `form` reset or delete also
+                // removes the old-shape row that carries the form at the same
+                // address, in the same transaction (the repository's `delete`
+                // joins it). ⛔ Form content only.
+                let removedOldShapeRows: OldShapeFormRowRemoval[] = [];
+                const formRowRemoval = targetState === 'active' && singularTypeForRepo === 'form';
+                const deleteFormAware = async (del: () => Promise<any>): Promise<any> => {
+                    if (!formRowRemoval) return del();
+                    const run = async () => {
+                        const removed = await del();
+                        removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                            name: request.name,
+                            packageId: packageId ?? null,
+                            actor: request.actor ?? null,
+                            source: 'protocol.deleteMetaItem',
+                        });
+                        return removed;
+                    };
+                    return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
+                };
+                const result = await deleteFormAware(() => repo.delete(ref, {
                     parentVersion,
                     // #4556 — NULL, not 'system', for an actor-less delete.
                     actor: request.actor ?? null,
@@ -898,7 +960,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     // row it meets.
                     packageId,
                     ...memberOption(member),
-                });
+                }));
+                await healOldShapeFormRowRemovals(host, removedOldShapeRows);
 
                 // Heal the registry: drop the overlay's runtime shadow so the
                 // packaged artifact is visible again (all kernels), and on
@@ -1321,8 +1384,14 @@ export class ProtocolDiffDeleteLoadFacet {
                         const recordName = String(record.name);
                         const perShipperType = ['flow', 'action'].includes(canonicalMetaType(normalizedType))
                             || servesSealedOverrideRow(normalizedType);
+                        // [#37013] …nor the platform's own record: a package-less
+                        // row whose body carries the platform's mark, which the
+                        // metadata service keeps beside the shipping package's
+                        // item in a slot of its own. It overlays nothing, so a
+                        // line prescribing its deletion would name the wrong row.
                         if (
                             !host.isHostCodeDatasource(normalizedType, recordName)
+                            && !isPlatformRecordRow(record)
                             && !(perShipperType
                                 ? someShipperOf(host, normalizedType, recordName, servedOverrideOf)
                                 : servedOverrideOf(host.packagedArtifactOwner({ type: normalizedType, name: recordName })))

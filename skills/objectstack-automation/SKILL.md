@@ -8,10 +8,10 @@ description: >
   for validation rules or record hooks on an object (objectstack-data), or
   kernel / plugin events (objectstack-platform).
 license: Apache-2.0
-compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
+compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.2"
   domain: automation
   tags: flow, workflow, trigger, approval, state-machine, scheduled, webhook
 ---
@@ -34,14 +34,14 @@ Also vendor-integration callbacks and **assignment rules**.
 ### Flow Types
 
 | Type | When to Use |
-|:-----|:------------|
-| `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
-| `screen` | Interactive — presents UI screens |
-| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative` |
-| `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
+|:--|:--|
+| `autolaunched` | No user interaction: started by events, APIs or other flows |
+| `screen` | Shows UI screens |
+| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`**, or a **per-record date sweep** via `config.timeRelative` |
+| `record_change` | Fires on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
-**A stepped form over one object that never branches** is no flow: an **objectstack-ui** form view, `type: 'wizard'`.
+**A stepped form over one object that never branches** is no flow: an **objectstack-ui** named form view (`type: 'wizard'`) a `type: 'form'` action opens.
 
 **A flow an installed package ships** is read-only. To change what it does, save
 a same-named flow in the base's paired `.custom` package declaring
@@ -69,49 +69,49 @@ Built-in (plugins register more; a `type` none runs is refused at a server's pub
 #### Control Flow
 
 | Node | Purpose |
-|:-----|:--------|
-| `start` | Entry point — every flow has exactly one |
-| `end` | Exit point — can have multiple |
-| `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config |
+|:--|:--|
+| `start` | Entry point: exactly one per flow |
+| `end` | Exit point: one or more |
+| `decision` | Branch by **edge `condition` predicates**, not node config |
 | `loop` | Iterate a **nested `config.body` region** once per item of `config.collection` — a CEL value envelope or an inline list, never a string; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
 | `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end |
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first; in a `record-after-*` flow it (or `errorHandling.strategy: 'retry'`) may not reach an inline `http` / `connector_action`: the save would wait out every attempt. Inside a `subflow` / `map` child, retried by either flow, that is **silent**: the flow saves but never arms (`GET /api/v1/automation/_status`: `bound: false`, `unboundCause: retried_callout_in_subflow`) until the child's `http` is `durable: true` or nothing retries the call. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
-| `wait` | Pause until a timer elapses or a named signal arrives |
-| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller) |
+| `wait` | Pause for a timer or a named signal |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller). `os validate` warns `flow-subflow-unknown` on any name this stack lacks, a correct cross-package call included |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `assignment` | Set variable values |
 | `create_record` | Insert a record |
 | `update_record` | Modify records |
 | `delete_record` | Remove records |
-| `get_record` | Fetch records with filters (**no `query_record`**) |
+| `get_record` | Fetch records by filter (**no `query_record`**) |
 | `save_notice` | Tell the saver what this create/update started — record create/update trigger only, not after a pause: **objectstack-data** `rules/lifecycle.md` § Save Notice |
 
 #### External Integration
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `http` | Call an HTTP API — set `timeoutMs`, or it has no timeout and warns (`flow-http-timeout-missing`). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: use a declared connector via `connector_action`. Retried after a record change: `durable: true` (outbox-queued, else sent once in the background, unretried; no response) |
 | `notify` | Send a notification (below) |
-| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge the `inputSchema` fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
+| `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `items`, a key outside listed `properties`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable); `os validate` does not judge that fit yet. Retried after a record change: drop the retry, or run the flow on demand / on a schedule |
 | `script` | Call a **registered** function (*Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress`, which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen means "Next", no count. `progress` in a node `config` is refused |
 
 #### Human Decision
 
 | Node | Purpose |
-|:-----|:--------|
+|:--|:--|
 | `approval` | Route a record for human sign-off |
 
 ### `notify`
 
 An undeclared key is a named parse error. **RAW** keys are read as written:
-a `{token}` in one is refused. The node as JSON (TypeScript: the same
+a `{token}` in one is refused. As JSON (TypeScript: the same
 literal, a `FlowNode`):
 
 ```json
@@ -321,10 +321,11 @@ Most are caught by `objectstack build`:
    ```
 
 4. **A `select` is compared and written by its option `value`, never its label.**
-   The request speaks the label ("Lost"); the row stores the `value` (`lost`).
-   `condition: "record.status == 'Lost'"` parses, matches no row: the flow
-   stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
-   fails the run (`invalid_option`). Read the field's `options`.
+   The request says "Lost"; the row stores `lost`.
+   A start or edge `condition: "record.status == 'Lost'"`, or `filter` /
+   `fields: { status: 'Lost' }`, is refused at publish (inline options), else
+   matches no row or fails the run (`invalid_option`); a filter for rows still
+   holding the label takes a CEL envelope operand. Read the field's `options`.
 
 ---
 
@@ -399,24 +400,25 @@ token implies the other:
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
-Endpoint: `POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on
-the **start node `config`**:
+`POST /api/v1/automation/hooks/:flowName/:hookId`, configured on the
+**start node `config`**:
 
 | `config` key | Purpose |
-|:-------------|:--------|
+|:--|:--|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
 | `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
-- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
-- **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
-- The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
-- **A flow name two packages hold:** the bare hook above answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow is reached only at `POST /api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env` there: a flow no package ships).
+- **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
+- **Idempotency:** `x-idempotency-key` dedupes retries — delivery is at-least-once: author the flow idempotent.
+- **Queue-backed:** it ACKs `202` and enqueues; the flow runs on the consumer.
+- The JSON body is the flow's trigger record (`record.*` / bare fields) plus `params`.
+- **A flow name two packages hold:** the bare hook answers `401 INVALID_SIGNATURE` whatever the signature (cause: server log only). Each package's flow answers only at `…/hooks/:namespace/:flowName/:hookId`, by its `manifest.namespace` (`_env`: a flow no package ships).
+- **A disabled package's flow:** that `401` at both addresses, nothing enqueued; once enabled, a sender's retry gets `202`.
 
 ### Trigger Types (start-node `config.triggerType`)
 
 | `triggerType` | ObjectQL hook |
-|:------|:------|
+|:--|:--|
 | `record-before-create` (can modify/reject) | `beforeInsert` |
 | `record-after-create` | `afterInsert` |
 | `record-before-update` | `beforeUpdate` |

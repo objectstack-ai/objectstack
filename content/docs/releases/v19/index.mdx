@@ -1,0 +1,442 @@
+---
+title: v19
+description: "The v19 line, which opens with the 19.0.0-next prereleases: the breaking changes it carries over 18.6.0, each with its pull request, and the path from 18.x — protocol 19, an engines.protocol range of '^19', and the build that tells you what else to fix."
+---
+
+> **Release status: no 19.x version is published yet.** This page covers the
+> `19.0.0-next.N` prerelease line, starting with `19.0.0-next.0`, the first
+> cut of the line. It was written on 2026-11-26, before that cut was
+> published: npm's `latest` tag carries 18.6.0, and no `19.x` version is on
+> npm. A plain install stays on 18.x until 19.0 GA; a prerelease is installed
+> only on request, at an exact `19.0.0-next.N`. The [v18](/docs/releases/v18)
+> line is the current release.
+
+**The v19 line** opened on `main` with two changes. The first,
+[#37230](https://github.com/objectstack-ai/objectstack/pull/37230) (merged
+2026-11-25), put Changesets in pre mode with the tag `next` and carries the
+line's two `major` changesets; every package versions in lockstep, so the
+whole train moves to 19, and each cut until 19.0 GA is a `19.0.0-next.N`
+prerelease. The second,
+[#37314](https://github.com/objectstack-ai/objectstack/pull/37314) (merged
+2026-11-26), moved `PROTOCOL_VERSION` to `19.0.0`. Every other breaking change
+below landed on `main` after 18.6.0 and ships in `19.0.0-next.0`, each with
+its own changeset saying what breaks and how to move.
+
+## Breaking changes
+
+**How this list was built.** From the 950 changesets pending on `main` at
+`a46efa8c`, the input of the `19.0.0-next.0` version pass. Each changeset
+body was classified by `classifyReleaseBullet` in
+`scripts/release-github-releases.mjs`, the function that groups a GitHub
+Release body: **102 are breaking**, from 101 pull requests. 71 need you to act
+and 31 carry a registered ADR-0087 entry that `os migrate meta` lists for
+you. Of the rest, 278 add capabilities, 7 declare a semantic change and 563
+are other fixes; they are not listed here. Each line below is the changeset's
+own summary, shortened, with the pull request that landed it; the changeset,
+and the `CHANGELOG.md` entry the version pass writes from it, carries the
+whole before and after. The 87 pull requests titled with `!` since 18.6.0 are
+all in this list.
+
+### What makes it a major
+
+- **Protocol 19.** `PROTOCOL_VERSION` reads `'19.0.0'`, so a runtime from this
+  line refuses a manifest whose `engines.protocol` admits 18 and not 19
+  (`'^18'`) with `OS_PROTOCOL_INCOMPATIBLE`, before any of its metadata
+  loads. Registered as `protocol-18-range-refused`, on the protocol-19 step.
+  [#37314](https://github.com/objectstack-ai/objectstack/pull/37314)
+- **67 translation keys retired from `@object-ui/i18n`.** Keys 18.6.0 shipped
+  and no code reads any more are gone from every locale; an override of one
+  of them no longer applies. The changeset lists every key.
+  [#37230](https://github.com/objectstack-ai/objectstack/pull/37230)
+
+### 需手动处理 — breaking changes you must act on [#action-required]
+
+#### Sign-in, accounts and SSO
+
+- A server outside development mode refuses a development seed credential;
+  `os user set-password` sets a new one.
+  [#34717](https://github.com/objectstack-ai/objectstack/pull/34717)
+- A boot outside development mode retires what the development seed issued.
+  [#36699](https://github.com/objectstack-ai/objectstack/pull/36699)
+- A directory deactivation removes the user's local password; a re-activation
+  restores access through SSO only.
+  [#34738](https://github.com/objectstack-ai/objectstack/pull/34738)
+- A self-serve social creation is admitted only with a provider-verified
+  address under an address-based posture.
+  [#35200](https://github.com/objectstack-ai/objectstack/pull/35200)
+- A credential change ends access issued before it.
+  [#35664](https://github.com/objectstack-ai/objectstack/pull/35664)
+- A password reset ends what the account added before it.
+  [#35822](https://github.com/objectstack-ai/objectstack/pull/35822)
+- A password reset disables the OAuth applications the account registered and
+  revokes the SCIM credentials it minted.
+  [#35971](https://github.com/objectstack-ai/objectstack/pull/35971)
+- A disabled or removed account keeps nothing running in its name.
+  [#36163](https://github.com/objectstack-ai/objectstack/pull/36163)
+- Deleting an SSO provider ends the sessions a sign-in through it opened and
+  removes its projected grants.
+  [#36173](https://github.com/objectstack-ai/objectstack/pull/36173)
+- SSO discovery fetches only hosts that resolve to public addresses, and
+  connects only to addresses that are public at connect time.
+  [#35697](https://github.com/objectstack-ai/objectstack/pull/35697),
+  [#35781](https://github.com/objectstack-ai/objectstack/pull/35781)
+
+#### Access: security, sharing, approvals and the data doors
+
+- A predicate update or delete writes the rows a Modify All holder, a
+  non-creator owner or an edit-share target can write by id, instead of
+  stopping at the creator-only floor.
+  [#35914](https://github.com/objectstack-ai/objectstack/pull/35914)
+- A predicate update or delete of a `controlled_by_parent` detail writes every
+  row its caller may write by id.
+  [#36282](https://github.com/objectstack-ai/objectstack/pull/36282)
+- Every share grant counts: the sharing scopes carry the share-grant leaf
+  instead of a list capped at 5,000 grants (ADR-0155).
+  [#36116](https://github.com/objectstack-ai/objectstack/pull/36116)
+- An app-authored elevation's reads and writes are judged by its caller's
+  organization wall.
+  [#36386](https://github.com/objectstack-ai/objectstack/pull/36386)
+- An action's selection is read in the caller's scope before the action runs.
+  [#36132](https://github.com/objectstack-ai/objectstack/pull/36132)
+- Every data door judges environment membership.
+  [#36134](https://github.com/objectstack-ai/objectstack/pull/36134)
+- The restriction profile is served on the unscoped route only; its
+  environment-scoped twin is no longer mounted.
+  [#36531](https://github.com/objectstack-ai/objectstack/pull/36531)
+- Stored bytes outside the inline allow-list are served as attachments, and
+  every stored-bytes answer carries `nosniff` and a sandbox CSP.
+  [#36518](https://github.com/objectstack-ai/objectstack/pull/36518)
+- An approver reassigns only their own slot.
+  [#36144](https://github.com/objectstack-ai/objectstack/pull/36144)
+- A reject requires a reason: through the `approval_reject` action, the
+  approvals route, `IApprovalService.decide` and `client.approvals.reject`
+  (which requires the decision and its `comment`), and from the email action
+  link, which records the reason typed on the confirm page.
+  [#35716](https://github.com/objectstack-ai/objectstack/pull/35716),
+  [#35741](https://github.com/objectstack-ai/objectstack/pull/35741),
+  [#36695](https://github.com/objectstack-ai/objectstack/pull/36695)
+
+#### A disabled package's objects
+
+- Global search leaves out the objects of a disabled package.
+  [#35367](https://github.com/objectstack-ai/objectstack/pull/35367)
+- `$expand` and a relation condition stop serving a disabled package's object
+  through an enabled object's lookup.
+  [#35444](https://github.com/objectstack-ai/objectstack/pull/35444)
+- The analytics doors refuse an object of a disabled package with
+  `404 OBJECT_PACKAGE_DISABLED`.
+  [#36319](https://github.com/objectstack-ai/objectstack/pull/36319)
+- `callData` refuses a relation condition on a disabled package's object in
+  its aggregate arm and no-protocol query fallback, and its data at every
+  relation hop, for a system context too.
+  [#36337](https://github.com/objectstack-ai/objectstack/pull/36337),
+  [#36687](https://github.com/objectstack-ai/objectstack/pull/36687)
+- Change Owner refuses an object of a disabled package with
+  `404 OBJECT_PACKAGE_DISABLED`.
+  [#36674](https://github.com/objectstack-ai/objectstack/pull/36674)
+
+#### Namespaces, bundles and metadata saves
+
+- An unmanaged install renamed into a `targetNamespace` refuses a package
+  without a namespace whose object names all share a prefix other than the
+  derived one, a stray-object package, and a declared namespace its object
+  names do not carry.
+  [#36138](https://github.com/objectstack-ai/objectstack/pull/36138),
+  [#37065](https://github.com/objectstack-ai/objectstack/pull/37065)
+- A save naming no package, at a bundle member only a dependent package holds,
+  writes the base package's row the bare read addresses.
+  [#37069](https://github.com/objectstack-ai/objectstack/pull/37069)
+- The restore doors refuse a restore whose row is the platform's own record,
+  and the history selector never addresses the package-less row for a package
+  that neither holds nor ships the name.
+  [#37423](https://github.com/objectstack-ai/objectstack/pull/37423)
+- A refused metadata save and a refused data-API request no longer list zod's
+  bare "Invalid input" union entry ahead of the entries that explain it; a
+  query `where` of the wrong kind is refused with one `fields[]` entry that
+  names the shapes it takes.
+  [#35520](https://github.com/objectstack-ai/objectstack/pull/35520),
+  [#37083](https://github.com/objectstack-ai/objectstack/pull/37083),
+  [#37205](https://github.com/objectstack-ai/objectstack/pull/37205)
+- A refusal names fields, options and objects in the declared `sourceLocale`
+  as authored.
+  [#35351](https://github.com/objectstack-ai/objectstack/pull/35351)
+- `==` / `!=` between a list-valued field reached through a lookup hop and a
+  scalar is refused, as the root-field case is.
+  [#36673](https://github.com/objectstack-ai/objectstack/pull/36673)
+
+#### The data engine, filters, formulas and drivers
+
+- A predicate update judges each matched row against the parent summaries the
+  rows before it move, as consecutive by-id updates do.
+  [#34709](https://github.com/objectstack-ai/objectstack/pull/34709)
+- A multi-row insert judges a rule reading a parent field calculated from a
+  roll-up as one-by-one inserts judge it.
+  [#35773](https://github.com/objectstack-ai/objectstack/pull/35773)
+- A field that is `required` and hidden by its own `visibleWhen` is required
+  only when shown.
+  [#34978](https://github.com/objectstack-ai/objectstack/pull/34978)
+- An action body's write inside `ctx.api.transaction` keeps its audit and
+  activity rows beside a `telemetry` datasource, and a write it makes to an
+  object on another datasource is refused.
+  [#35102](https://github.com/objectstack-ai/objectstack/pull/35102)
+- A by-id delete whose driver removes nothing after the row was read answers
+  `RECORD_NOT_FOUND` and runs no after-delete work.
+  [#35537](https://github.com/objectstack-ai/objectstack/pull/35537)
+- A state machine judges every write from the stored state, a clear included.
+  [#36127](https://github.com/objectstack-ai/objectstack/pull/36127)
+- Every row a sync-in pull writes records where it came from, and nothing else
+  may write those columns.
+  [#36795](https://github.com/objectstack-ai/objectstack/pull/36795)
+- A context placeholder (`{current_user_id}`, `{current_org_id}`) compared
+  against a date, datetime or time field is refused.
+  [#35508](https://github.com/objectstack-ai/objectstack/pull/35508)
+- The value data source refuses a plain-object comparand with no `$` key; a
+  non-boolean `$null` / `$exists` flag is refused, and so are the object
+  comparands the value data source cannot compare.
+  [#35604](https://github.com/objectstack-ai/objectstack/pull/35604),
+  [#35832](https://github.com/objectstack-ai/objectstack/pull/35832)
+- A flow condition that hands `timestamp()` a date field through
+  `record.FIELD` or `previous.FIELD` is refused, as the bare field name was.
+  [#34935](https://github.com/objectstack-ai/objectstack/pull/34935)
+- A relationship-path dashboard drill is sent as one nested-relation
+  condition, joined in the database.
+  [#35423](https://github.com/objectstack-ai/objectstack/pull/35423)
+- `aggregate` refuses a dotted `groupBy` entry with `INVALID_FIELD` / 400,
+  before any driver runs.
+  [#35479](https://github.com/objectstack-ai/objectstack/pull/35479)
+- MongoDB refuses a non-UTC date-bucket timezone on a direct `aggregate()`
+  call instead of answering UTC buckets.
+  [#35473](https://github.com/objectstack-ai/objectstack/pull/35473)
+- The SQL driver stores a boolean field as a boolean whatever spelling the
+  caller sends.
+  [#35718](https://github.com/objectstack-ai/objectstack/pull/35718)
+- The offboarding hand-over no longer moves the owner of a
+  `controlled_by_parent` detail record.
+  [#35428](https://github.com/objectstack-ai/objectstack/pull/35428)
+- Change Owner answers what was saved, and says a person was notified only
+  when the notice went out.
+  [#36683](https://github.com/objectstack-ai/objectstack/pull/36683)
+- A lookup pick no longer copies an amount into a field in another currency.
+  [#36351](https://github.com/objectstack-ai/objectstack/pull/36351)
+- A `lookupAutofill` written by hand on a standalone form node's field is not
+  run.
+  [#37090](https://github.com/objectstack-ai/objectstack/pull/37090)
+
+#### Analytics
+
+- An analytics query that selects nothing answers `400 VALIDATION_FAILED` at
+  the entry instead of a 500.
+  [#35771](https://github.com/objectstack-ai/objectstack/pull/35771)
+- The dataset query door, `POST /api/v1/analytics/query` and the native arm of
+  `POST /api/v1/analytics/sql` refuse a scalar comparison or text operator on
+  a multi-value or JSON field with `400 INVALID_FILTER`, instead of a wrong
+  count.
+  [#36184](https://github.com/objectstack-ai/objectstack/pull/36184)
+- The native dataset face and the draft preview refuse `=` / `$in` / `$ne` on
+  a single-value `image` or `file` column stored as JSON.
+  [#36771](https://github.com/objectstack-ai/objectstack/pull/36771)
+
+#### The Console and the `@object-ui/*` packages
+
+- An object's list opens a record one way — the name opens the page, the
+  hover icon the side panel; `navigation.mode` is deprecated there.
+  [#35910](https://github.com/objectstack-ai/objectstack/pull/35910)
+- The knowledge settings page and the AI page's embedder section appear only
+  where the knowledge service is mounted.
+  [#36975](https://github.com/objectstack-ai/objectstack/pull/36975)
+- A flow opens full-screen in its own page; the Automations pillar's flow list
+  is gone.
+  [#37169](https://github.com/objectstack-ai/objectstack/pull/37169)
+- Home no longer offers 「Build with AI」 or 「Build an app」.
+  [#37249](https://github.com/objectstack-ai/objectstack/pull/37249)
+- `NavigationOverlay` drops its `comments` prop, which no caller fills.
+  [#37275](https://github.com/objectstack-ai/objectstack/pull/37275)
+- A partly failed bulk approve or reject in the Approval Center says why each
+  row failed.
+  [#37282](https://github.com/objectstack-ai/objectstack/pull/37282)
+
+#### The CLI and `verify`
+
+- The CLI opens a sign-in page only for an http(s) address and never through
+  a shell, and `os mcp connect` registers only an address that passes one
+  parse.
+  [#36769](https://github.com/objectstack-ai/objectstack/pull/36769)
+- `os db orphans --delete` and `os secret orphans --delete` exit `1` when the
+  confirmation they need is not given.
+  [#36676](https://github.com/objectstack-ai/objectstack/pull/36676)
+- A managed `mongodb` datasource runs on verify's in-memory stand-in, and a
+  managed datasource on a plugin's driver id refuses the boot.
+  [#36171](https://github.com/objectstack-ai/objectstack/pull/36171)
+
+### 自动迁移 — listed for you by `os migrate meta` [#migrated-for-you]
+
+Each carries a registered ADR-0087 entry. In `19.0.0-next.0` two sit on the
+protocol-19 step, `protocol-18-range-refused` and
+`data-table-staged-edit-retired`
+([#37437](https://github.com/objectstack-ai/objectstack/pull/37437)); a later
+prerelease may add more, and `os migrate meta` lists them. The other 39 landed
+after 18.6.0 on the protocol-18 step, which `os migrate meta --from 18` does
+not replay and `--from 17` does.
+
+#### Seeds
+
+- The seed modes `insert` and `replace` are retired.
+  [#34791](https://github.com/objectstack-ai/objectstack/pull/34791)
+- The save door refuses a seed whose object does not exist.
+  [#35388](https://github.com/objectstack-ai/objectstack/pull/35388)
+- A seed record that leaves a key field blank is refused at load.
+  [#35459](https://github.com/objectstack-ai/objectstack/pull/35459)
+- A seed never stores a roll-up (summary) value; the load says what it
+  dropped.
+  [#36118](https://github.com/objectstack-ai/objectstack/pull/36118)
+- `os validate` and `os build` refuse seed records the seed load would drop.
+  [#37156](https://github.com/objectstack-ai/objectstack/pull/37156)
+
+#### Keys retired or refused at parse
+
+- `object-grid`'s `singleClickEdit` is retired; every editable grid selects a
+  cell first and saves each cell on its own.
+  [#36357](https://github.com/objectstack-ai/objectstack/pull/36357)
+- `columnState` is retired from the stored `view` row.
+  [#36435](https://github.com/objectstack-ai/objectstack/pull/36435)
+- The boolean arm of a relationship field's `inlineEdit` is retired.
+  [#36802](https://github.com/objectstack-ai/objectstack/pull/36802)
+- `KnowledgeChunk.metadata` and the Knowledge page's chunk overlap are
+  retired; one splitter, and a `split` key on an object source.
+  [#37287](https://github.com/objectstack-ai/objectstack/pull/37287)
+- A context pack (`ai_context`) is identified by its package and its name.
+  [#37291](https://github.com/objectstack-ai/objectstack/pull/37291)
+- A sealed object naming no `lifecycle.seal.chainField` is refused when its
+  default chain column `tenant_id` cannot chain its rows.
+  [#35916](https://github.com/objectstack-ai/objectstack/pull/35916)
+- Record create and edit stop loading internal forms; a field gains a Show on
+  create switch.
+  [#36543](https://github.com/objectstack-ai/objectstack/pull/36543)
+
+#### Composition and packages
+
+- Two entries under one identity in one package are refused when a
+  composition or a package body assembles them.
+  [#35699](https://github.com/objectstack-ai/objectstack/pull/35699)
+- A composition's top-level `objectExtensions` entry that no package body
+  carries is registered and served; composition refuses two such jobs of one
+  name.
+  [#36338](https://github.com/objectstack-ai/objectstack/pull/36338)
+- Composition refuses one job name enabled in two packages.
+  [#37392](https://github.com/objectstack-ai/objectstack/pull/37392)
+- The read naming no bundle member addresses the canonical member alone.
+  [#34910](https://github.com/objectstack-ai/objectstack/pull/34910)
+- An `object_extension` amount naming a sibling `currencyField` the served
+  object does not hold is refused at the save.
+  [#35538](https://github.com/objectstack-ai/objectstack/pull/35538)
+
+#### Checks at the build and publish doors
+
+- Five publish-time checks for metadata that does nothing at run time, and
+  four build probes.
+  [#35244](https://github.com/objectstack-ai/objectstack/pull/35244)
+- Ten publish-time checks for flows that save and do not run: seven refuse,
+  three warn.
+  [#36691](https://github.com/objectstack-ai/objectstack/pull/36691)
+- A hook or job body that does not compile in the runtime's wrapper is
+  refused.
+  [#35713](https://github.com/objectstack-ai/objectstack/pull/35713)
+- An action body's unclosed regular-expression literal or bad flag set, and a
+  body's pattern the runtime's QuickJS refuses, are refused, not only warned
+  about.
+  [#35672](https://github.com/objectstack-ai/objectstack/pull/35672),
+  [#36721](https://github.com/objectstack-ai/objectstack/pull/36721)
+- An undeclared text key asked for as `ctx.text?.('k')` is refused.
+  [#35686](https://github.com/objectstack-ai/objectstack/pull/35686)
+- `validateExpression` refuses `==` / `!=` between a list-valued field and a
+  scalar; a flow condition's date arithmetic on `record.FIELD` or
+  `previous.FIELD` is refused.
+  [#36207](https://github.com/objectstack-ai/objectstack/pull/36207),
+  [#36333](https://github.com/objectstack-ai/objectstack/pull/36333)
+- `field-group-shadowed` judges the six highlights the record page draws.
+  [#35629](https://github.com/objectstack-ai/objectstack/pull/35629)
+- A `transferBehavior: 'cascade'` the Change Owner action can never offer is
+  refused.
+  [#37382](https://github.com/objectstack-ai/objectstack/pull/37382)
+- One refusal names several declared reasons, each in the person's language.
+  [#37395](https://github.com/objectstack-ai/objectstack/pull/37395)
+
+#### Sign-in and sync-in
+
+- An invited sign-up the audience posture admits receives the declared
+  self-registration permission set, and is refused when that set cannot be
+  resolved.
+  [#36312](https://github.com/objectstack-ai/objectstack/pull/36312)
+- A sync-in pull marks the rows the source deleted, and an incremental source
+  states how it learns of a delete.
+  [#37179](https://github.com/objectstack-ai/objectstack/pull/37179)
+
+## Coming from 18.x
+
+Reach 18.6.0 first, walking each 18.x page's upgrade checklist, through the
+[18.6.0 checklist](/docs/releases/v18/18-6#upgrade-checklist). Then:
+
+1. **Move every pin together, to one exact `19.0.0-next.N`.** Every
+   `@objectstack/*` and `@object-ui/*` dependency, with `@objectstack/skills`
+   and `create-objectstack` where you use them. A caret range never moves you
+   onto a prerelease by itself; pin the exact version.
+2. **Declare protocol 19.** In each manifest you author, `objectstack.config.ts`
+   and every package manifest of a multi-package app, move
+   `engines: { protocol: '^18' }` to `engines: { protocol: '^19' }`. Move it
+   with the versions, not before them: an 18.x runtime refuses `'^19'`.
+
+   ```bash
+   os migrate meta --from 18 --write   # rewrites a root defineStack manifest's range
+   ```
+
+   A manifest `composeStacks` composes from several packages has no one
+   literal to rewrite, so there the command writes nothing and lists the range;
+   change it by hand in each package manifest.
+3. **List the line's registered entries.** `os migrate meta --from 17` also
+   replays the protocol-18 step, where 39 of the
+   [41 registered entries](#migrated-for-you) sit. Most are semantic entries:
+   for those the command rewrites nothing, and prints each with the surface,
+   the replacement and how to tell it is done.
+4. **Run the build, and fix what it refuses.**
+
+   ```bash
+   os validate
+   os build
+   ```
+
+   Fix each refusal with its line in [需手动处理](#action-required) or
+   [自动迁移](#migrated-for-you). The command flow is the loop in
+   [Upgrading](/docs/upgrading#the-loop).
+5. **Remove overrides of the retired translation keys.** An i18next resource
+   or Studio catalogue that overrides one of the 67 keys in
+   [#37230](https://github.com/objectstack-ai/objectstack/pull/37230) is never
+   read; move its text to the key the surface reads now.
+6. **Read the sign-in and access entries before the first boot.** A
+   development seed credential is refused and retired outside development
+   mode, and the doors listed under
+   [需手动处理](#action-required) answer differently for a disabled package, an
+   environment you are not a member of, and a reject without a reason.
+
+<Callout type="warn">
+**Compiled from the changesets, not walked.** No `19.0.0-next.N` was
+published when this page was written, so none of these steps has been run
+against a published 19.x package.
+</Callout>
+
+## How a breaking change lands on this line
+
+- **Prereleases until GA.** Changesets is in pre mode with the tag `next`
+  (`.changeset/pre.json`), so each cut versions as `19.0.0-next.N`. 19.0 GA
+  exits pre mode and publishes to `latest`.
+- **One change, one changeset, one migration.** Each breaking change says so
+  in its own changeset, with what breaks and how to move, under the level rule
+  the v18 line used: a metadata-protocol change takes `minor`, every other
+  change `patch`, and a breaking one keeps its **BREAKING** banner and its
+  ADR-0087 disposition.
+- **Protocol 19.** `PROTOCOL_VERSION` is `19.0.0`, so the handshake admits
+  `engines.protocol: '^19'` and refuses `'^18'`.
+
+## Per-release notes
+
+One page per release follows the v18 pattern as each 19.x release ships. Until
+then, this page and the changesets are the record of the line.

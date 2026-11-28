@@ -7,6 +7,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SchemaRegistry } from '@objectstack/objectql';
+// Paid at collection, not in a case's clocked window: the modules the source
+// under test loads with `await import(…)` (check:test-source-alias).
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
 import {
   findHostConfig,
   composeForDeclarations,
@@ -932,6 +938,22 @@ describe('servedPlatform (#22506)', () => {
       expect(ctors, provider).toContain(provider);
     }
     expect(out.plugins.map((p: any) => p?.name)).toContain('com.objectstack.rest.api');
+  }, 60_000);
+
+  it('[ADR-0161 K8 item 12] a stack that ships a knowledge_source and lists no `knowledge` composes the knowledge service, as `serve` mounts it; without one it does not', async () => {
+    const withSource = project([
+      'export default {',
+      "  manifest: { id: 'com.example.os37306unit', name: 'item mount', version: '0.0.0', type: 'app' },",
+      "  objects: [{ name: 'os37306_note', fields: { title: { type: 'text' } } }],",
+      "  knowledgeSources: [{ name: 'notes', label: 'Notes', source: { kind: 'object', object: 'os37306_note', content: ['title'] } }],",
+      '};',
+      '',
+    ].join('\n'));
+    const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: withSource, servedPlatform: {} });
+    expect(out.plugins.map((p: any) => p?.constructor?.name)).toContain('KnowledgeServicePlugin');
+
+    const control = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: project(APP), servedPlatform: {} });
+    expect(control.plugins.map((p: any) => p?.constructor?.name)).not.toContain('KnowledgeServicePlugin');
   }, 60_000);
 
   it('a provider the host already supplies wins, as under `serve` — never a second instance', async () => {

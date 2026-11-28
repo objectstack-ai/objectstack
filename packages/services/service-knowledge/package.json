@@ -1,8 +1,8 @@
 {
   "name": "@objectstack/service-knowledge",
-  "version": "18.6.0",
+  "version": "19.0.0-next.2",
   "license": "Apache-2.0",
-  "description": "Knowledge Service for ObjectStack — orchestrator implementing IKnowledgeService over pluggable IKnowledgeAdapter backends (RAGFlow, LlamaIndex, Dify, in-memory).",
+  "description": "Knowledge Service for ObjectStack — orchestrator implementing IKnowledgeService over pluggable IKnowledgeAdapter backends (in-memory, PostgreSQL + pgvector, libSQL, or your own).",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,20 +17,32 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./testing": {
+      "import": {
+        "types": "./dist/testing.d.ts",
+        "default": "./dist/testing.js"
+      }
     }
   },
   "scripts": {
-    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "build": "rm -rf dist && tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/services/service-knowledge --project tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/embedder-openai": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*"
   },
   "devDependencies": {
+    "@objectstack/driver-sql": "workspace:*",
     "@objectstack/objectql": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/service-queue": "workspace:*",
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

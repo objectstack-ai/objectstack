@@ -65,6 +65,7 @@ import {
   actionTextsWithoutRunnableCode,
   hookRefusalCodesThrownIn,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   hookTextKeysAskedIn,
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtSave,
@@ -520,7 +521,7 @@ export const ActionParamSchema = lazySchema(() => strictObject(
   reference: SnakeCaseIdentifierSchema.optional().describe('Reference target object for inline lookup/master_detail params; mirrors FieldSchema.reference.').meta({ title: 'Reference Object' }),
   /**
    * When true, the param's default value is pulled from the current row record
-   * (key = the resolved field name) when the action runs from a list_item
+   * (key = the resolved field name) when the action runs from a list row (`record_row` / `record`)
    * context. Useful for edit dialogs that pre-fill from the selected row.
    */
   defaultFromRow: z.boolean().optional().meta({ title: 'Default From Row' }),
@@ -689,19 +690,75 @@ export const ActionParamSchema = lazySchema(() => strictObject(
  * console compiling until an executor exists — a coupling the ruling's
  * contract-first split (spec now, executor halves downstream) must not carry —
  * and a member would be a second spelling of the bulk def's `operation`.
+ *
+ * `ask_ai` (ADR-0160 D7) IS a member, and the coupling above is why it lands
+ * with its executor: the spec member and the console executor ship in one PR,
+ * so the console never compiles against a type it cannot run. It is an action
+ * on one record that focuses the in-app assistant on that record. It names
+ * nothing — a `target` beside it is refused at parse — and it is never an AI
+ * tool: `ai.exposed: true` beside it is refused at parse, and no server
+ * dispatch admits it (the runtime's headless predicate answers `false`), so
+ * neither `list_actions`/`run_action` nor the `action_` tool family serves it.
+ * A client draws it only where it draws the assistant's pin control (the
+ * assistant surface on, and the AI service advertising that it honours a
+ * conversation focus); elsewhere the action is absent, not disabled.
  */
-export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form']);
+export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form', 'ask_ai']);
 export type ActionType = z.input<typeof ActionType>;
 
 /**
+ * Action types whose dispatch names nothing, so a `target` is not required:
+ * `script` (an inline `body` may stand in for it) and `ask_ai` (ADR-0160 D7:
+ * it focuses the assistant on the record it runs on, and a `target` beside it
+ * is refused — see {@link refuseAskAiContradictions}).
+ */
+const TARGETLESS_TYPES: ReadonlySet<string> = new Set(['script', 'ask_ai']);
+
+/**
  * Action types that require a `target` field.
- * Derived from ActionType, excluding 'script' which allows inline handlers.
+ * Derived from ActionType, excluding the targetless types above.
  * These types reference an external resource (URL, flow, modal, or API endpoint)
  * and cannot function without a target binding.
  */
 const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
-  ActionType.options.filter((t) => t !== 'script'),
+  ActionType.options.filter((t) => !TARGETLESS_TYPES.has(t)),
 );
+
+/**
+ * ADR-0160 D7 — the two things an `ask_ai` action may not declare.
+ *
+ * - `target`: the action names nothing. The context pack the assistant reads
+ *   is chosen by the pack-selection rule of `get_record_context`, never by the
+ *   action, so a `target` here would be a declaration no runtime reads.
+ * - `ai.exposed: true` (registered actions only — the inline shape has no
+ *   `ai` key): an `ask_ai` action has no server dispatch, so no agent could
+ *   ever run it; exposing it would advertise a tool that cannot exist.
+ */
+function refuseAskAiContradictions(
+  data: { type?: string; target?: unknown; ai?: { exposed?: boolean } | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (data.type !== 'ask_ai') return;
+  if (data.target !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['target'],
+      message:
+        "A `type: 'ask_ai'` action takes no `target`: it focuses the in-app assistant on the record it "
+        + "runs on, and the material the assistant reads about that record is chosen by the record's "
+        + 'context pack, not by the action. Drop `target`.',
+    });
+  }
+  if (data.ai?.exposed === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['ai', 'exposed'],
+      message:
+        "A `type: 'ask_ai'` action is never an AI tool: it has no server dispatch (it only opens the "
+        + 'assistant in the console), so no agent could run it. Drop `ai.exposed`, or set it to `false`.',
+    });
+  }
+}
 
 /**
  * Action Schema
@@ -740,7 +797,7 @@ const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
  * Note: The action name is the configuration ID. JavaScript function names can use camelCase,
  * but the metadata ID must be lowercase snake_case.
  */
-// Retired-VALUE prescription. Declared with `//` (never `/** */`) and ABOVE the
+// Retired-VALUE prescriptions. Declared with `//` (never `/** */`) and ABOVE the
 // enum's JSDoc deliberately: `build-docs.ts` takes a doc comment adjacent to the
 // declaration as the reference entry's blurb, so a `/** */` here would displace
 // the location table below. (House style set by the `crypto.hash` /
@@ -754,64 +811,111 @@ const GLOBAL_NAV_RETIRED =
   + 'never reached a user. The only thing that DID draw it was the Studio designer, which '
   + 'previewed a command-palette frame for a surface the product does not have — an authoring '
   + 'tool teaching authors to write dead metadata (ADR-0078). Place the action on a location a '
-  + 'renderer serves (`list_toolbar`, `list_item`, `record_header`, `record_more`, '
-  + '`record_related`, `record_section`), or — for an action that deliberately has no UI home, '
+  + 'renderer serves (`list`, `record`, `record_page`, `record_row`, `record_related`, '
+  + '`record_section`), or — for an action that deliberately has no UI home, '
   + 'such as an object-less one invoked over REST/MCP/AI — declare it headless with '
   + '`locations: []`, which keeps its capability gate, param contract and audit trail. '
   + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
+// The four page-part words protocol 19 replaced (objectstack#36495): a location
+// now says what the action acts on. Each keeps a prescription keyed on the
+// received value, so only a spelling that used to be legal is told it moved.
+const PAGE_PART_LOCATIONS_RETIRED_TAIL =
+  ' Protocol 19 names what an action acts on, not the part of the page it sits in: `list` (acts on '
+  + 'no record), `record` (acts on one record: the record page and each list row), and the narrow '
+  + 'words `record_page`, `record_row`, `record_related` and `record_section`. Which actions are '
+  + 'buttons and in what order is the object\'s `actionLayout`. '
+  + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+const PAGE_PART_LOCATIONS_RETIRED: Readonly<Record<string, string>> = {
+  list_toolbar: '`list_toolbar` became `list` in @objectstack/spec 19: write `list`.'
+    + PAGE_PART_LOCATIONS_RETIRED_TAIL,
+  list_item: '`list_item` became `record_row` in @objectstack/spec 19 — or `record`, when the action is also '
+    + 'on the record page (`record_header` / `record_more` beside it).' + PAGE_PART_LOCATIONS_RETIRED_TAIL,
+  record_header: '`record_header` became `record_page` in @objectstack/spec 19 — or `record`, when the action '
+    + 'is also on each list row (`list_item` beside it).' + PAGE_PART_LOCATIONS_RETIRED_TAIL,
+  record_more: '`record_more` became `record_page` in @objectstack/spec 19 — or `record`, when the action is '
+    + 'also on each list row (`list_item` beside it). An action that was only in the record page\'s ⋯ menu '
+    + '(`record_more` without `record_header`) keeps that fold with `component: \'action:menu\'`. A block '
+    + 'whose own `location` is `record_more` (a bar of the ⋯ menu\'s actions) has no replacement word: the ⋯ '
+    + 'menu is no location of its own now, and a bar at `record_page` leaves its actions out.'
+    + PAGE_PART_LOCATIONS_RETIRED_TAIL,
+};
+
 /**
- * Action Location — where an action is allowed to surface in the UI.
+ * Action Location — what an action acts on, and so where it can surface.
  *
  * Canonical list (single source of truth for the whole platform). Renderers,
  * the ActionEngine, the Studio designer dropdowns, and `objectui` consumers
  * MUST import from this constant rather than re-declaring their own enum —
  * adding a new location should require touching this one file only.
  *
- * Semantics:
- * - `list_toolbar`    — header/toolbar of a list view (bulk actions, "New", export).
- * - `list_item`       — per-row action on a list/grid row (Salesforce row-level menu).
- * - `record_header`   — primary actions in the record-detail title bar.
- * - `record_more`     — overflow menu under the "More" / ⋯ button on a record.
+ * Semantics (protocol 19, objectstack#36495; maintainer rulings 7213534162
+ * and 7213827153):
+ * - `list`            — acts on no record: drawn on the object's list page
+ *                       toolbar ("New", import, export, an object-level run).
+ * - `record`          — acts on one record: drawn on the record page (its
+ *                       header, the side preview, a phone's bottom bar) AND
+ *                       on each list row (the row's ⋮ menu). The word an
+ *                       action that acts on a record writes by default.
+ * - `record_page`     — acts on one record, on the record page only (not on
+ *                       list rows).
+ * - `record_row`      — acts on one record, on each list row only (every row
+ *                       wherever the object is listed; not on the record page).
  * - `record_related`  — per-row action on each row of a related list shown inside
  *                       a parent record, in that parent's context only. Unlike
- *                       `list_item` (every row wherever the object is listed), it
+ *                       `record_row` (every row wherever the object is listed), it
  *                       never surfaces on the object's own list views.
  * - `record_section`  — actions surfaced inside a body section/tab of a record
  *                       (e.g. a Security tab grouping change-password, 2FA, etc.).
+ *                       Drawn only by an authored record page block that renders
+ *                       it; the standard record page (a phone, the side preview,
+ *                       and an object with no authored page) does not draw it, so
+ *                       an action that must reach every surface adds `record_page`
+ *                       (with `component: 'action:menu'` to sit in the ⋯ menu).
+ *
+ * Which of an object's record-page actions are buttons and which sit in the
+ * page's ⋯ menu, and in what order, is the object's `actionLayout`; without
+ * it, an action with `component: 'action:menu'` is drawn in the ⋯ menu only.
+ *
+ * Until protocol 19 the words named page parts: `list_toolbar` (now `list`),
+ * `list_item` (now `record_row`), `record_header` and `record_more` (now
+ * `record_page`, the `record_more`-only fold kept by `component:
+ * 'action:menu'`), and an action on both a row and the record page now writes
+ * `record`. The conversion `action-locations-acted-on` rewrites stored and
+ * source metadata losslessly; the enum's error map tells an author who writes
+ * an old word which word replaced it.
  *
  * `global_nav` was REMOVED in 17 (#6888, maintainer ruling 2026-08-09). It had
  * been declared here since the vocabulary was written and no product surface
  * ever served it: the console's ⌘K palette composes its groups from nav items,
  * objects, dashboards, pages, reports, recent items and record search, and
- * references no action metadata. Four of the five references to the value in
- * the whole UI repo were the Studio designer — which drew the author a mock
- * "⌘K · Command palette" frame, promising a rendering the product cannot do
- * (the ADR-0078 declares-renders-does-nothing shape, arriving through the
- * location vocabulary rather than through a missing key). Retired rather than
- * implemented: no user has asked for command-palette actions and the only two
- * declarers were our own showcase corpus, so wiring the palette would have been
- * capability expansion with no pull. This is an enum VALUE, not a key, so there
- * is no `retiredKey()` tombstone — the prescription lives on the enum's own
- * error map above, keyed on `issue.input` so that only the spelling which used
- * to be legal is told it "was removed". An object-less action's honest
- * declaration is `locations: []` (headless), not a location nothing renders.
+ * references no action metadata. Retired rather than implemented. This is an
+ * enum VALUE, not a key, so there is no `retiredKey()` tombstone — the
+ * prescription lives on the enum's own error map above, keyed on
+ * `issue.input` so that only the spelling which used to be legal is told it
+ * "was removed". An object-less action's honest declaration is
+ * `locations: []` (headless), not a location nothing renders.
  */
 export const ACTION_LOCATIONS = [
-  'list_toolbar',
-  'list_item',
-  'record_header',
-  'record_more',
+  'list',
+  'record',
+  'record_page',
+  'record_row',
   'record_related',
   'record_section',
 ] as const;
 
 export const ActionLocationSchema = z.enum(ACTION_LOCATIONS, {
-  // Only the spelling that USED to be legal gets the retirement message.
+  // Only a spelling that USED to be legal gets a retirement message.
   // Telling the author of `globalnav` that their value "was removed" would
   // misinform, so everything else keeps zod's own enum error, which already
   // lists the legal locations. (`array_agg` / `crypto.hash` precedent.)
-  error: (issue) => (issue.input === 'global_nav' ? GLOBAL_NAV_RETIRED : undefined),
+  error: (issue) => {
+    if (issue.input === 'global_nav') return GLOBAL_NAV_RETIRED;
+    return typeof issue.input === 'string' && Object.prototype.hasOwnProperty.call(PAGE_PART_LOCATIONS_RETIRED, issue.input)
+      ? PAGE_PART_LOCATIONS_RETIRED[issue.input]
+      : undefined;
+  },
 });
 export type ActionLocation = z.input<typeof ActionLocationSchema>;
 
@@ -1361,7 +1465,7 @@ const actionObject = () => strictObject({
   icon: z.string().optional().describe('Icon name'),
 
   /** Where does this action appear? */
-  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible'),
+  locations: z.array(ActionLocationSchema).optional().describe('Locations where this action is visible. `record_section` is drawn only by an authored record page block that renders it; the standard record page (on a phone, in the side preview, and for an object with no authored page) does not draw it, so an action that must reach every surface adds `record_page` as well, with `component: \'action:menu\'` to sit in the record page\'s ⋯ menu rather than be a header button. `list` acts on no record (the list page toolbar); `record` acts on one record, on the record page and on each list row; `record_page` and `record_row` are one of those two only.'),
 
   /** 
    * Visual Component Type
@@ -1490,7 +1594,8 @@ const actionObject = () => strictObject({
    */
   body: HookBodySchema.optional().describe(
     'Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. '
-      + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule.",
+      + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. "
+      + "Its system elevation does not lift the organization wall: the body has its reads and writes judged by the invoking user's organization wall. A write whose own data names an organization outside it, or empties a record's organization, is refused with PERMISSION_DENIED. Where the wall denies the user (no active organization under isolated, no membership under group), its reads of an organization's records return none, its deletes remove none, and its other writes are refused with PERMISSION_DENIED.",
   ),
 
   /**
@@ -1616,7 +1721,7 @@ const actionObject = () => strictObject({
    * `bodyExtra`, `bodyShape`, `recordIdParam`/`recordIdField`, `onSuccess`,
    * `opensInNewTab`/`newTabUrl` and any other explicit `type` are each refused
    * with their own message ({@link refuseDeclarativeUpdateContradictions}).
-   * A `list_toolbar` location is refused too: there is no current record
+   * A `list` location is refused too: there is no current record
    * there — the selection bar is the bulk def's home.
    *
    * EXECUTOR CONTRACT (the halves that perform the write are downstream cards
@@ -1634,6 +1739,8 @@ const actionObject = () => strictObject({
       ? `\`operation: '${issue.input}'\` is a bulk-def operation with no row-level form: `
         + (issue.input === 'delete'
           ? 'a row delete is the object\'s own delete affordance, not a declarative action (and was not ruled for the row form). '
+            + "To delete the current record from an action, declare a `type: 'flow'` action naming an autolaunched flow "
+            + "that deletes the record: the flow runs as the caller, so the caller's delete permission applies. "
           : "on a bulk def `'custom'` dispatches the action the def NAMES; on a row the action IS the action, so there is nothing to name. ")
         + "The one row-level operation is `'update'` (a static `patch` written to the current record)."
       : undefined),
@@ -1794,7 +1901,7 @@ const actionObject = () => strictObject({
    * instead of relying on cross-file `defineStack({ actions })` registration
    * order — which is fragile and couples unrelated features.
    *
-   * In `record_header` the first visible action becomes the primary button, so
+   * On the record page the first visible action becomes the primary button, so
    * a low (or negative) `order` promotes an action into the primary slot and a
    * high `order` demotes it toward the `⋯` overflow menu. This is the
    * declarative lever a plugin (e.g. plugin-approvals) or app author uses to
@@ -1807,7 +1914,7 @@ const actionObject = () => strictObject({
    * backward compatible. Renderers MAY additionally prefer a `variant:'primary'`
    * action when two actions tie on `order` (see objectui record-header renderer).
    */
-  order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order.'),
+  order: z.number().optional().describe('Sort order within a location group (lower = higher). Promotes/demotes an action toward the record page header\'s primary button; stable, so actions without `order` keep their registration order.'),
 
   /** UX Behavior */
   // NB this describe() renders into the InlineAction reference table too (both
@@ -2220,11 +2327,11 @@ const actionObject = () => strictObject({
   ai: ActionAiSchema.optional().describe('AI exposure (opt-in). Set ai.exposed=true + ai.description to make this callable by agents.'),
 
   /**
-   * Row-context: when the action runs from a list_item location, this body key
+   * Row-context: when the action runs from a list row (`record_row` / `record`), this body key
    * receives the row's id (or the field named by `recordIdField`). Defaults to
    * `id` when omitted but `recordIdField` is set; otherwise no injection.
    */
-  recordIdParam: z.string().optional().describe('Body key to inject the row id into when running from a list_item context.'),
+  recordIdParam: z.string().optional().describe('Body key to inject the row id into when running from a list row (`record_row` / `record`).'),
   /**
    * Row field whose value seeds `recordIdParam`. Defaults to `'id'` when
    * `recordIdParam` is set. Use this when the body key expects a non-id value
@@ -2529,7 +2636,7 @@ const actionObject = () => strictObject({
  * `patch` only beside `operation: 'update'`; beside it, `type` stays at its
  * default `'script'` (the platform action route), every key that binds or
  * shapes a dispatch the update does not make is refused at its own path, there
- * is a `patch` or a non-empty `params` to write, and no `list_toolbar`
+ * is a `patch` or a non-empty `params` to write, and no `list`
  * location. `objectName` is judged by `defineStack`'s walk instead
  * (`stack.zod.ts`, `collectGlobalUpdateActionErrors`).
  */
@@ -2718,15 +2825,17 @@ function refuseUndeclaredLiteralActionRefusalCode(
     if (Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
     ctx.addIssue({ code: 'custom', path: ['body', 'source'], message: undeclaredActionRefusalCodeAtSave(code, declared) });
   }
-  for (const { code, reason } of hookRefusalReasonsThrownIn(source)) {
+  for (const pair of hookRefusalReasonsThrownIn(source)) {
+    const { code, reason } = pair;
     if (!Object.prototype.hasOwnProperty.call(data.refusals, code)) continue;
-    // Read only under a code that declares `reasons`, as on a hook.
+    // A single reason is read only under a code that declares `reasons`, a
+    // listed one (#36877) under every code, as on a hook.
     const reasons = data.refusals[code]?.reasons;
-    if (!reasons || Object.prototype.hasOwnProperty.call(reasons, reason)) continue;
+    if (!isUndeclaredThrownReason(pair, reasons)) continue;
     ctx.addIssue({
       code: 'custom',
       path: ['body', 'source'],
-      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons)),
+      message: undeclaredActionRefusalReasonAtSave(code, reason, Object.keys(reasons ?? {})),
     });
   }
 }
@@ -2969,7 +3078,8 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
-}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`")).refine((data) => {
+}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`"))
+  .superRefine(refuseAskAiContradictions).refine((data) => {
   // A `script` action must be *executable*: it needs either an inline `body`
   // (the runtime invokes it in the sandbox) or a `target` naming a registered
   // bundle function. With neither, AppPlugin registers no engine handler and
@@ -3387,7 +3497,7 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     CONFIRM_BESIDE_PARAMS_REFUSAL,
   ).superRefine(refuseUnopenableUrlTarget(
     "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
-  )),
+  )).superRefine(refuseAskAiContradictions),
 ));
 
 /**

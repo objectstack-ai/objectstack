@@ -17,9 +17,12 @@
  *    refused 409 with the `?package=` remedy, naming no package, and stores
  *    no row (#34144 ruling A, #34262: a disabled package holds no name, so a
  *    save naming none has no row to write). Re-enabled, the same save is
- *    kept. A delete of the stored package-less row removes it while the
- *    package is disabled, as before. A save at a member the package ships is
- *    refused, as before.
+ *    kept. With the package disabled again, a save and a delete of the
+ *    stored package-less row are refused 409 with the enable as the remedy
+ *    and the row is left as it was (ADR-0150 D3, the 2026-11-26 note: the
+ *    row is the holder's customization, hidden with it; the delete removed
+ *    it). Re-enabled, the row is served again and the delete removes it. A
+ *    save at a member the package ships is refused, as before.
  *  - S5: while an ENABLED package holds the name through a stored row the
  *    registry has not read, the row is served and listed as on `main`, in
  *    either read order.
@@ -191,7 +194,7 @@ describe('[#33401, review#2 S1] the lists leave out the package-less row the by-
 });
 
 describe('[#33401, review#2 S3] a package-less save and delete while every holder is disabled', () => {
-    it('a save at a member the package never ships is refused naming no package and stores no row; re-enabled it is kept; a delete removes it; a save at a shipped member is refused, as before', async () => {
+    it('a save at a member the package never ships is refused naming no package and stores no row; re-enabled it is kept; disabled again, a save and a delete of that row are refused with the enable as the remedy and the row stays; re-enabled, the delete removes it; a save at a shipped member is refused, as before', async () => {
         const stores: Stores = new Map();
         const { engine, protocol } = await boot(stores);
         engine.registry.disablePackage(PKG);
@@ -216,12 +219,31 @@ describe('[#33401, review#2 S3] a package-less save and delete while every holde
             .toMatchObject({ success: true, state: 'active' });
         expect(packagelessRows(stores)).toEqual(['fr-FR']);
         expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr');
-        // Unchanged: with the package disabled again, a delete naming no package removes the row.
+        // FROM (`main` 5dbcc02b): with the package disabled again, a delete
+        // naming no package removed the row (`success: true`), and a save
+        // edited it unseen. TO (ADR-0150 D3, the 2026-11-26 note): the row is
+        // the holder's customization, hidden with it, so both are refused 409
+        // with the enable as the remedy, never `?package=`, and the row stays.
         engine.registry.disablePackage(PKG);
+        const storedRow = () => JSON.stringify(Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.name === NAME && r.state === 'active').map((r) => [r.package_id ?? null, r.bundle_member ?? null, r.metadata, r.version]));
+        const before = storedRow();
+        for (const write of [
+            () => protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'EDITED fr') } as any),
+            () => protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any),
+        ]) {
+            const hidden: any = await write().then(() => undefined, (error: unknown) => error);
+            expect([hidden?.status, hidden?.code], String(hidden?.message)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(String(hidden?.message).startsWith('Enable the package that holds email_template ')).toBe(true);
+            expect(String(hidden?.message)).not.toContain(PKG);
+        }
+        expect(storedRow()).toBe(before);
+        // CONTROL — re-enabled: the row is served as it was, and the delete removes it, as before.
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr');
         expect(await protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any))
             .toMatchObject({ success: true });
         expect(packagelessRows(stores)).toEqual([]);
-        engine.registry.enablePackage(PKG);
         expect(await subjectAt(protocol, 'fr-FR')).toBeUndefined();
     });
 });
@@ -248,5 +270,168 @@ describe('[#33401, review#2 S5] an enabled package holding the name through an u
         try { protocol.admitEnvironmentQualifier({ type: 'email_template', name: NAME, member: 'fr-FR' }); } catch (error) { refusal = error; }
         expect([refusal?.status, refusal?.code]).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(refusal?.[Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal')]).toBe(true);
+    });
+});
+
+describe('[ADR-0150 D3, the 2026-11-26 note] the per-item publish and the rollback naming no package, while every holder is disabled', () => {
+    /** Every stored row of the name, active and draft, as the store holds it. */
+    const storedRows = (stores: Stores) => JSON.stringify(Array.from(stores.get('sys_metadata')?.values() ?? [])
+        .filter((r) => r.name === NAME)
+        .map((r) => [r.state, r.package_id ?? null, r.bundle_member ?? null, r.metadata, r.version])
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+    const refusalOf = (pending: Promise<unknown>): Promise<any> => pending.then(() => undefined, (error: unknown) => error);
+
+    it.each([['beside the stored package-less row', true], ['with no row stored', false]] as const)('publish, a package-less draft %s: refused 409 with the enable as the remedy, nothing written; re-enabled, the row is served as it was and the same publish goes live', async (_cell, withRow) => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        // `fr-FR` is a member the package never ships: the ADR-0146 D11 close
+        // leaves this cell open, so the disabled-holders judgment answers.
+        if (withRow) await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'DRAFT fr'), mode: 'draft' } as any);
+        engine.registry.disablePackage(PKG);
+        const before = storedRows(stores);
+        // FROM (`main` 56c9cae6): `success: true`, the draft promoted into the
+        // package-less active row the disabled package hides. TO: refused as
+        // the save and the delete are, and nothing is written.
+        const refused = await refusalOf(protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any));
+        expect([refused?.status, refused?.code], String(refused?.message ?? 'no refusal')).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message).startsWith('Enable the package that holds email_template ')).toBe(true);
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(storedRows(stores)).toBe(before);
+        // CONTROL — re-enabled: the row is served byte-identical, and the publish goes live.
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBe(withRow ? 'SAVED fr' : undefined);
+        expect(await protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any)).toMatchObject({ success: true });
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('DRAFT fr');
+    });
+
+    it.each([['beside the stored package-less row', true], ['with no package-less row stored', false]] as const)('publish, the package\'s own draft %s: refused 409 with the `?package=` remedy, nothing written; the publish naming the package promotes it, the package-less row byte-identical', async (_cell, withRow) => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        if (withRow) await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'PKG DRAFT fr'), mode: 'draft', packageId: PKG } as any);
+        engine.registry.disablePackage(PKG);
+        const packageless = () => JSON.stringify(Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.name === NAME && (r.package_id ?? null) === null).map((r) => [r.state, r.bundle_member ?? null, r.metadata, r.version]));
+        const before = storedRows(stores);
+        const packagelessBefore = packageless();
+        // FROM (`main` 73d5e347): `success: true`, the draft promoted into the
+        // disabled package's active row, which the next enable serves.
+        // TO (#37851 ruling A): refused as the bare save of the item is, with
+        // the `?package=` remedy (the promotion addresses the package's own
+        // draft and row, which the publish naming the package reaches), and
+        // nothing is written.
+        const refused = await refusalOf(protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any));
+        expect([refused?.status, refused?.code], String(refused?.message ?? 'no refusal')).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message).startsWith('Name the package this publish is for, then send it again')).toBe(true);
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(storedRows(stores)).toBe(before);
+        // CONTROL — the remedy: the publish naming the package promotes the
+        // draft into the package's own row, as on `main`, and leaves the
+        // package-less row byte-identical.
+        expect(await protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR', packageId: PKG } as any)).toMatchObject({ success: true });
+        expect(packageless()).toBe(packagelessBefore);
+        expect(Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.name === NAME && r.state === 'active').map((r) => r.package_id ?? null).sort())
+            .toEqual((withRow ? [PKG, null] : [PKG]).sort());
+    });
+
+    it('publish, the package\'s own draft, re-enabled: the bare publish promotes it as on `main`', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'PKG DRAFT fr'), mode: 'draft', packageId: PKG } as any);
+        engine.registry.disablePackage(PKG);
+        expect((await refusalOf(protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any)))?.status).toBe(409);
+        engine.registry.enablePackage(PKG);
+        expect(await protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any)).toMatchObject({ success: true });
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('PKG DRAFT fr');
+    });
+
+    it('publish with no draft stored, beside the stored package-less row: `NO_DRAFT` as on `main`, nothing written', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr') } as any);
+        engine.registry.disablePackage(PKG);
+        const before = storedRows(stores);
+        const missing = await refusalOf(protocol.publishMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any));
+        expect([missing?.status, missing?.code], String(missing?.message ?? 'no refusal')).toEqual([404, 'NO_DRAFT']);
+        expect(storedRows(stores)).toBe(before);
+    });
+
+    it('rollback of the package-less row: refused 409 with the enable as the remedy, nothing written; re-enabled, the row is served as it was and the same rollback restores the version', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr 1') } as any);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr 2') } as any);
+        const events = (await protocol.historyMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any)).events;
+        expect(events).toHaveLength(2);
+        const first = Math.min(...events.map((e: any) => e.version as number));
+        engine.registry.disablePackage(PKG);
+        const before = storedRows(stores);
+        // FROM (`main` 56c9cae6): `success: true`, the hidden row rewritten
+        // to the first version's body. TO: refused, nothing written.
+        const refused = await refusalOf(protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR' } as any));
+        expect([refused?.status, refused?.code], String(refused?.message ?? 'no refusal')).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message).startsWith('Enable the package that holds email_template ')).toBe(true);
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(storedRows(stores)).toBe(before);
+        // CONTROL — re-enabled: the row is served byte-identical, and the rollback restores the version.
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr 2');
+        expect(await protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR' } as any))
+            .toMatchObject({ success: true, restoredFromVersion: first });
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr 1');
+    });
+
+    it('rollback with the package-less row\'s history but no row stored: refused 409 with the enable as the remedy, no row inserted; re-enabled, the same rollback restores the version', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr 1') } as any);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'SAVED fr 2') } as any);
+        const events = (await protocol.historyMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any)).events;
+        const first = Math.min(...events.map((e: any) => e.version as number));
+        await protocol.deleteMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR' } as any);
+        expect(packagelessRows(stores)).toEqual([]);
+        engine.registry.disablePackage(PKG);
+        const before = storedRows(stores);
+        // FROM (`main` 73d5e347): `success: true`, a new package-unbound
+        // active row inserted with the first version's body, which the next
+        // enable serves. TO (#37851 ruling A): refused, the enable as the
+        // remedy (the restore writes the package-unbound row, the disabled
+        // holder's customization, which naming the package does not reach),
+        // and no row is inserted.
+        const refused = await refusalOf(protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR' } as any));
+        expect([refused?.status, refused?.code], String(refused?.message ?? 'no refusal')).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message).startsWith('Enable the package that holds email_template ')).toBe(true);
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(storedRows(stores)).toBe(before);
+        // CONTROL — re-enabled: nothing is served at the member, and the same rollback restores the version.
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBeUndefined();
+        expect(await protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR' } as any))
+            .toMatchObject({ success: true, restoredFromVersion: first });
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('SAVED fr 1');
+    });
+
+    it('rollback of the package\'s own row: refused 409 with the `?package=` remedy, nothing written; the rollback naming the package restores the version', async () => {
+        const stores: Stores = new Map();
+        const { engine, protocol } = await boot(stores);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'PKG fr 1'), packageId: PKG } as any);
+        await protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('fr-FR', 'PKG fr 2'), packageId: PKG } as any);
+        const events = (await protocol.historyMetaItem({ type: 'email_template', name: NAME, member: 'fr-FR', packageId: PKG } as any)).events;
+        expect(events).toHaveLength(2);
+        const first = Math.min(...events.map((e: any) => e.version as number));
+        engine.registry.disablePackage(PKG);
+        const before = storedRows(stores);
+        const refused = await refusalOf(protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR' } as any));
+        expect([refused?.status, refused?.code], String(refused?.message ?? 'no refusal')).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(String(refused?.message).startsWith('Name the package this rollback is for, then send it again')).toBe(true);
+        expect(String(refused?.message)).not.toContain(PKG);
+        expect(storedRows(stores)).toBe(before);
+        // CONTROL — the remedy: the rollback naming the package restores the package's row, as on `main`.
+        expect(await protocol.rollbackMetaItem({ type: 'email_template', name: NAME, toVersion: first, member: 'fr-FR', packageId: PKG } as any))
+            .toMatchObject({ success: true, restoredFromVersion: first });
+        engine.registry.enablePackage(PKG);
+        expect(await subjectAt(protocol, 'fr-FR')).toBe('PKG fr 1');
     });
 });

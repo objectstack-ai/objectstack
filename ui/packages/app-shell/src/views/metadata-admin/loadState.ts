@@ -204,7 +204,7 @@ export function loadErrorOf(state: LoadState<unknown>): string | undefined {
  * and it can only produce the `error` arm. Copy-pasted unions are how the next
  * drift starts — which is exactly what happened: `FieldSelectorWidget` in
  * `widgets.tsx` was a fourth loader with the same swallow, missed by
- * objectui#5170 because it does not go through `MetadataClient` at all. It now
+ * objectui#5170 because it reads no `WidgetContext` catalog. It now
  * calls this hook too, so the hook lives here rather than private to
  * `ResourceEditPage` (`widgets.tsx` cannot import that module — `ResourceEditPage`
  * imports `widgets`).

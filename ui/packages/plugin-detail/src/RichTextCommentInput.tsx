@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useDetailTranslation } from './useDetailTranslation';
 import { extractMentions } from './extractMentions';
+import { getTextareaCaretCoordinates } from './textareaCaret';
 
 export interface MentionSuggestion {
   id: string;
@@ -54,7 +55,29 @@ export interface RichTextCommentInputProps {
    * extra slot. Focus opens it in full. The record timeline's composer.
    */
   compact?: boolean;
+  /**
+   * `phone` (objectstack#36076 item 3): the editor first, then one row under
+   * it — mention, bold, italic, list, code, and send at the right end — with
+   * no preview and no keyboard-shortcut hint; the text at 16 px, so a phone
+   * does not zoom the page into the box. `default`: the toolbar above.
+   */
+  layout?: 'default' | 'phone';
 }
+
+/** The mention menu's width (`w-56`) and its tallest height (`max-h-40`), in px. */
+const MENTION_MENU_WIDTH = 224;
+const MENTION_MENU_MAX_HEIGHT = 160;
+/** The gap between the caret's line and the mention menu, in px. */
+const MENTION_MENU_GAP = 4;
+
+/**
+ * Where the mention menu opens, relative to the editor box (objectstack#36070):
+ * under the caret's line, or above it when the space under it in the window
+ * is too short for the menu and the space above is longer.
+ */
+type MentionMenuPlacement =
+  | { side: 'below'; top: number; left: number }
+  | { side: 'above'; bottom: number; left: number };
 
 /** The look of a picked mention, in the preview and in the composer's chip row. */
 const MENTION_CHIP_CLASS =
@@ -121,6 +144,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   autoFocus = false,
   onMentionSuggestionsWanted,
   compact = false,
+  layout = 'default',
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -130,6 +154,8 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   const [mentionQuery, setMentionQuery] = React.useState('');
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const editorBoxRef = React.useRef<HTMLDivElement>(null);
+  const [mentionPlacement, setMentionPlacement] = React.useState<MentionMenuPlacement | null>(null);
   React.useEffect(() => {
     if (autoFocus) textareaRef.current?.focus();
     // On mount only: a later re-render must not pull focus back.
@@ -154,6 +180,36 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
       s.label.toLowerCase().includes(query),
     );
   }, [mentionQuery, mentionSuggestions]);
+
+  // The menu follows the caret: measured after each render that shows it,
+  // where the caret now is (the query typed after `@` moves it). Where layout
+  // cannot be measured the menu keeps its old place, over the editor's top left.
+  const mentionMenuShown = showMentions && filteredMentions.length > 0;
+  React.useLayoutEffect(() => {
+    // A closed menu keeps its last place unread; the next opening measures
+    // again before the browser paints it.
+    if (!mentionMenuShown) return;
+    const textarea = textareaRef.current;
+    const box = editorBoxRef.current;
+    if (!textarea || !box) return;
+    const caret = getTextareaCaretCoordinates(textarea, textarea.selectionStart);
+    if (!caret) return;
+    const lineTop = textarea.offsetTop + caret.top - textarea.scrollTop;
+    const lineBottom = lineTop + caret.height;
+    const left = Math.max(
+      0,
+      Math.min(textarea.offsetLeft + caret.left - textarea.scrollLeft, box.clientWidth - MENTION_MENU_WIDTH),
+    );
+    const boxTop = box.getBoundingClientRect().top;
+    const spaceBelow = window.innerHeight - (boxTop + lineBottom);
+    const spaceAbove = boxTop + lineTop;
+    const needed = MENTION_MENU_MAX_HEIGHT + MENTION_MENU_GAP;
+    setMentionPlacement(
+      spaceBelow < needed && spaceAbove > spaceBelow
+        ? { side: 'above', bottom: box.clientHeight - lineTop + MENTION_MENU_GAP, left }
+        : { side: 'below', top: lineBottom + MENTION_MENU_GAP, left },
+    );
+  }, [mentionMenuShown, value, mentionQuery]);
 
   const insertAtCursor = React.useCallback(
     (before: string, after: string = '') => {
@@ -256,6 +312,10 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           return;
         }
         if (e.key === 'Escape') {
+          // The key closes the list and nothing else: a panel or drawer
+          // round the box must not close on it too (objectstack#36075).
+          e.preventDefault();
+          e.stopPropagation();
           setShowMentions(false);
           return;
         }
@@ -270,20 +330,9 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
     [showMentions, filteredMentions, mentionIndex, handleSelectMention, onSubmit],
   );
 
-  return (
-    <div
-      className={cn('border rounded-md', className)}
-      data-composer-collapsed={compact ? String(collapsed) : undefined}
-      onFocus={compact ? () => setFocused(true) : undefined}
-      onBlur={
-        compact
-          ? (e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
-            }
-          : undefined
-      }
-    >
-      {/* Toolbar */}
+  const phone = layout === 'phone';
+  // The desktop's toolbar, above the editor.
+  const toolbar = (
       <div className={cn('flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30', collapsed && 'hidden')}>
         <Button
           variant="ghost"
@@ -365,9 +414,65 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           </Button>
         )}
       </div>
+  );
+  // objectstack#36076 — the phone's row, under the editor: the same commands
+  // at touch size, mention first, send at the right end.
+  const phoneToolButton = 'h-11 w-11 shrink-0';
+  const phoneToolbar = (
+    <div
+      className={cn('flex items-center gap-0.5 border-t px-1 py-1', collapsed && 'hidden')}
+      // A press here keeps the caret (and the phone's keyboard) in the box.
+      onMouseDown={(e) => e.preventDefault()}
+      data-composer-toolbar="phone"
+    >
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleMentionTrigger} disabled={disabled} aria-label={t('detail.mentionSomeone')}>
+        <AtSign className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleBold} disabled={disabled} aria-label={t('detail.formatBold')}>
+        <Bold className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleItalic} disabled={disabled} aria-label={t('detail.formatItalic')}>
+        <Italic className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleList} disabled={disabled} aria-label={t('detail.listFormat')}>
+        <List className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" className={phoneToolButton} onClick={handleCode} disabled={disabled} aria-label={t('detail.inlineCode')}>
+        <Code className="h-4 w-4" />
+      </Button>
+      <div className="flex-1" />
+      {onSubmit && (
+        <Button
+          size="icon"
+          className="h-11 w-11 shrink-0 rounded-full"
+          onClick={onSubmit}
+          disabled={disabled || (!canSubmitEmpty && !value.trim())}
+          aria-label={t('detail.sendComment')}
+          data-composer-send=""
+        >
+          <Send className="h-4 w-4" />
+        </Button>
+      )}
+    </div>
+  );
+
+  return (
+    <div
+      className={cn('border rounded-md', className)}
+      data-composer-collapsed={compact ? String(collapsed) : undefined}
+      onFocus={compact ? () => setFocused(true) : undefined}
+      onBlur={
+        compact
+          ? (e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+            }
+          : undefined
+      }
+    >
+      {!phone && toolbar}
 
       {/* Editor / Preview */}
-      <div className="relative">
+      <div className="relative" ref={editorBoxRef}>
         {isPreview ? (
           <div
             className="min-h-[80px] px-3 py-2 text-sm prose prose-sm max-w-none"
@@ -379,7 +484,8 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               ref={textareaRef}
               className={cn(
                 'w-full px-3 text-sm bg-transparent resize-none focus:outline-none placeholder:text-muted-foreground',
-                collapsed ? 'block h-8 min-h-0 py-1.5 text-[13px] leading-5' : 'min-h-[80px] py-2',
+                collapsed ? 'block h-8 min-h-0 py-1.5 text-sm leading-5' : 'min-h-[80px] py-2',
+                phone && (collapsed ? 'h-10 py-2 text-base leading-6' : 'min-h-[72px] text-base'),
               )}
               rows={collapsed ? 1 : undefined}
               placeholder={placeholder ?? t('detail.writeComment')}
@@ -408,8 +514,23 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
             )}
 
             {/* @mention dropdown */}
-            {showMentions && filteredMentions.length > 0 && (
-              <div className="absolute left-2 bottom-full mb-1 w-56 bg-popover border rounded-md shadow-md z-50 max-h-40 overflow-y-auto">
+            {mentionMenuShown && (
+              <div
+                className={cn(
+                  'absolute w-56 bg-popover border rounded-md shadow-md z-50 max-h-40 overflow-y-auto',
+                  !mentionPlacement && 'left-2 bottom-full mb-1',
+                )}
+                // Positional only (no colour): the caret's place is known at
+                // run time, so it cannot be a utility class.
+                style={
+                  mentionPlacement
+                    ? mentionPlacement.side === 'below'
+                      ? { top: mentionPlacement.top, left: mentionPlacement.left }
+                      : { bottom: mentionPlacement.bottom, left: mentionPlacement.left }
+                    : undefined
+                }
+                data-mention-menu={mentionPlacement?.side ?? ''}
+              >
                 {filteredMentions.map((suggestion, index) => (
                   <button
                     key={suggestion.id}
@@ -449,6 +570,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           {extraSlot}
         </div>
       )}
+      {phone && phoneToolbar}
     </div>
   );
 };

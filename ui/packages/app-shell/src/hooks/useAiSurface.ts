@@ -40,27 +40,33 @@
  * @module
  */
 
-import { useRef } from 'react';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
+import { catalogServesBuild, catalogServesFocus } from './surfaceAgent.js';
+import { resolveAiApiBase } from './aiApiBase.js';
 
-/**
- * Resolve the AI service base URL, mirroring AiChatPage / the Home CTAs:
- * an explicit `VITE_AI_BASE_URL` wins, otherwise `${VITE_SERVER_URL}/api/v1/ai`.
- * Shared so every catalog fetch (route guard, layouts, Home) hits the same URL.
- */
-export function resolveAiApiBase(): string {
-  const env = (import.meta as any).env ?? {};
-  const fromEnv = env.VITE_AI_BASE_URL as string | undefined;
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
-  const serverUrl = (env.VITE_SERVER_URL as string | undefined) ?? '';
-  return `${serverUrl.replace(/\/$/, '')}/api/v1/ai`;
-}
+// Re-exported where its callers have always imported it from.
+export { resolveAiApiBase };
 
 export interface AiSurfaceState {
   /** True when the AI UI should render — the CALLER can reach >= 1 agent (access-filtered). */
   enabled: boolean;
   /** True until the agent catalog has resolved; route guards wait on this. */
   isLoading: boolean;
+  /**
+   * objectstack#36969 — true when the same catalog serves the build agent
+   * (alias-aware, `catalogServesBuild`): the gate for an entry that promises
+   * building with AI. False while loading, and where building is closed
+   * (`build` persisted inactive, `ask` still served).
+   */
+  buildServed: boolean;
+  /**
+   * objectstack#37142 — true when the same catalog serves an agent that
+   * declares it honours a conversation focus (`capabilities.focus`,
+   * objectstack#36999). With `enabled`, the gate ADR-0160 D7 puts on the
+   * `ask_ai` action: it is drawn where the pin control can be. False while
+   * loading and on a server that declares no capabilities.
+   */
+  focusServed: boolean;
 }
 
 /**
@@ -68,21 +74,21 @@ export interface AiSurfaceState {
  * should be shown FOR THE CURRENT USER, driven off the access-filtered agent
  * catalog (empty for seat-less users -> AI hidden; ADR-0068).
  */
-export function useAiSurfaceEnabled(): AiSurfaceState {
-  const { agents, isLoading } = useAgents({ apiBase: resolveAiApiBase() });
-
-  // useAgents starts `isLoading=false` and only kicks off the fetch in an effect
-  // a tick later, so the first render's empty list means "not fetched yet", not
-  // "no agents". Latch whether a fetch has actually been in flight so the route
-  // guard treats that initial frame as loading (not a definitive empty → redirect).
-  const fetchStartedRef = useRef(false);
-  if (isLoading) fetchStartedRef.current = true;
+export function useAiSurfaceEnabled(options: { enabled?: boolean } = {}): AiSurfaceState {
+  // `enabled: false` asks nothing (objectstack#37833: the navigation gate asks
+  // only while an app carries an `ai:chat` entry); the answer then reads as
+  // loading, and the caller that turned the read off does not consult it.
+  const { agents, settled } = useAgents({ apiBase: resolveAiApiBase(), enabled: options.enabled ?? true });
 
   const enabled = agents.length > 0;
   return {
     enabled,
-    // Agents present → resolved/available. Otherwise we're loading until a fetch
-    // has both started and finished with an empty result.
-    isLoading: enabled ? false : isLoading || !fetchStartedRef.current,
+    buildServed: catalogServesBuild(agents),
+    focusServed: catalogServesFocus(agents),
+    // Agents present → resolved/available. Otherwise loading until a read has
+    // answered (`settled`): the first render's empty list means "not fetched
+    // yet", and a read the cache answers is never seen loading
+    // (objectstack#37833).
+    isLoading: enabled ? false : !settled,
   };
 }

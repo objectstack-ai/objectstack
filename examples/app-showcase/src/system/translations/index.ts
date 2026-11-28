@@ -231,7 +231,7 @@ export const ShowcaseTranslationBundle = {
           issued_on: { label: 'Issued On' },
           tax_rate: { label: 'Tax Rate (%)' },
           paid_on: { label: 'Paid On' },
-          total: { label: 'Total' },
+          total: { label: 'Subtotal' },
           // Translated at birth (the multi-currency fields, ADR-0144):
           // check-i18n-coverage ratchets this example at its untranslated count.
           currency_code: { label: 'Currency' },
@@ -383,6 +383,10 @@ export const ShowcaseTranslationBundle = {
     },
   },
   'zh-CN': {
+    // The package's own name, keyed by its manifest id (objectstack#35513).
+    packages: {
+      'com.example.showcase': { name: 'ObjectStack 演示', description: '覆盖全部元数据类型、全部视图类型与主要能力链路的综合演示工作区。' },
+    },
     objects: {
       showcase_project: {
         label: '项目',
@@ -441,11 +445,11 @@ export const ShowcaseTranslationBundle = {
           by_status: { label: '按状态' },
           budget_chart: { label: '按客户预算' },
         },
-        // Section headings from two surfaces: `ui/views/project.view.ts`'s
-        // `edit` form (`project` / `budget_schedule`) and
+        // Section headings from two surfaces: the object's `fieldGroups`
+        // (`project` / `budget_schedule`, the create and edit forms) and
         // `ui/pages/project-detail.page.ts`'s `record:details` tab
-        // (`overview` / `financials` / `timeline`). Each declares a stable
-        // `name`, the only thing that makes the heading translatable
+        // (`overview` / `financials` / `timeline`). Each carries a stable key
+        // or `name`, the only thing that makes the heading translatable
         // (#8231). Wording reuses vocabulary this bundle already established
         // elsewhere: `预算` (fields.budget above), `排期` (showcase_task
         // `_sections.schedule` below), `概览` (showcase_task
@@ -500,6 +504,13 @@ export const ShowcaseTranslationBundle = {
         // `showcase_project`'s entry uses — one word per idea across the bundle.
         _validations: {
           task_status_flow: { message: '任务状态流转无效。' },
+        },
+        // The object's one activity milestone (`status` → `done`), keyed by
+        // the pair that fires it; `{title}` is the authored template's token.
+        // A zh-CN reader's timeline row reads this; the stored row keeps the
+        // authored English sentence for every other reader.
+        _milestones: {
+          status: { done: { summary: '✅ 任务已完成：{title}' } },
         },
         _views: {
           // The default list — keyed `default`, see showcase_project above.
@@ -562,6 +573,7 @@ export const ShowcaseTranslationBundle = {
           showcase_bulk_reassign: { label: '重新分配…' },
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
+          showcase_ask_about_task: { label: '问 AI' },
           showcase_new_task: { label: '新建任务' },
           showcase_archive_task: {
             label: '归档',
@@ -624,6 +636,10 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: '账单邮箱' },
           support_config: { label: '支持配置' },
           churn_reason: { label: '流失原因' },
+          // The account side of the Revenue Pulse region filter
+          // (`filterBindings: { region: 'sales_region' }`), worded as the
+          // dataset's dimension describes it (销售区域).
+          sales_region: { label: '销售区域', options: { amer: '美洲', emea: '欧洲、中东和非洲', apac: '亚太' } },
         },
         // The zh-CN mirror of the `en` `_validations` block — see the note
         // there. Vocabulary is the one this bundle already established:
@@ -650,7 +666,7 @@ export const ShowcaseTranslationBundle = {
         // ADR reference is kept, as `showcase_client_brief.description` keeps
         // its own.
         description:
-          '演示「默认推导 + 稀疏覆盖」表单：一套扁平、分组、带意图标记的字段集，同时投影为完整的编辑表单和精简的新建表单（ADR-0047）。',
+          '演示一套字段集供两张表单使用：字段分组同时编排完整的编辑表单和新建表单，标记 showOnCreate false 的字段不出现在新建表单中（ADR-0047）。',
         fields: {
           name: { label: '姓名' },
           email: { label: '邮箱' },
@@ -676,43 +692,27 @@ export const ShowcaseTranslationBundle = {
         // no lookup could reach. Its source label is the bare plural
         // "Contacts", so the object's own `pluralLabel` above is the right
         // word; the `全部…` spelling the task/project lists use belongs to
-        // labels that actually say "All …".
-        //
-        // `_views.create.title` — the sparse `formViews.create` form's own
-        // heading (`title: 'New contact'`), which `translateView` overlays
-        // onto the served form's `config.title`. 新建联系人 follows the
-        // 新建… shape a create heading takes. Its `submitBehavior` is the
-        // thank-you panel the same form shows after a save, overlaid onto the
-        // served form's `config.submitBehavior`.
+        // labels that actually say "All …". The container declares no form:
+        // the create and edit forms are the object's `fieldGroups`.
         _views: {
           default: { label: '联系人' },
-          create: {
-            title: '新建联系人',
-            submitBehavior: { title: '联系人已创建', message: '其余信息可在记录中补充。' },
-          },
         },
-        // `_sections` — the four groups of the default edit form in
-        // `ui/views/contact.view.ts`, plus the sparse `formViews.create`
-        // override's single section (#8231 remainder). Each declares a
-        // stable `name`, which is the only reason the heading is
-        // translatable (`ObjectForm` looks it up as
-        // `objects.showcase_contact._sections.<name>.label` and otherwise
+        // `_sections` — the object's four `fieldGroups`, the sections of its
+        // create form, edit form and record page. A group's `key` is what
+        // makes the heading translatable (`ObjectForm` looks it up as
+        // `objects.showcase_contact._sections.<key>.label` and otherwise
         // renders the English `label` verbatim). Wording reuses the vocabulary
         // this bundle already established — 状态 and 备注 are exactly the words
         // its `stage`-family and `notes` entries use — rather than minting a
         // second term per idea. `contact` reads 联系方式 (contact DETAILS, its
         // fields being 姓名/邮箱/电话) instead of a circular 联系人 heading
         // inside a contact record; `work` follows the `…信息` shape the
-        // showcase_semantic_zoo headings set. `who_is_this` is the create
-        // form's own heading — a plain rendering of the English question,
-        // matching the no-punctuation style every other heading in this file
-        // uses.
+        // showcase_semantic_zoo headings set.
         _sections: {
           contact: { label: '联系方式' },
           work: { label: '工作信息' },
           status: { label: '状态' },
           notes: { label: '备注' },
-          who_is_this: { label: '这是谁' },
         },
       },
       // [#9308 fixture 2] The zh-CN mirror of the `en` block above, key for
@@ -758,9 +758,13 @@ export const ShowcaseTranslationBundle = {
           owner: { label: '负责人邮箱' },
           status: { label: '状态' },
           issued_on: { label: '开具日期' },
+          // The Revenue Pulse dashboard's region filter lands on this field, so
+          // a drilled list's chip names it: the same words as the dashboard's
+          // own filter label and options (`dashboards.showcase_revenue_pulse`).
+          region: { label: '区域', options: { amer: '美洲', emea: '欧洲、中东和非洲', apac: '亚太' } },
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
-          total: { label: '合计' },
+          total: { label: '小计' },
           currency_code: { label: '币种' },
           invoice_date: { label: '发票日期' },
           amount: { label: '含税总额' },
@@ -791,7 +795,8 @@ export const ShowcaseTranslationBundle = {
       // 报销单), so its object label, description, every column and every
       // status option are translated here — the sidebar's word and the list's
       // header now agree. 草稿 / 已提交 / 已批准 follow the 已… shape this
-      // bundle uses for a reached state; 合计 is showcase_invoice's `total`.
+      // bundle uses for a reached state. 合计 is this report's own total; the
+      // invoice's pre-tax `total` reads 小计 (Subtotal) beside its 含税总额.
       showcase_expense_report: {
         label: '报销单',
         pluralLabel: '报销单',
@@ -897,6 +902,8 @@ export const ShowcaseTranslationBundle = {
         // (#8231).
         _sections: {
           tell_us_about_yourself: { label: '介绍一下您自己' },
+          // The authored `form` item's section (`ui/forms/feedback.form.ts`).
+          feedback: { label: '您的反馈' },
         },
       },
       // Object, fields and `kind` options as well as the views below: the
@@ -923,9 +930,9 @@ export const ShowcaseTranslationBundle = {
           default: { label: '全部单元' },
           org_chart: { label: '组织架构图' },
         },
-        // `ui/views/business-unit.view.ts` `edit` form's single section.
-        // Declares a stable `name`, the only thing that makes the heading
-        // translatable (#8231). Bare object word, matching `全部单元` above.
+        // The object's single `fieldGroups` entry, the section of its create
+        // and edit forms. Its stable `key` is the only thing that makes the
+        // heading translatable (#8231). Bare object word, matching `全部单元` above.
         _sections: {
           unit: { label: '单元' },
         },
@@ -1364,6 +1371,17 @@ export const ShowcaseTranslationBundle = {
     // page heading: each reads the word its sidebar entry already uses
     // (`apps.showcase_app.navigation`), so the heading matches the link that
     // opened it.
+    // [ADR-0159 D8] The showcase's authored `form` item (`forms.<name>`),
+    // src/ui/forms/feedback.form.ts — read before any `_views` tail.
+    forms: {
+      'showcase_inquiry.feedback': {
+        label: '提交反馈',
+        submitBehavior: {
+          title: '感谢您',
+          message: '您的反馈已送达展示团队。',
+        },
+      },
+    },
     pages: {
       showcase_capability_map: { label: '能力地图' },
       showcase_my_work: { label: '我的工作', subtitle: '你的待办队列、团队产出，以及需要关注的事项。' },

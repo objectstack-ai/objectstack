@@ -1,5 +1,153 @@
 # @object-ui/plugin-editor
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- @object-ui/components@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [c3da753]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [8fbae19]
+- Updated dependencies [1f97fce]
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- Updated dependencies [1c05546]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [89364b4]
+- Updated dependencies [eed422e]
+- Updated dependencies [2df9691]
+- Updated dependencies [55020c3]
+- Updated dependencies [6f2bd4f]
+- Updated dependencies [99a0e4f]
+- Updated dependencies [1b2cd80]
+- Updated dependencies [3819afe]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [285ad8d]
+- Updated dependencies [9212119]
+- Updated dependencies [cda16d4]
+- Updated dependencies [dda665f]
+- Updated dependencies [98b3f87]
+- Updated dependencies [f71d488]
+- Updated dependencies [ccded86]
+- Updated dependencies [e01b8be]
+- Updated dependencies [d96c878]
+- Updated dependencies [72d19c4]
+- Updated dependencies [b0c624a]
+- Updated dependencies [f98f18c]
+- Updated dependencies [227a16a]
+- Updated dependencies [598a34d]
+- Updated dependencies [0585797]
+- Updated dependencies [811858c]
+- Updated dependencies [fac1e7d]
+- Updated dependencies [8500ee7]
+- Updated dependencies [a6607c7]
+- Updated dependencies [c00be39]
+- Updated dependencies [1c87956]
+- Updated dependencies [5345905]
+- Updated dependencies [c9b0a23]
+- Updated dependencies [6b360ab]
+- Updated dependencies [c7174c3]
+- Updated dependencies [78f7160]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [7de1bad]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [dea68e9]
+- Updated dependencies [6b51822]
+- Updated dependencies [52fb30c]
+- Updated dependencies [8807dcb]
+- Updated dependencies [9ed18a5]
+- Updated dependencies [f548bdc]
+- Updated dependencies [9f6f306]
+- Updated dependencies [8c8ff0f]
+- Updated dependencies [dda5e74]
+- Updated dependencies [f2a990b]
+- Updated dependencies [035a12c]
+- Updated dependencies [33d0169]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8aed508]
+- Updated dependencies [a60740a]
+- Updated dependencies [dc10b3b]
+- Updated dependencies [dca608a]
+- Updated dependencies [baf2678]
+- Updated dependencies [13d1e95]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [3ae62ac]
+- Updated dependencies [6c7c6db]
+- Updated dependencies [493ad09]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [04f9861]
+- Updated dependencies [e605773]
+- Updated dependencies [713545f]
+- Updated dependencies [a2dc858]
+- Updated dependencies [b3bcfef]
+- Updated dependencies [aad35e6]
+- Updated dependencies [0b2118f]
+- Updated dependencies [d12ac84]
+- Updated dependencies [4099ef2]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [740720c]
+- Updated dependencies [6e643cc]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [1a2a8a9]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [70d07fd]
+- Updated dependencies [8a741ab]
+- Updated dependencies [6cfa758]
+- Updated dependencies [ad50d61]
+- Updated dependencies [d7411fa]
+- Updated dependencies [c6075a7]
+- Updated dependencies [fed637c]
+- Updated dependencies [1948c5f]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [368deee]
+- Updated dependencies [08bf7d2]
+- Updated dependencies [021524c]
+- Updated dependencies [49c6bf3]
+- Updated dependencies [4ed453d]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [a68b475]
+- Updated dependencies [57445a6]
+- Updated dependencies [0212714]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [c0dd417]
+- Updated dependencies [517e415]
+- Updated dependencies [6ddb97b]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [5f34d65]
+- Updated dependencies [7939732]
+- Updated dependencies [dbc1765]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [c2f8bff]
+- Updated dependencies [c385d3b]
+- Updated dependencies [3aa008d]
+- Updated dependencies [378c955]
+- Updated dependencies [56fa31b]
+- Updated dependencies [9c5fb3e]
+  - @object-ui/types@19.0.0-next.0
+  - @object-ui/core@19.0.0-next.0
+  - @object-ui/components@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

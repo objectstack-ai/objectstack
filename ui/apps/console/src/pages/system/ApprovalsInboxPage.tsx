@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader, approvalQueueState, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
 import {
   Button,
@@ -78,9 +78,9 @@ import {
 } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
+import { declaredUserMessage } from '@object-ui/react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { isSystemManagedField } from '@object-ui/types';
-import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
+import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import {
   CheckCircle2,
   XCircle,
@@ -108,12 +108,61 @@ import {
   isUnresolvableRecordReference,
   useUnresolvableRecordReferenceLabel,
 } from './unresolvableRecordReference';
-import { useHiddenFieldsByObject } from './hiddenFields';
+import { useInboxFigureFieldByObject } from './hiddenFields';
+import { applyInboxUrlState, parseInboxUrlState, type InboxSort, type InboxUrlState } from './approvalsInboxUrlState';
 
-type TabKey = 'pending' | 'submitted' | 'all';
+type TabKey = InboxUrlState['tab'];
 
 /** Server page size for the paginated tabs (submitted / all). */
 const PAGE_SIZE = 50;
+
+/** One row a bulk approve / reject could not decide, and the refusal's reason. */
+interface BulkFailure {
+  id: string;
+  title: string;
+  reason: string;
+}
+
+/**
+ * How many failed rows a bulk run's toast lists before the rest move behind
+ * its "Show all" action (the dialog lists every one).
+ */
+const BULK_FAILURES_IN_TOAST = 3;
+
+/**
+ * The history-state key a bulk run that settled after the inbox unmounted
+ * hands its failed rows back under. The run's toast outlives the page, so its
+ * "Show all" cannot open the old page's dialog; it navigates back to the inbox
+ * the run started on with the rows in this key, and the inbox opens its
+ * dialog on them.
+ */
+const BULK_FAILURES_STATE_KEY = 'approvalsBulkFailures';
+
+/**
+ * Every mounted inbox's "reload my list and badge" (objectstack#37548). A
+ * bulk run outlives the inbox it started on: when it settles it tells every
+ * inbox mounted then — itself if the user stayed, a fresh one if they left
+ * and came back — and an inbox mounted at no point sees nothing reloaded.
+ */
+const bulkRunSettledListeners = new Set<() => void>();
+
+/** A bulk run settled: every mounted inbox reloads its list and badge once. */
+function announceBulkRunSettled(): void {
+  for (const listener of [...bulkRunSettledListeners]) listener();
+}
+
+/** The failed rows a navigation handed this inbox, or `null` when it handed none. */
+function handedBulkFailures(state: unknown): BulkFailure[] | null {
+  if (!state || typeof state !== 'object') return null;
+  const list = (state as Record<string, unknown>)[BULK_FAILURES_STATE_KEY];
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const rows = list.filter((f): f is BulkFailure =>
+    !!f && typeof f === 'object'
+    && typeof (f as BulkFailure).id === 'string'
+    && typeof (f as BulkFailure).title === 'string'
+    && typeof (f as BulkFailure).reason === 'string');
+  return rows.length > 0 ? rows : null;
+}
 
 /**
  * Semantic status colors (green = approved, amber = waiting, red = rejected,
@@ -307,19 +356,6 @@ function slaState(dueAt: string | null | undefined, now: number): { overdue: boo
   return { overdue: due < now, ms: Math.abs(now - due) };
 }
 
-/**
- * Whether a snapshot key is a framework-managed column rather than a business
- * field of the record — `@object-ui/types`' `isSystemManagedField`, the one
- * classifier the default list columns, record pickers and related lists use
- * to keep bookkeeping out of business surfaces. The queue reads the snapshot
- * without the object's field declarations, so it judges by name: the
- * classifier's name list, which includes `owner_id`, the injected ownership
- * column (objectui#11677).
- */
-function isBookkeepingKey(key: string): boolean {
-  return isSystemManagedField(key);
-}
-
 function prettifyKey(k: string): string {
   const tokens = k.split('_').filter(Boolean);
   // Drop a trailing `id` token so a resolved lookup key reads as its subject —
@@ -330,59 +366,43 @@ function prettifyKey(k: string): string {
 }
 
 /**
- * Amount-like keys worth surfacing in the queue so a reviewer can triage
- * without opening each request (#2762 P1-3). Deliberately narrow — a decision
- * turns on the amount/total/budget, not on every numeric field.
- */
-const AMOUNT_KEY_RE = /(amount|total|price|value|cost|sum|budget|salary|fee|revenue|balance|金额|总额|价格|费用|预算|金额)/i;
-
-/**
- * The one decision-relevant numeric field (amount/total/…) of the snapshot,
- * for the inline list display and amount sort. Prefers the server-formatted
+ * The row's figure: the value of the field its object declares as its inbox
+ * figure (`figureField`, the first numeric `highlightFields` entry the author
+ * did not declare `hidden: true` — see `hiddenFields.ts`), for the inline
+ * queue display and the amount sort. Prefers the server-formatted
  * `payload_display` value (currency, etc.) but always keeps the raw number for
- * ordering. Null when the snapshot has no such field.
+ * ordering.
  *
- * `hiddenKeys` is the fields THIS request's object declares `hidden: true`, and
- * it is **required** on purpose (objectui#6020). It was optional when
- * objectui#5565 added it, and four of the five call sites simply did not pass
- * it — a filter that lives in the function body but is unpassed at the call
- * site reads exactly like a fixed defect. Required, the compiler asks the one
- * question that matters at every present and future call site: *whose* hidden
- * keys?
+ * Null when the object declares no figure, or when the snapshot holds no
+ * number for it. ⛔ Never chosen by a field's NAME: an object that declares no
+ * numeric highlight shows no figure (ADR-0085 — one curated list, every
+ * surface).
  *
- * An empty set means "nothing known to be hidden" — including the case where
- * the metadata read has not answered — and yields today's amount. See
- * `hiddenFields.ts` on why this presentation filter fails open.
+ * A declared figure of 0 is shown: it is the value of the field the author
+ * chose, not a guess.
  *
- * The first key whose NAME matches {@link AMOUNT_KEY_RE} and whose value is not
- * zero leads (objectui#12110 item 6). A name match is a guess about what the
- * key means, and a zero from a guessed key (HotCRM's `child_account_revenue`
- * roll-up, finding C-18 of the HotCRM browser pass) is not the request's
- * amount, so it never leads.
+ * `figureField` is **required** on purpose: the queue spans many objects, and
+ * the compiler asks at every call site *whose* figure field.
  */
-function decisionAmountEntry(
+function declaredFigureEntry(
   r: ApprovalRequestRow,
-  hiddenKeys: ReadonlySet<string>,
+  figureField: string | null,
   locale: string,
 ): { key: string; label: string; value: number; display: string } | null {
+  if (figureField === null) return null;
   const payload = r.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
-    if (isBookkeepingKey(k)) continue;
-    if (hiddenKeys.has(k)) continue; // author declared `hidden: true` (#5565)
-    if (!AMOUNT_KEY_RE.test(k)) continue;
-    const num = typeof v === 'number'
-      ? v
-      : (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
-    if (num == null || !Number.isFinite(num) || num === 0) continue;
-    return {
-      key: k,
-      label: r.payload_labels?.[k] ?? prettifyKey(k),
-      value: num,
-      display: r.payload_display?.[k] ?? num.toLocaleString(locale),
-    };
-  }
-  return null;
+  const v = (payload as Record<string, unknown>)[figureField];
+  const num = typeof v === 'number'
+    ? v
+    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : null);
+  if (num == null || !Number.isFinite(num)) return null;
+  return {
+    key: figureField,
+    label: r.payload_labels?.[figureField] ?? prettifyKey(figureField),
+    value: num,
+    display: r.payload_display?.[figureField] ?? num.toLocaleString(locale),
+  };
 }
 
 /** The page's scoped translator, as the row cells receive it. */
@@ -411,10 +431,13 @@ type Translate = (key: string, defaultValue: string, opts?: Record<string, unkno
  */
 
 function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
+  // The label and step wrap rather than truncate: a one-line label's
+  // unbreakable width would size this column and push the table past its card
+  // (see the column heads in the page body).
   return (
     <div className="min-w-0">
-      <div className="font-medium truncate">{processLabel(r)}</div>
-      <div className="text-xs text-muted-foreground truncate">
+      <div className="font-medium break-words">{processLabel(r)}</div>
+      <div className="text-xs text-muted-foreground break-words">
         {stepLabel(r) || '—'}
         {(r.round ?? 1) > 1 && (
           <span className="ml-1.5 text-violet-600 dark:text-violet-400">
@@ -566,7 +589,7 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
  */
 function SelfSubmittedBadge({ label }: { label: string }) {
   return (
-    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-[10px] font-normal">
+    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-xs font-normal">
       {label}
     </Badge>
   );
@@ -577,11 +600,11 @@ function SelfSubmittedBadge({ label }: { label: string }) {
  * readable/unreadable decision and the URL are ONE prop so the two cannot be
  * handed in disagreeing with each other.
  *
- * `hiddenKeys` belongs to THIS row's object (objectui#6020). The queue spans
- * many objects, so it is a per-row prop and not something this cell could
- * resolve for itself — see the page body, which drives it off one lookup.
+ * `figureField` belongs to THIS row's object. The queue spans many objects, so
+ * it is a per-row prop and not something this cell could resolve for itself —
+ * see the page body, which drives it off one lookup.
  */
-function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLabel }: {
+function RecordCell({ r, href, linkState, figureField, deadLabel, unresolvableLabel }: {
   r: ApprovalRequestRow;
   href: string | null;
   /**
@@ -590,15 +613,14 @@ function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLab
    * an app whose navigation does not list its object still leads back here.
    */
   linkState: { from: { pathname: string; label: string } };
-  hiddenKeys: ReadonlySet<string>;
+  figureField: string | null;
   deadLabel: string | null;
   unresolvableLabel: string | null;
 }) {
   const displayLocale = useDisplayLocale();
-  // Surface the decision-relevant amount inline so a reviewer can triage the
-  // queue without opening each request (#2762 P1-3) — minus anything the
-  // author declared `hidden: true` (objectui#6020).
-  const amount = decisionAmountEntry(r, hiddenKeys, displayLocale);
+  // Surface the object's declared figure inline so a reviewer can triage the
+  // queue without opening each request.
+  const amount = declaredFigureEntry(r, figureField, displayLocale);
   // objectui#5211: no link into a record this viewer cannot open. The title
   // still shows — it comes from the request's own payload snapshot, which the
   // approver was already given — it just stops being an anchor.
@@ -620,17 +642,17 @@ function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLab
       ) : unresolvableLabel !== null ? (
         <UnresolvableRecordReference label={unresolvableLabel} className="text-sm max-w-full" />
       ) : href === null ? (
-        <div className="text-sm truncate max-w-full" title={title}>{title}</div>
+        <div className="text-sm line-clamp-2 break-words max-w-full" title={title}>{title}</div>
       ) : (
       <Link
         to={href}
         state={linkState}
         onClick={(e) => e.stopPropagation()}
-        className="inline-flex items-center gap-1 text-sm hover:underline truncate max-w-full"
+        className="inline-flex items-start gap-1 text-sm hover:underline max-w-full"
         title={title}
       >
-        <span className="truncate">{title}</span>
-        <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="line-clamp-2 break-words">{title}</span>
+        <ExternalLink className="h-3 w-3 mt-1 shrink-0 text-muted-foreground" />
       </Link>
       )}
       <div className="text-xs text-muted-foreground truncate">
@@ -732,14 +754,13 @@ function InlineActions({
  * `sys_approval_request`, where `RecordDetailView` mounts the page objectstack
  * serves for it (`sys_approval_request_detail`).
  *
- * The app segment is the app that owns the request's RECORD
- * (`objectHostAppSegment`, objectstack#32667): the app it is asked from when
- * that app lists the record's object, else the first app that does, else
- * Setup. A request opened under an app whose navigation never names the
- * record's object drew that app's sidebar around it, and its record card could
- * not reach the record. Only when the reader can open no such app, nor Setup,
- * does the request stay in the app it was asked from (or `setup` outside one,
- * as the row's record link falls back).
+ * The app segment is the app that owns the request's RECORD when one does: the
+ * app it is asked from when that app lists the record's object, else the first
+ * app that does (`objectHostAppSegment` without its Setup step). When no app
+ * lists the object the request stays in the app it is asked from, which for an
+ * open with no source app is the current, last used or first app
+ * (`resolveApprovalsHostSegment`, objectstack#35505): Setup only when it is
+ * that app. An inbox with no app segment (the zero-app route set) keeps `setup`.
  */
 function requestPagePath(
   apps: readonly Record<string, unknown>[] | undefined,
@@ -747,8 +768,31 @@ function requestPagePath(
   appName: string | undefined,
   requestId: string,
 ): string {
-  const segment = objectHostAppSegment(apps, objectName, appName) ?? (appName || 'setup');
-  return `/apps/${segment}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+  return `/apps/${requestPageSegment(apps, objectName, appName)}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+}
+
+function requestPageSegment(
+  apps: readonly Record<string, unknown>[] | undefined,
+  objectName: string | null | undefined,
+  appName: string | undefined,
+): string {
+  return objectHostAppSegment(apps, objectName, appName, { orSetup: false }) ?? (appName || 'setup');
+}
+
+/**
+ * The history state a deep link opens the request page with: the way back is
+ * the approvals inbox of the app the page opens in, never the object's raw
+ * `sys_approval_request` list (objectstack#35505). The page's ✕ and the phone's
+ * ‹ follow `from.pathname`. A queue handed in by the opener (Home's 我的工作,
+ * the bell: `approvalQueueState`) rides along, so 「处理后打开下一条」 moves on
+ * through it; an open that hands none (a notification, the e-mail link) carries
+ * the way back alone.
+ */
+function deepLinkRequestState(incoming: unknown, inboxPath: string, inboxLabel: string): Record<string, unknown> {
+  const base = incoming && typeof incoming === 'object' ? (incoming as Record<string, unknown>) : {};
+  const from = base.from && typeof base.from === 'object' ? (base.from as Record<string, unknown>) : {};
+  const label = typeof from.label === 'string' && from.label ? from.label : inboxLabel;
+  return { ...base, from: { ...from, pathname: inboxPath, label } };
 }
 
 /**
@@ -776,6 +820,8 @@ export function ApprovalsInboxPage() {
  */
 function RequestDeepLink({ requestId }: { requestId: string }) {
   const { appName } = useParams<{ appName?: string }>();
+  const location = useLocation();
+  const { t } = useObjectTranslation();
   const { apps, loading } = useMetadata();
   const catalog = Array.isArray(apps) ? (apps as Record<string, unknown>[]) : undefined;
   const choose = !loading && !!catalog && catalog.length > 0;
@@ -800,9 +846,15 @@ function RequestDeepLink({ requestId }: { requestId: string }) {
   }, [choose, requestId]);
 
   if (loading) return null;
-  if (!choose) return <Navigate to={requestPagePath(catalog, null, appName, requestId)} replace />;
-  if (answer?.requestId !== requestId) return null;
-  return <Navigate to={requestPagePath(catalog, answer.objectName, appName, requestId)} replace />;
+  if (choose && answer?.requestId !== requestId) return null;
+  const objectName = choose ? (answer?.objectName ?? null) : null;
+  const segment = requestPageSegment(catalog, objectName, appName);
+  const state = deepLinkRequestState(
+    location.state,
+    `/apps/${segment}/system/approvals`,
+    String(t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' })),
+  );
+  return <Navigate to={requestPagePath(catalog, objectName, appName, requestId)} replace state={state} />;
 }
 
 function ApprovalsQueue() {
@@ -878,6 +930,12 @@ function ApprovalsQueue() {
 
   /** Map raw API errors to business-readable toasts (no `HTTP_404: Not found`). */
   const humanizeError = useCallback((err: any, fallback: string): string => {
+    // A refusal the server marked for the end user (`userMessage`, already in
+    // the request's language) is shown as written, before any generic line:
+    // the decide refusal of a submitter's own approval names what to do
+    // instead (objectstack#36463). `call` parks the body on `err.details`.
+    const marked = declaredUserMessage(err);
+    if (marked) return marked;
     const code = err?.code ?? '';
     const status = err?.status ?? 0;
     if (code === 'NOT_IMPLEMENTED' || status === 501) {
@@ -977,7 +1035,20 @@ function ApprovalsQueue() {
    */
   const unresolvableReferenceLabel = useUnresolvableRecordReferenceLabel();
 
-  const [tab, setTab] = useState<TabKey>('pending');
+  // objectstack#36966 — the tab, the filters, the search and the sort live in
+  // the address (`approvalsInboxUrlState.ts`), so Back from a request's page,
+  // a reload and a copied link reopen the inbox as the reader left it. Every
+  // write replaces the history entry: Back leaves the inbox, it never pages
+  // through filter flips.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.toString();
+  const urlState = useMemo(() => parseInboxUrlState(new URLSearchParams(search)), [search]);
+  const { tab, status: statusFilter, process: processFilter, object: objectFilter, sort: sortKey } = urlState;
+  const writeUrlState = useCallback(
+    (patch: Partial<InboxUrlState>) =>
+      setSearchParams((prev) => applyInboxUrlState(prev, patch), { replace: true }),
+    [setSearchParams],
+  );
   const [rows, setRows] = useState<ApprovalRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1030,43 +1101,106 @@ function ApprovalsQueue() {
   );
 
   /**
-   * objectui#5565 + objectui#6020 — the fields each object on screen declares
-   * `hidden: true`. `hidden` is a UI contract (objectstack#10749: "`hidden:
-   * true` stays UI-only; `internal: true` is the serialization primitive"), and
-   * every surface below is default UI, so all of them must honour it: the
-   * queue rows, the mobile cards, and the amount sort (#6020).
+   * The figure field each object on screen declares — the first numeric
+   * `highlightFields` entry it did not declare `hidden: true` (ADR-0085; see
+   * `hiddenFields.ts`). The queue rows, the mobile cards and the amount sort
+   * all read it.
    *
-   * ⛔ It is keyed BY OBJECT and not a single set. The queue is N rows spanning
-   * K objects; threading one object's set into the rows would apply one
-   * object's declarations to every row — hiding fields on rows whose object
-   * never declared them, missing fields on rows whose object did, and looking
-   * fixed while doing it. Every consumer asks with its OWN `object_name`.
+   * ⛔ It is keyed BY OBJECT. The queue is N rows spanning K objects, each with
+   * its own declarations; every consumer asks with its OWN `object_name`.
    *
-   * One cached metadata read per distinct object per mount, empty until it
-   * answers — see `hiddenFields.ts` for the cost model and why this fails open.
+   * One cached metadata read per distinct object per mount, `null` (no
+   * figure) until it answers.
    */
-  const hiddenFieldObjects = useMemo(
+  const figureObjects = useMemo(
     () => rows.map((t) => t.object_name),
     [rows],
   );
-  const hiddenFields = useHiddenFieldsByObject(hiddenFieldObjects);
+  const figureFields = useInboxFigureFieldByObject(figureObjects);
 
-  // Search + filters. On the paginated tabs (submitted/all) the free-text
-  // query is debounced and pushed to the server; the pending tab keeps
-  // instant client-side matching over its (bounded) personal queue.
-  const [query, setQuery] = useState('');
-  const [serverQuery, setServerQuery] = useState('');
-  const [processFilter, setProcessFilter] = useState<string>('all');
-  const [objectFilter, setObjectFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  // Client-side ordering of the visible rows (#2762 P1-3). Default keeps the
-  // server's newest-first; the others let a reviewer triage by wait time or by
-  // the decision-relevant amount.
-  const [sortKey, setSortKey] = useState<'recent' | 'oldest' | 'amount'>('recent');
+  // Search + filters. The box keeps its own draft, so a keystroke never waits
+  // on the router; the draft reaches the address debounced (`q`). On the
+  // paginated tabs (submitted/all) the address's query is the one the server
+  // is asked; the pending tab keeps instant client-side matching over its
+  // (bounded) personal queue, from the draft. The draft follows the address
+  // only on a navigation this page did not write (a link here, Back /
+  // Forward), never on a REPLACE, which is this page's own write.
+  const [query, setQuery] = useState(urlState.q);
+  const navigationType = useNavigationType();
+  const [draftLocationKey, setDraftLocationKey] = useState(location.key);
+  if (draftLocationKey !== location.key) {
+    setDraftLocationKey(location.key);
+    if (navigationType !== 'REPLACE') setQuery(urlState.q);
+  }
+  const serverQuery = tab === 'pending' ? '' : urlState.q;
+  // Client-side ordering of the visible rows (#2762 P1-3), `sortKey` above.
+  // Default keeps the server's newest-first; the others let a reviewer triage
+  // by wait time or by the decision-relevant amount.
+  const setStatusFilter = useCallback((v: string) => writeUrlState({ status: v }), [writeUrlState]);
+  const setProcessFilter = useCallback((v: string) => writeUrlState({ process: v }), [writeUrlState]);
+  const setObjectFilter = useCallback((v: string) => writeUrlState({ object: v }), [writeUrlState]);
+  const setSortKey = useCallback((v: InboxSort) => writeUrlState({ sort: v }), [writeUrlState]);
 
   // Bulk selection (only meaningful on "pending" tab where the user can act)
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
+  /**
+   * The failed rows the "Show all" dialog lists, each with the refusal's
+   * reason. A toast carries the first few; its "Show all" action puts ITS OWN
+   * run's list here and opens the dialog, so a toast still on screen after a
+   * later run never shows that later run's rows (or an empty list).
+   */
+  const [bulkFailures, setBulkFailures] = useState<BulkFailure[]>([]);
+  const [bulkFailuresOpen, setBulkFailuresOpen] = useState(false);
+  /**
+   * The partial-failure toasts this page raised and has not seen dismissed.
+   * They stay until dismissed, and their action opens this page's dialog, so
+   * they leave with the page.
+   */
+  const bulkFailureToasts = useRef(new Set<string | number>());
+  /**
+   * Whether this page is still mounted. A bulk run keeps going after the user
+   * leaves; when it settles it must not touch this page's state, and its
+   * toast's action must not open this page's dialog — nothing would show.
+   */
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    const raised = bulkFailureToasts.current;
+    return () => {
+      mounted.current = false;
+      for (const id of raised) toast.dismiss(id);
+    };
+  }, []);
+  // A bulk run, this page's or one an earlier inbox started, settled while
+  // this page is mounted: reload its list and badge (objectstack#37548).
+  const reloadAfterBulkRun = useRef<() => void>(() => {});
+  useEffect(() => {
+    const listener = () => reloadAfterBulkRun.current();
+    bulkRunSettledListeners.add(listener);
+    return () => { bulkRunSettledListeners.delete(listener); };
+  }, []);
+  // A run that settled after the inbox unmounted handed its failed rows back
+  // through the navigation its toast's "Show all" made: open the dialog on
+  // them once per navigation, then drop them from the history entry so a
+  // reload or Back does not open it again.
+  const handedFailures = handedBulkFailures(location.state);
+  const [handedKey, setHandedKey] = useState<string | null>(null);
+  if (handedFailures && handedKey !== location.key) {
+    setHandedKey(location.key);
+    setBulkFailures(handedFailures);
+    setBulkFailuresOpen(true);
+  }
+  const handedRows = handedFailures !== null;
+  useEffect(() => {
+    if (!handedRows) return;
+    const rest = { ...(location.state as Record<string, unknown>) };
+    delete rest[BULK_FAILURES_STATE_KEY];
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: Object.keys(rest).length > 0 ? rest : null },
+    );
+  }, [handedRows, location, navigate]);
 
   // Inline decision confirmations (row-level quick action / mobile card /
   // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
@@ -1090,10 +1224,10 @@ function ApprovalsQueue() {
   const [focusIndex, setFocusIndex] = useState<number>(-1);
 
   useEffect(() => {
-    if (tab === 'pending') return;
-    const t = window.setTimeout(() => setServerQuery(query), 350);
+    if (query === urlState.q) return;
+    const t = window.setTimeout(() => writeUrlState({ q: query }), 350);
     return () => window.clearTimeout(t);
-  }, [query, tab]);
+  }, [query, urlState.q, writeUrlState]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1198,25 +1332,73 @@ function ApprovalsQueue() {
       .then(res => setMyPendingCount(res.data.length))
       .catch(() => { /* best-effort */ });
   }, [identities]);
+  useEffect(() => {
+    reloadAfterBulkRun.current = () => {
+      void load();
+      refreshBadge();
+    };
+  }, [load, refreshBadge]);
 
-  /** Unique process labels present in current rows (for filter dropdown). */
-  const processOptions = useMemo(() => {
+  /** Unique process labels present in current rows. */
+  const rowProcesses = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) set.add(processLabel(r));
     return Array.from(set).sort();
   }, [rows]);
 
   /**
-   * Unique objects present in current rows (for filter dropdown): filtered by
-   * machine name, shown by the label the row serves, which the approvals door
-   * picks in the reader's language (objectstack#26883).
+   * Unique objects present in current rows: filtered by machine name, shown by
+   * the label the row serves, which the approvals door picks in the reader's
+   * language (objectstack#26883).
    */
-  const objectOptions = useMemo(() => {
+  const rowObjects = useMemo(() => {
     const byName = new Map<string, string>();
     for (const r of rows) if (r.object_name && !byName.has(r.object_name)) byName.set(r.object_name, objectDisplay(r));
     return Array.from(byName, ([value, label]) => ({ value, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
+
+  /**
+   * The filter dropdowns: the rows' own values, and the filter in force when no
+   * loaded row carries it (objectstack#36966). On the paginated tabs the rows
+   * are the pages loaded so far, so a filter the address names can sit past
+   * them; the dropdown still shows it, and the reader can see and clear it.
+   * An object no loaded row labels is shown by its machine name.
+   */
+  const processOptions = useMemo(
+    () => (processFilter !== 'all' && !rowProcesses.includes(processFilter)
+      ? [...rowProcesses, processFilter].sort()
+      : rowProcesses),
+    [rowProcesses, processFilter],
+  );
+  const objectOptions = useMemo(
+    () => (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)
+      ? [...rowObjects, { value: objectFilter, label: objectFilter }].sort((a, b) => a.label.localeCompare(b.label))
+      : rowObjects),
+    [rowObjects, objectFilter],
+  );
+
+  /**
+   * objectstack#36966 — a process or object the address names (Back, a
+   * reload, a copied link) is data, not a fixed vocabulary, so it is checked
+   * against the rows: once, at the first load that answers rows. Only when
+   * those rows are the WHOLE answer — the pending tab, which is unpaginated,
+   * or a paginated tab whose first load holds every row (`total`) — does a
+   * value none of them carries read as "all" and leave the address. A value
+   * past the first page of a paginated tab is kept (see the dropdowns above).
+   * A filter picked from the dropdowns is never second-guessed.
+   */
+  const seedFiltersChecked = useRef(false);
+  useEffect(() => {
+    if (seedFiltersChecked.current || loading || error || rows.length === 0) return;
+    seedFiltersChecked.current = true;
+    const wholeAnswer = tab === 'pending' || total === null || rows.length >= total;
+    if (!wholeAnswer) return;
+    const patch: Partial<InboxUrlState> = {};
+    if (processFilter !== 'all' && !rowProcesses.includes(processFilter)) patch.process = 'all';
+    if (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)) patch.object = 'all';
+    if (patch.process || patch.object) writeUrlState(patch);
+  }, [loading, error, rows.length, tab, total, processFilter, rowProcesses, objectFilter, rowObjects, writeUrlState]);
 
   // objectstack#29070: the list follows the search box at a deferred
   // priority, so a keystroke repaints the box first and the rows after,
@@ -1246,18 +1428,16 @@ function ApprovalsQueue() {
     if (sortKey === 'recent') return matched; // server order is already newest-first
     const sorted = [...matched];
     if (sortKey === 'amount') {
-      // Highest amount first; rows without a detectable amount sink to the
-      // bottom (keeping their relative newest-first order).
+      // Highest figure first; rows without a figure sink to the bottom
+      // (keeping their relative newest-first order).
       //
-      // objectui#6020: a row whose amount field its object declares
-      // `hidden: true` has no amount HERE either, so it sinks with them. An
-      // ordering IS a disclosure — it leaks the relative magnitude of a hidden
-      // figure to a viewer who never sees the figure — so the queue must not
-      // order on a value it declines to render. Each row is asked about its
-      // own object; a page spanning several objects gets several answers.
+      // The queue orders on exactly the figure it renders: an object that
+      // declares no figure, or whose figure would be a field it declares
+      // `hidden: true`, has none HERE either — an ordering IS a disclosure of
+      // relative magnitude. Each row is asked about its own object.
       sorted.sort((a, b) => {
-        const av = decisionAmountEntry(a, hiddenFields.forObject(a.object_name), displayLocale)?.value;
-        const bv = decisionAmountEntry(b, hiddenFields.forObject(b.object_name), displayLocale)?.value;
+        const av = declaredFigureEntry(a, figureFields.forObject(a.object_name), displayLocale)?.value;
+        const bv = declaredFigureEntry(b, figureFields.forObject(b.object_name), displayLocale)?.value;
         if (av == null && bv == null) return 0;
         if (av == null) return 1;
         if (bv == null) return -1;
@@ -1268,7 +1448,7 @@ function ApprovalsQueue() {
       sorted.sort((a, b) => (submittedAt(a) || '').localeCompare(submittedAt(b) || ''));
     }
     return sorted;
-  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
+  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, figureFields, displayLocale]);
 
   /**
    * Open a request on its page (objectui#12484): the page objectstack serves
@@ -1287,9 +1467,20 @@ function ApprovalsQueue() {
    * draws 「第 N 条，共 M 条」 with ↓ ↑ and `j` / `k` over it, and a decision
    * that takes the request out of the queue opens the next one. The other
    * tabs list requests the reader is not deciding, so they hand no queue.
+   *
+   * objectstack#36966 — a search typed and not yet written to the address
+   * (the write is debounced) is written first, into the inbox's own entry, so
+   * Back returns to it too.
    */
   const openRequest = useCallback(
-    (r: ApprovalRequestRow) =>
+    (r: ApprovalRequestRow) => {
+      let inboxSearch = location.search;
+      if (query !== urlState.q) {
+        const next = applyInboxUrlState(searchParams, { q: query });
+        setSearchParams(next, { replace: true });
+        const flushed = next.toString();
+        inboxSearch = flushed ? `?${flushed}` : '';
+      }
       navigate(
         appName
           ? `/apps/${appName}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(r.id)}`
@@ -1302,13 +1493,17 @@ function ApprovalsQueue() {
         tab === 'pending'
           ? {
               state: approvalQueueState(
-                { pathname: `${location.pathname}${location.search}`, label: inboxTitle },
+                { pathname: `${location.pathname}${inboxSearch}`, label: inboxTitle },
                 filteredRows.map((row) => row.id),
               ),
             }
           : undefined,
-      ),
-    [navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows],
+      );
+    },
+    [
+      navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows,
+      query, urlState.q, searchParams, setSearchParams,
+    ],
   );
 
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
@@ -1390,9 +1585,12 @@ function ApprovalsQueue() {
   const runBulk = useCallback(async (kind: 'approve' | 'reject', comment?: string) => {
     const targets = actionableSelectedRows;
     if (targets.length === 0) return;
+    // Where this run started: a run that settles after the user left hands
+    // its failed rows back to this inbox from here.
+    const inboxPath = `${location.pathname}${location.search}`;
     setBulkRunning(true);
     let ok = 0;
-    const failures: string[] = [];
+    const failures: BulkFailure[] = [];
     for (const r of targets) {
       const pending = new Set(r.pending_approvers || []);
       const actor = identities.find(i => pending.has(i)) || user?.id || '';
@@ -1400,25 +1598,71 @@ function ApprovalsQueue() {
         const fn = kind === 'approve' ? approvalsApi.approve : approvalsApi.reject;
         await fn(r.id, { actor_id: actor, ...decisionComment(comment) });
         ok++;
-      } catch {
-        failures.push(r.record_title || formatIdentity(r.record_id));
+      } catch (err: any) {
+        // Each failure keeps its refusal's own text, read the way the
+        // single-row Approve reads it (`userMessage` first, else the page's
+        // generic line) — a bare title says which row, never why.
+        failures.push({
+          id: r.id,
+          title: r.record_title || formatIdentity(r.record_id),
+          reason: humanizeError(err, tr('actionFailed', 'Action failed')),
+        });
       }
     }
-    setBulkRunning(false);
-    setSelectedRowIds(new Set());
+    // The user may have left while the run was going: an unmounted page's
+    // state is not touched. The list and badge reload in whichever inbox is
+    // mounted now (`announceBulkRunSettled`), this one or a fresh one.
+    const live = mounted.current;
+    if (live) {
+      setBulkRunning(false);
+      setSelectedRowIds(new Set());
+    }
     if (failures.length === 0) {
       toast.success(kind === 'approve'
         ? tr('bulkApproved', 'Approved {{count}} requests', { count: ok })
         : tr('bulkRejected', 'Rejected {{count}} requests', { count: ok }));
     } else {
-      const shown = failures.slice(0, 3).join(', ');
-      toast.error(tr('bulkPartial', '{{ok}} succeeded, {{fail}} failed: {{which}}', {
-        ok, fail: failures.length, which: shown + (failures.length > 3 ? '…' : ''),
-      }));
+      const lines = failures.slice(0, BULK_FAILURES_IN_TOAST).map(f =>
+        tr('bulkFailureLine', '{{title}}: {{reason}}', { title: f.title, reason: f.reason }));
+      const overflow = failures.length > BULK_FAILURES_IN_TOAST;
+      // The toast stays until dismissed: a row per line with its reason is
+      // more than a few seconds' reading, and the overflow's "Show all" must
+      // not time out.
+      const toastId = toast.error(tr('bulkPartialSummary', '{{ok}} succeeded, {{fail}} failed', { ok, fail: failures.length }), {
+        description: lines.join('\n'),
+        classNames: { description: 'whitespace-pre-line' },
+        duration: Infinity,
+        closeButton: true,
+        onDismiss: () => { bulkFailureToasts.current.delete(toastId); },
+        // More failures than the toast shows: the rest are one click away.
+        // The action closes over THIS run's list, never the page's latest.
+        // A run that settled after the page unmounted raises a toast the
+        // page never sees dismissed, so its action cannot open the gone
+        // page's dialog: it goes back to the inbox the run started on and
+        // hands the list over (`BULK_FAILURES_STATE_KEY`).
+        ...(overflow
+          ? {
+              action: {
+                label: tr('bulkFailuresShowAll', 'Show all ({{n}})', { n: failures.length }),
+                onClick: live
+                  ? () => {
+                      setBulkFailures(failures);
+                      setBulkFailuresOpen(true);
+                    }
+                  : () => {
+                      navigate(inboxPath, { state: { [BULK_FAILURES_STATE_KEY]: failures } });
+                    },
+              },
+            }
+          : {}),
+      });
+      if (live && toastId != null) bulkFailureToasts.current.add(toastId);
     }
-    void load();
-    refreshBadge();
-  }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, tr]);
+    announceBulkRunSettled();
+  }, [
+    actionableSelectedRows, identities, user?.id, humanizeError, tr,
+    location.pathname, location.search, navigate,
+  ]);
 
   /** Confirmed row-level approve (from the shared dialog). */
   const inlineApprove = useCallback(async (r: ApprovalRequestRow) => {
@@ -1535,6 +1779,14 @@ function ApprovalsQueue() {
                     widths so they never crowd — instead of the browser
                     spreading five auto columns evenly and leaving 审批事项
                     over-wide next to a cramped 状态. */}
+                {/* objectstack#37534 — the three text columns (Request,
+                    Record, Requester) WRAP instead of holding one line, so
+                    none of them sets a minimum width the card cannot give:
+                    from a 928 px card up the table fits, and the pinned
+                    Approve / Reject column covers no other column at rest.
+                    Narrower, the table scrolls under the pin (#12708).
+                    `e2e/approvals-inbox-desktop-columns-37534.spec.ts`
+                    measures it in Chromium. */}
                 <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
                 {/* objectui#12816 — the Record cells are `max-w-0` (below),
                     so this floor is the column's only minimum: enough to
@@ -1569,9 +1821,10 @@ function ApprovalsQueue() {
                   )}
                   <TableCell><RequestCell r={r} tr={tr} /></TableCell>
                   {/* objectui#12816 — `max-w-0` takes the record title's
-                      unbreakable width out of the auto-layout table's
-                      column sizing, so a long title truncates (full text
-                      in its `title`) instead of widening the table. */}
+                      width out of the auto-layout table's column sizing,
+                      so a long title wraps to two lines and is then
+                      clamped (full text in its `title`, objectstack#37534)
+                      instead of widening the table. */}
                   <TableCell className="max-w-0">
                     <RecordCell
                       r={r}
@@ -1581,7 +1834,7 @@ function ApprovalsQueue() {
                       // a live-looking link for the first paint.
                       href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
                       linkState={recordLinkState}
-                      hiddenKeys={hiddenFields.forObject(r.object_name)}
+                      figureField={figureFields.forObject(r.object_name)}
                       deadLabel={deadLabelFor(r)}
                       unresolvableLabel={unresolvableLabelFor(r)}
                     />
@@ -1595,9 +1848,9 @@ function ApprovalsQueue() {
                         <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5 text-sm">
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm">
                         <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                        <span className="min-w-0 break-words" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
                         {tab !== 'submitted' && r.viewer?.is_submitter === true && (
                           <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
                         )}
@@ -1617,14 +1870,14 @@ function ApprovalsQueue() {
                         // ADR-0157 D9: the working calendar cannot count the
                         // deadline, so the request waits; say why in its place.
                         return (
-                          <div className="mt-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                          <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                             {slaRefusalLabel(r.sla_due_refusal)}
                           </div>
                         );
                       }
                       return sla ? (
                         <div className={cn(
-                          'mt-0.5 text-[10px] font-medium',
+                          'mt-0.5 text-xs font-medium',
                           sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
                         )}>
                           {slaLabel(sla)}
@@ -1697,8 +1950,8 @@ function ApprovalsQueue() {
                       <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
                     )}
                     {(() => {
-                      // objectui#6020: this row's OWN object decides.
-                      const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
+                      // This row's OWN object decides.
+                      const amount = declaredFigureEntry(r, figureFields.forObject(r.object_name), displayLocale);
                       return amount ? (
                         <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
                       ) : null;
@@ -1754,7 +2007,7 @@ function ApprovalsQueue() {
     </>
   ), [
     tab, allSelected, toggleAll, allFilteredSelectable, tr, filteredRows, focusIndex, openRequest,
-    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, hiddenFields,
+    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, figureFields,
     unresolvableLabelFor, statusLabel, now, displayLocale, formatRelative, isActionable, inlineActing,
     needsDecisionInputs, openApprove, openReject, slaLabel, slaRefusalLabel,
   ]);
@@ -1762,12 +2015,8 @@ function ApprovalsQueue() {
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
 
   const onTabChange = (v: string) => {
-    setTab(v as TabKey);
-    setStatusFilter('all');
-    setProcessFilter('all');
-    setObjectFilter('all');
+    writeUrlState({ tab: v as TabKey, status: 'all', process: 'all', object: 'all', q: '', sort: 'recent' });
     setQuery('');
-    setSortKey('recent');
     setFocusIndex(-1);
   };
 
@@ -1843,11 +2092,12 @@ function ApprovalsQueue() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{tr('allStatuses', 'All statuses')}</SelectItem>
-                    <SelectItem value="pending">{statusLabel('pending')}</SelectItem>
-                    <SelectItem value="approved">{statusLabel('approved')}</SelectItem>
-                    <SelectItem value="rejected">{statusLabel('rejected')}</SelectItem>
-                    <SelectItem value="recalled">{statusLabel('recalled')}</SelectItem>
-                    <SelectItem value="returned">{statusLabel('returned')}</SelectItem>
+                    {/* One option per status the CONTRACT declares, so a state the
+                        platform adds is offered the day it ships (a hand-typed list
+                        missed `cancelled` while its rows already showed here). */}
+                    {APPROVAL_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
@@ -1879,7 +2129,7 @@ function ApprovalsQueue() {
               )}
               {/* Triage ordering (#2762 P1-3): newest by default, or by wait
                   time / decision amount. */}
-              <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
+              <Select value={sortKey} onValueChange={(v) => setSortKey(v as InboxSort)}>
                 <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[120px] text-sm')}>
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                   <SelectValue placeholder={tr('sortBy', 'Sort')} />
@@ -1985,6 +2235,32 @@ function ApprovalsQueue() {
             </div>
           )}
 
+          {/* Every failed row of the last bulk run, with its reason — the
+              toast's "Show all" opens it when the failures overflow the toast. */}
+          <AlertDialog open={bulkFailuresOpen} onOpenChange={setBulkFailuresOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {tr('bulkFailuresTitle', 'Not decided: {{n}}', { n: bulkFailures.length })}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {tr('bulkFailuresBody', 'These requests were left as they were. Each one says why.')}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <ul data-testid="approvals-bulk-failures" className="max-h-[50vh] overflow-y-auto space-y-2 text-sm">
+                {bulkFailures.map(f => (
+                  <li key={f.id}>
+                    <span className="font-medium">{f.title}</span>
+                    <span className="block text-muted-foreground">{f.reason}</span>
+                  </li>
+                ))}
+              </ul>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{tr('close', 'Close')}</AlertDialogCancel>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           {loading ? (
             <div className="space-y-2">
               <Skeleton className="h-10 w-full" />
@@ -2041,7 +2317,7 @@ function ApprovalsQueue() {
                 </div>
               )}
 
-              <div className="hidden md:block text-[11px] text-muted-foreground">
+              <div className="hidden md:block text-xs text-muted-foreground">
                 {tr('keyboardHint', 'Keyboard: j/k move · Enter open · x select · a approve · r reject')}
               </div>
             </>

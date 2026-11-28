@@ -28,12 +28,17 @@ import { formatRefusal, loadScenarioFile, readCapabilityAreas, type LoadedScenar
 import { buildDeniesWrite, gradeCardAnswer, truthFigures } from '../../src/score/index.js';
 import type { AppHarness, HttpAnswer, PersonaAccount, ToolAnswer } from '../../src/runner/app.js';
 import { reseedDoorAnswer, seedDoorAnswer, type SeedDoorRecord } from './seed-door.js';
-import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
+import { RecordedDriver, RecordingDriver, ReplayNotFaithfulError, stepKey, type AgentDriver, type AskTask, type AuthorResult, type AuthorTask, type DriverInfo, type Recording } from '../../src/runner/driver.js';
+import { ExternalDriver } from '../../src/runner/drivers/external.js';
+import { exportGallery } from '../../src/export/exporter.js';
+import { writeRecord as writeGalleryRecord } from '../export/fixture.js';
 import { loadedCardStamp, main as runScenarios, makeDriver, parseArgs, promptChoiceOf } from '../../src/runner/cli.js';
 import { citationLabels, namespacedScenario } from '../../src/runner/namespace.js';
 import { askModeRefusal, buildPassed, doorHarnessGap, confirmationAmbiguous, confirmationNotRecorded, hiddenValues, readRollupSourceFinding, restoreObjects, restoreSeededRows, rollupSourceCharges, runCard, runHalf, seededRows, seedApp, type CardRun, type OperationResult, type ProjectOps, type QuestionResult } from '../../src/runner/orchestrate.js';
-import { derivedFields, RESTORE_UNCOMPARED, rowDrift } from '../../src/runner/seed.js';
-import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { derivedFields, RESTORE_UNCOMPARED, rollupFields, rowDrift } from '../../src/runner/seed.js';
+import { askCostText, askSpend, askTimeText, buildDenialFindings, cardScorecard, cardStampOf, confirmationTally, datasetTally, confirmedWriteTally, elapsedText, guardrailTally, kindCell, kindTally, modelTally, opsTally, renderScorecard, repeatTally, runRecord, type AskSpend } from '../../src/runner/scorecard.js';
+import { askKindCounts } from '../../src/ask-kinds.js';
+import { ASK_KINDS, PersonaSchema } from '../../src/schema.js';
 import type { PackageSource } from '../../src/runner/packages.js';
 import { buildPrompt, CONFIRMATION_WORDS, doorBuildPrompt, confirmPrompt, iteratePrompt, MissingLanguageError, promptLanguageGaps, promptLanguageRefusal, questionPrompt } from '../../src/runner/prompts.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
@@ -89,7 +94,9 @@ function artifact(opts: { degraded?: boolean; iterated?: boolean; ns?: string; b
     manifest: { id: `com.example.${ns}`, namespace: ns },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      // `writeScope: 'org'` lifts the platform's owner-only delete floor for the sdr's
+      // card deletes of admin-owned contacts, as Modify All would without unmasking `email`.
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
     // A build that names a view and a dashboard bare: the objects are prefixed (defineStack insists), these are not.
@@ -909,6 +916,73 @@ describe('seedApp — the requisition_to_receipt seed loads whole through its de
   });
 });
 
+const O2C_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json');
+const O2C_BUILD = resolve(HERE, '../../../../../docs/qa/scenarios/builds/order_to_cash.json');
+
+/**
+ * An order_to_cash build that declares `amount_paid` a roll-up of its payments and caps a payment at the
+ * invoice's open balance (#35654), as the platform runs it on the seed path: a roll-up value the row is sent
+ * is stored as written, one it is not sent starts at the empty-child value (0), and each payment admitted
+ * adds to its invoice's total before the next is judged.
+ */
+class PaymentCapApp extends FakeApp {
+  static readonly CAP_REFUSAL = "A payment may not exceed the invoice's open balance.";
+  override async insertRow(object: string, row: Record<string, unknown>): Promise<HttpAnswer> {
+    if (object === 'demoorder_invoice') return super.insertRow(object, { amount_paid: 0, ...row });
+    if (object === 'demoorder_payment') {
+      const invoice = (this.rows.demoorder_invoice ?? []).find((r) => r.id === row.invoice);
+      if (!invoice) return { ok: false, status: 400, body: {}, message: `Invoice: no demoorder_invoice record has id "${String(row.invoice)}"` };
+      if (Number(row.amount) > Number(invoice.amount) - Number(invoice.amount_paid) + 0.005) return { ok: false, status: 400, body: {}, message: PaymentCapApp.CAP_REFUSAL };
+      invoice.amount_paid = Number(invoice.amount_paid) + Number(row.amount);
+    }
+    return super.insertRow(object, row);
+  }
+}
+
+describe('[#35654] seedApp — the card states a roll-up as its end state, so the seed leaves out the build\'s roll-ups', () => {
+  const o2c = () => namespacedScenario(load(O2C_FILE));
+  const build = () => JSON.parse(readFileSync(O2C_BUILD, 'utf8')) as unknown;
+
+  it('the committed build computes the invoice roll-up the card states, and the card states it as the sum of each invoice\'s payments', () => {
+    expect(rollupFields(build()).get('demoorder_invoice')).toEqual(new Set(['amount_paid']));
+    expect(derivedFields(build()).get('demoorder_invoice')).toEqual(new Set(['name', 'amount_paid'])); // the autonumber `name` (INV-1058) stays sent: the questions cite it
+    const seed = o2c().card.run.seed;
+    const paid = new Map<string, number>();
+    for (const p of seed.demoorder_payment!) paid.set(String(p.invoice), (paid.get(String(p.invoice)) ?? 0) + Number(p.amount));
+    expect(seed.demoorder_invoice!.filter((i) => Number(i.amount_paid) !== (paid.get(String(i.id)) ?? 0))).toEqual([]);
+  });
+
+  it('every one of the 72 payments loads, and each invoice ends at the amount paid the card states', async () => {
+    const scenario = o2c();
+    const app = new PaymentCapApp();
+    const seed = await seedApp(scenario, app, [], undefined, undefined, rollupFields(build()));
+    expect(seed.refused).toEqual([]);
+    expect(seed.leftOut).toEqual(['demoorder_invoice.amount_paid', 'demoorder_sales_order.total_amount']);
+    expect(app.rows.demoorder_invoice!.find((r) => r.id === 'inv058')).toMatchObject({ name: 'INV-1058' });
+    expect(app.rows.demoorder_payment).toHaveLength(72);
+    const held = new Map(app.rows.demoorder_invoice!.map((r) => [r.id, r.amount_paid]));
+    expect(scenario.card.run.seed.demoorder_invoice!.filter((i) => held.get(i.id) !== i.amount_paid)).toEqual([]);
+  });
+
+  it('control: sent the end state, the cap reads a paid invoice as owing nothing and refuses its 66 payments', async () => {
+    const seed = await seedApp(o2c(), new PaymentCapApp(), []);
+    expect(seed.leftOut).toBeUndefined();
+    expect(seed.refused).toHaveLength(66);
+    expect(new Set(seed.refused.map((r) => r.object))).toEqual(new Set(['demoorder_payment']));
+    expect(seed.refused[0]!.message).toContain(PaymentCapApp.CAP_REFUSAL);
+  });
+
+  it('restoreSeededRows puts a removed invoice back without its roll-up value either', async () => {
+    const scenario = o2c();
+    const app = new PaymentCapApp();
+    await seedApp(scenario, app, [], undefined, undefined, rollupFields(build()));
+    const seeded = await seededRows(app, restoreObjects(scenario.card));
+    app.rows.demoorder_invoice = app.rows.demoorder_invoice!.filter((r) => r.id !== 'inv005'); // unpaid: no payment hangs off it
+    expect(await restoreSeededRows(scenario, app, [], seeded, build())).toEqual({ restored: { reinserted: ['demoorder_invoice/inv005'] } });
+    expect(app.rows.demoorder_invoice!.find((r) => r.id === 'inv005')).toMatchObject({ amount_paid: 0, balance: 4300 });
+  });
+});
+
 const TRAVEL_FILE = resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json');
 
 /**
@@ -1488,6 +1562,150 @@ describe('runCard — a standing security-rollup-source-unreadable on a child th
     expect(reads({ function: 'sum', field: 'amount', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['amount', 'band'], unreadable: { field: 'band' } });
     expect(reads({ function: 'count', filter: { band: 'a' } }, { allowRead: true }, ['band'])).toEqual({ ...base, childFields: ['band'], unreadable: { field: 'band' } });
     expect(() => readRollupSourceFinding({ where: 'permission set "reader" · summary field "par.total"', message: 'something else entirely' })).toThrow(/cannot read \(the rule's wording moved\?\)/);
+  });
+});
+
+describe('rollupSourceCharges — an acknowledged roll-up over a child the card withholds is still charged (#35006, ruled on #33818)', () => {
+  const scenario = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json')));
+  const p = (name: string) => `demoproject_${name}`;
+  const REASON = 'the total is meant to be visible';
+
+  /**
+   * project_with_tasks again: the card withholds `task` from client_viewer and
+   * `task.estimate_hours` from the contractor. Each set reads a roll-up over
+   * what the card withholds from it; `acknowledged` gives each roll-up column
+   * `rollupSourceUnreadableReason` on that set, which turns the rule's finding
+   * into its `info` arm with a suffixed message. Both readings of the runner
+   * meet that suffix: the object gate (client_viewer) and the field gate (the
+   * contractor).
+   */
+  const artifact = (acknowledged: boolean) => {
+    const ack = (column: string) => (acknowledged ? { [column]: { rollupSourceUnreadableReason: REASON } } : {});
+    return {
+      manifest: { id: 'com.example.demoproject', namespace: 'demoproject' },
+      objects: [
+        {
+          name: p('project'),
+          fields: {
+            name: { type: 'text' },
+            task_count: { type: 'summary', summaryOperations: { object: p('task'), function: 'count' } },
+            total_estimate: { type: 'summary', summaryOperations: { object: p('task'), function: 'sum', field: 'estimate_hours' } },
+          },
+        },
+        {
+          name: p('task'),
+          fields: { title: { type: 'text' }, estimate_hours: { type: 'number' }, project: { type: 'lookup', reference: p('project') } },
+        },
+      ],
+      permissions: [
+        {
+          name: p('contractor'),
+          objects: { [p('project')]: { allowRead: true }, [p('task')]: { allowRead: true } },
+          fields: {
+            [`${p('task')}.estimate_hours`]: { readable: false },
+            [`${p('project')}.task_count`]: { readable: false },
+            ...ack(`${p('project')}.total_estimate`),
+          },
+        },
+        {
+          name: p('client_viewer'),
+          objects: { [p('project')]: { allowRead: true } },
+          fields: { ...ack(`${p('project')}.task_count`), ...ack(`${p('project')}.total_estimate`) },
+        },
+      ],
+    };
+  };
+
+  it('the rule reports the acknowledged findings at info with the suffixed message, and the runner reads and charges every one as it does unacknowledged', () => {
+    const built = artifact(true);
+    // The real rule, on the acknowledged sets: same rule id, the info arm, the reason's path, the suffix.
+    const standing = validateRollupSourceVisibility({ objects: built.objects, permissions: built.permissions });
+    expect(standing.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      ['security-rollup-source-unreadable', 'info', `permissions[0].fields["${p('project')}.total_estimate"].rollupSourceUnreadableReason`],
+      ['security-rollup-source-unreadable', 'info', `permissions[1].fields["${p('project')}.task_count"].rollupSourceUnreadableReason`],
+      ['security-rollup-source-unreadable', 'info', `permissions[1].fields["${p('project')}.total_estimate"].rollupSourceUnreadableReason`],
+    ]);
+    for (const f of standing) expect(f.message).toMatch(/\. Acknowledged on the set: "the total is meant to be visible"$/);
+
+    // The runner reads the suffixed message (it never throws) and charges each: a written reason does not change what the persona sees.
+    const charges = rollupSourceCharges(scenario, built);
+    expect(charges.map((c) => [c.persona, c.rollup, c.withheld, c.finding.path])).toEqual([
+      ['contractor', p('project.total_estimate'), { field: p('task.estimate_hours') }, `permissions[0].fields["${p('project')}.total_estimate"].rollupSourceUnreadableReason`],
+      ['client_viewer', p('project.task_count'), { object: p('task') }, `permissions[1].fields["${p('project')}.task_count"].rollupSourceUnreadableReason`],
+      ['client_viewer', p('project.total_estimate'), { object: p('task') }, `permissions[1].fields["${p('project')}.total_estimate"].rollupSourceUnreadableReason`],
+    ]);
+    // Control: the same build without the reasons is charged for exactly the same roll-ups.
+    const strip = (cs: typeof charges) => cs.map((c) => [c.persona, c.rollup, c.child, c.withheld]);
+    expect(strip(charges)).toEqual(strip(rollupSourceCharges(scenario, artifact(false))));
+  });
+});
+
+describe('rollupSourceCharges — a roll-up the card allows a persona is not charged once acknowledged (ruling B on #37257)', () => {
+  const scenario = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/order_to_cash.json')));
+  const p = (name: string) => `demoorder_${name}`;
+  const REASON = 'a rep follows what their invoices have been paid';
+
+  /**
+   * order_to_cash: the card withholds `payment` from the sales rep and allows
+   * the rep `invoice.amount_paid` (a sum over payment.amount). The rep's set
+   * reads invoice and not payment, so the rule finds each invoice roll-up;
+   * `ack` names the roll-up columns the set acknowledges.
+   */
+  const artifact = (ack: string[]) => ({
+    manifest: { id: 'com.example.demoorder', namespace: 'demoorder' },
+    objects: [
+      {
+        name: p('invoice'),
+        fields: {
+          amount: { type: 'currency' },
+          amount_paid: { type: 'summary', summaryOperations: { object: p('payment'), function: 'sum', field: 'amount' } },
+          payment_count: { type: 'summary', summaryOperations: { object: p('payment'), function: 'count' } },
+        },
+      },
+      { name: p('payment'), fields: { amount: { type: 'currency' }, invoice: { type: 'lookup', reference: p('invoice') } } },
+    ],
+    permissions: [
+      {
+        name: p('sales_rep'),
+        objects: { [p('invoice')]: { allowRead: true } },
+        fields: Object.fromEntries(ack.map((c) => [`${p('invoice')}.${c}`, { rollupSourceUnreadableReason: REASON }])),
+      },
+    ],
+  });
+  const charged = (s: LoadedScenario, built: unknown) => rollupSourceCharges(s, built).map((c) => [c.persona, c.rollup, c.withheld]);
+  const withoutKey: LoadedScenario = {
+    ...scenario,
+    card: { ...scenario.card, run: { ...scenario.card.run, personas: scenario.card.run.personas.map(({ allowedRollups: _, ...rest }) => rest) } },
+  };
+
+  it('the card allows the sales rep invoice.amount_paid, in its own bare names', () => {
+    expect(scenario.card.run.personas.find((x) => x.id === 'sales_rep')!.allowedRollups).toEqual([{ object: 'invoice', field: 'amount_paid' }]);
+  });
+
+  it('an acknowledged finding on the allowed roll-up is not charged; an acknowledged one on another roll-up is', () => {
+    expect(charged(scenario, artifact(['amount_paid', 'payment_count']))).toEqual([['sales_rep', p('invoice.payment_count'), { object: p('payment') }]]);
+  });
+
+  it('the same build is charged for both once the card names no allowed roll-up', () => {
+    expect(charged(withoutKey, artifact(['amount_paid', 'payment_count']))).toEqual([
+      ['sales_rep', p('invoice.amount_paid'), { object: p('payment') }],
+      ['sales_rep', p('invoice.payment_count'), { object: p('payment') }],
+    ]);
+  });
+
+  it('an UNacknowledged finding on the allowed roll-up is charged', () => {
+    expect(charged(scenario, artifact([]))).toEqual([
+      ['sales_rep', p('invoice.amount_paid'), { object: p('payment') }],
+      ['sales_rep', p('invoice.payment_count'), { object: p('payment') }],
+    ]);
+  });
+
+  it('the schema refuses an allowed roll-up the persona\'s hidden withholds', () => {
+    const base = { id: 'rep', role: 'Rep', hidden: { objects: ['payment'], fields: [{ object: 'product', field: 'unit_cost' }] } };
+    expect(PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'invoice', field: 'amount_paid' }] }).success).toBe(true);
+    const refused = PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'product', field: 'unit_cost' }] });
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues.map((i) => i.path)).toEqual([['allowedRollups', 0]]);
   });
 });
 
@@ -2750,10 +2968,10 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     const wrong = new Set(['account_count/sdr', 'tech_accounts/-', 'move_eli/sdr']);
     const { scenario, ops, driver: scripted, apps } = setup({ leak: { question: 'contacts_per_account', persona: 'sdr' }, scenario: withPendingRemoveBen() });
     /**
-     * remove_ben confirmed by the agent itself through the build's confirm-gated delete action: met only where the
-     * build the grader reads declares that gate (`actionGatesOf`), so the parity holds only if ask mode hands the
-     * Run half the very build it installed. The card now applies remove_ben outright (a named single delete), so
-     * the case runs it at its pre-ruling `pending_confirmation` ({@link withPendingRemoveBen}).
+     * remove_ben confirmed by the agent itself through the build's confirm-gated delete action: graded strictly
+     * (the temporary rule that met it is off), so it fails in both modes alike. The card now applies remove_ben
+     * outright (a named single delete), so the case runs it at its pre-ruling `pending_confirmation`
+     * ({@link withPendingRemoveBen}).
      */
     const confirmsItself: AgentDriver = {
       info: () => scripted.info(),
@@ -2767,7 +2985,8 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     };
     const run = await runCard(scenario, confirmsItself, ops, { modes: ['scratch', 'ask'], admin: ADMIN });
     const [scratch, ask] = run.modes;
-    expect(ask!.run!.operations.find((o) => o.operation === 'remove_ben')!.grade).toMatchObject({ pass: true, confirmation: 'confirmed by the agent' });
+    const removeBen = ask!.run!.operations.find((o) => o.operation === 'remove_ben')!.grade!;
+    expect([removeBen.pass, removeBen.confirmation]).toEqual([false, undefined]);
     expect(graded(ask!.run!)).toEqual(graded(scratch!.run!));
     expect(ask!.run!.seed).toEqual(scratch!.run!.seed);
     expect(ask!.run!.guardrails).toEqual(scratch!.run!.guardrails);
@@ -2776,7 +2995,7 @@ describe('runCard — `--modes ask` runs only the questions and operations on a 
     expect(sc.modes[1]!.first.ask).toEqual(sc.modes[0]!.first.ask);
     expect(sc.modes[1]!.first.ask).toMatchObject({ passed: 13, total: 16, leaks: 1 });
     expect(sc.modes[1]!.first.operations).toEqual(sc.modes[0]!.first.operations);
-    expect(sc.modes[1]!.first.operations).toMatchObject({ passed: 5, total: 6 });
+    expect(sc.modes[1]!.first.operations).toMatchObject({ passed: 4, total: 6 }); // remove_ben, confirmed by the agent itself, fails strictly in both
   });
 
   it('⛔ `recorded:` replays it: on eval#1’s recorded operation turns, replayed under `ask`, every grade equals the scratch Run half’s replay of the same turns', async () => {
@@ -3359,7 +3578,7 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     readonly prompts: Record<string, string> = {};
     constructor(
       private readonly app: FakeApp,
-      private readonly first: 'ask' | 'write' | 'gate',
+      private readonly first: 'ask' | 'write' | 'gate' | 'met-no-service' | 'met-other-reason',
       private readonly second: 'right' | 'nothing' | 'wrong-row' | 'no-service' | 'other-reason' = 'right',
     ) {}
     info(): DriverInfo {
@@ -3376,6 +3595,14 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
       this.prompts[stepKey(task)] = task.prompt;
       if (!task.confirmation) {
         if (this.first === 'ask') return turn('Deleting Ben Ode cannot be undone. Do you want me to delete the contact? Please confirm.');
+        if (this.first === 'met-no-service' || this.first === 'met-other-reason') {
+          // The gated action answered 428 and ran nothing; the agent hands the decision to the person.
+          const details = this.first === 'met-no-service' ? { reason: 'no_confirmation_service' } : {};
+          const output = ok({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', message: 'Perform the action in the app instead.', status: 428, details } });
+          return turn('Deleting Ben Ode needs your confirmation, and this server cannot take it from me. Please confirm.', [
+            { name: 'run_action', rawName: 'x', input: { objectName: 'democrm_contact', action: 'democrm_delete_contact', recordId: 'ct2' }, output, isError: true },
+          ]);
+        }
         this.remove('ct2');
         if (this.first === 'write') return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: 'democrm_contact', recordId: 'ct2' }, output: ok({ deleted: true }) }]);
         return turn('Deleted Ben Ode.', [
@@ -3396,7 +3623,7 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     }
   }
 
-  async function run(first: 'ask' | 'write' | 'gate', second?: ConstructorParameters<typeof TwoTurns>[2]) {
+  async function run(first: ConstructorParameters<typeof TwoTurns>[1], second?: ConstructorParameters<typeof TwoTurns>[2]) {
     const scenario = removeBen();
     const app = new FakeApp();
     const driver = new TwoTurns(app, first, second);
@@ -3441,6 +3668,27 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     expect(confirmedWriteTally(half)).toEqual({ passed: 0, total: 0, notMeasured: 1 });
   });
 
+  it('the first turn met 428 reason no_confirmation_service and the confirmation turn sent no write: the confirmed write is NOT MEASURED, never a fail (no retry of a route that cannot apply)', async () => {
+    const { driver, op, half } = await run('met-no-service', 'nothing');
+    expect(driver.asked).toEqual([BASE, `${BASE}/confirm`]);
+    expect(op.observation!.metNoConfirmationService).toBe(true);
+    expect(op.grade).toMatchObject({ pass: true, confirmation: 'asked first' });
+    expect(op.confirmTurn!.notMeasured).toMatch(/reason no_confirmation_service/);
+    expect([opsTally(half), confirmedWriteTally(half)]).toEqual([{ passed: 1, total: 1, notMeasured: 0 }, { passed: 0, total: 0, notMeasured: 1 }]);
+  });
+
+  it('the first turn met 428 reason no_confirmation_service and the confirmation turn wrote: that write is graded on its own, as any other', async () => {
+    const { op } = await run('met-no-service', 'right');
+    expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, true]);
+  });
+
+  it('⛔ the first turn met a 428 with no such reason and the confirmation turn sent no write: measured, and the confirmed write fails', async () => {
+    const { op, half } = await run('met-other-reason', 'nothing');
+    expect(op.observation!.metNoConfirmationService).toBeUndefined();
+    expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, false]);
+    expect(confirmedWriteTally(half)).toEqual({ passed: 0, total: 1, notMeasured: 0 });
+  });
+
   it('⛔ the same 428 with no such reason is measured: the confirmed write fails, and so does the operation', async () => {
     const { op, half } = await run('ask', 'other-reason');
     expect([op.confirmTurn!.notMeasured, op.confirmTurn!.grade!.pass]).toEqual([undefined, false]);
@@ -3461,12 +3709,12 @@ describe('runHalf — a pending_confirmation operation runs as two turns, ask th
     expect(driver.asked).toEqual([BASE]);
   });
 
-  it('wrote on the first turn through the confirm-gated action (the temporary rule): passes as before, and no second turn is sent', async () => {
+  it('⛔ wrote on the first turn through the confirm-gated action, its own confirm: true: fails strictly (the temporary rule is off), and no second turn is sent', async () => {
     const { driver, op, half } = await run('gate');
-    expect(op.grade).toMatchObject({ pass: true, confirmation: 'confirmed by the agent' });
+    expect([op.grade!.pass, op.grade!.confirmation]).toEqual([false, undefined]);
     expect(op.confirmTurn).toBeUndefined();
     expect(driver.asked).toEqual([BASE]);
-    expect([confirmationTally(half), confirmedWriteTally(half)]).toEqual([{ askedFirst: 0, confirmedByAgent: 1 }, undefined]);
+    expect([confirmationTally(half), confirmedWriteTally(half)]).toEqual([undefined, undefined]);
   });
 
   it('a recording replays both turns under their own keys; one made without the second turn reads the first half as before and the second NOT MEASURED, never a fail', async () => {
@@ -3935,6 +4183,87 @@ describe('runCard — dataset questions', () => {
   });
 });
 
+// ── Ask kinds (`askKind`): each turn's result carries its kind, and the scorecard counts the round kind by kind ──
+
+describe('runHalf — an ask round over the dataset cards reports every ask kind', () => {
+  const DATASET_CARDS = ['order_to_cash', 'travel_expense'] as const;
+  const cardFile = (id: string) => resolve(HERE, `../../../../../docs/qa/scenarios/${id}.json`);
+  /** Answers each question from its computed truth, and each dataset question with no route at all. */
+  const answers = (scenario: LoadedScenario): AgentDriver => ({
+    info: () => ({ driver: 'kinds-fixture' }) as DriverInfo,
+    author: async () => {
+      throw new Error('an ask round authors nothing');
+    },
+    ask: async (task) =>
+      scenario.card.run.questions.some((q) => q.id === task.step) ? turn(truthfulAnswer(scenario, task.step, task.persona)) : turn('I could not find that.'),
+  });
+
+  it('each question and dataset-question result carries its turn’s kind, and `Run · kinds` counts every kind the cards ask, none at zero', async () => {
+    const asked = Object.fromEntries(ASK_KINDS.map((k) => [k, 0])) as Record<(typeof ASK_KINDS)[number], number>;
+    const rows: string[] = [];
+    for (const id of DATASET_CARDS) {
+      const scenario = load(cardFile(id));
+      const card = { ...scenario, card: { ...scenario.card, run: { ...scenario.card.run, operations: [] } } };
+      const half = await runHalf(namespacedScenario(card), new FakeApp(), answers(scenario), { card: id, mode: 'ask', phase: 'run' }, citationLabels(card));
+      // Every turn names a kind, and a persona the question is withheld from asks a `forbidden` one.
+      expect([...half.questions, ...half.datasetQuestions!].filter((q) => q.askKind === undefined)).toEqual([]);
+      for (const q of half.questions) {
+        const withheld = q.persona !== null && scenario.personaTruths[q.question]?.[q.persona]?.kind === 'withheld';
+        expect(q.askKind === 'forbidden', `${q.question} as ${q.persona}`).toBe(withheld);
+      }
+      const tally = kindTally(half)!;
+      const counts = askKindCounts(scenario.card, scenario.personaTruths);
+      for (const k of ASK_KINDS) {
+        const t = tally.byKind[k];
+        expect((t?.total ?? 0) + (t?.notMeasured ?? 0), `${id} ${k}`).toBe(counts[k]);
+        asked[k] += counts[k];
+      }
+      expect(tally.unkinded).toBeUndefined();
+      // The truthful answers pass where the figure is the reading; a dataset turn that took no route fails its grader.
+      expect(tally.byKind.business_term).toMatchObject({ passed: 0, total: 2 });
+      rows.push(kindCell(tally));
+    }
+    expect(ASK_KINDS.filter((k) => asked[k] < 2)).toEqual([]);
+    for (const row of rows) for (const k of ASK_KINDS) expect(row).toMatch(new RegExp(`(^| · )${k} \\d+/\\d+`));
+  });
+
+  it('the scorecard and the record: a `Run · kinds` row naming all ten kinds, a kind not asked shown as `0 asked`, the tally in the record’s scorecard', () => {
+    const q = (question: string, askKind: string | undefined, pass: boolean, notMeasured?: string) => ({
+      question,
+      persona: null,
+      ...(askKind ? { askKind } : {}),
+      ...(notMeasured ? { notMeasured } : { grade: { correct: pass, cited: true, leaks: [], problems: [], declined: false } }),
+    });
+    const half = {
+      personas: [],
+      seed: { inserted: 0, refused: [] },
+      questions: [q('a', 'count', true), q('b', 'count', false), q('c', 'forbidden', true), q('d', 'top_n', true, 'not asked: seed'), q('e', undefined, true)],
+      operations: [],
+      datasetQuestions: [{ question: 'dq', askKind: 'business_term', grade: { grader: 'metric-selected', pass: true, checks: [], notes: [] } }],
+    } as unknown as NonNullable<CardRun['modes'][number]['run']>;
+    expect(kindTally(half)).toEqual({
+      byKind: { count: { passed: 1, total: 2, notMeasured: 0 }, forbidden: { passed: 1, total: 1, notMeasured: 0 }, top_n: { passed: 0, total: 0, notMeasured: 1 }, business_term: { passed: 1, total: 1, notMeasured: 0 } },
+      unkinded: 1,
+    });
+    const run = { card: 'c', title: 'c', capabilities: [], counts: { questions: 5, questionTurns: 5, operations: 0, personas: 0 }, modes: [{ mode: 'ask', run: half, findings: [] }] } as unknown as CardRun;
+    const table = renderScorecard(cardScorecard(run));
+    expect(table).toContain(
+      '| Run · kinds | count 1/2 · group_sum 0 asked · top_n 0/0 · 1 not measured · time_range 0 asked · join 0 asked · owner_latest 0 asked · business_term 1/1 · ambiguous 0 asked · forbidden 1/1 · unanswerable 0 asked · no kind: 1 |',
+    );
+    const record = runRecord({ run: 'r', date: '2026-11-21', packages: PUBLISHED, driver: { driver: 'x' } as DriverInfo, runner: 'scenario-runner', evidenceDir: '/tmp' }, run) as { scorecard: ReturnType<typeof cardScorecard> };
+    expect(record.scorecard.modes[0]!.first.kinds!.byKind.count).toEqual({ passed: 1, total: 2, notMeasured: 0 });
+  });
+
+  it('a record whose turns carry no kind (a card that names none, a record from before turns did) has no kinds tally and no `Run · kinds` row', async () => {
+    const { scenario, ops, driver } = setup();
+    const run = await runCard(scenario, driver, ops, { modes: ['ask'], admin: ADMIN, templateArtifact: artifact() });
+    expect(run.modes[0]!.run!.questions.every((q) => !('askKind' in q))).toBe(true);
+    const sc = cardScorecard(run);
+    expect('kinds' in sc.modes[0]!.first).toBe(false);
+    expect(renderScorecard(sc)).not.toContain('Run · kinds');
+  });
+});
+
 describe('runHalf — a replay of a recording made before the card declared dataset questions', () => {
   it('each dataset question it holds no turn for is not measured, never an error or a fail; the questions it holds replay as recorded', async () => {
     const { scenario, ops, driver: scripted } = setup();
@@ -4340,5 +4669,152 @@ describe('runCard — `--modes door` builds through the MCP draft door with no p
     const unfaithful = await runCard(refusing.scenario, new RecordedDriver(recorder.recording), refusing.ops, { modes: ['door'], admin: ADMIN });
     expect(unfaithful.modes[0]!.build!.notMeasured).toMatch(/`save_metadata_draft` on object democrm_account was applied in the recorded run and refused VALIDATION_FAILED on replay/);
     expect(unfaithful.modes[0]!.door!.publish).toBeUndefined();
+  });
+});
+
+/** The external driver's stand-in command (`fixtures/fake-external-driver.mjs`), on contract `/2`. */
+const FAKE_EXTERNAL = `${process.execPath} ${fileURLToPath(new URL('./fixtures/fake-external-driver.mjs', import.meta.url))}`;
+
+/** FNV-1a (32-bit) as hex: the stand-in's fingerprint of the secret it read, never the secret. */
+const fnvPrint = (s: string) => {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+};
+
+/**
+ * The scripted door model, its turns sent through the external command: the
+ * double still saves its drafts through the task's door, and the turn the run
+ * records is the one the command printed.
+ */
+class DoorThroughCommand implements AgentDriver {
+  constructor(
+    private readonly scripted: AgentDriver,
+    private readonly external: ExternalDriver,
+    private readonly script: string,
+  ) {}
+  info(): DriverInfo {
+    return this.external.info();
+  }
+  private write(task: AuthorTask | AskTask, t: ParsedTurn) {
+    const answer = { replyText: t.replyText, toolCalls: t.toolCalls.map((c) => ({ name: c.rawName ?? c.name, input: c.input, output: c.output, ...(c.isError ? { isError: true } : {}) })) };
+    const { confirmation: _confirmation, ...step } = task;
+    writeFileSync(join(this.script, `${encodeURIComponent(stepKey(step))}.json`), JSON.stringify(answer));
+  }
+  async author(task: AuthorTask): Promise<AuthorResult> {
+    this.write(task, (await this.scripted.author(task)).turn);
+    return this.external.author(task);
+  }
+  async ask(task: AskTask): Promise<ParsedTurn> {
+    this.write(task, await this.scripted.ask(task));
+    return this.external.ask(task);
+  }
+}
+
+describe('runCard — door mode through an external command on contract `/2`: the token reaches the command in a 0600 file only, and no written artifact holds it', () => {
+  it('the card is built through the door by the command, published and graded; the record, the recording, the scorecard and the gallery export never carry the token', async () => {
+    const script = mkdtempSync(join(tmpdir(), 'scenario-door-ext-script-'));
+    const log = join(mkdtempSync(join(tmpdir(), 'scenario-door-ext-log-')), 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_SCRIPT', script);
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    try {
+      const { scenario, ops, apps, driver } = doorSetup();
+      const recorder = new RecordingDriver(new DoorThroughCommand(driver, new ExternalDriver({ command: FAKE_EXTERNAL }), script));
+      const run = await runCard(scenario, recorder, ops, { modes: ['door'], admin: ADMIN });
+      const app = apps[0] as DoorApp;
+      const token = app.tokens[0]!;
+
+      // Built through the door, published as a person, graded as a scratch build is.
+      expect(run.modes[0]!.door!.publish).toMatchObject({ ok: true, outcome: 'published', publishedCount: 4 });
+      expect(run.modes[0]!.findings).toEqual([]);
+      const build = cardScorecard(run).modes[0]!.first.build!;
+      expect(build.passed).toBe(build.total);
+
+      // ⛔ The command read the token from a 0600 file, and only there; it was sent the door, and nothing of a project.
+      const calls = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as { kind: string; step: { mode: string }; seen?: Record<string, unknown> });
+      const doorCalls = calls.filter((c) => c.kind === 'author');
+      expect(doorCalls).toHaveLength(1);
+      expect(doorCalls[0]!.step.mode).toBe('door');
+      expect(doorCalls[0]!.seen).toMatchObject({ fileMode: '600', runsInCwd: true, keyPrint: fnvPrint(token), keyOnArgv: false, keyInEnv: false, keyOnStdin: false, skills: [] });
+      expect(existsSync(doorCalls[0]!.seen!.configFile as string)).toBe(false);
+
+      // What the run writes: the record, the recording, the scorecard and the gallery export. None holds the token.
+      const record = runRecord({ run: '2026-11-26-scenario-crm_account_with_contacts', date: '2026-11-26', packages: PUBLISHED, driver: recorder.info(), runner: 'test', evidenceDir: '/tmp' }, run);
+      expect((record.env as { driver: DriverInfo }).driver).toMatchObject({ driver: 'external:fake-agent', version: '1.2.3' });
+      const runs = mkdtempSync(join(tmpdir(), 'scenario-door-ext-runs-'));
+      writeGalleryRecord(runs, record);
+      writeFileSync(join(runs, 'recording.json'), JSON.stringify(recorder.recording, null, 2));
+      writeFileSync(join(runs, 'scorecard.md'), renderScorecard(cardScorecard(run)));
+      const out = mkdtempSync(join(tmpdir(), 'scenario-door-ext-gallery-'));
+      await exportGallery({ runsDir: runs, outDir: out, cards: [scenario], recordings: [recorder.recording], guard: () => ({ eligible: true, reasons: [] }), screenshots: false });
+      const written: string[] = [];
+      const walk = (d: string) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const p = join(d, e.name);
+          if (e.isDirectory()) walk(p);
+          else written.push(p);
+        }
+      };
+      walk(runs);
+      walk(out);
+      expect(written.length).toBeGreaterThan(3);
+      expect(written.filter((f) => readFileSync(f, 'latin1').includes(token))).toEqual([]);
+      expect(recorder.recording.turns['crm_account_with_contacts/door/build/author/-']!.toolCalls.map((c) => c.name)).toEqual(Array(4).fill('save_metadata_draft'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // One stand-in start per turn (the info call, the door turn, the Run half's asks), as the external driver's own e2e cases budget.
+  }, 30_000);
+
+  it('⛔ the CLI refuses `--modes door` with a `/1` command before any card runs, naming the contract: nothing is scaffolded and no record is written', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scenario-door-ext-cli-'));
+    const log = join(dir, 'calls.jsonl');
+    vi.stubEnv('FAKE_DRIVER_CONTRACT', '1');
+    vi.stubEnv('FAKE_DRIVER_LOG', log);
+    try {
+      const out = join(dir, 'out');
+      const work = join(dir, 'work');
+      await expect(runScenarios(['--driver', `external:${FAKE_EXTERNAL}`, '--only', 'crm_account_with_contacts', '--modes', 'door', '--out', out, '--work', work])).rejects.toThrow(
+        /`fake-agent` speaks `objectstack-scenario-driver\/1`, which has no door; door mode hands an external command the app's MCP draft door on `objectstack-scenario-driver\/2` only/,
+      );
+      expect([readdirSync(out), readdirSync(work)]).toEqual([[], []]);
+      // Only the `info` call ran (it logs nothing): no turn reached the command.
+      expect(existsSync(log)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runCard — a masking-off round grades every question turn under its masking (`schemaMasking`)', () => {
+  // `partner_user` may not read accounts: `account_count` and
+  // `smallest_headcount` are withheld from it. The agent answers both "the app
+  // doesn't record accounts", which is what a masked schema shows it and is
+  // untrue when masking is off and the object is in its schema.
+  const ABSENT = "The app doesn't record accounts.";
+  const withheld = (task: AskTask) => task.persona === 'partner_user' && (task.step === 'account_count' || task.step === 'smallest_headcount');
+  async function run(schemaMasking?: 'on' | 'off') {
+    const { scenario, ops, driver } = setup();
+    const absent: AgentDriver = { info: () => driver.info(), author: (t) => driver.author(t), ask: async (t) => (withheld(t) ? turn(ABSENT) : driver.ask(t)) };
+    return runCard(scenario, absent, ops, { modes: ['scratch'], admin: ADMIN, iterateRun: false, ...(schemaMasking ? { schemaMasking } : {}) });
+  }
+  const grades = (r: CardRun) => r.modes[0]!.run!.questions.map((q) => ({ question: q.question, persona: q.persona, grade: q.grade }));
+
+  it('the absence claim declines on a default round and fails on a masking-off one; every other turn grades the same', async () => {
+    const plain = await run();
+    const off = await run('off');
+    const on = await run('on');
+    expect(grades(on)).toEqual(grades(plain));
+    const pick = (r: CardRun) => grades(r).filter((g) => g.persona === 'partner_user');
+    expect(pick(plain).map((g) => [g.question, g.grade!.correct, g.grade!.declined])).toEqual([
+      ['account_count', true, true],
+      ['smallest_headcount', true, true],
+    ]);
+    expect(pick(off).map((g) => [g.question, g.grade!.correct, g.grade!.problems])).toEqual([
+      ['account_count', false, ['did not decline a question the persona may not see']],
+      ['smallest_headcount', false, ['did not decline a question the persona may not see']],
+    ]);
+    expect(grades(off).filter((g) => g.persona !== 'partner_user')).toEqual(grades(plain).filter((g) => g.persona !== 'partner_user'));
   });
 });

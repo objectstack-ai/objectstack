@@ -11,13 +11,15 @@
  *
  * Pinned:
  *  - the Actions view of a read-only base's object offers New, with the same
- *    presets, once the base has or can get its pair; a preset writes a new
- *    `action` item into the pair as a draft (`objectName` = the object,
- *    `ifNoneMatch: '*'`), asking the ensure door, and the object is not
- *    written;
+ *    presets, once the base has or can get its pair; a preset writes nothing
+ *    until the top bar's Save, which writes a new `action` item into the pair
+ *    as a draft (`objectName` = the object, `ifNoneMatch: '*'`), asking the
+ *    ensure door, then publishes that one action at the pair
+ *    (objectstack#36511), and the object is not written;
  *  - the vendor's actions stay read-only (no Delete, the editor disabled);
- *    the added one carries the "added" mark, edits autosave into the pair's
- *    draft, and Delete removes its draft and its published row at the pair;
+ *    the added one carries the "added" mark, an edit is sent by Save into the
+ *    pair's draft and published, and Delete takes the row off the page, its
+ *    draft and its published row at the pair going with the next Save;
  *  - "only customizations" counts the added action and narrows the list to it;
  *  - walled: no New, and the pair's action opens read-only;
  *  - CONTROL: on a writable package an action is still written into the
@@ -42,7 +44,7 @@ const VENDOR = {
   name: 'crm_lead_convert',
   label: 'Convert',
   objectName: OBJECT,
-  locations: ['record_header'],
+  locations: ['record_page'],
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };
@@ -52,7 +54,7 @@ const KEPT = {
   name: 'crm_lead_action_7',
   label: 'Qualify',
   objectName: OBJECT,
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   operation: 'update',
   patch: { status: 'qualified' },
 };
@@ -121,6 +123,7 @@ const mockClient = {
   ),
   get: vi.fn(async () => null),
   // The pair's action drafts are kept, so a read after a write serves them.
+  publish: vi.fn(async () => ({})),
   save: vi.fn(async (type: string, name: string, body: unknown, opts?: { packageId?: string }) => {
     if (type === 'action' && opts?.packageId === PAIR) srv.pairDrafts[name] = body as Record<string, unknown>;
     return { ok: true, version: 'v2', state: 'draft' };
@@ -175,7 +178,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The pillar reaches a dynamic `import('@objectstack/lint')`: pay its load at
 // collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioCancel, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t, tFormat } from '../metadata-admin/i18n';
@@ -229,16 +234,16 @@ afterEach(() => {
 
 async function mountOnActions(props: { readOnly: boolean; customization?: StudioBaseCustomization | null }) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
-    </MemoryRouter>,
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
+    </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).
   fireEvent.click((await screen.findAllByRole('button', { name: L('engine.studio.data.tab.actions') }, { timeout: 8000 }))[0]);
   await within(await screen.findByTestId('actions-list', undefined, { timeout: 8000 })).findByText('Convert');
 }
 
-/** Past the autosave's 1.5 s debounce. */
+/** Past the retired autosave's 1.5 s debounce: nothing may leave before Save. */
 async function outlastDebounce(): Promise<void> {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 2300));
@@ -264,13 +269,24 @@ describe('Studio adds an action to an installed app’s object, in its customiza
       expect(await screen.findByTestId(`action-preset-${id}`)).toBeInTheDocument();
     }
     fireEvent.click(screen.getByTestId('action-preset-change_choice'));
+    // objectstack#36511 — nothing is written, and no pair asked for, before Save.
+    await outlastDebounce();
+    expect(actionSaves()).toHaveLength(0);
+    expect(ensure).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(actionSaves()).toHaveLength(1));
+    await pressStudioSave();
+    await waitFor(() => expect(mockClient.publish).toHaveBeenCalledTimes(1));
+    expect(actionSaves()).toHaveLength(1);
     const [, name, body, opts] = actionSaves()[0]!;
     expect(name).toMatch(/^crm_lead_action_\d+$/);
     expect(name).not.toBe(VENDOR.name);
-    expect(body).toMatchObject({ name, objectName: OBJECT, operation: 'update', locations: ['record_header'] });
+    expect(body).toMatchObject({ name, objectName: OBJECT, operation: 'update', locations: ['record_page'] });
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR, ifNoneMatch: '*' });
+    // Then that one action is published at the pair: live at once, asserting
+    // no published action of its name (objectstack#36726).
+    // objectstack#37440 — pinned to the draft this Save wrote (its receipt), too.
+    expect(mockClient.publish).toHaveBeenCalledWith('action', name, { packageId: PAIR, ifNoneMatch: '*', draftVersion: expect.any(String) });
+    expect(mockClient.save.mock.invocationCallOrder[0]).toBeLessThan(mockClient.publish.mock.invocationCallOrder[0]);
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);
 
@@ -298,16 +314,23 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(label).toBeEnabled();
     fireEvent.change(label, { target: { value: 'Mark qualified' } });
     await outlastDebounce();
-    await waitFor(() => expect(actionSaves()).toHaveLength(1));
+    expect(actionSaves(), 'no write before Save').toHaveLength(0);
+    await pressStudioSave();
+    await waitFor(() => expect(mockClient.publish).toHaveBeenCalledTimes(1));
+    expect(actionSaves()).toHaveLength(1);
     const [, name, body, opts] = actionSaves()[0]!;
     expect(name).toBe(KEPT.name);
     expect(body).toMatchObject({ name: KEPT.name, label: 'Mark qualified', objectName: OBJECT });
     // The read's decorations are not written back.
     expect(body).not.toHaveProperty('_packageId');
     expect(opts).toMatchObject({ mode: 'draft', packageId: PAIR });
+    expect(mockClient.publish).toHaveBeenCalledWith('action', KEPT.name, { packageId: PAIR, draftVersion: expect.any(String) });
     expect(saves().filter(([type]) => type === 'object')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: L('engine.studio.actions.delete') }));
+    await outlastDebounce();
+    expect(mockClient.reset, 'Delete sends nothing before Save').not.toHaveBeenCalled();
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.reset).toHaveBeenCalledTimes(2));
     expect(mockClient.reset.mock.calls).toEqual([
       ['action', KEPT.name, { state: 'draft', packageId: PAIR }],
@@ -327,6 +350,29 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     expect(within(list()).getByText('Qualify')).toBeInTheDocument();
   }, 30_000);
 
+  it('Cancel takes back an added action and an edit: nothing is sent, the list is as the pair holds it (objectstack#36511)', async () => {
+    srv.pairPublished = [KEPT];
+    await mountOnActions({ readOnly: true, customization: customizationOf() });
+    fireEvent.click(await within(list()).findByText('Qualify', undefined, { timeout: 8000 }));
+    fireEvent.change(screen.getByRole('textbox', { name: L('engine.inspector.action.label') }), {
+      target: { value: 'Mark qualified' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: L('engine.studio.new') }));
+    fireEvent.click(await screen.findByTestId('action-preset-change_choice'));
+    await waitFor(() => expect(within(list()).getAllByTestId('customization-mark')).toHaveLength(2));
+
+    await pressStudioCancel();
+    await waitFor(() => expect(within(list()).getAllByTestId('customization-mark')).toHaveLength(1));
+    expect(within(list()).getByText('Qualify')).toBeInTheDocument();
+    expect(within(list()).queryByText('Mark qualified')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('studio-save')).toBeNull();
+    await outlastDebounce();
+    expect(actionSaves()).toHaveLength(0);
+    expect(mockClient.publish).not.toHaveBeenCalled();
+    expect(mockClient.reset).not.toHaveBeenCalled();
+    expect(ensure).not.toHaveBeenCalled();
+  }, 30_000);
+
   it('walled: no New, and the pair’s action opens read-only', async () => {
     srv.pairPublished = [KEPT];
     await mountOnActions({ readOnly: true, customization: customizationOf({ walled: true }) });
@@ -342,6 +388,7 @@ describe('Studio adds an action to an installed app’s object, in its customiza
     fireEvent.click(screen.getByRole('button', { name: L('engine.studio.new') }));
     fireEvent.click(await screen.findByTestId('action-preset-change_choice'));
     await outlastDebounce();
+    await pressStudioSave();
     await waitFor(() => expect(saves().filter(([type]) => type === 'object').length).toBeGreaterThan(0));
     const [, , body] = saves().filter(([type]) => type === 'object').at(-1)!;
     const names = (body.actions as Array<Record<string, unknown>>).map((a) => a.name);
@@ -358,7 +405,7 @@ describe('Studio adds an action to an installed app’s object, in its customiza
  *
  * `action` is a translatable type: in a zh-CN session the pair's list and its
  * served drafts carry the translated label and confirmation text, and the
- * autosave sends the buffer whole. Here the served reads carry the translated
+ * Save sends the buffer whole. Here the served reads carry the translated
  * copies and the pair's layered read the stored source.
  *
  * Direction, written before the run: with the buffer seeded from the served
@@ -370,7 +417,7 @@ describe('a pair action edits the action as stored (objectstack#35054)', () => {
   const SOURCE = { ...KEPT, confirmText: 'Qualify this lead?' };
   const SERVED = { ...SOURCE, label: '资格认定', confirmText: '认定此线索？' };
 
-  it('a zh-CN edit autosaves the stored confirmation text; the edited label changes', async () => {
+  it('a zh-CN edit saves the stored confirmation text; the edited label changes', async () => {
     srv.pairPublished = [SERVED];
     srv.pairDrafts = { [KEPT.name]: SERVED };
     srv.stored = { [KEPT.name]: { published: SOURCE, draft: SOURCE } };
@@ -380,7 +427,7 @@ describe('a pair action edits the action as stored (objectstack#35054)', () => {
     const label = screen.getByRole('textbox', { name: L('engine.inspector.action.label') });
     expect(label).toHaveValue('Qualify');
     fireEvent.change(label, { target: { value: 'Mark qualified' } });
-    await outlastDebounce();
+    await pressStudioSave();
     await waitFor(() => expect(actionSaves()).toHaveLength(1));
     const [, name, body, opts] = actionSaves()[0]!;
     expect(name).toBe(KEPT.name);
@@ -405,5 +452,7 @@ describe('a pair action edits the action as stored (objectstack#35054)', () => {
     await outlastDebounce();
     expect(actionSaves()).toHaveLength(0);
     expect(await screen.findByText(L('engine.studio.refusal.draftUnreadable'))).toBeInTheDocument();
+    // objectstack#36511 — and the top bar offers no Save for it.
+    expect(screen.queryByTestId('studio-save')).toBeNull();
   }, 30_000);
 });

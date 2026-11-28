@@ -82,13 +82,20 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { getMetadataInspector, registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import type { MetadataInspectorProps } from '../metadata-admin/inspector-registry';
 import type { MetadataPreviewProps } from '../metadata-admin/preview-registry';
 import { getStudioCanvasPreview } from './studio-canvas-preview';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -132,12 +139,6 @@ function LateObjectInspector(props: MetadataInspectorProps) {
 function UnrelatedInspector() {
   return <div data-testid="unrelated-inspector" />;
 }
-function LatePagePreview(props: MetadataPreviewProps) {
-  return <div data-testid="late-page-preview">{props.name}</div>;
-}
-function UnrelatedPreview() {
-  return <div data-testid="unrelated-preview" />;
-}
 function LateFlowPreview(props: MetadataPreviewProps) {
   return <div data-testid="late-flow-preview">{props.name}</div>;
 }
@@ -154,10 +155,10 @@ describe('Data pillar field rail — a late object inspector fills the open rail
 
     render(
       <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);
@@ -185,50 +186,16 @@ describe('Data pillar field rail — a late object inspector fills the open rail
   });
 });
 
-describe('Interfaces pillar canvas — a late page preview replaces the fallback (objectui#11939)', () => {
-  it('late preview rendered: true', async () => {
-    assertModuleGraphLoaded();
-    expect(getMetadataPreview('page')).toBeUndefined();
-
-    render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
-        <InterfacesPillar packageId="com.acme.app" />
-      </MemoryRouter>,
-    );
-    fireEvent.click(await screen.findByTitle('page · home_page'));
-    await waitFor(() => expect(screen.getByTestId('canvas-mode-toggle')).toBeInTheDocument(), {
-      timeout: 4000,
-    });
-
-    // Before: today's fallback. Which of its two sentences shows depends on
-    // whether ANY designer is registered (objectui#6795 part C), and that is
-    // shared module state here — both end in the same clause.
-    const FALLBACK = /cannot be previewed or designed here\.$/;
-    expect(await screen.findAllByText(FALLBACK)).not.toHaveLength(0);
-    expect(screen.queryByTestId('late-page-preview')).toBeNull();
-
-    // Control: another type's preview changes nothing on this leaf.
-    act(() => registerMetadataPreview('report', UnrelatedPreview));
-    expect(screen.queryByTestId('unrelated-preview')).toBeNull();
-    expect(screen.queryAllByText(FALLBACK)).not.toHaveLength(0);
-
-    act(() => registerMetadataPreview('page', LatePagePreview));
-    expect(await screen.findByTestId('late-page-preview')).toHaveTextContent('home_page');
-    expect(screen.queryAllByText(FALLBACK)).toHaveLength(0);
-  });
-});
-
 describe('Automations pillar canvas — a late flow preview replaces the fallback (objectui#11939)', () => {
   it('late preview rendered: true, and the header chip stops saying there is no designer', async () => {
     assertModuleGraphLoaded();
     expect(getMetadataPreview('flow')).toBeUndefined();
 
     render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/automations']}>
-        <AutomationsPillar packageId="com.acme.app" />
+      <MemoryRouter initialEntries={['/studio/com.acme.app/metadata/flow/nightly']}>
+        <AutomationsPillar packageId="com.acme.app" flowName="nightly" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: /Nightly/ }));
 
     const NO_DESIGNER =
       'No metadata designers are registered in this session, so this flow cannot be designed here.';

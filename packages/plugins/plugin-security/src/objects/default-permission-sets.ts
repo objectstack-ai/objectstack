@@ -399,6 +399,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
         allowDelete: true,
         viewAllRecords: true,
         modifyAllRecords: true,
+        // [Field-axis split, ruling of record 6912661484, letter A] The
+        // read-only "every field" vote (`viewAllFieldsReadVote`,
+        // `@objectstack/core`). `viewAllRecords`/`modifyAllRecords` cast no
+        // field vote, so this bit is what keeps an organization administrator
+        // reading every field another set hides. It votes no edit: a field
+        // another set locks stays locked for a holder of both sets. The
+        // explicit entries below carry no `viewAllFields` and so no field vote:
+        // an explicit entry is the set's whole answer for its object.
+        // `deriveWallLessOrgAdmin` drops it with the two bypass bits.
+        viewAllFields: true,
         // [#3544] The super-user bits do not imply export.
         //
         // [#8681] …and this set no longer GRANTS it either — read the twin
@@ -459,6 +469,14 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // so an administrator edits every unit of their organization without
       // them.
       sys_unit: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // [ADR-0158 U6, Open item 10 option A] The organization's display decimal
+      // places for a standard unit code: set, changed and cleared here.
+      // Clearing is deleting the row, so this line keeps the delete the
+      // wildcard gives (unlike `sys_unit`, whose rows hold codes records use).
+      // WITHOUT the superuser bits, like the line above: settings carry no
+      // owner scope for an administrator, so an administrator edits every
+      // setting of their organization without them.
+      sys_standard_unit_setting: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     },
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
     // administrator reads its organization's mailboxes and their unassociated
@@ -926,6 +944,38 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // (ADR-0090 D5). An external member resolves `external_default` and gets
       // no such line.
       sys_unit: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [ADR-0158 U6, Open item 10 option A] The organization's display decimal
+      // places for a standard unit code, READ only, on the `sys_unit` line's
+      // reasoning: a quantity displays with the same default for every member
+      // who reads it. ⛔ No row policy (every row is the member's own
+      // organization's reference data, behind Layer 0, ADR-0095 D1) and ⛔ no
+      // write bit: organization administrators set and clear these through
+      // `organization_admin`'s line. An external member resolves
+      // `external_default` and gets no such line, as with `sys_unit`.
+      sys_standard_unit_setting: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // [#36942 — maintainer ruling 7131539862, verbatim 「1. #36942 任务/备忘默认权限： A。」]
+      // The platform's built-in tasks and notes (`@objectstack/platform-objects`
+      // `work/`), for every member, whichever application is installed: read,
+      // create and edit, in the `sys_comment` shape above (ruling 6633054352).
+      // Left to applications, the capability would depend on which package is
+      // installed and vanish on uninstall; read only would leave a task nobody
+      // can tick done.
+      //
+      // These two lines open the OBJECTS. WHICH ROWS is each object's own
+      // private sharing, and ⛔ no row policy is added for either: a task is
+      // read by its creator (`owner_id`, stamped on insert) and its assignee
+      // (the declared `sys_task_assignee` rule, a `field` recipient on
+      // `assignee_id` with `edit` access); a note by its creator. Another
+      // member reads neither, by id or by list — the premise the ruling rests
+      // on, pinned with this grant in place by
+      // `task-note-objects-36942.test.ts`. The assignee's edit lands through
+      // that share: the `owner_only_writes` floor below defers to an `edit`
+      // share, measured there too, so no per-object alternative is added.
+      //
+      // ⛔ No `allowDelete`, for the anchor reason above. An external member
+      // resolves `external_default` and gets no such line.
+      sys_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      sys_note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     // [#21237] The identity object's `Admin` group is admin-review data, not a
     // staff directory: `sys_user_org_members` below opens every org peer's row,
@@ -1734,14 +1784,16 @@ const baseDefaultPermissionSets: PermissionSet[] = [
 /**
  * [ADR-0105 D4] Derive the wall-less org-admin variant
  * ({@link ORGANIZATION_ADMIN_NO_BYPASS}) from `organization_admin` by dropping
- * the wildcard `viewAllRecords`/`modifyAllRecords` bits — everything else
+ * the wildcard `viewAllRecords`/`modifyAllRecords` bits, and with them the
+ * wildcard `viewAllFields` — everything else
  * (object grants, managed-write denies, the assignment-table overrides,
  * system permissions, the identity RLS carve-outs) is carried over verbatim.
  *
  * DERIVED, never a second literal: two hand-maintained copies of a
  * high-privilege set are a drift waiting to happen, and the drift would be a
- * silent privilege difference. The only intended delta is the superuser bits,
- * so the only thing this function may do is remove them.
+ * silent privilege difference. The only intended delta is the superuser bits
+ * (and the `viewAllFields` bit that rides with them on the wildcard), so the
+ * only thing this function may do is remove them.
  *
  * ⚠️ The copy is SHALLOW and taken at MODULE LOAD, so what it carries over is
  * the compile-time baseline only — the registry-driven managed-write denies
@@ -1764,8 +1816,15 @@ function deriveWallLessOrgAdmin(base: PermissionSet): PermissionSet {
   // superuser bits. Ownership, sharing and business RLS still apply; grant
   // `admin_full_access` (or an explicit set carrying the bits) when a
   // deployment-wide data superuser is genuinely intended.
+  //
+  // [Field-axis split, ruling of record 6912661484] `viewAllFields` leaves
+  // with the two bypass bits. The variant never read the fields another set
+  // hides, so keeping the parent's `viewAllFields` would hand its holders
+  // every such field, a widening nobody ruled. It is a field vote, not a
+  // record bypass: dropping it is about keeping the variant's answer, not
+  // about the tenant wall.
   const objects: Record<string, any> = { ...(base.objects ?? {}) };
-  const { viewAllRecords: _v, modifyAllRecords: _m, ...wildcardWithoutBypass } =
+  const { viewAllRecords: _v, modifyAllRecords: _m, viewAllFields: _f, ...wildcardWithoutBypass } =
     (objects['*'] ?? {}) as Record<string, unknown>;
   objects['*'] = wildcardWithoutBypass;
   return PermissionSetSchema.parse({

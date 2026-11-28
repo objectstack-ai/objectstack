@@ -290,15 +290,39 @@ function TypeBody({ type, d, locale }: { type: string; d: Record<string, unknown
               <div className="text-xs text-amber-700 dark:text-amber-400">{tr('engine.validationPreview.noTransitions', locale)}</div>
             ) : (
               <ul className="rounded border bg-background divide-y text-xs">
-                {entries.map(([from, tos]) => (
-                  <li key={from} className="flex items-center gap-2 px-2.5 py-1.5">
-                    <span className="font-mono">{from}</span>
-                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                    <span className="font-mono text-emerald-700 dark:text-emerald-400">
-                      {Array.isArray(tos) && tos.length > 0 ? tos.join(' | ') : tr('engine.validationPreview.deadEnd', locale)}
-                    </span>
-                  </li>
-                ))}
+                {entries.map(([from, tos]) => {
+                  // A `''` target is not a state: it says this state may be
+                  // CLEARED (the field set back to empty). Joining it as a name
+                  // drew a trailing separator, or a blank row when it was the
+                  // only target. Name it in words — the same words the Studio
+                  // rules panel puts on that row's checkbox. An empty list is
+                  // still a dead end.
+                  const list = Array.isArray(tos) ? tos : [];
+                  const named = list.filter((to) => to !== '');
+                  const clearable = list.length > named.length;
+                  return (
+                    <li key={from} className="flex items-center gap-2 px-2.5 py-1.5">
+                      <span className="font-mono">{from}</span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      {list.length === 0 ? (
+                        <span className="font-mono text-emerald-700 dark:text-emerald-400">
+                          {tr('engine.validationPreview.deadEnd', locale)}
+                        </span>
+                      ) : (
+                        <>
+                          {named.length > 0 && (
+                            <span className="font-mono text-emerald-700 dark:text-emerald-400">{named.join(' | ')}</span>
+                          )}
+                          {clearable && (
+                            <span className="rounded border bg-muted/40 px-1.5 py-0.5 text-[11px] italic text-muted-foreground">
+                              {tr('engine.studio.rules.transitionClearable', locale)}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Section>

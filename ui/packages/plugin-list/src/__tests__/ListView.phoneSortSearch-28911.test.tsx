@@ -144,7 +144,8 @@ describe('phone list: the search icon expands in place (objectstack#28911)', () 
     const trigger = screen.getByTestId('phone-search-trigger');
     expect(trigger).toBeVisible();
     expect(trigger).toHaveAccessibleName('Search');
-    expect(sizeTokens(trigger)).toEqual(sizeTokens(screen.getByTestId('toolbar-display-trigger')));
+    // objectstack#35883 — a pill of the phone toolbar, 44 px like its other pills.
+    expect(sizeTokens(trigger)).toEqual(expect.arrayContaining(['h-11', 'min-w-11']));
 
     fireEvent.click(trigger);
     const input = screen.getByTestId('phone-search-input');

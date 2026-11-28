@@ -74,7 +74,7 @@ export const SysTwoFactor = ObjectSchema.create({
       label: 'Enable 2FA',
       icon: 'shield-check',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/two-factor/enable',
       requiresFeature: 'twoFactor',
@@ -99,7 +99,7 @@ export const SysTwoFactor = ObjectSchema.create({
       label: 'Disable 2FA',
       icon: 'shield-off',
       variant: 'danger',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/two-factor/disable',
       requiresFeature: 'twoFactor',
@@ -118,7 +118,7 @@ export const SysTwoFactor = ObjectSchema.create({
       label: 'Regenerate Backup Codes',
       icon: 'refresh-cw',
       variant: 'secondary',
-      locations: ['list_toolbar', 'list_item'],
+      locations: ['list', 'record_row'],
       type: 'api',
       target: '/api/v1/auth/two-factor/generate-backup-codes',
       requiresFeature: 'twoFactor',
@@ -263,6 +263,7 @@ export const SysTwoFactor = ObjectSchema.create({
   
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // #1591 — reads only: writes are refused by the identity write guard

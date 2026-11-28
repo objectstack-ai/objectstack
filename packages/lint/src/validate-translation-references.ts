@@ -128,6 +128,14 @@
  * node, is pointed at `approvals.<node_id>.label` rather than told only that
  * the node is not a screen.
  *
+ * `flows.<name>.nodes.<node_id>.label` (ruling 7076440876) is judged against
+ * every other node: the id must name a node of the flow, at any depth, that is
+ * neither a `screen` nor an `approval`. Those two already carry their label
+ * under their own key, so a `nodes` key over one is pointed at
+ * `screens.<node_id>.title` or `approvals.<node_id>.label`, and a `screens` or
+ * `approvals` key written over any other node is pointed at
+ * `nodes.<node_id>.label`. An id the flow does not declare is an orphan.
+ *
  * `hooks.<name>.refusals.<CODE>.message` (#26170) is judged against the hook's
  * refusal catalogue: the hook must be one the stack defines (or a sibling
  * package's, through the artifact carrier), and the code one its `refusals`
@@ -268,6 +276,7 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
+import { isRecordPageBuiltinTab, relatedListEntryHidden, relatedListEntryName, relatedListNameCovers } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
 import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
@@ -469,11 +478,41 @@ interface ObjectFacts {
    */
   validations: Set<string>;
   /**
+   * `_milestones` addresses — per watched `field`, the `value`s an
+   * `activityMilestones` entry of this object fires on (#37524).
+   * `objects.<obj>._milestones.<field>.<value>.summary` is keyed by that pair.
+   */
+  milestones: Map<string, Set<string>>;
+  /**
    * `_tabs` names — the filter-preset tabs declared for this object, from
    * `page.interfaceConfig.userFilters.tabs[].name`. See {@link collectPageTabs}
    * for why that is the only carrier and how the object binding is resolved.
    */
   tabs: Set<string>;
+  /**
+   * `_relatedLists` names — the `list` of every object-form `relatedLists`
+   * entry this object declares WITH a `label`, the only entries
+   * `translateObject` overlays `objects.<obj>._relatedLists.<list>.label` onto.
+   */
+  relatedListLabels: Set<string>;
+  /**
+   * Every list this object's `relatedLists` names, labelled or not (a bare
+   * string, an object entry, a built-in tab) — read only to say WHY a
+   * `_relatedLists` key over a named but unlabelled entry resolves nothing.
+   */
+  relatedListNames: Set<string>;
+  /**
+   * The lists a paired `.custom` arrangement hides (`{ list, hidden: true }`,
+   * ADR-0146 D10): no tab shows them, so their title is read nowhere — read
+   * only to say so.
+   */
+  relatedListHidden: Set<string>;
+  /**
+   * The lists whose label (from the owner or a placement) a `.custom`
+   * arrangement entry replaced with none: the tab shows, untitled by any
+   * `label` — read only to name the arrangement in the finding.
+   */
+  relatedListStripped: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -501,6 +540,13 @@ interface ScreenFacts {
    * screen without one resolves nothing.
    */
   hasDescription: boolean;
+  /**
+   * Whether the screen AUTHORS its own heading (`config.title`, a non-empty
+   * string). Such a screen is titled apart from its label, so its label has a
+   * key of its own, `…nodes.<node_id>.label`; an untitled screen's label IS
+   * its heading, keyed `…screens.<node_id>.title`.
+   */
+  titled: boolean;
 }
 
 /** Everything a `flows.<name>.…` key may legally name under one flow. */
@@ -565,6 +611,12 @@ interface Universe {
    */
   contributedOnlyApps: Set<string>;
   dashboards: Map<string, { widgets: Set<string>; actions: Set<string> }>;
+  /**
+   * [ADR-0159 D8] Authored `form` item name → its named sections → the `field`
+   * of each entry object the section declares: what a
+   * `forms.<name>.sections.<section>[.fields.<field>]` key may name.
+   */
+  forms: Map<string, Map<string, Set<string>>>;
   /** Flow name (`Flow.name`) → its screen nodes and their declared fields. */
   flows: Map<string, FlowFacts>;
   /**
@@ -633,7 +685,12 @@ function emptyFacts(): ObjectFacts {
     sections: new Set(),
     sectionEntries: new Map(),
     validations: new Set(),
+    milestones: new Map(),
     tabs: new Set(),
+    relatedListLabels: new Set(),
+    relatedListNames: new Set(),
+    relatedListHidden: new Set(),
+    relatedListStripped: new Set(),
   };
 }
 
@@ -680,6 +737,35 @@ function emptyFacts(): ObjectFacts {
  * of anchors is now a list of call sites, not four copies of a loop that can
  * drift apart one at a time.
  */
+/**
+ * Register the `_sections` names one form-ish container declares, under the
+ * object it binds to.
+ *
+ * Form sections carry an OPTIONAL `name` that exists purely for the
+ * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
+ * lookup"). A section without one cannot be translated at all, so it
+ * contributes nothing here. A form view's container and a `form` item
+ * (ADR-0159) both feed it: `translateForm` reads a form item's section
+ * headings at `objects.<object>._sections.<name>`, as a form view's are read.
+ */
+function addFormSections(container: AnyRec, binding: string | undefined, factsFor: (objectName: string) => ObjectFacts): void {
+  if (!binding) return;
+  for (const section of recordsOf(container.sections)) {
+    const sectionName = strName(section.name);
+    if (!sectionName) continue;
+    const facts = factsFor(binding);
+    facts.sections.add(sectionName);
+    // A section's entry objects are the `_sections.<name>.fields` keys; a
+    // bare field-name entry authors no copy, so it addresses nothing.
+    let entries = facts.sectionEntries.get(sectionName);
+    if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
+    for (const entry of recordsOf(section.fields)) {
+      const field = strName(entry.field);
+      if (field) entries.add(field);
+    }
+  }
+}
+
 function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
   const recordObject = viewObjectName(view);
   const bindingOf = (container: AnyRec): string | undefined =>
@@ -692,31 +778,8 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
     if (objectName && name) factsFor(objectName).forms.add(name);
   };
 
-  /**
-   * Register the `_sections` names one form-ish container declares.
-   *
-   * Form sections carry an OPTIONAL `name` that exists purely for the
-   * `_sections` lookup (`ui/view.zod.ts`: "Stable section identifier for i18n
-   * lookup"). A section without one cannot be translated at all, so it
-   * contributes nothing here.
-   */
-  const addSections = (container: AnyRec, binding: string | undefined) => {
-    if (!binding) return;
-    for (const section of recordsOf(container.sections)) {
-      const sectionName = strName(section.name);
-      if (!sectionName) continue;
-      const facts = factsFor(binding);
-      facts.sections.add(sectionName);
-      // A section's entry objects are the `_sections.<name>.fields` keys; a
-      // bare field-name entry authors no copy, so it addresses nothing.
-      let entries = facts.sectionEntries.get(sectionName);
-      if (!entries) facts.sectionEntries.set(sectionName, (entries = new Set()));
-      for (const entry of recordsOf(section.fields)) {
-        const field = strName(entry.field);
-        if (field) entries.add(field);
-      }
-    }
-  };
+  const addSections = (container: AnyRec, binding: string | undefined) =>
+    addFormSections(container, binding, factsFor);
 
   const listBinding = isRec(view.list) ? bindingOf(view.list) : undefined;
   if (isRec(view.list)) addView(listBinding, defaultListViewKey(listBinding, view));
@@ -1113,21 +1176,31 @@ function contributedNavItemsByApp(stack: AnyRec): Map<string, unknown[]> {
  *
  * `ObjectExtensionSchema` is a `strictObject`, so the fold surface is EXACTLY
  * its declared keys: `extend`, `priority`, `fields`, `validations`, `indexes`,
- * `label`, `pluralLabel`, `description`. Everything else is refused BY NAME at
- * the extension level with authoring guidance (`actions`, `listViews`,
- * `fieldGroups`, `hooks` carry their own `guidance` text; `views`, `sections`
- * and `tabs` fall to the shared unknown-key refusal). Measured against the
- * schema rather than read off the merge: each of those seven produced an
- * extension-level `unrecognized_keys` issue, while `fields` and `validations`
- * parsed.
+ * `label`, `pluralLabel`, `description`, and the arrangement keys the base's
+ * paired `.custom` package writes, `fieldGroups` and `relatedLists`
+ * (ADR-0146 D10), and `place`, which positions the items the extension brings.
+ * Everything else is refused BY NAME at the extension level
+ * with authoring guidance (`actions`, `listViews`, `hooks` carry their own
+ * `guidance` text; `views`, `sections` and `tabs` fall to the shared
+ * unknown-key refusal). Measured against the schema rather than read off the
+ * merge: each of those six produced an extension-level `unrecognized_keys`
+ * issue, while `fields`, `validations` and `fieldGroups` parsed.
  *
- * ⇒ Only TWO of this rule's rungs are reachable through an extension:
- * `objects.<obj>.fields.*` and `objects.<obj>._validations.*`. `indexes` is
- * not translatable; `label` / `pluralLabel` / `description` are leaf copy on
- * an object that already resolved, and this rule checks no leaf. ⛔ Do not
- * grow this fold to `_views` / `_sections` / `_tabs` / `_actions` "for
- * symmetry": an extension cannot contribute any of them, so a key there is an
- * orphan exactly as it was, and widening those rungs would silence real ones.
+ * ⇒ FOUR of this rule's rungs are reachable through an extension:
+ * `objects.<obj>.fields.*`, `objects.<obj>._validations.*`,
+ * `objects.<obj>._sections.*` for the groups a `.custom` arrangement brings
+ * (`fieldGroups[].key` is the section anchor, ADR-0085), and
+ * `objects.<obj>._relatedLists.*` for a labelled tab entry it brings: an
+ * object-form entry of a `.custom` arrangement's `relatedLists` that is not
+ * `hidden`, or a list placement in `place` (spliced, where the target declares
+ * `relatedLists`, into the served target and into the packaged base the read
+ * compares with, `getPackagedObjectBase`), each titling a tab of
+ * the served target by its `list`. `indexes` is not translatable; `label` / `pluralLabel` /
+ * `description` are leaf copy on an object that already resolved, and this
+ * rule checks no leaf. ⛔ Do not grow this fold to `_views` / `_tabs` /
+ * `_actions` "for symmetry": an extension cannot contribute any of them, so a
+ * key there is an orphan exactly as it was, and widening those rungs would
+ * silence real ones.
  *
  * ## Read through the package's one fold (#30471)
  *
@@ -1291,6 +1364,25 @@ function buildUniverse(stack: AnyRec): Universe {
     for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
     }
+    // #37524: `_milestones.<field>.<value>` is keyed by the pair a milestone fires on.
+    for (const milestone of recordsOf(obj.activityMilestones)) {
+      const field = strName(milestone.field);
+      const value = typeof milestone.value === 'string' && milestone.value.length > 0 ? milestone.value : undefined;
+      if (!field || !value) continue;
+      let values = facts.milestones.get(field);
+      if (!values) facts.milestones.set(field, (values = new Set()));
+      values.add(value);
+    }
+    // `_relatedLists.<list>` is keyed by an object-form `relatedLists` entry's
+    // literal `list` (`object.field` is one key), and resolves only over an
+    // entry that authors a `label`: `translateObject` overlays that label and
+    // swaps nothing in for an entry without one.
+    for (const entry of Array.isArray(obj.relatedLists) ? obj.relatedLists : []) {
+      const list = typeof entry === 'string' ? entry : isRec(entry) ? strName(entry.list) : undefined;
+      if (!list) continue;
+      facts.relatedListNames.add(list);
+      if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
+    }
   };
 
   for (const obj of recordsOf(stack.objects)) {
@@ -1359,6 +1451,68 @@ function buildUniverse(stack: AnyRec): Universe {
       for (const rule of extension.validations) {
         collectValidationRuleNames(rule, facts.validations);
       }
+      // [ADR-0146 D10] `_sections.<group>` is keyed by `fieldGroups[].key`
+      // (ADR-0085), and the base's paired `.custom` package declares the
+      // target's whole field arrangement in its extension: a group it brings
+      // is a section anchor of the target, as the target's own groups are.
+      for (const group of extension.fieldGroups) {
+        const key = strName(group.key);
+        if (key) facts.sections.add(key);
+      }
+      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a list
+      // placement's `place` entry titles a tab of the target, and where the
+      // target declares `relatedLists` the served target carries that entry,
+      // which `translateObject` translates as it does the target's own (a
+      // placed entry is part of the packaged base it is compared with,
+      // `getPackagedObjectBase`). A placement on a target that declares none
+      // is not applied, and its key is accepted here all the same: this fold
+      // does not read whether the target declares the list. The `.custom`
+      // arrangement's entries are folded after every placement, below.
+      const arranged = new Set<unknown>(extension.relatedListArrangement ?? []);
+      for (const entry of extension.relatedListEntries) {
+        if (arranged.has(entry)) continue;
+        const list = strName(entry.list);
+        if (!list) continue;
+        facts.relatedListNames.add(list);
+        if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
+      }
+    }
+    // [#36595] The `.custom` arrangement (ADR-0146 D10) is applied after the
+    // owner's list and every placement, as the registry applies it
+    // (`registry-custom-arrangement.ts`): each of its entries REPLACES every
+    // entry it covers (`relatedListNameCovers`: the same list, or a bare child
+    // for each list of that child). So a labelled entry titles the tab, a
+    // bare name or an unlabelled entry leaves it the child FK's
+    // `relatedListTitle`, and `{ list, hidden: true }` leaves no tab, whatever
+    // label the owner or a placement gave the lists it covers. Lists it does
+    // not cover keep what they had.
+    //
+    // Two passes per arrangement, as the registry reads one: it collects the
+    // arrangement's entries first and only then drops what they cover from the
+    // tab list steps 1–2 gave, so one entry never strips a label or a `hidden`
+    // a sibling entry of the SAME arrangement wrote, in either order.
+    for (const extension of extensions) {
+      const arrangement = (extension.relatedListArrangement ?? [])
+        .map((entry) => ({ entry, list: relatedListEntryName(entry) }))
+        .filter((e): e is { entry: unknown; list: string } => typeof e.list === 'string' && e.list !== '');
+      for (const { list } of arrangement) {
+        facts.relatedListNames.add(list);
+        for (const labelled of [...facts.relatedListLabels]) {
+          if (!relatedListNameCovers(list, labelled)) continue;
+          facts.relatedListLabels.delete(labelled);
+          facts.relatedListStripped.add(labelled);
+        }
+        for (const hidden of [...facts.relatedListHidden]) {
+          if (relatedListNameCovers(list, hidden)) facts.relatedListHidden.delete(hidden);
+        }
+      }
+      for (const { entry, list } of arrangement) {
+        if (relatedListEntryHidden(entry)) facts.relatedListHidden.add(list);
+        else if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) {
+          facts.relatedListLabels.add(list);
+          facts.relatedListStripped.delete(list);
+        }
+      }
     }
   }
 
@@ -1377,6 +1531,30 @@ function buildUniverse(stack: AnyRec): Universe {
   // where precedence has to be decided, and they are decided where they live.)
   for (const view of [...recordsOf(stack.views), ...artifactProvidedRecords(stack, 'views')]) {
     collectViewRecord(view, factsFor);
+  }
+  // [ADR-0159 card ②] A `form` item's named sections are `_sections` facts of
+  // the object it binds to (its one `object`), the same anchor a form view's
+  // sections are. Its own label, title and panel live in the `forms` family,
+  // keyed by its name, so it contributes no `_views` fact.
+  // [ADR-0159 D8] …and the form's own `forms.<name>.sections` node, read
+  // before that default: the same sections and entries, keyed by the form.
+  const forms = new Map<string, Map<string, Set<string>>>();
+  for (const form of [...recordsOf(stack.forms), ...artifactProvidedRecords(stack, 'forms')]) {
+    addFormSections(form, strName(form.object), factsFor);
+    const formName = strName(form.name);
+    if (!formName) continue;
+    let sections = forms.get(formName);
+    if (!sections) forms.set(formName, (sections = new Map()));
+    for (const section of recordsOf(form.sections)) {
+      const sectionName = strName(section.name);
+      if (!sectionName) continue;
+      let entries = sections.get(sectionName);
+      if (!entries) sections.set(sectionName, (entries = new Set()));
+      for (const entry of recordsOf(section.fields)) {
+        const field = strName(entry.field);
+        if (field) entries.add(field);
+      }
+    }
   }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor, and
@@ -1684,6 +1862,7 @@ function buildUniverse(stack: AnyRec): Universe {
         fieldOptions,
         objectName: strName(config?.objectName),
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
+        titled: typeof config?.title === 'string' && config.title.length > 0,
       });
     }
     flows.set(flowName, { screens, refusals, notices, records, approvals, messages, otherNodes });
@@ -1823,6 +2002,7 @@ function buildUniverse(stack: AnyRec): Universe {
     apps,
     contributedOnlyApps,
     dashboards,
+    forms,
     flows,
     hooks,
     hookTexts,
@@ -2053,6 +2233,55 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
           );
         }
 
+        // _relatedLists.<list>
+        //
+        // A record-page related-list title the parent declares on an
+        // object-form `relatedLists` entry. A key over a list the object names
+        // without a `label` translates nothing: that tab's title is the child
+        // FK's `relatedListTitle`, keyed on the child.
+        for (const listName of Object.keys(asRecord(rawNode._relatedLists))) {
+          if (facts.relatedListLabels.has(listName)) continue;
+          const listWhere = `${inLocale} · object "${objectName}" · related list "${listName}"`;
+          const listPath = `${objPath}._relatedLists${memberPath(listName)}`;
+          if (isRecordPageBuiltinTab(listName)) {
+            orphan(listWhere, listPath,
+              `"${listName}" is a built-in record-page tab, written only bare and titled by the platform, ` +
+              `so no title of object "${objectName}" reads this key.`,
+              `Drop this key: a built-in tab takes no \`label\` here.`);
+            continue;
+          }
+          if ([...facts.relatedListHidden].some((hidden) => relatedListNameCovers(hidden, listName))) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
+              `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
+              `Drop this key, or show the tab (drop \`hidden\`) with the owner's \`label\` on the entry.`);
+            continue;
+          }
+          if (facts.relatedListStripped.has(listName)) {
+            orphan(listWhere, listPath,
+              `Related list "${listName}" of object "${objectName}" carries no \`label\` in the \`.custom\` ` +
+              `arrangement, which replaces the owner's entry, so no title reads this key.`,
+              `Drop this key, or re-state the arrangement's entry with the owner's \`label\` ({ list, label }).`);
+            continue;
+          }
+          const named = facts.relatedListNames.has(listName);
+          orphan(
+            listWhere,
+            listPath,
+            named
+              ? `Related list "${listName}" of object "${objectName}" carries no \`label\` in ` +
+                `\`relatedLists\`, so no title reads this key.`
+              : `Translations are keyed to related list "${listName}", which no \`relatedLists\` entry ` +
+                `of object "${objectName}" names, so nothing reads this key.` +
+                suggest(listName, facts.relatedListLabels),
+            named
+              ? `Give the entry a \`label\` ({ list, label }) to title it here, or translate the ` +
+                `child lookup field's \`relatedListTitle\` instead, and drop this key.`
+              : `Match the key to the entry's \`list\` (a dotted object.field is one key), or drop ` +
+                `it if the entry was renamed or removed.`,
+          );
+        }
+
         // _validations.<rule>
         //
         // Same shape as `_tabs` above: a machine name that either exists on
@@ -2071,6 +2300,31 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
               `removed.`,
           );
+        }
+
+        // _milestones.<field>.<value>
+        //
+        // A milestone's summary template, keyed by the pair that fires it. A
+        // key over a pair no milestone declares is never read: the row keeps
+        // its authored sentence.
+        for (const [field, rawValues] of Object.entries(asRecord(rawNode._milestones))) {
+          for (const value of Object.keys(asRecord(rawValues))) {
+            if (facts.milestones.get(field)?.has(value)) continue;
+            const declared = facts.milestones.get(field);
+            orphan(
+              `${inLocale} · object "${objectName}" · milestone "${field}" → "${value}"`,
+              `${objPath}._milestones${memberPath(field)}${memberPath(value)}`,
+              declared
+                ? `Translations are keyed to a milestone of field "${field}" firing on "${value}", ` +
+                  `which object "${objectName}" does not declare, so no timeline row reads this key.` +
+                  suggest(value, declared)
+                : `Translations are keyed to a milestone watching field "${field}", which no ` +
+                  `\`activityMilestones\` entry of object "${objectName}" watches, so no timeline row ` +
+                  `reads this key.`,
+              `Match the key to the milestone's \`field\` and \`value\`, or drop it if the milestone ` +
+                `was changed or removed.`,
+            );
+          }
         }
 
         // _actions.<name>[.params.<name>[.options.<value>] | .outcomeMessages.<outcome>
@@ -2211,6 +2465,44 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               suggest(actionKey, dash.actions),
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.`,
           );
+        }
+      }
+
+      // ── [ADR-0159 D8] forms.<name>.sections.<section>[.fields.<field>] ──
+      //
+      // Only the `sections` branch is judged: a section the form names and an
+      // entry `field` that section declares are the targets `translateForm`
+      // reads there. A form this stack does not author is skipped, as a page
+      // is (no rung judges `forms.<name>` itself yet).
+      for (const [formName, rawForm] of Object.entries(asRecord(rawData.forms))) {
+        const form = universe.forms.get(formName);
+        if (!form || !isRec(rawForm)) continue;
+        const formPath = `${base}.forms${memberPath(formName)}`;
+        for (const [sectionName, rawSection] of Object.entries(asRecord(rawForm.sections))) {
+          const entries = form.get(sectionName);
+          if (!entries) {
+            orphan(
+              `${inLocale} · form "${formName}" · section "${sectionName}"`,
+              `${formPath}.sections.${sectionName}`,
+              `Translations are keyed to section "${sectionName}", which form "${formName}" does not ` +
+                `declare, so nothing reads them.` +
+                suggest(sectionName, form.keys()),
+              `Key the section by its \`name\` in the form's \`sections\`, or drop the translation.`,
+            );
+            continue;
+          }
+          for (const fieldName of Object.keys(asRecord(asRecord(rawSection).fields))) {
+            if (entries.has(fieldName)) continue;
+            orphan(
+              `${inLocale} · form "${formName}" · section "${sectionName}" · entry "${fieldName}"`,
+              `${formPath}.sections.${sectionName}.fields.${fieldName}`,
+              `Translations are keyed to entry "${fieldName}" of section "${sectionName}", which form ` +
+                `"${formName}" does not declare in that section, so nothing reads them.` +
+                suggest(fieldName, entries),
+              `Key the entry by its \`field\` under the section's \`name\`, or drop the translation. A ` +
+                `bare field name authors no copy: translate the field itself at \`objects.OBJECT.fields.FIELD\`.`,
+            );
+          }
         }
       }
 
@@ -2418,7 +2710,8 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 ? approvalRedirect('screen', nodeId, flowName)
                 : otherType
                   ? `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
-                    `declares as a \`${otherType}\` node, not a \`screen\`, so nothing resolves these keys.`
+                    `declares as a \`${otherType}\` node, not a \`screen\`; its label is keyed ` +
+                    `\`nodes.${nodeId}.label\`.`
                   : `Translations are keyed to screen "${nodeId}", which flow "${flowName}" ` +
                     `declares no screen node for, so the wizard step keeps its source-locale heading.` +
                     suggest(nodeId, flow.screens.keys()),
@@ -2556,11 +2849,39 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `\`screen\` node; its heading is keyed \`screens.${nodeId}.title\`.`
               : nodeType
                 ? `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares as a ` +
-                  `\`${nodeType}\` node, not an \`approval\`, so nothing resolves this key.`
+                  `\`${nodeType}\` node, not an \`approval\`; its label is keyed \`nodes.${nodeId}.label\`.`
                 : `Translations are keyed to approval step "${nodeId}", which flow "${flowName}" declares no ` +
                   `node for, so the step keeps its source-locale label.` +
                   suggest(nodeId, flow.approvals),
             `Approval-step translations are keyed by the \`id\` of an \`approval\` node.`,
+          );
+        }
+        // ── flows.<name>.nodes.<node_id> (ruling 7076440876) ──────────────
+        // Any node but an `approval` or an untitled `screen`, at any depth:
+        // those two carry their label under a key of their own, so a `nodes`
+        // key over one is pointed there rather than accepted as a second key.
+        // A screen that authors its own `config.title` is titled apart from
+        // its label, so its label is keyed here.
+        for (const nodeId of Object.keys(asRecord(rawFlow.nodes))) {
+          if (flow.screens.get(nodeId)?.titled) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          if (nodeType && nodeType !== SCREEN_NODE_TYPE && nodeType !== APPROVAL_NODE_TYPE) continue;
+          orphan(
+            `${inLocale} · flow "${flowName}" · node "${nodeId}"`,
+            `${flowPath}.nodes.${nodeId}`,
+            nodeType === SCREEN_NODE_TYPE
+              ? `Translations are keyed to node "${nodeId}", which flow "${flowName}" declares as a ` +
+                `\`screen\` node with no \`config.title\` of its own, so its label is its heading, keyed ` +
+                `\`screens.${nodeId}.title\`.`
+              : nodeType === APPROVAL_NODE_TYPE
+                ? approvalRedirect('node', nodeId, flowName)
+                : `Translations are keyed to node "${nodeId}", which flow "${flowName}" does not declare, so ` +
+                  `its drawn step keeps its authored label.` +
+                  suggest(nodeId, [
+                    ...[...flow.otherNodes].filter(([, type]) => type !== APPROVAL_NODE_TYPE).map(([id]) => id),
+                    ...[...flow.screens].filter(([, screen]) => screen.titled).map(([id]) => id),
+                  ]),
+            `Node-label translations are keyed by a node's \`id\`, not its \`label\`.`,
           );
         }
       }
@@ -2640,10 +2961,11 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
 }
 
 /**
- * The verdict for a `screens` / `refusals` key written over an `approval`
- * node: the step's one translatable string is its label, under `approvals`.
+ * The verdict for a `screens` / `refusals` / `nodes` key written over an
+ * `approval` node: the step's one translatable string is its label, under
+ * `approvals`.
  */
-function approvalRedirect(group: 'screen' | 'refusal', nodeId: string, flowName: string): string {
+function approvalRedirect(group: 'screen' | 'refusal' | 'node', nodeId: string, flowName: string): string {
   return (
     `Translations are keyed to ${group} "${nodeId}", which flow "${flowName}" declares as an ` +
     `\`approval\` node; its step label is keyed \`approvals.${nodeId}.label\`.`

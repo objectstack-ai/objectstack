@@ -26,7 +26,7 @@ test('New <object> modal renders relationship-derived subforms and submits an at
   });
 
   await page.goto('/apps/showcase_app/showcase_invoice');
-  await page.getByRole('button', { name: /^New$/i }).first().click();
+  await page.getByTestId('object-view-new-button').first().click();
 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByTestId('md-form-submit')).toBeVisible();

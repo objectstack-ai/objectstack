@@ -8,9 +8,11 @@
  *      sees code vs overlay vs effective.
  *   2. Renders a SchemaForm against the JSONSchema in the type's
  *      `/meta/types` registry row.
- *   3. Save → PUT, with automatic destructive-change handling: a 409
- *      `destructive_change` response opens a confirmation dialog
- *      listing the issues, and on confirm we retry with `?force=true`.
+ *   3. Save → the item's draft PUT, then that one item's publish, so a
+ *      Save takes effect at once (objectstack#36902), with automatic
+ *      destructive-change handling: a 409 `destructive_change` response
+ *      opens a confirmation dialog listing the issues, and on confirm we
+ *      retry with `?force=true`.
  *   4. Reset overlay → DELETE (overlay only).
  *   5. References tab → calls `client.references()` and lists
  *      back-pointers so admins know what will break before deleting.
@@ -27,13 +29,9 @@ import {
   Save,
   RotateCcw,
   Trash2,
-  History,
-  Link2,
   Loader2,
   AlertTriangle,
-  Layers3,
   GitCompareArrows,
-  Boxes,
   Eye,
   Pencil,
   X,
@@ -44,23 +42,12 @@ import {
   MousePointer2,
   SlidersHorizontal,
   FileCode2,
-  Zap,
-  ZapOff,
   Send,
-  Undo2,
   Lock,
-  ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@object-ui/components';
 import { Badge } from '@object-ui/components';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from '@object-ui/components';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -91,11 +78,20 @@ import type {
 // The ONE draft-envelope reader (objectui#8181). Its docblock carries the
 // read-decoration contract objectui#7603 established here; it was hoisted so
 // the three sibling copies could stop re-deriving it.
-import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
-import { PageShell } from './PageShell.js';
+import { extractDraftBody, formatMetadataError, readDraftChanges, type DraftChange } from '@object-ui/data-objectstack';
+import { PageShell, WritabilityBadge } from './PageShell.js';
+import { ResourceDetailHeader } from './ResourceDetailHeader.js';
+import {
+  ItemToolTabPanel,
+  ItemToolTabStrip,
+  offeredItemToolTabs,
+  useItemToolTab,
+  type ItemToolTab,
+} from '../item-tools/ItemToolTabs.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
-import { LayeredDiff, countOverlaidFields } from '../item-tools/LayeredDiff.js';
-import { DraftReviewPanel, computeDraftChangeCount } from './DraftReviewPanel.js';
+import { computeDraftChangeCount } from './DraftReviewPanel.js';
+import { DraftReviewSheet } from './DraftReviewSheet.js';
+import { useDraftReviewArrival } from './useDraftReviewArrival.js';
 import {
   SchemaForm,
   DRAWER_METADATA_ID_SCOPE,
@@ -115,16 +111,27 @@ import {
   conditionSubjectsForMetadataType,
 } from './conditionScope.js';
 import { mapLoaded, usePickerLoad } from './loadState.js';
+import { useCapabilityAudienceLoader } from './useCapabilityAudienceLoader.js';
 import {
   useMetadataClient,
   useMetadataTypes,
   type RichMetadataTypeEntry,
 } from './useMetadata.js';
 // objectui#11773 — the draft save's optimistic-concurrency guard and its dialog.
-import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+import {
+  draftReceiptVersion,
+  isPublishConflictKeptEditing,
+  publishedPinOf,
+  readDraftForSave,
+  useDraftSaveGuard,
+} from './DraftConflictDialog.js';
+// objectstack#36902 — Save takes effect at once; the AI draft's notice is the designers'.
+import { isAiDraft, publishDetailSave } from './detailSaveAtOnce.js';
+import { StudioAiDraftNotice } from '../studio-design/StudioAiDraftNotice.js';
+import { publishFailureOf, publishRefusal, type StudioRefusal } from '../studio-design/metadataError.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 // objectstack#29148 — the one strip a Studio editor draws for a refused draft read.
 import { StudioRefusalStrip } from '../studio-design/StudioRefusalStrip.js';
-import type { StudioRefusal } from '../studio-design/metadataError.js';
 import {
   BUNDLE_MEMBER_PARAM,
   getMetadataResource,
@@ -134,15 +141,14 @@ import {
 import { useCreateDerive, deriveDefaultCreateFields } from './createDerive.js';
 import { RelatedPanel, type RelatedTarget } from './RelatedPanel.js';
 import { MetadataDetailDrawer } from './MetadataDetailDrawer.js';
-import { HistoryPanel } from '../item-tools/ResourceHistoryPage.js';
-import { AuditPanel } from '../item-tools/AuditPanel.js';
-import { ReferencesPanel, useReferencesScan } from '../item-tools/ReferencesPanel.js';
+import { useReferencesScan } from '../item-tools/ReferencesPanel.js';
 import {
   getMetadataPreview,
   useRegisteredMetadataPreview,
   type MetadataSelection,
 } from './preview-registry.js';
 import { readFields } from './previews/object-fields-io.js';
+import { declaredFieldOptions } from './previews/useObjectFields.js';
 import { useRegisterAssistantEditor, type AssistantEditorContext } from '../../assistant/assistantBus.js';
 import { useRegisteredMetadataInspector } from './inspector-registry.js';
 import { useRegisteredMetadataDefaultInspector } from './default-inspector-registry.js';
@@ -170,6 +176,7 @@ import { FlowLedgerSwitch } from '../studio-design/FlowLedgerSwitch.js';
 import { useActionLedger } from '../setup/packagedActionLedger.js';
 import { standaloneActionObjectName } from '../setup/packagedActions.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { studioCreateLandsInApp } from '../studio-design/studioAppEdit.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
@@ -416,6 +423,15 @@ function readActivePackageBinding(): string | undefined {
 }
 
 /**
+ * The item as its package ships it (the layered read's `code`), handed to a
+ * scoped inspector so an undone change restores it (objectstack#37031).
+ */
+function shippedLayerOf(layered: MetadataLayered<unknown> | null): Record<string, unknown> | null {
+  const code = layered?.code;
+  return code && typeof code === 'object' && !Array.isArray(code) ? (code as Record<string, unknown>) : null;
+}
+
+/**
  * Whether a layered answer this page already read holds no layer at all: no
  * packaged baseline, no customisation row, no effective value. That is what
  * `MetadataClient.layered()` resolves for the server's 404, an item that has
@@ -532,6 +548,41 @@ type ObjectCatalog = {
 };
 
 /**
+ * The field and action catalogs of one served object document, as the
+ * pickers read them. A field's declared `multiple: true` rides along: the
+ * `filter-builder` widget reads it to offer a list-valued column membership
+ * and the empty checks only (`operatorsForField`). Its declared `options` ride
+ * along too, read by `declaredFieldOptions`: the widget's builder draws a
+ * picklist column's value as a picker over them and stores the option's
+ * `value`, so a picklist filter holds a value the column can match.
+ *
+ * @internal exported for tests
+ */
+export function objectCatalogOf(obj: { fields?: Record<string, any> | Array<any> } | null | undefined): ObjectCatalog {
+  const fieldOf = (name: unknown, f: any): ObjectFieldOption => {
+    const options = f && typeof f === 'object' ? declaredFieldOptions(f) : undefined;
+    return {
+      name: name as string,
+      label: f?.label,
+      type: f?.type,
+      ...(f?.multiple === true ? { multiple: true } : {}),
+      ...(options ? { options } : {}),
+    };
+  };
+  const raw = obj?.fields;
+  const list = Array.isArray(raw)
+    ? raw.map((f: any) => fieldOf(f?.name, f))
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw).map(([name, f]: [string, any]) => fieldOf(name, f))
+      : [];
+  const rawActions = (obj as any)?.actions;
+  const acts = Array.isArray(rawActions)
+    ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
+    : [];
+  return { fields: list.filter((f) => !!f.name), actions: acts };
+}
+
+/**
  * A refusal the SERVER returned for this document, held against the draft
  * slices its issue paths named (`9073cf018`).
  *
@@ -635,7 +686,7 @@ function MetadataResourceEditPageImpl({
   embedded,
 }: MetadataResourceEditPageImplProps) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   // ADR-0048 — the owning package of the item being edited, carried on the
   // edit URL as `?package=` (emitted by the metadata list links). Scopes the
   // layered/draft read so a same-name collision resolves to the right
@@ -1024,8 +1075,21 @@ function MetadataResourceEditPageImpl({
     save: saveDraftVersioned,
     recordRead: recordDraftRead,
     forget: forgetDraftVersion,
+    recordPublished: recordPublishedVersion,
+    publish: publishPinned,
+    // objectstack#37440 — the version the page's own Save wrote, which pins its publish.
+    heldDraftVersion,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadFromServer);
+  // objectstack#36902 — the pending draft's per-key provenance (`draftChanges`),
+  // `null` with no draft or none recorded: an AI-written draft gets the
+  // designers' notice and its discard (decision 1), a person's the
+  // "unpublished changes" line with its own Publish and Discard (decision 14).
+  const [draftChanges, setDraftChanges] = React.useState<DraftChange[] | null>(null);
+  // objectstack#36902 — why the item's own publish was refused, in the
+  // designers' words (`publishRefusal`), the server's text behind Details.
+  const [publishRefused, setPublishRefused] = React.useState<StudioRefusal | null>(null);
+  const [discardingAiDraft, setDiscardingAiDraft] = React.useState(false);
 
   // Form edit mode. The form is read-only by default — admins land in a
   // "view" state and must click Edit to mutate, mirroring the Salesforce /
@@ -1127,7 +1191,7 @@ function MetadataResourceEditPageImpl({
     : `${type}:${name}:default`;
   // objectstack#27629 — the verdict belongs to the DRAFT, not to the selection
   // (the ruling on objectstack#27485, ported here from Studio's Data pillar).
-  // Expiring it with the selection released Save and the autosave the moment
+  // Expiring it with the selection released Save the moment
   // the author cleared or changed it, while the broken text stayed in the
   // draft. So each selection's last live verdict is kept with the stamp of the
   // draft slice it judged (`selectionSlicePath`, fingerprinted the way a server
@@ -1223,6 +1287,7 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     setSaveRefusal(null);
     setInspectorVerdicts({});
+    setPublishRefused(null);
   }, [type, name]);
   React.useEffect(() => {
     if (!editing) setSelection(null);
@@ -1233,31 +1298,10 @@ function MetadataResourceEditPageImpl({
   const draftSnapshotRef = React.useRef<Record<string, unknown> | null>(null);
 
   // Last successful save timestamp — surfaced as "Saved HH:MM" indicator
-  // next to the icon-only Save button.
+  // next to the Save button. objectstack#36902 — there is no auto-save: a
+  // Save makes the item live, so it is the author's to press (as #36511 did
+  // for the designers).
   const [lastSavedAt, setLastSavedAt] = React.useState<Date | null>(null);
-
-  // Auto-save toggle, persisted per-browser. Defaults to on for an
-  // "it just works" experience; users can disable it from the toolbar.
-  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const v = window.localStorage.getItem('metadata-admin:autosave');
-      return v === null ? true : v === '1';
-    } catch {
-      return true;
-    }
-  });
-  React.useEffect(() => {
-    try {
-      window.localStorage.setItem('metadata-admin:autosave', autoSaveEnabled ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  }, [autoSaveEnabled]);
-  // Tracks the last draft snapshot we attempted to auto-save, so a
-  // validation failure does not loop on the same payload — auto-save
-  // only retries once the user mutates the draft again.
-  const lastAutoSaveSnapshotRef = React.useRef<string | null>(null);
 
   // Prefetch object name list once — fuels the `ref:object` widget.
   // We don't block render on it; the widget shows a "Loading…" state.
@@ -1302,17 +1346,7 @@ function MetadataResourceEditPageImpl({
         sourceObjectName
           ? async () => {
               const obj = (await client.get('object', sourceObjectName)) as { fields?: Record<string, any> | Array<any> } | null;
-              const raw = obj?.fields;
-              const list = Array.isArray(raw)
-                ? raw.map((f: any) => ({ name: f?.name, label: f?.label, type: f?.type }))
-                : raw && typeof raw === 'object'
-                  ? Object.entries(raw).map(([name, f]: [string, any]) => ({ name, label: f?.label, type: f?.type }))
-                  : [];
-              const rawActions = (obj as any)?.actions;
-              const acts = Array.isArray(rawActions)
-                ? rawActions.map((a: any) => ({ name: a?.name, label: a?.label, locations: a?.locations })).filter((a: any) => !!a.name)
-                : [];
-              return { fields: list.filter((f) => !!f.name), actions: acts };
+              return objectCatalogOf(obj);
             }
           : null,
       [client, sourceObjectName],
@@ -1364,6 +1398,14 @@ function MetadataResourceEditPageImpl({
       [client, declaresPermissionSets],
     ),
   );
+
+  // objectstack#34908 — the audience catalog for the `ref-multi:capability`
+  // picker (a list view's or a dashboard's `requiredPermissions`): the
+  // capabilities the environment knows, the permission sets granting each and
+  // the positions holding them. The picker reads it through this loader once
+  // it is on screen, so a form without that row, or with it in a closed
+  // section, sends no request.
+  const loadCapabilityAudience = useCapabilityAudienceLoader(client);
 
   // Component ids placed on the page being edited — fuels the `ref:component`
   // picker so a page variable's `source` (the component that writes it) is
@@ -1423,8 +1465,9 @@ function MetadataResourceEditPageImpl({
       objectViews: objectViewsState,
       componentIds,
       permissionSets: permissionSetsState,
+      loadCapabilityAudience,
     }),
-    [type, objectsState, objectCatalogState, objectViewsState, componentIds, permissionSetsState],
+    [type, objectsState, objectCatalogState, objectViewsState, componentIds, permissionSetsState, loadCapabilityAudience],
   );
 
   // Load layered view + initial draft.
@@ -1531,7 +1574,11 @@ function MetadataResourceEditPageImpl({
         // objectui#11773 — the next save is pinned to what the draft read
         // served: its version, or "no draft row" when none was pending.
         recordDraftRead(type, name, draftPackage, draftRead.pin);
+        // objectstack#36902 — and the Save's publish is pinned to the published
+        // row the layers served (objectstack#36601), at the address it writes.
+        recordPublishedVersion(type, name, draftPackage, publishedPinOf(lay));
         setHasDraft(!!draftReal);
+        setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
         setLoading(false);
       } catch (err: any) {
         if (!cancelled) {
@@ -1554,7 +1601,7 @@ function MetadataResourceEditPageImpl({
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead]);
+  }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead, recordPublishedVersion]);
 
   // Related drawer state. `null` = closed. We avoid querystring round-
   // trips on every keystroke; URL state is best-effort sync via effect
@@ -1572,50 +1619,39 @@ function MetadataResourceEditPageImpl({
   // mounted for that caller. Unknown fails open.
   const canReadTrail = useCanReadAuthoringTrail();
 
-  // objectui#12496 — the open sheet is SEEDED from the `?tab=` deep link the
-  // URL-sync effect below writes, so a shared or refreshed link reopens it.
-  // It is read here, in the state's initializer, and not in a mount effect:
-  // the sync effect's mount pass ran first with no sheet open and deleted
-  // `tab` before any later reader could see it. Only a sheet this page offers
-  // THIS caller is accepted — the same conditions the header buttons render
-  // on. Anything else (an unknown value, a gated sheet, `review`, which needs
-  // a loaded draft) opens nothing, and the sync effect drops it from the URL.
-  // Embedded items are not deep-linkable: they live in the parent body and
-  // need the parent payload to materialise.
-  const [openSheet, setOpenSheet] =
-    React.useState<'layers' | 'references' | 'related' | 'history' | 'audit' | 'review' | null>(() => {
-      if (typeof window === 'undefined' || embedded || createMode) return null;
-      const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab === 'layers' || tab === 'references') return tab;
-      if (tab === 'related') return hasAnchors ? tab : null;
-      if (tab === 'history' || tab === 'audit') return canReadTrail ? tab : null;
-      return null;
-    });
+  // objectstack#36901 (epic objectstack#36890 decision 8) — the item tools are
+  // TABS of this page (`item-tools/ItemToolTabs.tsx`): details, the canvas of
+  // a type that registers one, related, references, history (with the audit
+  // log) and source (with the layered comparison). Each is offered on the
+  // conditions its old sheet was: related for a type with anchors, history
+  // for a caller who may read the authoring trail (objectui#12475). The open
+  // tab is the address's `?tab=`, seeded on first render (objectui#12496), and
+  // the retired sheets' values still open their tab (`layers` → Source,
+  // `audit` → History). A create draft and an item embedded in another surface
+  // have the details alone: the parent page owns the address.
+  const hasCanvas = !createMode && !embedded && !!registeredPreview;
+  const offeredTabs = React.useMemo(
+    () =>
+      createMode || embedded
+        ? (['details'] as ItemToolTab[])
+        : offeredItemToolTabs({ preview: hasCanvas, related: hasAnchors, trail: canReadTrail }),
+    [createMode, embedded, hasCanvas, hasAnchors, canReadTrail],
+  );
+  const itemTab = useItemToolTab(offeredTabs, { enabled: !embedded && !createMode });
+  // The draft review is the header's status chip (decision 8), opened here.
+  const [reviewOpen, setReviewOpen] = React.useState(false);
 
-  // ADR-0033 Phase B — `?review=1` arrival (from the chat's "Review N change(s)"
-  // affordance). The AI may have drafted this item *after* the page mounted, so
-  // we first force a fresh fetch, then — once the draft is loaded — open the
-  // generic review/diff sheet and consume the query param (so a refresh/back
-  // doesn't re-trigger it). The same-item-already-open case is covered by the
-  // reload bump (the load effect keys off `reloadKey`, not the search string).
-  const reviewParam = searchParams.get('review');
-  const reviewBumpedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (reviewParam !== '1' || createMode) return;
-    if (!reviewBumpedRef.current) {
-      reviewBumpedRef.current = true;
-      setReloadKey((k) => k + 1);
-      return; // wait for the reload to settle before reading hasDraft
-    }
-    if (!loading) {
-      if (hasDraft) setOpenSheet('review');
-      const next = new URLSearchParams(searchParams);
-      next.delete('review');
-      setSearchParams(next, { replace: true });
-      reviewBumpedRef.current = false;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewParam, createMode, loading, hasDraft]);
+  // ADR-0033 Phase B — `?review=1` arrival (the chat's "Review N change(s)"
+  // and the Packages page's per-draft link): read the item afresh, then open
+  // the review once the draft is loaded, and drop the query param
+  // (`useDraftReviewArrival`, shared with the permission set's matrix).
+  useDraftReviewArrival({
+    enabled: !createMode,
+    loading,
+    hasDraft,
+    reload: () => setReloadKey((k) => k + 1),
+    open: () => setReviewOpen(true),
+  });
 
   // Inspector tabs: properties form vs raw JSON source view. Source view
   // is for power users who need to edit fields the form doesn't expose
@@ -1623,23 +1659,6 @@ function MetadataResourceEditPageImpl({
   // navigations since most users live in the form 99% of the time.
   const [inspectorTab, setInspectorTab] =
     React.useState<'properties' | 'source'>('properties');
-
-  // When the References sheet opens, lazy-load the data (idempotent).
-  // Also keep the URL `?tab=` query in sync so deep-links round-trip: the
-  // state's initializer above reads the link, so this mount pass keeps an
-  // accepted `tab` and drops one that opened nothing.
-  React.useEffect(() => {
-    if (openSheet === 'references') {
-      void loadReferences();
-    }
-    if (typeof window !== 'undefined' && !embedded) {
-      const url = new URL(window.location.href);
-      if (openSheet) url.searchParams.set('tab', openSheet);
-      else url.searchParams.delete('tab');
-      window.history.replaceState({}, '', url.toString());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openSheet, embedded]);
 
   // Designer-style split-panel state. The inspector (right form panel)
   // can collapse to give the preview the full canvas. The collapsed
@@ -1708,11 +1727,13 @@ function MetadataResourceEditPageImpl({
       document.body.style.overflow = prev;
     };
   }, [isFullscreen]);
-  // Escape exits fullscreen.
+  // Escape exits fullscreen. objectstack#36900 — not an Escape a dialog over
+  // the page (the command palette, a confirm) already took to close itself:
+  // Radix's dismissable layer marks the one it acts on `defaultPrevented`.
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isFullscreen) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
         setIsFullscreen(false);
       }
@@ -1930,7 +1951,7 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     if (typeof window === 'undefined' || embedded) return;
     // `?open=` on first mount restores the Related drawer target. `?tab=` is
-    // read by `openSheet`'s initializer, not here (objectui#12496).
+    // read by `useItemToolTab`'s initializer, not here (objectui#12496).
     const sp = new URLSearchParams(window.location.search);
     const open = sp.get('open');
     if (open && open.includes(':')) {
@@ -1982,6 +2003,7 @@ function MetadataResourceEditPageImpl({
   async function doSave(force: boolean) {
     setSaving(true);
     setError(null);
+    setPublishRefused(null);
     setIssues([]);
     if (createMode) {
       setRevealIssues(true);
@@ -2087,57 +2109,126 @@ function MetadataResourceEditPageImpl({
         setSaving(false);
         return;
       }
-      // Save lands in the draft buffer — the runtime keeps serving the
-      // last published version until the operator clicks Publish. The
-      // backend defaults to publish mode for backward-compatibility, so
-      // Studio must opt into draft explicitly.
-      // Bind to the active software package (sys_metadata.package_id) when a
-      // real package scope is carried in the URL (`?package=`). The backend
-      // stamps it on create and preserves an existing binding on update, so
-      // env-local overlays (no `?package=`) are unaffected.
+      // objectstack#36902 (epic objectstack#36890 decision 1) — a Save takes
+      // effect at once, as the designers' Save does (objectstack#36511): the
+      // item's draft (`PUT ?mode=draft`), then that one item's own publish
+      // (`publishDetailSave`), never the package's batch. The draft binds to
+      // the active software package (`?package=`) when the URL carries one;
+      // the publish names the same package and member.
       const activePackage = readActivePackageBinding();
       const saveOptions = {
         force,
         mode: 'draft' as const,
         ...(activePackage ? { packageId: activePackage } : {}),
       };
+      // The draft pending before this save — the AI assistant's, or a
+      // person's from before Save took effect at once. A refused publish keeps
+      // it, now carrying these edits; with none, it takes back the one this
+      // save wrote.
+      const hadDraft = !createMode && hasDraft;
+      // objectstack#28680 — whether this save gives the item its first layer.
+      const firstPublish = createMode || holdsNoLayer(layered);
       // objectui#11773 — a create, with nothing read, is the first-write pin
       // (`If-None-Match: *`): the door refuses it where the name already holds
       // a draft instead of writing over it, and reads it as a create. A save of
       // the item this editor loaded sends the pin its load or last save held.
+      let wroteDraft = true;
+      // objectstack#37440 — the version this Save's own draft write returned, which pins its publish.
+      let draftVersion: string | undefined;
       if (createMode) {
         // objectui#7611 — a type whose edit page writes the live item creates
-        // it live too (`createLive`), so the page that opens next reads what
-        // was created and no draft is left behind for a Publish to replay.
-        const createOptions =
-          config.createLive && !activePackage ? { force } : saveOptions;
-        await client.save<any>(type, savedName, itemToSave, { ...createOptions, ifNoneMatch: '*' });
+        // it live too (`createLive`): nothing is left in the draft to publish.
+        const live = !!config.createLive && !activePackage;
+        const receipt = await client.save<any>(type, savedName, itemToSave, { ...(live ? { force } : saveOptions), ifNoneMatch: '*' });
+        wroteDraft = !live;
+        draftVersion = draftReceiptVersion(receipt);
       } else if ((await saveDraftVersioned(type, savedName, itemToSave, saveOptions)) === 'reloaded') {
         // The author chose the saved version; the load effect replaces the draft.
         return;
+      } else {
+        draftVersion = heldDraftVersion(type, savedName, activePackage);
+      }
+      if (wroteDraft) {
+        // objectstack#34818 — a flow whose Problems tab lists the draft's
+        // publish checks: the author has read them (`publishChecksShown.ts`).
+        const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
+        if (reviewedChecks) markPublishChecksShown(type, savedName);
+        let live: Awaited<ReturnType<typeof publishDetailSave>>;
+        try {
+          live = await publishDetailSave(
+            client,
+            {
+              type,
+              name: savedName,
+              ...(activePackage ? { packageId: activePackage } : {}),
+              ...memberScope,
+              ...(draftVersion ? { draftVersion } : {}),
+            },
+            hadDraft,
+            // objectstack#36601 — pinned to the published row the load read; a
+            // create read nothing, and its draft's first-write pin stands.
+            createMode ? undefined : publishPinned,
+          );
+        } finally {
+          if (reviewedChecks) clearPublishChecksShown(type, savedName);
+        }
+        // The published row moved and the author chose to reload it.
+        if (live.kind === 'reloaded') return;
+        if (live.kind === 'refused') {
+          // objectstack#36902 item 6 — nothing went live: the reason is shown,
+          // and the edits stay on the page, unsaved.
+          if (live.draftDiscarded) {
+            setHasDraft(false);
+            setDraftChanges(null);
+            if (!createMode) recordDraftRead(type, savedName, activePackage, { ifNoneMatch: '*' });
+          }
+          setPublishRefused(
+            isPublishConflictKeptEditing(live.error)
+              ? { message: live.error instanceof Error ? live.error.message : String(live.error) }
+              : publishRefusal(publishFailureOf(type, savedName, live.error), type, itemToSave as Record<string, unknown>, locale),
+          );
+          return;
+        }
       }
       // Refresh layered + draft state after save — scope to the same package
       // as the initial load (ADR-0048) so a same-name collision re-reads this
       // package's own row, not another's.
       const refreshScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
-      // objectui#11799 — this save went into a draft, which makes no layer. An
-      // item this page loaded with no layer still has none, and an item it
-      // just created has never been published (the page then navigates to the
-      // item, whose load reads it afresh). `/layers` answers 404 for both, so
-      // it is not asked: the answer already held stands.
+      // objectui#11799 — a create's page navigates to the item, whose load
+      // reads it afresh, so `/layers` is not asked here.
       // objectstack#29793, objectstack#30786 — …except for a type whose buffer
-      // IS a layer (`editsAuthoredLayers`: the stored `draft` this save just
-      // wrote, which a caller the server serves that layer to is answered for a
-      // draft-only name too).
-      const layerless = !editsAuthoredLayers(type) && (createMode || (savedName === name && holdsNoLayer(layered)));
-      const [lay, draftResp] = await Promise.all([
+      // IS a layer (`editsAuthoredLayers`).
+      const layerless = !editsAuthoredLayers(type) && createMode;
+      const [lay, draftRead] = await Promise.all([
         layerless ? layered : client.layered<any>(type, savedName, refreshScope),
-        client.getDraft<any>(type, savedName, refreshScope).catch(() => null),
+        // objectui#11773 — read at the address the next save writes, so its answer pins that save.
+        readDraftForSave<any>(client, type, savedName, activePackage, bundleMember),
       ]);
       if (!layerless) setLayered(lay);
+      if (wroteDraft && firstPublish && !activePackage) {
+        // objectstack#28680 — a package-less page or dashboard made live for
+        // the first time joins app navigation. Not awaited: each app write
+        // reports itself (a toast with Undo, or its failure).
+        void navigationWrites.created(type, savedName, lay?.effective ?? itemToSave);
+      }
+      if ('refused' in draftRead) {
+        setDraftRefused({
+          message: t('engine.studio.refusal.draftUnreadable', locale),
+          detail: formatMetadataError(draftRead.refused),
+        });
+        setLoadFailed(true);
+        return;
+      }
+      const draftResp = draftRead.answer;
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
+      if (!createMode) {
+        // What remains pins the next save (normally "no draft row") and its publish.
+        recordDraftRead(type, savedName, activePackage, draftRead.pin);
+        recordPublishedVersion(type, savedName, activePackage, publishedPinOf(lay));
+      }
       // The served draft is the whole document the save just stored (see the
       // load effect, objectui#10765): take it as-is. ⛔ Not spread over
       // `effective` — that is the PUBLISHED layer, and a spread would bring a
@@ -2164,7 +2255,6 @@ function MetadataResourceEditPageImpl({
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setLastSavedAt(new Date());
-      lastAutoSaveSnapshotRef.current = JSON.stringify(fresh);
       setDestructiveIssues(null);
       setPendingItem(null);
       // The server took this document, so whatever it refused before is
@@ -2186,6 +2276,11 @@ function MetadataResourceEditPageImpl({
         const qs = searchParams.toString();
         navigate(`../${encodeURIComponent(savedName)}${qs ? `?${qs}` : ''}`, {
           relative: 'path',
+          // objectstack#36906 — in a Studio package's area a new dashboard or
+          // report opens in its app at once, so the create's own entry is
+          // replaced: Back from the app lands on the list, not on an empty
+          // create page.
+          replace: studioCreateLandsInApp(areaHost?.packageId, type),
         });
       }
     } catch (err: any) {
@@ -2232,7 +2327,7 @@ function MetadataResourceEditPageImpl({
         }
         setIssues(mapped);
         // Hold the refusal against the draft slices the server named, so the
-        // next auto-save cannot re-send the same refused document behind an
+        // next Save cannot re-send the same refused document behind an
         // unrelated edit (`9073cf018`). Paths that do not localise are
         // DROPPED rather than kept as a wildcard: a refusal we cannot tie to a
         // slice must gate nothing at all.
@@ -2288,7 +2383,7 @@ function MetadataResourceEditPageImpl({
   // uses), never the browser's native `confirm()`. One slot holds whichever
   // is open; its copy is computed when it opens, from the body loaded then.
   const [pendingConfirm, setPendingConfirm] = React.useState<{
-    kind: 'reset' | 'delete' | 'discard';
+    kind: 'reset' | 'delete' | 'discard' | 'discardAi';
     title: string;
     description: string;
     actionLabel: string;
@@ -2364,6 +2459,8 @@ function MetadataResourceEditPageImpl({
       if (resetSemantic) {
         const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
+        // objectstack#36902 — the next Save's publish is pinned to the row read.
+        recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
         // objectstack#29793 — the published item as its author wrote it.
         const fresh = authoredPublished(type, lay as AuthoredLayers);
         setDraft(fresh);
@@ -2386,11 +2483,14 @@ function MetadataResourceEditPageImpl({
     }
   }
 
-  // Promote the pending draft to the active overlay. Mirrors `doSave`'s
-  // refresh pattern so the editor stays in sync with the new baseline.
+  // objectstack#36902 (decision 14) — publish a draft that was already pending
+  // (a person's from before Save took effect at once): that one item, pinned
+  // like a Save's publish. Mirrors `doSave`'s refresh pattern so the editor
+  // stays in sync with the new baseline.
   async function doPublish() {
     setPublishing(true);
     setError(null);
+    setPublishRefused(null);
     try {
       // State the SAME package the save step already stated — read from the
       // same single source, so the two calls of one loop can never disagree.
@@ -2409,13 +2509,25 @@ function MetadataResourceEditPageImpl({
       const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
       if (reviewedChecks) markPublishChecksShown(type, name);
       try {
-        await client.publish<any>(type, name, {
+        // objectstack#36601 — pinned to the published row the load read.
+        const outcome = await publishPinned(client, type, name, {
           ...(activePackage ? { packageId: activePackage } : {}),
           ...memberScope,
         });
+        // The published row moved and the author chose to reload it.
+        if (outcome === 'reloaded') return;
+      } catch (err) {
+        // objectstack#36902 item 6 — the refusal's reason, in the designers' words.
+        setPublishRefused(
+          isPublishConflictKeptEditing(err)
+            ? { message: err instanceof Error ? err.message : String(err) }
+            : publishRefusal(publishFailureOf(type, name, err), type, refusalProbeBody(draft), locale),
+        );
+        return;
       } finally {
         if (reviewedChecks) clearPublishChecksShown(type, name);
       }
+      emitMetadataRefresh();
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
@@ -2443,6 +2555,7 @@ function MetadataResourceEditPageImpl({
       }
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
       // After a publish the promoted body IS `effective` and the draft row is
       // normally gone; a draft that does remain is a whole document and is
@@ -2468,6 +2581,7 @@ function MetadataResourceEditPageImpl({
       // the re-read says what the next save is pinned to (normally "no draft
       // row").
       recordDraftRead(type, name, activePackage, draftRead.pin);
+      recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -2492,6 +2606,53 @@ function MetadataResourceEditPageImpl({
     });
   }
 
+  // objectstack#36902 (decision 1, the designers' rule of objectstack#36660) —
+  // drop the AI assistant's draft of this one item, at the package and member
+  // it was read at (`DELETE /meta/:type/:name?state=draft`), back to the live
+  // version. Edits not yet saved go with it, so they are asked about first,
+  // in the page's in-app confirm (objectui#13333), not the native one.
+  function discardAiDraft() {
+    if (isDirty) {
+      setPendingConfirm({
+        kind: 'discardAi',
+        title: t('engine.studio.aiDraft.discard', locale),
+        description: t('engine.studio.aiDraft.discardConfirmUnsaved', locale),
+        actionLabel: t('engine.studio.aiDraft.discard', locale),
+        item: ownItemLabel() || `${type}/${name ?? ''}`,
+      });
+      return;
+    }
+    void runDiscardAiDraft();
+  }
+
+  async function runDiscardAiDraft() {
+    setDiscardingAiDraft(true);
+    setError(null);
+    setPublishRefused(null);
+    try {
+      const activePackage = readActivePackageBinding();
+      await client.reset(type, name, {
+        state: 'draft',
+        ...(activePackage ? { packageId: activePackage } : {}),
+        ...memberScope,
+      });
+      setHasDraft(false);
+      setDraftChanges(null);
+      // The load installs the live version and pins the next save to it.
+      setReloadKey((k) => k + 1);
+      // The ledger behind Changes re-reads, one item fewer.
+      emitMetadataRefresh();
+    } catch (err) {
+      setError(
+        tFormat('engine.studio.aiDraft.discardFailed', locale, {
+          reason: formatMetadataError(err),
+        }),
+      );
+    } finally {
+      setDiscardingAiDraft(false);
+    }
+  }
+
   async function runDiscardDraft(item: string) {
     setSaving(true);
     setError(null);
@@ -2512,12 +2673,16 @@ function MetadataResourceEditPageImpl({
       // with no layer still has none, and `/layers` would answer 404.
       const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, layeredScope);
       setLayered(lay);
+      // objectstack#36902 — the next Save's publish is pinned to the row read.
+      recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
       // objectstack#29793 — the published item as its author wrote it.
       const fresh = authoredPublished(type, lay as AuthoredLayers);
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setHasDraft(false);
+      setDraftChanges(null);
       setDraftDiagnostics(undefined);
+      emitMetadataRefresh();
       // objectui#12303 — the discard is said, naming what it discarded, through
       // the console's shared toast (`sonner`, the one Studio's publish uses).
       // Only here, after the DELETE and the re-read landed: a refused discard
@@ -2546,7 +2711,7 @@ function MetadataResourceEditPageImpl({
   }, [draft, createMode]);
 
   // The write gates — hoisted above the early `loading` return so the
-  // auto-save / keyboard / blocker effects below can read them. The item
+  // keyboard / blocker effects below can read them. The item
   // half (`itemWritable`: the type tier and the served `editable`) and the
   // caller half (`canWrite`) are decided once, next to the designer auto-on
   // effect above.
@@ -2593,42 +2758,13 @@ function MetadataResourceEditPageImpl({
     },
   });
 
-  // Auto-save: debounce edits and persist silently once the user pauses
-  // for AUTOSAVE_DEBOUNCE_MS. Skipped for create mode (need an explicit
-  // name first), read-only forms, and while a save is already in flight.
-  // We track the last attempted snapshot so a validation failure doesn't
-  // loop on the same payload — the user has to mutate the draft again.
-  const AUTOSAVE_DEBOUNCE_MS = 1500;
-  // Keep doSave fresh inside the effect without re-arming the timer on
-  // every render.
+  // objectstack#36902 — no auto-save timer: a Save makes the item live, so it
+  // is sent only by the button, ⌘S and the destructive-change confirmation.
+  // Keep doSave fresh for the shortcut without re-binding it on every render.
   const doSaveRef = React.useRef(doSave);
   React.useEffect(() => {
     doSaveRef.current = doSave;
   });
-  React.useEffect(() => {
-    if (!autoSaveEnabled) return;
-    if (createMode || readOnly || !editing || !isDirty || saving) return;
-    // Autosave is a save door like any other: gating only the button would let
-    // the timer publish the malformed definition a second later (objectui#4306).
-    if (inspectorBlocking > 0) return;
-    // Second validation term, and the one that survives a selection change.
-    // The timer is the door the wedge (`9073cf018`) actually came through: it
-    // re-sent the refused document on every later edit, silently, so the
-    // designer showed the rename as applied while the server held none of it.
-    if (refusalBlocking > 0) return;
-    let snap: string;
-    try {
-      snap = JSON.stringify(draft);
-    } catch {
-      return;
-    }
-    if (snap === lastAutoSaveSnapshotRef.current) return;
-    const handle = window.setTimeout(() => {
-      lastAutoSaveSnapshotRef.current = snap;
-      doSaveRef.current(false);
-    }, AUTOSAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [draft, isDirty, editing, saving, createMode, readOnly, autoSaveEnabled, inspectorBlocking, refusalBlocking]);
 
   // Keyboard shortcut — ⌘S / Ctrl+S triggers save when dirty.
   React.useEffect(() => {
@@ -2637,8 +2773,8 @@ function MetadataResourceEditPageImpl({
         if (!canWrite || readOnly) return;
         if (!editing && !createMode) return;
         e.preventDefault();
-        // Third save door — the shortcut must respect the same gate as the
-        // button and the autosave timer (objectui#4306).
+        // Second save door — the shortcut must respect the same gate as the
+        // button (objectui#4306).
         if (!saving && (createMode || isDirty) && inspectorBlocking === 0 && refusalBlocking === 0) {
           doSaveRef.current(false);
         }
@@ -2683,13 +2819,63 @@ function MetadataResourceEditPageImpl({
   }, [embedded, type, name, draft]);
   useRegisterAssistantEditor(assistantEditorCtx);
 
+  // objectstack#36901 — the page's frame. On its own route the item fills the
+  // content pane under the one Studio detail header (`ResourceDetailHeader`:
+  // × back to the list, ‹ › through it, the tabs, the page's actions); embedded
+  // in another surface it keeps the compact `PageShell` row and no tabs. The
+  // loading and refused states draw the same frame, so the header (and its
+  // list read for ‹ ›) is not mounted twice.
+  const packageLabel =
+    (layered?.packageId as string | undefined) ?? (ownerPackageId && ownerPackageId !== 'all' ? ownerPackageId : undefined);
+  const itemLabel = typeof draft.label === 'string' && draft.label.trim() !== '' ? draft.label : name;
+  const renderFrame = (
+    body: React.ReactNode,
+    extras: { actions?: React.ReactNode; tabs?: React.ReactNode } = {},
+  ): React.ReactElement =>
+    embedded ? (
+      <PageShell
+        entry={entry ?? { type, label: type }}
+        itemName={createMode ? '(new)' : name}
+        subtitle={createMode ? t('engine.edit.createNew', locale) : undefined}
+        actions={extras.actions}
+      >
+        {body}
+      </PageShell>
+    ) : (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="resource-detail">
+        <ResourceDetailHeader
+          testId="resource-detail-header"
+          type={type}
+          name={createMode ? '' : name}
+          pager={!createMode}
+          tabAddress={itemTab.address}
+          locale={locale}
+          label={createMode ? t('engine.edit.createNew', locale) : itemLabel}
+          apiName={createMode ? undefined : name}
+          typeLabel={translateMetadataType(type, locale, entry?.label ?? type)}
+          packageLabel={packageLabel}
+          meta={<WritabilityBadge entry={entry} readOnly={hostReadOnly} locale={locale} compact />}
+          primaryAction={extras.actions ? <div className="flex items-center gap-1">{extras.actions}</div> : undefined}
+          tabs={extras.tabs}
+          // objectstack#36892 — the header's Esc is document-wide and yields
+          // only to an event already handled. The canvas fullscreen is no
+          // Radix overlay: its own Esc listener is on `window`, after the
+          // document's, so while it is open Esc must leave the page alone.
+          closeOnEscape={!isFullscreen}
+        />
+        <div className="min-h-0 flex-1 overflow-auto">{body}</div>
+      </div>
+    );
+
   if (loading) {
     return (
-      <PageShell entry={entry} itemName={name}>
-        <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading {type}/{name}…
-        </div>
-      </PageShell>
+      <DraftVerdictContext.Provider value={serverDiagnostics}>
+        {renderFrame(
+          <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading {type}/{name}…
+          </div>,
+        )}
+      </DraftVerdictContext.Provider>
     );
   }
 
@@ -2698,11 +2884,13 @@ function MetadataResourceEditPageImpl({
   // over the published body.
   if (draftRefused) {
     return (
-      <PageShell entry={entry ?? { type, label: type }} itemName={name}>
-        <div className="p-6">
-          <StudioRefusalStrip refusal={draftRefused} locale={locale} className="px-3 py-2 text-sm" />
-        </div>
-      </PageShell>
+      <DraftVerdictContext.Provider value={serverDiagnostics}>
+        {renderFrame(
+          <div className="p-6">
+            <StudioRefusalStrip refusal={draftRefused} locale={locale} className="px-3 py-2 text-sm" />
+          </div>,
+        )}
+      </DraftVerdictContext.Provider>
     );
   }
 
@@ -2766,6 +2954,7 @@ function MetadataResourceEditPageImpl({
     // Cancel reverts the draft to the last saved snapshot, so the document the
     // server refused no longer exists to be refused.
     setSaveRefusal(null);
+    setPublishRefused(null);
     setEditing(false);
   }
 
@@ -2815,10 +3004,6 @@ function MetadataResourceEditPageImpl({
     </InspectorReadOnlyReason>
   );
 
-  // Note: URL `?tab=` deep-links were repurposed to open side-panel
-  // sheets (Layers / References / Related). Anything else is ignored —
-  // the main work area is always the form+preview.
-
   // The shortcut hint, or why Save is withheld. Enabled (or mid-save) it is
   // the button's accessible name and tooltip both, so the word drawn beside
   // the icon (objectui#13337) leaves the name a reader hears unchanged; a
@@ -2849,122 +3034,16 @@ function MetadataResourceEditPageImpl({
   const actionsNode = (
     <>
       {/* Declarative type-level actions (GAP-1) — e.g. datasource
-          "Test connection". Only on a saved item: record_header actions
+          "Test connection". Only on a saved item: record_page actions
           template `${ctx.recordId}` from the item name, which `(new)`
           drafts don't have yet. */}
       {!createMode && (
         <MetadataTypeActions
           entry={entry}
-          location="record_header"
+          location="record_page"
           recordId={name}
           onAfter={() => setReloadKey((k) => k + 1)}
         />
-      )}
-      {/* Info sheets — icon-only group, mirrors the canvas
-          toolbar style (small ghost icons + tooltip). Keeps
-          the primary edit / save actions visually dominant. */}
-      {(!createMode || hasAnchors) && (
-        <div className="flex items-center rounded-md border bg-background p-0.5">
-          {!createMode && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('layers')}
-              title={t('engine.edit.layers', locale)}
-              className="h-7 w-7 p-0 relative"
-            >
-              <Layers3 className="h-3.5 w-3.5" />
-              {layered?.overlay && (() => {
-                const n = countOverlaidFields(layered.code, layered.effective);
-                return n > 0 ? (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-emerald-600 text-emerald-50 text-[9px] leading-[14px] text-center font-medium"
-                    title={t('engine.layers.diff', locale)}
-                  >
-                    {n}
-                  </span>
-                ) : null;
-              })()}
-            </Button>
-          )}
-          {!createMode && hasDraft && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('review')}
-              title={t('designer.draftReview.title', locale)}
-              className="h-7 w-7 p-0 relative"
-              data-testid="resource-review-trigger"
-            >
-              <GitCompareArrows className="h-3.5 w-3.5" />
-              {(() => {
-                const n = computeDraftChangeCount(
-                  layered?.effective ?? null,
-                  draft,
-                );
-                return n > 0 ? (
-                  <span
-                    className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-amber-500 text-amber-50 text-[9px] leading-[14px] text-center font-medium"
-                    title={tFormat('designer.draftReview.badge', locale, { n })}
-                  >
-                    {n}
-                  </span>
-                ) : null;
-              })()}
-            </Button>
-          )}
-          {!createMode && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('references')}
-              title={t('engine.edit.references', locale)}
-              className="h-7 w-7 p-0 relative"
-            >
-              <Link2 className="h-3.5 w-3.5" />
-              {refsState.status === 'loaded' && refsState.items.length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full bg-muted text-foreground text-[9px] leading-[14px] text-center font-medium border">
-                  {refsState.items.length}
-                </span>
-              )}
-            </Button>
-          )}
-          {hasAnchors && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpenSheet('related')}
-              title={t('engine.edit.related', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <Boxes className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {!createMode && canReadTrail && (
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="history-button"
-              onClick={() => setOpenSheet('history')}
-              title={t('engine.edit.history', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <History className="h-3.5 w-3.5" />
-            </Button>
-          )}
-          {!createMode && canReadTrail && (
-            <Button
-              variant="ghost"
-              size="sm"
-              data-testid="audit-button"
-              onClick={() => setOpenSheet('audit')}
-              title={t('engine.edit.auditTab', locale)}
-              className="h-7 w-7 p-0"
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
       )}
       {!createMode && canWrite && layered?.overlay && lockDeletable && (
         <Button
@@ -3006,35 +3085,14 @@ function MetadataResourceEditPageImpl({
         <SaveStatusIndicator
           saving={saving}
           isDirty={isDirty}
-          autoSaveEnabled={autoSaveEnabled}
-          // The same two terms that return the auto-save effect early and
-          // disable Save: while either holds, no save is coming, so the chip
-          // must not promise one. Read, never recomputed.
+          // The same two terms that disable Save: while either holds, no save
+          // is coming, so the chip must not promise one. Read, never recomputed.
           held={inspectorBlocking > 0 || refusalBlocking > 0}
           heldReason={saveTitle}
           lastSavedAt={lastSavedAt}
           createMode={!!createMode}
           locale={locale}
         />
-      )}
-      {canWrite && (editing || createMode) && !createMode && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setAutoSaveEnabled((v) => !v)}
-          className="h-7 w-7 p-0 text-muted-foreground"
-          title={
-            autoSaveEnabled
-              ? t('engine.edit.autoSaveOn', locale)
-              : t('engine.edit.autoSaveOff', locale)
-          }
-        >
-          {autoSaveEnabled ? (
-            <Zap className="h-3.5 w-3.5 text-emerald-600" />
-          ) : (
-            <ZapOff className="h-3.5 w-3.5" />
-          )}
-        </Button>
       )}
       {canWrite && !createMode && editing && !PreviewComponent && (
         <Button
@@ -3098,64 +3156,97 @@ function MetadataResourceEditPageImpl({
           )}
         </DisabledControlReason>
       )}
-      {/* Publish / Discard draft — only when there is a pending draft.
-          Save writes to the draft buffer; the runtime keeps serving the
-          published version until the operator clicks Publish. */}
-      {canWrite && !createMode && hasDraft && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={doDiscardDraft}
-          disabled={saving || publishing}
-          className="h-7 w-7 p-0 text-muted-foreground"
-          title={t('engine.edit.discardDraft', locale)}
-        >
-          <Undo2 className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canWrite && !createMode && hasDraft && (
-        <Button
-          size="sm"
-          onClick={doPublish}
-          disabled={saving || publishing || isDirty}
-          className="h-7 px-2 relative bg-emerald-600 hover:bg-emerald-700 text-emerald-50"
-          title={
-            isDirty
-              ? t('engine.edit.publishBlockedDirty', locale)
-              : t('engine.edit.publish', locale)
-          }
-        >
-          {publishing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <>
-              <Send className="h-3.5 w-3.5 mr-1" />
-              <span className="text-xs">{t('engine.edit.publish', locale)}</span>
-            </>
-          )}
-        </Button>
-      )}
+      {/* objectstack#36902 — no Publish here: Save makes the item live. A
+          draft that was already pending is published or discarded from its
+          own line above the editor (decision 14). */}
     </>
   );
 
-  const page = (
-    <PageShell
-      entry={entry ?? { type, label: type }}
-      itemName={createMode ? '(new)' : name}
-      subtitle={createMode ? t('engine.edit.createNew', locale) : undefined}
-      actions={PreviewComponent ? null : actionsNode}
-    >
+  // objectstack#36901 (decision 8) — the draft review is a status chip in the
+  // header, not a sheet trigger among the tools: shown while a draft is
+  // pending, it opens the review (ADR-0033 Phase B), as `?review=1` does.
+  // objectstack#36902 — a pending draft some key of which the AI assistant wrote.
+  const aiDraft = !createMode && hasDraft && isAiDraft(draftChanges);
+  const draftChangeCount = hasDraft && !createMode ? computeDraftChangeCount(layered?.effective ?? null, draft) : 0;
+  const reviewChip =
+    !createMode && hasDraft ? (
+      <button
+        type="button"
+        data-testid="resource-review-trigger"
+        onClick={() => setReviewOpen(true)}
+        title={t('designer.draftReview.title', locale)}
+        className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded bg-amber-400/15 px-2 text-[11px] text-amber-700 hover:bg-amber-400/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
+      >
+        <GitCompareArrows className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span>{t('engine.studio.unpublishedDraft', locale)}</span>
+        {draftChangeCount > 0 && (
+          <span className="tabular-nums opacity-80">· {tFormat('designer.draftReview.badge', locale, { n: draftChangeCount })}</span>
+        )}
+      </button>
+    ) : null;
+
+  // objectstack#36901 (decision 8) — the body the open tab draws. The canvas
+  // (Preview) and the details form edit the ONE draft this page holds, and the
+  // header's Save and ⌘S save it whichever tab is open (decision 4):
+  // a tab switch keeps every unsaved edit, so it asks nothing. A create draft
+  // draws the canvas when its type authors there (`CREATE_MODE_CANVAS_TYPES`).
+  const activeTab = itemTab.location.tab;
+  const canvasOpen = !!PreviewComponent && (createMode || activeTab === 'preview');
+  const toolTab =
+    activeTab === 'references' || activeTab === 'history' || activeTab === 'source' ? activeTab : null;
+  const tabStrip =
+    offeredTabs.length > 1 ? (
+      <ItemToolTabStrip
+        tabs={offeredTabs}
+        active={activeTab}
+        onSelect={(tab) => itemTab.select(tab)}
+        counts={refsState.status === 'loaded' ? { references: refsState.items.length } : undefined}
+        locale={locale}
+      />
+    ) : undefined;
+  const toolTabBody =
+    activeTab === 'related' && hasAnchors ? (
+      <div data-testid="item-tab-panel-related">
+        <RelatedPanel type={type} name={name} parentItem={draft} onOpen={(target) => setRelatedTarget(target)} />
+      </div>
+    ) : toolTab ? (
+      <ItemToolTabPanel
+        tab={toolTab}
+        view={itemTab.location.view}
+        onViewChange={(view) => itemTab.select(toolTab, view)}
+        type={type}
+        name={name}
+        packageId={ownerPackageId}
+        className=""
+        // Source edits this page's draft, on the gate the form is editable on.
+        source={{
+          value: draft,
+          onChange: formReadOnly ? undefined : handleCreateAwareChange,
+          issues: displayIssues.map((i) => ({ path: i.path ?? '', message: i.message })),
+        }}
+        layered={layered}
+        references={{ state: refsState, load: loadReferences }}
+        // The rollback door asks the capability and wall verdicts the save
+        // door asks, so it is offered on Save's gate (objectui#12183: a walled
+        // tenant was offered it, refused).
+        onRolledBack={canWrite ? () => setReloadKey((k) => k + 1) : undefined}
+        locale={locale}
+      />
+    ) : null;
+
+  const page = renderFrame(
+    <>
       <div
         className={
-          PreviewComponent
+          canvasOpen
             ? 'flex h-full min-h-0 flex-col'
             : 'p-6 space-y-6 max-w-7xl'
         }
       >
-        {(error || readOnly || hasDraft || isLocked || walledDeciding) && (
+        {(error || publishRefused || readOnly || hasDraft || isLocked || walledDeciding) && (
           <div
             className={
-              PreviewComponent
+              canvasOpen
                 ? 'px-6 pt-4 space-y-3'
                 : 'space-y-3'
             }
@@ -3208,10 +3299,32 @@ function MetadataResourceEditPageImpl({
                 )}
               </div>
             )}
-            {hasDraft && !createMode && (
-              <div className="text-xs text-emerald-900 border border-emerald-300 bg-emerald-50 rounded p-3 dark:text-emerald-200 dark:border-emerald-700/50 dark:bg-emerald-950/30 flex items-center gap-3">
+            {/* objectstack#36902 item 6 — the item's own publish was refused:
+                nothing went live, and the reason says why. */}
+            {publishRefused && (
+              <StudioRefusalStrip refusal={publishRefused} locale={locale} className="px-3 py-2 text-sm" />
+            )}
+            {/* objectstack#36902 (decision 1) — the AI assistant's draft is the
+                version on screen: Save makes it live too, and its discard
+                drops that one item's draft, the designers' line. */}
+            {aiDraft && (
+              <StudioAiDraftNotice
+                locale={locale}
+                onDiscard={canWrite ? discardAiDraft : undefined}
+                busy={discardingAiDraft || saving || publishing}
+              />
+            )}
+            {/* objectstack#36902 (decision 14) — a person's draft from before
+                Save took effect at once: marked as unpublished changes, and
+                published or discarded here, this one item. */}
+            {hasDraft && !createMode && !aiDraft && (
+              <div
+                data-testid="resource-unpublished-changes"
+                role="status"
+                className="text-xs text-emerald-900 border border-emerald-300 bg-emerald-50 rounded p-3 dark:text-emerald-200 dark:border-emerald-700/50 dark:bg-emerald-950/30 flex items-center gap-3"
+              >
                 <Send className="h-3.5 w-3.5 shrink-0" />
-                <span className="flex-1">{t('engine.edit.draftPending', locale)}</span>
+                <span className="flex-1">{t('engine.edit.unpublishedChanges', locale)}</span>
                 {canWrite && (
                   <>
                     <Button
@@ -3220,6 +3333,7 @@ function MetadataResourceEditPageImpl({
                       onClick={doDiscardDraft}
                       disabled={saving || publishing}
                       className="h-7"
+                      data-testid="resource-draft-discard"
                     >
                       {t('engine.edit.discardDraft', locale)}
                     </Button>
@@ -3227,7 +3341,9 @@ function MetadataResourceEditPageImpl({
                       size="sm"
                       onClick={doPublish}
                       disabled={saving || publishing || isDirty}
+                      title={isDirty ? t('engine.edit.unpublishedPublishDirty', locale) : undefined}
                       className="h-7 bg-emerald-600 hover:bg-emerald-700 text-emerald-50"
+                      data-testid="resource-draft-publish"
                     >
                       {publishing ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3346,14 +3462,14 @@ function MetadataResourceEditPageImpl({
 
         <div
           className={
-            PreviewComponent
+            canvasOpen
               ? 'flex w-full flex-1 min-h-0 flex-col'
               : 'w-full'
           }
         >
           <div
             className={
-              PreviewComponent
+              canvasOpen
                 ? 'mt-2 flex-1 min-h-0 flex flex-col px-6 pb-4'
                 : 'mt-4 space-y-3'
             }
@@ -3362,7 +3478,7 @@ function MetadataResourceEditPageImpl({
                 "可写" badge in the header plus the Edit button in the
                 action bar already convey both signal and call-to-action,
                 and saving every vertical pixel for the canvas matters. */}
-            {!PreviewComponent && formReadOnly && !readOnly && canWrite && !createMode && (
+            {!PreviewComponent && formReadOnly && !readOnly && canWrite && !createMode && (activeTab === 'details' || activeTab === 'source') && (
               <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground border rounded p-2.5 bg-muted/30">
                 <span>
                   {t('engine.edit.readOnlyBanner', locale).split(/\{edit\}/).map((part, i, arr) => (
@@ -3502,6 +3618,8 @@ function MetadataResourceEditPageImpl({
                 <button
                   type="button"
                   onClick={() => {
+                    // The held selection is the canvas's: open it there.
+                    if (PreviewComponent && !createMode) itemTab.select('preview');
                     setInspectorTab('properties');
                     setSelection(inspectorHeld[0].selection);
                   }}
@@ -3511,7 +3629,7 @@ function MetadataResourceEditPageImpl({
                 </button>
               </div>
             )}
-            {PreviewComponent ? (
+            {canvasOpen ? (
               <div
                 className={
                   isFullscreen
@@ -3576,11 +3694,15 @@ function MetadataResourceEditPageImpl({
                           )}
                         </div>
                         <div className="flex items-center gap-1">
-                          {/* All page-level actions live here when the
-                              designer is present — merged from the
-                              PageShell header to reclaim a full row. */}
-                          {actionsNode}
-                          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                          {/* The page's actions are the detail header's;
+                              fullscreen covers that header, so they move
+                              here while it is on (never in both places). */}
+                          {isFullscreen && (
+                            <>
+                              {actionsNode}
+                              <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                            </>
+                          )}
                           {PreviewComponent && (
                             <Button
                               variant="ghost"
@@ -3758,6 +3880,7 @@ function MetadataResourceEditPageImpl({
                             type={type}
                             name={name}
                             draft={draft}
+                            shipped={shippedLayerOf(layered)}
                             selection={selection}
                             onPatch={(patch) =>
                               handleDraftChange((d) => ({
@@ -3794,6 +3917,7 @@ function MetadataResourceEditPageImpl({
                               readOnly={formReadOnly}
                               locale={locale}
                               serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                              serverForm={entry?.form}
                               issues={displayIssues}
                               revealIssues={revealIssues}
                               onInlineIssueFieldsChange={setInlineIssueFields}
@@ -3829,6 +3953,8 @@ function MetadataResourceEditPageImpl({
                     VSCode-style inspector toggle next to the fullscreen
                     button, so this duplicate affordance was just noise. */}
               </div>
+            ) : toolTabBody ? (
+              toolTabBody
             ) : (
               withReadOnlyReason(
                 <SchemaForm
@@ -3853,8 +3979,8 @@ function MetadataResourceEditPageImpl({
             {/* objectui#7611 — under the designer, too: `position` renders
                 through its preview, so the section takes a bounded strip
                 below the canvas instead of squeezing it. */}
-            {environmentSections && (
-              <div className={PreviewComponent ? 'shrink-0 max-h-[35vh] overflow-y-auto' : undefined}>
+            {environmentSections && (canvasOpen || activeTab === 'details') && (
+              <div className={canvasOpen ? 'shrink-0 max-h-[35vh] overflow-y-auto' : undefined}>
                 {environmentSections.map((EnvironmentSection, i) => (
                   <EnvironmentSection key={i} name={name} draft={draft} />
                 ))}
@@ -3864,167 +3990,18 @@ function MetadataResourceEditPageImpl({
         </div>
       </div>
 
-      {/* Layers / References / Related are right-side sheets, opened from
-          the page-shell header. They used to live in tabs above the form,
-          which stole vertical space from the primary work area. */}
-      <Sheet
-        open={openSheet === 'layers'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">{t('engine.edit.layers', locale)}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <LayeredDiff layered={layered} locale={locale} />
-          </div>
-        </SheetContent>
-      </Sheet>
-
       {/* ADR-0033 Phase B — generic draft↔published review/diff. Available for
           ANY type whenever a pending draft exists; opened by the chat's
-          "Review N change(s)" affordance (?review=1) or the toolbar button. */}
-      <Sheet
-        open={openSheet === 'review'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">{t('designer.draftReview.title', locale)}</SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name} · {t('designer.canvas.reviewVsPublished', locale)}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <DraftReviewPanel
-              published={layered?.effective ?? null}
-              draft={draft}
-              locale={locale}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      <Sheet
-        open={openSheet === 'references'}
-        onOpenChange={(o) => !o && setOpenSheet(null)}
-      >
-        <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-          <SheetHeader className="px-4 py-3 border-b">
-            <SheetTitle className="text-base">
-              {t('engine.edit.references', locale)}
-              {/* Only a completed scan may show a count — a `0` badge over a
-                  failed check is the same false measurement in miniature. */}
-              {refsState.status === 'loaded' && (
-                <Badge
-                  variant="outline"
-                  className="ml-2 text-[10px]"
-                  data-testid="refs-count-badge"
-                >
-                  {refsState.items.length}
-                </Badge>
-              )}
-            </SheetTitle>
-            <SheetDescription className="text-xs">
-              {type} / {name}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-4">
-            <ReferencesPanel
-              state={refsState}
-              locale={locale}
-              onRetry={() => void loadReferences()}
-            />
-          </div>
-        </SheetContent>
-      </Sheet>
-
-      {hasAnchors && (
-        <Sheet
-          open={openSheet === 'related'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[860px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.related', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-auto p-4">
-              <RelatedPanel
-                type={type}
-                name={name}
-                parentItem={draft}
-                onOpen={(t) => setRelatedTarget(t)}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {!createMode && canReadTrail && (
-        <Sheet
-          open={openSheet === 'history'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[720px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.history', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-auto p-4">
-              <HistoryPanel
-                type={type}
-                name={name}
-                client={client}
-                locale={locale}
-                packageId={ownerPackageId}
-                // The rollback door asks the capability and wall verdicts the
-                // save door asks, so it is offered on Save's gate
-                // (objectui#12183: a walled tenant was offered it, refused).
-                onRollback={canWrite ? () => setReloadKey((k) => k + 1) : undefined}
-                rollbackLabel={t('engine.edit.rollback', locale)}
-                rollbackConfirm={(version) =>
-                  t('engine.edit.rollbackConfirm', locale).replace(
-                    '{version}',
-                    String(version),
-                  )
-                }
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {!createMode && canReadTrail && (
-        <Sheet
-          open={openSheet === 'audit'}
-          onOpenChange={(o) => !o && setOpenSheet(null)}
-        >
-          <SheetContent side="right" className="w-[92vw] sm:max-w-[860px] p-0 flex flex-col gap-0">
-            <SheetHeader className="px-4 py-3 border-b">
-              <SheetTitle className="text-base">{t('engine.edit.auditTab', locale)}</SheetTitle>
-              <SheetDescription className="text-xs">
-                {type} / {name}
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex-1 min-h-0 overflow-hidden p-3">
-              <AuditPanel
-                type={type}
-                name={name}
-                client={client}
-                locale={locale}
-              />
-            </div>
-          </SheetContent>
-        </Sheet>
-      )}
+          "Review N change(s)" affordance (?review=1) or the header's chip. */}
+      <DraftReviewSheet
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        type={type}
+        name={name}
+        published={layered?.effective ?? null}
+        draft={draft}
+        locale={locale}
+      />
 
       <MetadataDetailDrawer
         target={relatedTarget}
@@ -4083,7 +4060,7 @@ function MetadataResourceEditPageImpl({
       {/* objectui#11773 — the draft-version conflict, apart from the
           destructive-change confirmation above: two different 409s. */}
       {draftConflictDialog}
-      {/* objectui#13333 — reset / delete / discard-draft, asked in-app. */}
+      {/* objectui#13333 — reset / delete / discard-draft / discard the AI's draft, asked in-app. */}
       <AlertDialog
         open={pendingConfirm !== null}
         onOpenChange={(open) => {
@@ -4109,6 +4086,7 @@ function MetadataResourceEditPageImpl({
                 setPendingConfirm(null);
                 if (!pending) return;
                 if (pending.kind === 'discard') void runDiscardDraft(pending.item);
+                else if (pending.kind === 'discardAi') void runDiscardAiDraft();
                 else void runReset(pending.kind === 'reset');
               }}
             >
@@ -4117,7 +4095,19 @@ function MetadataResourceEditPageImpl({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </PageShell>
+    </>,
+    {
+      // A canvas type's actions sat in its canvas toolbar under the old
+      // `PageShell`; the detail header holds them for every type now.
+      actions:
+        embedded || !isFullscreen ? (
+          <>
+            {reviewChip}
+            {actionsNode}
+          </>
+        ) : undefined,
+      tabs: tabStrip,
+    },
   );
   // objectstack#26858 — the verdict on the body on screen, for an expression
   // field to read at its own path (`useServerErrorsAt`).
@@ -4125,26 +4115,21 @@ function MetadataResourceEditPageImpl({
 }
 
 /**
- * SaveStatusIndicator — small inline label next to the Save icon that
- * communicates auto-save state so the icon-only button is not a black
- * box. Six states, each stamped on `data-state`:
+ * SaveStatusIndicator — small inline label next to the Save button. Four
+ * states, each stamped on `data-state` (objectstack#36902: no auto-save, so
+ * an unsaved edit waits for Save):
  *   - saving        → "Saving…" with spinner
  *   - dirty + held  → "Not saved" (destructive): a save door is shut — the
  *                     server refused this draft or the inspector holds a
- *                     fault — so neither the timer nor the button will save
- *                     it; the reason rides on the chip's title
- *   - dirty + on    → "Auto-saving…" (subtle, amber)
- *   - dirty + off   → "Unsaved" (amber)
- *   - clean + ts    → "Saved 14:32" (muted)
+ *                     fault — so the button will not save it; the reason
+ *                     rides on the chip's title
+ *   - dirty         → "Unsaved" (amber)
+ *   - clean + ts    → "Saved 14:32" (muted): the item is live
  *   - createMode    → hidden until first save
- *
- * `held` outranks the auto-save promise: the auto-save effect returns early on
- * the same terms, so "Auto-saving…" there would promise a save that never comes.
  */
 function SaveStatusIndicator({
   saving,
   isDirty,
-  autoSaveEnabled,
   held,
   heldReason,
   lastSavedAt,
@@ -4153,7 +4138,6 @@ function SaveStatusIndicator({
 }: {
   saving: boolean;
   isDirty: boolean;
-  autoSaveEnabled: boolean;
   /** A save door is shut on this draft (server refusal or inspector fault). */
   held: boolean;
   /** Why it is shut — the Save button's own explanation. */
@@ -4197,13 +4181,11 @@ function SaveStatusIndicator({
     return (
       <span
         data-testid="save-status"
-        data-state={autoSaveEnabled ? 'autosave-pending' : 'unsaved'}
+        data-state="unsaved"
         className="text-xs text-amber-600 dark:text-amber-300 hidden md:inline-flex items-center gap-1"
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-        {autoSaveEnabled
-          ? t('engine.edit.autoSavingShortly', locale)
-          : t('engine.edit.unsaved', locale)}
+        {t('engine.edit.unsaved', locale)}
       </span>
     );
   }

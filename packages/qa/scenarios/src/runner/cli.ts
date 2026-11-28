@@ -18,10 +18,12 @@
  *                        the app's MCP draft door with no project, publishes
  *                        the drafts as a person, then scores and runs the Run
  *                        half (`door.ts`, `doorMode`); the live `claude`
- *                        driver or a replay only
+ *                        driver, an external command on contract
+ *                        `objectstack-scenario-driver/2`, or a replay only
  *   --door-skills DIR    door mode: give the client the Claude Code skills in
  *                        DIR (the published `skills/`), as --ask-skills gives
- *                        them; absent ⇒ none
+ *                        them (an external command: in `door.skillsDir`);
+ *                        absent ⇒ none
  *   --door-skill-omit N[,N]
  *                        door mode: leave these skills of --door-skills out,
  *                        the arm without them; a name DIR holds no skill of
@@ -33,7 +35,8 @@
  *                        instead, a rules file the maintainer supplies from
  *                        outside the repository (`door.ts` states the format);
  *                        default the OS_SCENARIOS_DOOR_RULES variable (a file
- *                        or `builtin`); absent ⇒ none
+ *                        or `builtin`); absent ⇒ none; the live `claude`
+ *                        driver only
  *   --door-rules-omit S[,S]
  *                        door mode: leave these rule ids or named sets of the
  *                        rules out, the arm without them (the built-in sets:
@@ -120,6 +123,16 @@
  *                        `workspace` — this checkout, built and packed as the
  *                        release would publish it (unreleased; never exported;
  *                        refused when run from the published package, which has no checkout)
+ *   --schema-masking off boot every app of the run with object-schema masking
+ *                        off (ADR-0106 D8, `schema-masking.ts`), so a persona
+ *                        is served its whole schema and a field the card
+ *                        withholds from it is the field-level-security
+ *                        question; every record of the run says so
+ *                        (`env.schemaMasking`), and `summary` never sums it
+ *                        with a default run (default `on`: masked, nothing
+ *                        stamped). With no flag, the masking variable set in
+ *                        the environment makes the run a masking-off round,
+ *                        recorded as one; `on` beside it is refused
  *
  * `run-scenarios summary <record|dir>…` (`objectstack-scenarios summary`) reads
  * run records back instead and prints one author-model × ask-model table per
@@ -132,7 +145,7 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { formatRefusal, libraryOf, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../loader.js';
@@ -148,6 +161,7 @@ import { installedSpecVersion, PACKAGES_MODES, prepareWorkspacePackages, settleW
 import { bootDev, os, readArtifact, readNamespace, scaffold } from './project.js';
 import { PROMPT_LANGS, PROMPT_LENGTHS, promptChoiceText, promptLanguageRefusal, statedPromptChoice, type PromptChoice, type PromptLang, type PromptLength } from './prompts.js';
 import { rebaseScenario } from './run-date.js';
+import { roundSchemaMasking, SCHEMA_MASKING_SETTINGS, schemaMaskingHostEnv, schemaMaskingRefusal, schemaMaskingText, type SchemaMasking } from './schema-masking.js';
 import { cardScorecard, renderScorecard, runRecord, type CardStamp } from './scorecard.js';
 import { SUPPLIED_TEMPLATE_SOURCE, summaryMain, suppliedTemplateOf, type SuppliedTemplate } from './summary.js';
 
@@ -214,6 +228,8 @@ export interface CliArgs {
   lang?: PromptLang;
   /** `--prompt`: the card prompt the build turn is given ({@link PromptChoice.prompt}); absent ⇒ `detailed`. */
   prompt?: PromptLength;
+  /** `--schema-masking`: `off` boots every app of the run with object-schema masking off and stamps its records ({@link SchemaMasking}); `on` ⇒ masked; absent ⇒ masked unless the environment turns it off (`roundSchemaMasking`). */
+  schemaMasking?: SchemaMasking;
 }
 
 export function parseArgs(argv: readonly string[]): CliArgs {
@@ -293,6 +309,11 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       if (!(PROMPT_LENGTHS as readonly string[]).includes(p)) throw new Error(`unknown --prompt \`${p}\` (${PROMPT_LENGTHS.join(', ')})`);
       a.prompt = p as PromptLength;
     }
+    else if (flag === '--schema-masking') {
+      const m = val();
+      if (!(SCHEMA_MASKING_SETTINGS as readonly string[]).includes(m)) throw new Error(`unknown --schema-masking \`${m}\` (${SCHEMA_MASKING_SETTINGS.join(', ')})`);
+      a.schemaMasking = m as SchemaMasking;
+    }
     else if (flag === '--out') a.out = val();
     else if (flag === '--work') a.work = val();
     else if (flag === '--create-version') a.createVersion = val();
@@ -327,7 +348,7 @@ export type DriverModels = Pick<CliArgs, 'model' | 'authorModel' | 'askModel'>;
 /** The effort levels a run may ask the live driver for: `--effort`, `--author-effort`, `--ask-effort`. */
 export type DriverEfforts = Pick<CliArgs, 'effort' | 'authorEffort' | 'askEffort'>;
 
-/** The skills a run may give the live `claude` driver: `--ask-skills`, and door mode's arm (`--door-*`). */
+/** The skills a run may give the live driver: `--ask-skills` (`claude` only), and door mode's arm (`--door-*`; an external command takes its skills, not its rules). */
 export type DriverSkills = Pick<CliArgs, 'askSkills' | 'doorSkills' | 'doorSkillOmit' | 'doorRules' | 'doorRulesOmit'>;
 
 const LIVE_FLAGS: ReadonlyArray<readonly [keyof (DriverLimits & DriverModels & DriverEfforts & DriverSkills), string]> = [
@@ -382,7 +403,12 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
     throw new Error(`--ask-skills applies to the live \`claude\` driver only: it places Claude Code skills where a \`claude\` session discovers them and allows its \`Skill\` tool, and \`${spec}\` has neither`);
   }
   const door = givenFlags(opts, ['doorSkills', 'doorSkillOmit', 'doorRules', 'doorRulesOmit']);
-  if (door.length && spec !== 'claude' && !spec.startsWith('recorded:')) throw new Error(`${door.join(', ')}: ${doorModeRefusal(`\`${spec}\``)}`);
+  if (door.length && spec !== 'claude' && !spec.startsWith('recorded:') && !spec.startsWith('external:')) throw new Error(`${door.join(', ')}: ${doorModeRefusal(`\`${spec}\``)}`);
+  // An external command takes door mode's skills (contract `/2`, `drivers/external.ts`); the rules arm is a Claude Code session's `CLAUDE.md`.
+  const rules = givenFlags(opts, ['doorRules', 'doorRulesOmit']);
+  if (rules.length && spec.startsWith('external:')) {
+    throw new Error(`${rules.join(', ')} ${rules.length === 1 ? 'applies' : 'apply'} to the live \`claude\` driver only: the rules reach its client as the \`CLAUDE.md\` a Claude Code session reads, and the external driver contract carries no rules (\`--door-skills\` reaches an external command)`);
+  }
   if (spec.startsWith('recorded:')) {
     const given = givenFlags(opts);
     if (given.length) throw new Error(`${given.join(', ')} ${given.length === 1 ? 'applies' : 'apply'} to the live driver only: a replay re-reads each turn as it was recorded`);
@@ -416,9 +442,22 @@ export function makeDriver(spec: string, opts: DriverLimits & DriverModels & Dri
       ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
       ...(opts.authorEffort !== undefined ? { authorEffort: opts.authorEffort } : {}),
       ...(opts.askEffort !== undefined ? { askEffort: opts.askEffort } : {}),
+      ...(opts.doorSkills !== undefined ? { doorSkillsDir: opts.doorSkills } : {}),
+      ...(opts.doorSkillOmit !== undefined ? { doorSkillOmit: opts.doorSkillOmit } : {}),
     });
   }
   throw new Error(`unknown driver \`${spec}\` (claude, codex, external:COMMAND, recorded:FILE)`);
+}
+
+/**
+ * What a booted app's environment gains over the runner's own: door mode's
+ * host serves the OAuth authorization server its client's token comes from,
+ * and a masking-off round sets the D8 opt-out (`schema-masking.ts`) on the
+ * app's process alone, never on a model turn or a project command. `{}` on a
+ * default round outside door mode, as before the flag.
+ */
+export function bootEnv(args: Pick<CliArgs, 'schemaMasking'>, authoringDoor: boolean | undefined): Record<string, string> {
+  return { ...(authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}), ...schemaMaskingHostEnv(args.schemaMasking) };
 }
 
 /**
@@ -441,10 +480,55 @@ export function loadedCardStamp(loaded: Pick<LoadedScenario, 'fileSha256' | 'car
   return { id: loaded.card.id, sha256: loaded.fileSha256 };
 }
 
+/** The provenance file beside a verified build: `builds/F.json` → `builds/F.provenance.json` (`docs/qa/scenarios/README.md`, Verified builds). */
+export function templateProvenancePath(path: string): string {
+  return path.replace(/(\.json)?$/, '.provenance.json');
+}
+
+/**
+ * The line `run` prints when the `--template` file's provenance names another
+ * card file than the one the run grades: its `cardSha256` is the sha256 of the
+ * card file's bytes, the hash the record stamps (`CardStamp`), and it changes
+ * by PR with the card. Undefined when the two agree, when the template has no
+ * provenance file beside it, or when the provenance is another card's. A
+ * warning, never a refusal: the run still grades the card it loaded.
+ */
+export function templateProvenanceWarning(
+  path: string,
+  card: CardStamp,
+  read: (provenancePath: string) => string | undefined = (p) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return undefined;
+    }
+  },
+): string | undefined {
+  const provenancePath = templateProvenancePath(path);
+  const text = read(provenancePath);
+  if (text === undefined) return undefined;
+  const file = basename(provenancePath);
+  let provenance: { card?: unknown; cardSha256?: unknown };
+  try {
+    provenance = JSON.parse(text);
+  } catch {
+    return `template provenance: ${file} is not JSON, so nothing says which card the template was verified against`;
+  }
+  if (typeof provenance.card === 'string' && provenance.card !== card.id) return undefined;
+  if (typeof provenance.cardSha256 !== 'string') return `template provenance: ${file} names no cardSha256, so nothing says which ${card.id} card the template was verified against`;
+  if (provenance.cardSha256 === card.sha256) return undefined;
+  return `template provenance: ${file} names card ${card.id} sha256 ${provenance.cardSha256.slice(0, 12)}, but the card this run grades is sha256 ${card.sha256.slice(0, 12)} — refresh its cardSha256 by PR`;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   // `summary` reads records back; it runs nothing (`summary.ts`).
   if (argv[0] === 'summary') return summaryMain(argv.slice(1));
   const args = parseArgs(argv);
+  // `--schema-masking on` beside a shell that turns masking off says two things: refused before anything runs.
+  const maskingRefusal = schemaMaskingRefusal(args.schemaMasking);
+  if (maskingRefusal) throw new Error(maskingRefusal);
+  // The masking every booted app runs with, the shell's variable included: every record of the run states it.
+  const schemaMasking = roundSchemaMasking(args.schemaMasking);
   const here = dirname(fileURLToPath(import.meta.url));
   // The checkout, or the library root the published package carries (`library.ts`).
   const { root: repo, checkout } = locateLibraryRoot(here);
@@ -485,8 +569,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     args.doorRules = envRules;
     console.log(`door rules: ${DOOR_RULES_ENV} names the rules file`);
   }
-  if (args.modes.includes('door') && args.driver !== 'claude' && !args.driver.startsWith('recorded:')) throw new Error(doorModeRefusal(`\`--driver ${args.driver}\``));
+  if (args.doorRules === undefined && envRules && args.modes.includes('door') && args.driver.startsWith('external:')) {
+    console.log(`door rules: ${DOOR_RULES_ENV} is set and not used — the rules arm is the live \`claude\` driver's, and an external command is given none`);
+  }
+  if (args.modes.includes('door') && args.driver !== 'claude' && !args.driver.startsWith('recorded:') && !args.driver.startsWith('external:')) throw new Error(doorModeRefusal(`\`--driver ${args.driver}\``));
   const live = makeDriver(args.driver, args, checkout ? { repoRoot: repo } : {});
+  // Door mode hands an external command a door only on contract `/2`: a `/1` command is refused here, before any card runs.
+  if (args.modes.includes('door') && live instanceof ExternalDriver) live.assertDoor();
   // A replay reads the first N asks of each question turn: refused here, before any card runs, when it holds fewer.
   if (args.askRepeats !== undefined && live instanceof RecordedDriver) live.assertAskRepeats(args.askRepeats, chosen.map((c) => c.card));
   // A replay under other prompts than its recording's would grade one choice's answers as another's: refused here, before any card runs.
@@ -507,6 +596,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   );
   if (args.askRepeats !== undefined && args.askRepeats > 1) console.log(`ask repeats: each question turn asked ${args.askRepeats} times, operations once`);
   if (promptChoice) console.log(`prompts: ${promptChoiceText(promptChoice)}`);
+  if (schemaMasking === 'off') console.log(`${schemaMaskingText('off')}${args.schemaMasking === undefined ? ' — set by the environment, not by --schema-masking' : ''}`);
 
   // Built and packed once, before the first card: every scaffold of this run installs the same tarballs.
   const workspace = args.packages === 'workspace' ? await prepareWorkspacePackages(repo, join(work, 'workspace-packages')) : undefined;
@@ -531,8 +621,8 @@ export async function main(argv: readonly string[]): Promise<number> {
     os: (dir, a) => os(dir, a),
     readArtifact,
     namespace: readNamespace,
-    // Door mode's host serves the OAuth authorization server its client's token comes from.
-    boot: (dir, o) => bootDev(dir, undefined, o?.authoringDoor ? { OS_OIDC_PROVIDER_ENABLED: 'true' } : {}),
+    // Door mode's OAuth server, and a masking-off round's D8 opt-out (`bootEnv`).
+    boot: (dir, o) => bootDev(dir, undefined, bootEnv({ schemaMasking }, o?.authoringDoor)),
     harness: (url) => new HttpApp({ baseUrl: url, adminEmail: ADMIN.email, adminPassword: ADMIN.password }),
   };
   const templateBytes = args.template ? readFileSync(args.template) : undefined;
@@ -557,12 +647,15 @@ export async function main(argv: readonly string[]): Promise<number> {
     if (loaded.card.asOf !== undefined && loaded.card.asOf !== scenario.card.asOf) {
       console.log(`dates: the card's ${loaded.card.asOf} is run as ${scenario.card.asOf}, every card date moved by the same days`);
     }
-    publishedVersions = new Set();
-    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}) });
-    const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
     // The card file the run graded, as it was loaded (`CardStamp`): the record and the scorecard name its hash.
     const card = loadedCardStamp(loaded);
-    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card }, cardRun), cardRun, supplied);
+    // A verified build's provenance names the card file it was verified against; one that names another is stale.
+    const staleProvenance = args.template ? templateProvenanceWarning(args.template, card) : undefined;
+    if (staleProvenance) console.log(`warning: ${staleProvenance}`);
+    publishedVersions = new Set();
+    const cardRun = await runCard(scenario, driver, ops, { modes: args.modes, iterateRun: args.iterateRun, admin: ADMIN, ...(template ? { templateArtifact: template } : {}), ...(args.askRepeats !== undefined ? { askRepeats: args.askRepeats } : {}), ...(promptChoice ? { promptChoice } : {}), ...(schemaMasking === 'off' ? { schemaMasking } : {}) });
+    const packages: PackageSource = workspace ? workspace.source : { source: 'published', versions: [...publishedVersions].sort() };
+    const record = withSuppliedTemplate(runRecord({ run: `${date}-scenario-${scenario.card.id}`, date, ...(framework ? { framework } : {}), packages, driver: info, runner: 'scenario-runner', evidenceDir: work, card, ...(schemaMasking === 'off' ? { schemaMasking: 'off' as const } : {}) }, cardRun), cardRun, supplied);
     const file = join(outDir, `${date}-scenario-${scenario.card.id}.json`);
     writeFileSync(file, JSON.stringify(record, null, 2));
     console.log(renderScorecard(cardScorecard(cardRun, packages, card)));

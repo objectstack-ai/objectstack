@@ -9,10 +9,11 @@ description: "Knowledge Document / Chunk / Hit — canonical shapes shared by ev
 Knowledge Document / Chunk / Hit — canonical shapes shared by every
 `IKnowledgeAdapter` implementation.
 
-The framework does **not** prescribe chunk strategy or vector
-format. Adapters are free to chunk however they like; the framework
-only requires they round-trip these shapes when talking to the
-`IKnowledgeService`.
+The knowledge service owns the structural split (ADR-0161 K1): it cuts a
+document into passages once, by the source's `split` key, and hands the
+passages to every adapter that declares `capabilities.chunks` as the
+document's `chunks`. An adapter that does not declare it receives whole
+documents and splits them itself. The framework never sees a vector.
 
 See `content/docs/protocol/knowledge.mdx` for the full design.
 
@@ -42,7 +43,8 @@ const result = KnowledgeChunkSchema.parse(data);
 | **documentId** | `string` | ✅ |  |
 | **index** | `integer` | ✅ |  |
 | **content** | `string` | ✅ |  |
-| **metadata** | `Record<string, any>` | optional |  |
+| **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
+| **metadata** | `never` | optional | [REMOVED] `KnowledgeChunk.metadata` was removed in @objectstack/spec 18 (ADR-0049, ADR-0161 K8) — nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. Delete the key. A passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. |
 
 
 ---
@@ -54,12 +56,26 @@ const result = KnowledgeChunkSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | ✅ | Document id |
-| **sourceId** | `string` | ✅ | Owning KnowledgeSource id |
+| **sourceId** | `string` | ✅ | Index key of the owning knowledge source |
 | **sourceRecordId** | `string` | optional |  |
 | **content** | `string` | ✅ |  |
 | **title** | `string` | optional |  |
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 | **permissions** | `string[]` | optional |  |
+| **organizationId** | `string` | optional | Organization of the record the document was assembled from; set by the knowledge service under a walled tenancy posture |
+| **docHash** | `string` | optional | Service-computed hash of the assembled document (content, title, metadata, and organizationId when set); stored and returned as stored by the adapter |
+| **chunks** | `{ id: string; documentId: string; index: integer; content: string; … }[]` | optional | Service-cut passages of the document, handed to an adapter that declares capabilities.chunks |
+
+### Nested Shape: `KnowledgeDocument.chunks[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ |  |
+| **documentId** | `string` | ✅ |  |
+| **index** | `integer` | ✅ |  |
+| **content** | `string` | ✅ |  |
+| **headingPath** | `string[]` | optional | Headings the chunk sits under, outermost first (markdown strategy) |
+| **metadata** | `never` | optional | [REMOVED] `KnowledgeChunk.metadata` was removed in @objectstack/spec 18 (ADR-0049, ADR-0161 K8) — nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. Delete the key. A passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. |
 
 
 ---
@@ -78,6 +94,8 @@ const result = KnowledgeChunkSchema.parse(data);
 | **snippet** | `string` | ✅ |  |
 | **title** | `string` | optional |  |
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
+| **docHash** | `string` | optional | Stored docHash of the hit's document, returned as stored by the adapter |
+| **headingPath** | `string[]` | optional | Headings the hit's chunk sits under, outermost first |
 
 
 ---

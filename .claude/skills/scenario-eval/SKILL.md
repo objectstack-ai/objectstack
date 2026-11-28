@@ -78,6 +78,18 @@ metadata:
 - 结果按配置报**均值 + 最小–最大**,再按卡把 5 次合并报一张表。汇总脚本 runner 里还没有:
   手算或本席脚本都行,记录写明算法(分子分母合并,还是逐次百分比再平均)。
 - 只和上一张记录的**同一配置、同一组卡**比;发布版本或 runner sha 变了,Reading 点名这一变量。
+- **迭代要不要保留**(改了技能文本、工具说明或构建,再跑同一组卡):单独一轮 5 次高于上一轮 ⛔ 不算提升。
+  同一棵树重跑两轮,5 次合计就能差出 5 题(65 题里一轮 64、一轮 59),和要判的改动一样大。这两条里一轮 = 一条 5 次重复的
+  命令;同一棵树 = 记录里技能(`driver.askSkills`)、构建(`template`)的 sha256 与 runner sha(`env.framework`)都相同。判法:
+  - 改前、改后每侧**至少 3 轮、合计 ≥15 次**,同一配置、同一组卡、同一评分器 sha;评分器变过,先照 §4 把旧录音回放重评。
+    改前那棵树轮数不够就现在补跑。合并读数写进最新一张记录的 Reading,点名它合并的每张记录;上面「只和上一张比」管单轮趋势。
+  - 每侧分子分母合并报一个数,并列出各轮分数。**改后最低的一轮高于改前最高的一轮**才写「提升」,据此保留;
+    反过来写「回退」,据此丢弃。各 3 轮而实际无差别时,两侧这样完全分开的机会至多 1/20。
+  - 两侧的轮有重叠 ⇒ Reading 写「差别在轮间波动内」,附两侧合并数与方向;⛔ 不写提升或回退,⛔ 不凭这组分数保留或丢弃。
+    要不要加轮、要不要凭分数以外的理由落地,交派这张卡的席位。
+  - 冲着某一类题改的,那一类另报合并计数(如 20 回合错 6、30 回合错 4),措辞照上面三条。
+- **卡写「连续 N 轮达标」**照同一条读:在同一棵树上跑过的**每一轮**都达标才算达成,轮数不少于 N、合计 ≥15 次,不足就补轮。
+  这棵树有一轮不达标 ⇒ 凭分数未达成,⛔ 不靠重跑把它数过去;加轮还是换树交派这张卡的席位。换了树,之前的轮不接着数。
 - **问数日轮**:日轮一次重复,只报计数与趋势;排名次看周轮的 5 次。日轮比前一天、周轮比上一周
   (`summary` 也拒把 `--ask-repeats` 不同的运行并表)。
 - 每次重复都进记录:没跑完的照实写 `not measured` 与原因(README 的超时、`error_max_turns` 等),
@@ -104,7 +116,7 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --out "$OUT" --record "$OUT/run.rec.json" > "$OUT/run.log" 2>&1 &
 
 # 问数日轮:一卡一条;卡名照 §1 从卡文件重读,--template 是该卡入库构建的绝对路径(先查 §1 的开跑条件;
-# order_to_cash 的构建等 #34986,入库前只有 travel_expense 可跑)
+# 每张卡跑前 ls docs/qa/scenarios/builds/ 确认它有入库构建,⛔ 不凭记忆认定)
 OUT=/abs/path/eval-runs/DATE-ask/haiku-medium/travel_expense && mkdir -p "$OUT"
 nohup pnpm --filter @objectstack/scenarios run-scenarios \
   --only travel_expense --modes ask --template "$(git rev-parse --show-toplevel)/docs/qa/scenarios/builds/travel_expense.json" \
@@ -116,7 +128,7 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 
 维护者令(原话):"objectstack 公开仓,像 qa-run"。据此场景卡评测记录立在本仓、带全分(问数基线 ② 的
 数字仍不对外,见 `lanes/eval.md`)。运行产物 ⛔ 不进仓库树:run 记录 JSON、录音、日志留在 git-ignore 的默认
-`--out` 目录或本席的项目文件里;issue 就是报告,纯文本,⛔ 不放图。轮所装的已验证构建不是运行产物而是 fixture,
+`--out` 目录或本席的项目文件里;issue 就是报告,纯文本,⛔ 不放图。`--template` 所装的已验证构建不是运行产物而是 fixture,
 在树里(`docs/qa/scenarios/builds/`),只随 PR 改,⛔ 轮不写它。
 
 - **写入门**:立单、评论、关单全走 pm-dispatch 写入门,照 `checklist-test` §4 那一段;⛔ MCP `issue_write`。
@@ -153,9 +165,9 @@ nohup pnpm --filter @objectstack/scenarios run-scenarios \
 | **评分误判**:评分器把对的判错、错的判对(含泄露标记误报) | 跑分器主人:`packages/qa/scenarios` 归 `domain:devx`,有开着的评分专题卡就作它的一行 / 子卡(卡号见座位贴),否则走立卡门 |
 | **产品缺陷**:平台拒收合法写、probe 失败、能力缺失 | 立卡门(pm-dispatch `references/filing-gate.md`)交对应车道;probe 失败算平台,不算 agent |
 | **技能文本**:agent 照着已发布技能搭错 | 以 `finding` 报 `domain:skills`;本席 ⛔ 不自改技能 |
-| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;Results 只写泄露标记数,Findings 只写该文 §4 的固定一句,⛔ 不写内容、不立公开卡 |
+| **泄露 / 任何安全线索** | 只照 pm-dispatch `references/security-findings.md`;Results、Findings 照 §5,⛔ 不写内容、不立公开卡 |
 
-泄露标记先分清是评分误判还是真泄露;真泄露只走最后一行。
+泄露标记先分清评分误判与真泄露;真泄露只走末行。立出的卡 ⛔ 不挂 `eval-run`,照常进首触。
 
 ## Guardrails
 

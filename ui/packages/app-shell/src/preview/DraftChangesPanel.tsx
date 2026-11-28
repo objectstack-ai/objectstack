@@ -118,6 +118,12 @@ import { readDraftChecks, type DraftCheck } from './flowDraftChecks.js';
 import { clearPublishChecksShown, markPublishChecksShown } from './publishChecksShown.js';
 // objectstack#27835 — a property by its label on the item type's form.
 import { formKeyLabel, labelSpellsKey } from './changeKeyLabels.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface DraftChangeEntry {
   /**
@@ -213,7 +219,7 @@ function entryKey(entry: Pick<DraftChangeEntry, 'type' | 'name' | 'member'>): st
  */
 async function publishedNamesOf(type: string): Promise<Set<string>> {
   // `type` is already the canonical singular — folded in `listPendingDrafts`.
-  const res = await fetch(`/api/v1/meta/${encodeURIComponent(type)}`, {
+  const res = await authFetch(`/api/v1/meta/${encodeURIComponent(type)}`, {
     credentials: 'include',
     headers: { Accept: 'application/json' },
     cache: 'no-store',
@@ -285,7 +291,7 @@ async function fetchItemRead(
   // type with no members, and refuse a blank one.
   if (opts.member) params.push(`member=${encodeURIComponent(opts.member)}`);
   const qs = params.length ? `?${params.join('&')}` : '';
-  const res = await fetch(
+  const res = await authFetch(
     `/api/v1/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs}`,
     { credentials: 'include', headers: { Accept: 'application/json' }, cache: 'no-store' },
   );
@@ -898,8 +904,14 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
     t('preview.changes.typeCount.capability', { count, defaultValue: '{{count}} capabilities' }),
   tool: (t, count) => t('preview.changes.typeCount.tool', { count, defaultValue: '{{count}} AI tools' }),
   skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
+  ai_context: (t, count) =>
+    t('preview.changes.typeCount.ai_context', { count, defaultValue: '{{count}} AI context packs' }),
+  knowledge_source: (t, count) =>
+    t('preview.changes.typeCount.knowledge_source', { count, defaultValue: '{{count}} knowledge sources' }),
   datasource: (t, count) =>
     t('preview.changes.typeCount.datasource', { count, defaultValue: '{{count}} datasources' }),
+  // objectstack#37086 — a `form` item (ADR-0159 card ②) drafts and publishes like a view.
+  form: (t, count) => t('preview.changes.typeCount.form', { count, defaultValue: '{{count}} forms' }),
 };
 
 /** The types {@link TYPE_COUNT} names, for the test that holds it to the spec's registry. */
@@ -1489,6 +1501,22 @@ export interface DraftChangesPanelProps {
    * ({@link customizationEnvironmentText}, objectstack#30119).
    */
   customizationOf?: string;
+  /**
+   * objectstack#37454 (ADR-0084, amended 2026-11-26, 概览 Overview) — drawn in
+   * place, as the Pending tab of Studio's package overview, instead of as a
+   * sheet: the same list, checks, note and Publish all, with no overlay.
+   * `open` still says whether it is shown (it loads on each open), and
+   * `onOpenChange` is never called. Opening clears no toast: a page in place
+   * covers nothing, and a remount after a publish would clear the publish's
+   * own answer.
+   */
+  embedded?: boolean;
+  /**
+   * Read the drafts again whenever this value changes while open. The sheet
+   * re-reads at each open; an embedded panel stays open, so its host passes
+   * what moves when the drafts do (a publish, a new pending count).
+   */
+  reloadKey?: unknown;
 }
 
 export type DraftChangesPosture = 'review' | 'confirm';
@@ -1510,6 +1538,8 @@ export function DraftChangesPanel({
   posture = 'review',
   renderEntryNote,
   customizationOf,
+  embedded = false,
+  reloadKey,
 }: DraftChangesPanelProps) {
   const { t, language } = useObjectTranslation();
   const [entries, setEntries] = useState<DraftChangeEntry[] | null>(null);
@@ -1754,7 +1784,7 @@ export function DraftChangesPanel({
 
   useEffect(() => {
     if (open) void load();
-  }, [open, load]);
+  }, [open, load, reloadKey]);
 
   /**
    * Clear the toast stack when this panel opens (`add10d8f9`).
@@ -1780,7 +1810,9 @@ export function DraftChangesPanel({
    * a toast this panel's OWN publish raises is untouched.
    */
   useEffect(() => {
-    if (open) toast.dismiss();
+    if (open && !embedded) toast.dismiss();
+    // Keyed on the open transition; `embedded` is fixed for a host's mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const noChangeText = t('preview.changes.detailNone', {
@@ -1802,6 +1834,382 @@ export function DraftChangesPanel({
     byType.set(entry.type, bucket);
   }
 
+  const titleText = t('preview.changes.title', { defaultValue: 'Pending changes' });
+  const descriptionText = t('preview.changes.description', {
+    defaultValue: 'What publishing will change. New items are added; updates overwrite the live version.',
+  });
+  const headerNotes = (
+    <>
+      {customizationOf ? (
+        <p data-testid="draft-changes-saved-to" className="text-xs font-medium text-foreground">
+          {savedToCustomizationText(t, customizationOf)}
+        </p>
+      ) : null}
+      {/* objectstack#30119 (ADR-0146 D2) — and where they live: this
+        * environment's database, as items of the pair (`packageId`, the
+        * pair the host reviews), moved only by `os package export`. */}
+      {customizationOf && packageId ? (
+        <p data-testid="draft-changes-environment" className="text-xs text-muted-foreground">
+          {customizationEnvironmentText(t, packageId)}
+        </p>
+      ) : null}
+    </>
+  );
+  const body = (
+    <>
+      {posture === 'confirm' && entries && entries.length > 0 && !error ? (
+        // objectui#12517 — what the publish carries, counted off the same
+        // per-type grouping the headings below read.
+        <p data-testid="draft-changes-summary" className="mt-3 px-4 text-xs font-medium text-foreground">
+          {[
+            t('preview.changes.summaryItems', { count: entries.length, defaultValue: '{{count}} items' }),
+            ...[...byType.entries()].map(([type, items]) => summaryTypeSegment(t, type, items.length)),
+          ].join(' · ')}
+        </p>
+      ) : null}
+      <div
+        ref={listRef}
+        tabIndex={-1}
+        aria-label={t('preview.changes.title', { defaultValue: 'Pending changes' })}
+        data-testid="draft-changes-list"
+        className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6 outline-none"
+      >
+        {error ? (
+          <p className="text-sm text-destructive">
+            {t('preview.changes.loadFailed', { defaultValue: 'Could not load pending changes:' })}{' '}
+            {error}
+          </p>
+        ) : entries === null ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('preview.changes.loading', { defaultValue: 'Loading pending changes…' })}
+          </div>
+        ) : entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t('preview.changes.empty', { defaultValue: 'Nothing pending — every draft has been published.' })}
+          </p>
+        ) : (
+          [...byType.entries()].map(([type, items]) => (
+            <div key={type}>
+              <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {summaryTypeSegment(t, type, items.length)}
+              </h4>
+              <ul className="flex flex-col gap-1">
+                {items.map((entry) => {
+                  const key = entryKey(entry);
+                  const isExpanded = expanded.has(key);
+                  // objectui#11807 — the drill-in found nothing this publish
+                  // changes: not an UPDATE, whatever the name list said.
+                  const isUnchanged = unchanged.has(key);
+                  // objectui#11862 — the row's label leads, in the console
+                  // language, for a NEW row and an UPDATE row alike: the one
+                  // `_drafts` serves, so this list never chooses between a
+                  // published and a draft label. The name follows as
+                  // secondary text, or is the row's text when there is no
+                  // label.
+                  const labelText = resolveI18nLabel(entry.label, language)?.trim() ?? '';
+                  const note = renderEntryNote?.(entry);
+                  return (
+                    <li key={key} className="rounded-md border text-sm">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(key)}
+                        aria-expanded={isExpanded}
+                        title={isUnchanged ? noChangeText : undefined}
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-muted/50"
+                        data-testid="draft-entry-toggle"
+                      >
+                        {isExpanded ? (
+                          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        )}
+                        {isUnchanged ? (
+                          // Named, not hidden: this glyph is where the row
+                          // says why it carries no badge. The drill-in under
+                          // it prints the same sentence as text.
+                          <Equal
+                            role="img"
+                            aria-label={noChangeText}
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                          />
+                        ) : entry.kind === 'new' ? (
+                          <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        ) : entry.kind === 'update' ? (
+                          <FilePen className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                        ) : (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                        )}
+                        {labelText ? (
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className="truncate">{labelText}</span>
+                            {labelText !== entry.name ? (
+                              <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
+                                {entry.name}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
+                        )}
+                        {entry.member ? (
+                          // The member is what tells two rows of one name
+                          // apart (objectstack#23073); shown as served.
+                          <span
+                            className="shrink-0 font-mono text-xs text-muted-foreground"
+                            data-testid="draft-entry-member"
+                          >
+                            {entry.member}
+                          </span>
+                        ) : null}
+                        {!isUnchanged && entry.kind ? (
+                          <Badge
+                            variant="outline"
+                            className={
+                              entry.kind === 'new'
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border-amber-200 bg-amber-50 text-amber-700'
+                            }
+                          >
+                            {entry.kind === 'new'
+                              ? t('preview.changes.kindNew', { defaultValue: 'New' })
+                              : t('preview.changes.kindUpdate', { defaultValue: 'Update' })}
+                          </Badge>
+                        ) : null}
+                      </button>
+                      {note ? (
+                        <div className="border-t px-2.5 py-2" data-testid="draft-entry-note">
+                          {note}
+                        </div>
+                      ) : null}
+                      {isExpanded && (
+                        <div className="border-t bg-muted/20">
+                          <EntryDetail
+                            entry={entry}
+                            classifying={classifying}
+                            onCompared={(same) => markCompared(key, same)}
+                            backfill={backfillControl}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        )}
+      </div>
+      {checks.length > 0 && !error && (
+        <div
+          data-testid="draft-flow-checks"
+          className="mt-auto border-t border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+        >
+          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">
+            <ListChecks className="h-3.5 w-3.5 shrink-0" />
+            {t('preview.changes.flowChecksTitle', {
+              defaultValue: 'Before you publish — the publish check will report these',
+            })}
+          </p>
+          <ul className="mt-1.5 flex flex-col gap-2">
+            {draftChecksByItem(checks).map(({ type, name, items }) => {
+              const entry = entries?.find((e) => e.type === type && e.name === name);
+              const heading = resolveI18nLabel(entry?.label, language)?.trim() || name;
+              return (
+                <li key={JSON.stringify([type, name])} data-testid="draft-flow-checks-item">
+                  {/* The flow by the label its row shows, opening its designer
+                      where a host publishes the surface channel (Studio), plain
+                      text elsewhere — the security block's rule, below. */}
+                  {openSurface ? (
+                    <button
+                      type="button"
+                      onClick={() => openSurface({ type, name })}
+                      className="text-[11px] font-medium text-amber-900 underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-amber-100"
+                    >
+                      {heading}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] font-medium text-amber-900 dark:text-amber-200">{heading}</span>
+                  )}
+                  <ul className="mt-0.5 flex list-disc flex-col gap-1 pl-4">
+                    {items.map((c, i) => (
+                      <li
+                        key={i}
+                        data-severity={c.severity}
+                        className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
+                      >
+                        {c.message}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {problems.length > 0 && !error && (
+        <div
+          data-testid="draft-security-problems"
+          className="mt-auto border-t border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
+        >
+          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+            {t('preview.changes.securityBlockTitle', {
+              count: problems.length,
+              defaultValue: 'Publishing will be refused — {{count}} item(s) need a decision first',
+            })}
+          </p>
+          <ul className="mt-1.5 flex flex-col gap-1.5">
+            {problems.map((p) => (
+              <li
+                key={`${p.type}:${p.name}:${p.rule}`}
+                title={[p.message, p.hint].filter(Boolean).join(' ')}
+                className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
+              >
+                {/* `type/name`, the way the server's own publish refusal names
+                    the item (`object/crmext_visit: …`) — and, unlike a bare
+                    name, text that cannot collide with the same draft's row in
+                    the list above.
+
+                    Clickable ONLY where a host publishes the surface channel,
+                    i.e. inside Studio. This sheet is shared with the Home /
+                    draft-preview bar, where the designer is not a reachable
+                    destination at all: there `openSurface` is null and the
+                    name stays the plain prose it has always been, because a
+                    link that goes nowhere is worse than the sentence below
+                    telling you where to go. */}
+                {openSurface ? (
+                  <button
+                    type="button"
+                    onClick={() => openSurface({ type: p.type, name: p.name })}
+                    className="font-mono underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-amber-100"
+                  >
+                    {p.type}/{p.name}
+                  </button>
+                ) : (
+                  <span className="font-mono">
+                    {p.type}/{p.name}
+                  </span>
+                )}{' '}
+                — {securityProblemText(t, p)}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
+            {t('preview.changes.securityBlockWhere', {
+              defaultValue: 'Fix it on the object under Settings → Who can see which records, then publish again.',
+            })}
+          </p>
+        </div>
+      )}
+      {onPublish && (entries?.length ?? 0) > 0 && !error && (
+        <div className="mt-auto flex flex-col gap-2 border-t px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            {/* objectui#11591 — the note states what THIS scope's Publish
+                does. Only a package publishes as one atomic batch (`POST
+                /packages/:id/publish-drafts`); with no package there is no
+                batch door, so the caller promotes each draft by itself and a
+                draft that fails stays pending while the others go live. */}
+            {packageId
+              ? t('preview.changes.confirmNote', {
+                  count: entries!.length,
+                  defaultValue:
+                    'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
+                })
+              : t('preview.changes.confirmNoteSeparate', {
+                  count: entries!.length,
+                  defaultValue:
+                    'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
+                })}
+          </p>
+          {packageId && (
+            // ADR-0146 D1 — the change note. Offered only where the footer
+            // publishes one package as a batch: only that door carries a
+            // `message` to every history row it writes.
+            <div className="flex flex-col gap-1">
+              <label htmlFor={noteId} className="text-xs font-medium">
+                {t('preview.changes.noteLabel', { defaultValue: 'Change note (optional)' })}
+              </label>
+              <Textarea
+                id={noteId}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                disabled={publishing}
+                rows={2}
+                className="min-h-0 resize-none text-xs"
+                placeholder={t('preview.changes.notePlaceholder', {
+                  defaultValue: 'What changed and why. It is shown in each item’s history.',
+                })}
+                data-testid="draft-changes-note"
+              />
+            </div>
+          )}
+          <Button
+            ref={publishRef}
+            size="sm"
+            // objectui#12929 — the checked backfill choices, and ADR-0146 D1
+            // the change note, or no options at all: a sheet with neither
+            // sends the request it always sent.
+            onClick={() => {
+              const message = packageId ? note.trim() : '';
+              const options: DraftPublishOptions = {
+                ...(backfill.size > 0 ? { backfill: [...backfill.values()] } : {}),
+                ...(message ? { message } : {}),
+              };
+              // objectstack#34818 — the items whose publish checks this
+              // sheet just listed: their post-publish toast keeps its one
+              // title line (`publishChecksShown.ts`). Marked for the
+              // publish's flight only.
+              const reviewed = draftChecksByItem(checks);
+              for (const r of reviewed) markPublishChecksShown(r.type, r.name);
+              const clearReviewed = () => {
+                for (const r of reviewed) clearPublishChecksShown(r.type, r.name);
+              };
+              try {
+                void Promise.resolve(
+                  Object.keys(options).length > 0 ? onPublish(options) : onPublish(),
+                ).finally(clearReviewed);
+              } catch (e) {
+                clearReviewed();
+                throw e;
+              }
+            }}
+            disabled={publishing}
+            data-testid="draft-changes-publish"
+          >
+            {publishing ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Rocket className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {t('preview.changes.publishConfirm', { defaultValue: 'Publish all' })}
+          </Button>
+        </div>
+      )}
+    </>
+  );
+
+  // objectstack#37454 — the overview's Pending tab: the same body, in place.
+  if (embedded) {
+    if (!open) return null;
+    return (
+      <section
+        className="flex min-h-0 flex-1 flex-col"
+        aria-label={titleText}
+        data-testid="draft-changes-panel"
+        data-embedded=""
+        data-posture={posture}
+      >
+        <div className="flex flex-col gap-1.5 px-4">
+          <p className="text-sm text-muted-foreground">{descriptionText}</p>
+          {headerNotes}
+        </div>
+        {body}
+      </section>
+    );
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -1817,358 +2225,11 @@ export function DraftChangesPanel({
         }}
       >
         <SheetHeader>
-          <SheetTitle>
-            {t('preview.changes.title', { defaultValue: 'Pending changes' })}
-          </SheetTitle>
-          <SheetDescription>
-            {t('preview.changes.description', {
-              defaultValue: 'What publishing will change. New items are added; updates overwrite the live version.',
-            })}
-          </SheetDescription>
-          {customizationOf ? (
-            <p data-testid="draft-changes-saved-to" className="text-xs font-medium text-foreground">
-              {savedToCustomizationText(t, customizationOf)}
-            </p>
-          ) : null}
-          {/* objectstack#30119 (ADR-0146 D2) — and where they live: this
-            * environment's database, as items of the pair (`packageId`, the
-            * pair the host reviews), moved only by `os package export`. */}
-          {customizationOf && packageId ? (
-            <p data-testid="draft-changes-environment" className="text-xs text-muted-foreground">
-              {customizationEnvironmentText(t, packageId)}
-            </p>
-          ) : null}
+          <SheetTitle>{titleText}</SheetTitle>
+          <SheetDescription>{descriptionText}</SheetDescription>
+          {headerNotes}
         </SheetHeader>
-        {posture === 'confirm' && entries && entries.length > 0 && !error ? (
-          // objectui#12517 — what the publish carries, counted off the same
-          // per-type grouping the headings below read.
-          <p data-testid="draft-changes-summary" className="mt-3 px-4 text-xs font-medium text-foreground">
-            {[
-              t('preview.changes.summaryItems', { count: entries.length, defaultValue: '{{count}} items' }),
-              ...[...byType.entries()].map(([type, items]) => summaryTypeSegment(t, type, items.length)),
-            ].join(' · ')}
-          </p>
-        ) : null}
-        <div
-          ref={listRef}
-          tabIndex={-1}
-          aria-label={t('preview.changes.title', { defaultValue: 'Pending changes' })}
-          data-testid="draft-changes-list"
-          className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-6 outline-none"
-        >
-          {error ? (
-            <p className="text-sm text-destructive">
-              {t('preview.changes.loadFailed', { defaultValue: 'Could not load pending changes:' })}{' '}
-              {error}
-            </p>
-          ) : entries === null ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t('preview.changes.loading', { defaultValue: 'Loading pending changes…' })}
-            </div>
-          ) : entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t('preview.changes.empty', { defaultValue: 'Nothing pending — every draft has been published.' })}
-            </p>
-          ) : (
-            [...byType.entries()].map(([type, items]) => (
-              <div key={type}>
-                <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  {summaryTypeSegment(t, type, items.length)}
-                </h4>
-                <ul className="flex flex-col gap-1">
-                  {items.map((entry) => {
-                    const key = entryKey(entry);
-                    const isExpanded = expanded.has(key);
-                    // objectui#11807 — the drill-in found nothing this publish
-                    // changes: not an UPDATE, whatever the name list said.
-                    const isUnchanged = unchanged.has(key);
-                    // objectui#11862 — the row's label leads, in the console
-                    // language, for a NEW row and an UPDATE row alike: the one
-                    // `_drafts` serves, so this list never chooses between a
-                    // published and a draft label. The name follows as
-                    // secondary text, or is the row's text when there is no
-                    // label.
-                    const labelText = resolveI18nLabel(entry.label, language)?.trim() ?? '';
-                    const note = renderEntryNote?.(entry);
-                    return (
-                      <li key={key} className="rounded-md border text-sm">
-                        <button
-                          type="button"
-                          onClick={() => toggleExpanded(key)}
-                          aria-expanded={isExpanded}
-                          title={isUnchanged ? noChangeText : undefined}
-                          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left hover:bg-muted/50"
-                          data-testid="draft-entry-toggle"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-                          )}
-                          {isUnchanged ? (
-                            // Named, not hidden: this glyph is where the row
-                            // says why it carries no badge. The drill-in under
-                            // it prints the same sentence as text.
-                            <Equal
-                              role="img"
-                              aria-label={noChangeText}
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                            />
-                          ) : entry.kind === 'new' ? (
-                            <FilePlus2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                          ) : entry.kind === 'update' ? (
-                            <FilePen className="h-3.5 w-3.5 shrink-0 text-amber-600" />
-                          ) : (
-                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                          )}
-                          {labelText ? (
-                            <span className="flex min-w-0 flex-1 flex-col">
-                              <span className="truncate">{labelText}</span>
-                              {labelText !== entry.name ? (
-                                <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
-                                  {entry.name}
-                                </span>
-                              ) : null}
-                            </span>
-                          ) : (
-                            <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
-                          )}
-                          {entry.member ? (
-                            // The member is what tells two rows of one name
-                            // apart (objectstack#23073); shown as served.
-                            <span
-                              className="shrink-0 font-mono text-xs text-muted-foreground"
-                              data-testid="draft-entry-member"
-                            >
-                              {entry.member}
-                            </span>
-                          ) : null}
-                          {!isUnchanged && entry.kind ? (
-                            <Badge
-                              variant="outline"
-                              className={
-                                entry.kind === 'new'
-                                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                  : 'border-amber-200 bg-amber-50 text-amber-700'
-                              }
-                            >
-                              {entry.kind === 'new'
-                                ? t('preview.changes.kindNew', { defaultValue: 'New' })
-                                : t('preview.changes.kindUpdate', { defaultValue: 'Update' })}
-                            </Badge>
-                          ) : null}
-                        </button>
-                        {note ? (
-                          <div className="border-t px-2.5 py-2" data-testid="draft-entry-note">
-                            {note}
-                          </div>
-                        ) : null}
-                        {isExpanded && (
-                          <div className="border-t bg-muted/20">
-                            <EntryDetail
-                              entry={entry}
-                              classifying={classifying}
-                              onCompared={(same) => markCompared(key, same)}
-                              backfill={backfillControl}
-                            />
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))
-          )}
-        </div>
-        {checks.length > 0 && !error && (
-          <div
-            data-testid="draft-flow-checks"
-            className="mt-auto border-t border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
-          >
-            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">
-              <ListChecks className="h-3.5 w-3.5 shrink-0" />
-              {t('preview.changes.flowChecksTitle', {
-                defaultValue: 'Before you publish — the publish check will report these',
-              })}
-            </p>
-            <ul className="mt-1.5 flex flex-col gap-2">
-              {draftChecksByItem(checks).map(({ type, name, items }) => {
-                const entry = entries?.find((e) => e.type === type && e.name === name);
-                const heading = resolveI18nLabel(entry?.label, language)?.trim() || name;
-                return (
-                  <li key={JSON.stringify([type, name])} data-testid="draft-flow-checks-item">
-                    {/* The flow by the label its row shows, opening its designer
-                        where a host publishes the surface channel (Studio), plain
-                        text elsewhere — the security block's rule, below. */}
-                    {openSurface ? (
-                      <button
-                        type="button"
-                        onClick={() => openSurface({ type, name })}
-                        className="text-[11px] font-medium text-amber-900 underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:text-amber-200 dark:hover:text-amber-100"
-                      >
-                        {heading}
-                      </button>
-                    ) : (
-                      <span className="text-[11px] font-medium text-amber-900 dark:text-amber-200">{heading}</span>
-                    )}
-                    <ul className="mt-0.5 flex list-disc flex-col gap-1 pl-4">
-                      {items.map((c, i) => (
-                        <li
-                          key={i}
-                          data-severity={c.severity}
-                          className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
-                        >
-                          {c.message}
-                        </li>
-                      ))}
-                    </ul>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-        {problems.length > 0 && !error && (
-          <div
-            data-testid="draft-security-problems"
-            className="mt-auto border-t border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/30"
-          >
-            <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800 dark:text-amber-300">
-              <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-              {t('preview.changes.securityBlockTitle', {
-                count: problems.length,
-                defaultValue: 'Publishing will be refused — {{count}} item(s) need a decision first',
-              })}
-            </p>
-            <ul className="mt-1.5 flex flex-col gap-1.5">
-              {problems.map((p) => (
-                <li
-                  key={`${p.type}:${p.name}:${p.rule}`}
-                  title={[p.message, p.hint].filter(Boolean).join(' ')}
-                  className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
-                >
-                  {/* `type/name`, the way the server's own publish refusal names
-                      the item (`object/crmext_visit: …`) — and, unlike a bare
-                      name, text that cannot collide with the same draft's row in
-                      the list above.
-
-                      Clickable ONLY where a host publishes the surface channel,
-                      i.e. inside Studio. This sheet is shared with the Home /
-                      draft-preview bar, where the designer is not a reachable
-                      destination at all: there `openSurface` is null and the
-                      name stays the plain prose it has always been, because a
-                      link that goes nowhere is worse than the sentence below
-                      telling you where to go. */}
-                  {openSurface ? (
-                    <button
-                      type="button"
-                      onClick={() => openSurface({ type: p.type, name: p.name })}
-                      className="font-mono underline decoration-dotted underline-offset-2 hover:text-amber-950 dark:hover:text-amber-100"
-                    >
-                      {p.type}/{p.name}
-                    </button>
-                  ) : (
-                    <span className="font-mono">
-                      {p.type}/{p.name}
-                    </span>
-                  )}{' '}
-                  — {securityProblemText(t, p)}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-300/80">
-              {t('preview.changes.securityBlockWhere', {
-                defaultValue: 'Fix it on the object under Settings → Who can see which records, then publish again.',
-              })}
-            </p>
-          </div>
-        )}
-        {onPublish && (entries?.length ?? 0) > 0 && !error && (
-          <div className="mt-auto flex flex-col gap-2 border-t px-4 py-3">
-            <p className="text-xs text-muted-foreground">
-              {/* objectui#11591 — the note states what THIS scope's Publish
-                  does. Only a package publishes as one atomic batch (`POST
-                  /packages/:id/publish-drafts`); with no package there is no
-                  batch door, so the caller promotes each draft by itself and a
-                  draft that fails stays pending while the others go live. */}
-              {packageId
-                ? t('preview.changes.confirmNote', {
-                    count: entries!.length,
-                    defaultValue:
-                      'Publishing releases all {{count}} pending drafts of this package together: all of them go live, or none do.',
-                  })
-                : t('preview.changes.confirmNoteSeparate', {
-                    count: entries!.length,
-                    defaultValue:
-                      'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
-                  })}
-            </p>
-            {packageId && (
-              // ADR-0146 D1 — the change note. Offered only where the footer
-              // publishes one package as a batch: only that door carries a
-              // `message` to every history row it writes.
-              <div className="flex flex-col gap-1">
-                <label htmlFor={noteId} className="text-xs font-medium">
-                  {t('preview.changes.noteLabel', { defaultValue: 'Change note (optional)' })}
-                </label>
-                <Textarea
-                  id={noteId}
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  disabled={publishing}
-                  rows={2}
-                  className="min-h-0 resize-none text-xs"
-                  placeholder={t('preview.changes.notePlaceholder', {
-                    defaultValue: 'What changed and why. It is shown in each item’s history.',
-                  })}
-                  data-testid="draft-changes-note"
-                />
-              </div>
-            )}
-            <Button
-              ref={publishRef}
-              size="sm"
-              // objectui#12929 — the checked backfill choices, and ADR-0146 D1
-              // the change note, or no options at all: a sheet with neither
-              // sends the request it always sent.
-              onClick={() => {
-                const message = packageId ? note.trim() : '';
-                const options: DraftPublishOptions = {
-                  ...(backfill.size > 0 ? { backfill: [...backfill.values()] } : {}),
-                  ...(message ? { message } : {}),
-                };
-                // objectstack#34818 — the items whose publish checks this
-                // sheet just listed: their post-publish toast keeps its one
-                // title line (`publishChecksShown.ts`). Marked for the
-                // publish's flight only.
-                const reviewed = draftChecksByItem(checks);
-                for (const r of reviewed) markPublishChecksShown(r.type, r.name);
-                const clearReviewed = () => {
-                  for (const r of reviewed) clearPublishChecksShown(r.type, r.name);
-                };
-                try {
-                  void Promise.resolve(
-                    Object.keys(options).length > 0 ? onPublish(options) : onPublish(),
-                  ).finally(clearReviewed);
-                } catch (e) {
-                  clearReviewed();
-                  throw e;
-                }
-              }}
-              disabled={publishing}
-              data-testid="draft-changes-publish"
-            >
-              {publishing ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Rocket className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {t('preview.changes.publishConfirm', { defaultValue: 'Publish all' })}
-            </Button>
-          </div>
-        )}
+        {body}
       </SheetContent>
     </Sheet>
   );

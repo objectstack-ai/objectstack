@@ -189,6 +189,42 @@ describe('validateTranslationReferences — orphan keys', () => {
     expect(findings).toEqual([]);
   });
 
+  it('[ADR-0159 card ②] a `form` item\'s named section is a `_sections` anchor of the object it binds to', () => {
+    // `translateForm` reads a form item's section headings at
+    // `objects.<object>._sections.<name>`, as it reads a form view's.
+    const stackWithForm = (sectionKey: string) => ({
+      ...leadStack([{ 'zh-CN': { objects: { crm_lead: { label: '线索', _sections: { [sectionKey]: { label: '反馈', fields: { name: { label: '称呼' } } } } } } } }]),
+      forms: [{ name: 'crm_lead.feedback', object: 'crm_lead', type: 'simple', sections: [{ name: 'feedback', fields: [{ field: 'name' }] }] }],
+    });
+    expect(validateTranslationReferences(stackWithForm('feedback'))).toEqual([]);
+    // CONTROL: the same stack keyed to a section nothing declares is still reported.
+    expect(validateTranslationReferences(stackWithForm('feedbacks')).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.feedbacks',
+    ]);
+  });
+
+  it('[ADR-0159 D8] a `form` item\'s own `forms.<name>.sections` node is judged against the sections it names and their entries', () => {
+    const FORM = 'crm_lead.feedback';
+    const stackWithFormNode = (formKey: string, sectionKey: string, fieldKey: string) => ({
+      ...leadStack([{ 'zh-CN': {
+        objects: { crm_lead: { label: '线索' } },
+        forms: { [formKey]: { label: '反馈', sections: { [sectionKey]: { label: '反馈', fields: { [fieldKey]: { label: '称呼' } } } } } },
+      } }]),
+      forms: [{ name: FORM, object: 'crm_lead', type: 'simple', sections: [{ name: 'feedback', fields: [{ field: 'name' }, 'status'] }] }],
+    });
+    const paths = (stack: unknown) => validateTranslationReferences(stack as any).map((f) => [f.rule, f.path]);
+    expect(paths(stackWithFormNode(FORM, 'feedback', 'name'))).toEqual([]);
+    expect(paths(stackWithFormNode(FORM, 'feedbacks', 'name'))).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `translations[0]["zh-CN"].forms["${FORM}"].sections.feedbacks`],
+    ]);
+    // An entry the section does not declare as an entry object: a bare field name authors no copy.
+    expect(paths(stackWithFormNode(FORM, 'feedback', 'status'))).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `translations[0]["zh-CN"].forms["${FORM}"].sections.feedback.fields.status`],
+    ]);
+    // CONTROL: the node of a form the stack does not author is not judged here.
+    expect(paths(stackWithFormNode('crm_lead.elsewhere', 'feedbacks', 'status'))).toEqual([]);
+  });
+
   it('flags an unresolved view / action / section by name', () => {
     const findings = validateTranslationReferences(
       leadStack([
@@ -1083,10 +1119,33 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
   });
 
   /**
-   * ⛔ The fold reaches `fields.*` and `_validations.*` and no other rung,
-   * because `ObjectExtensionSchema` reaches no further: an author cannot
-   * contribute a view, a section, a filter-preset tab or an action through an
-   * extension at all, so a key for one is an orphan exactly as it was.
+   * [ADR-0146 D10] The third rung an extension reaches: the base's paired
+   * `.custom` package declares the target's whole field arrangement
+   * (`fieldGroups`), and `fieldGroups[].key` is the `_sections` anchor
+   * (ADR-0085), so a group that arrangement brings is addressable. A section
+   * no group of the object or of an extension declares is still an orphan.
+   */
+  it('accepts a `_sections` key for a group an extension\'s `fieldGroups` brings, and still reports one nobody declares', () => {
+    const stack = (sections: Record<string, unknown>) => ({
+      objects: [{ name: 'crm_lead', label: 'Lead', fields: { name: { type: 'text', label: 'Name' } } }],
+      objectExtensions: [
+        { extend: 'crm_lead', fieldGroups: [{ key: 'reach', label: 'Reach', fields: ['name'] }] },
+      ],
+      translations: [{ 'zh-CN': { objects: { crm_lead: { _sections: sections } } } }],
+    });
+    expect(validateTranslationReferences(stack({ reach: { label: '联系方式' } }))).toEqual([]);
+    expect(validateTranslationReferences(stack({ zzz_gone: { label: 'x' } })).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.zzz_gone',
+    ]);
+  });
+
+  /**
+   * ⛔ The fold reaches `fields.*`, `_validations.*` and the `_sections` of a
+   * `fieldGroups` arrangement, and no other rung, because
+   * `ObjectExtensionSchema` reaches no further: an author cannot contribute a
+   * view, a filter-preset tab or an action through an extension at all, and a
+   * section its `fieldGroups` does not declare is not one either, so a key
+   * for one is an orphan exactly as it was.
    */
   it('folds no other rung — an extended object still reports its ghost view, section, tab and action', () => {
     const findings = validateTranslationReferences(
@@ -1110,7 +1169,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
    * the SCHEMA, so if `ObjectExtensionSchema` ever accepts one of these keys,
    * this fails here rather than leaving the rule reporting correct keys for a
    * surface that has started to exist. Both arms are asserted, so the refusal
-   * reading is not a dead instrument: the two keys the fold DOES read parse.
+   * reading is not a dead instrument: the keys the fold DOES read parse.
    */
   it('pins the extension key surface the fold is sized against', () => {
     const refusedByName = (key: string): boolean => {
@@ -1125,7 +1184,9 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       'views:refused',
       'listViews:refused',
       'actions:refused',
-      'fieldGroups:refused',
+      // [ADR-0146 D10] The paired `.custom` package's arrangement: accepted by
+      // the schema, and its group keys are folded into `_sections` (above).
+      'fieldGroups:accepted',
       'sections:refused',
       'tabs:refused',
       'hooks:refused',
@@ -2373,7 +2434,7 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.approvals.gate');
     expect(findings[0].message).toBe(
       'Translations are keyed to approval step "gate", which flow "opportunity_approval" declares as a ' +
-        '`decision` node, not an `approval`, so nothing resolves this key.',
+        '`decision` node, not an `approval`; its label is keyed `nodes.gate.label`.',
     );
     expect(findings[0].hint).toBe('Approval-step translations are keyed by the `id` of an `approval` node.');
   });
@@ -2426,10 +2487,122 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     );
   });
 
-  it('control: a `screens` key over a non-approval, non-screen node keeps its own diagnosis', () => {
+  it('a `screens` key over a non-approval, non-screen node keeps its own diagnosis, pointed at `nodes`', () => {
     const findings = validateTranslationReferences(bundle({ opportunity_approval: { screens: { gate: { title: 'x' } } } }));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('declares as a `decision` node, not a `screen`');
+    expect(findings[0].message).toBe(
+      'Translations are keyed to screen "gate", which flow "opportunity_approval" declares as a `decision` node, ' +
+        'not a `screen`; its label is keyed `nodes.gate.label`.',
+    );
+  });
+});
+
+describe('validateTranslationReferences — flow node labels (`nodes.<node_id>.label`, ruling 7076440876)', () => {
+  /**
+   * The same measured HotCRM shape as the approval steps above: a start, a
+   * decision, a screen, an approval and a refusing end, plus a notify nested
+   * in a loop body (an ADR-0031 region), so every verdict below is judged
+   * against the same metadata and differs only in the bundle.
+   */
+  const nodeStack = {
+    flows: [
+      {
+        name: 'opportunity_approval',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'gate', type: 'decision', label: 'High Value (> $500K)?' },
+          { id: 'collect', type: 'screen', label: 'Collect', config: { fields: [{ name: 'note' }] } },
+          { id: 'greet', type: 'screen', label: 'Greeting', config: { title: 'Hello {{ vars.name }}' } },
+          {
+            id: 'manager_review',
+            type: 'approval',
+            label: 'Sales Manager Review',
+            config: { approvers: [{ type: 'manager' }] },
+          },
+          {
+            id: 'each_line',
+            type: 'loop',
+            label: 'Each line',
+            config: { collection: '{lines}', body: { nodes: [{ id: 'tell_owner', type: 'notify', label: 'Tell owner' }] } },
+          },
+          { id: 'refuse', type: 'end', label: 'Refused', config: { outcome: 'refused', message: 'Refused.' } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...nodeStack, translations: [{ 'zh-CN': { flows } }] });
+
+  it('reports nothing for the label of a start, decision, end or nested node — and the other groups beside it', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: {
+              start: { label: '开始' },
+              gate: { label: '大额（> 50 万美元）？' },
+              each_line: { label: '逐行' },
+              tell_owner: { label: '通知负责人' },
+              refuse: { label: '已拒绝' },
+            },
+            screens: { collect: { title: '收集' } },
+            approvals: { manager_review: { label: '销售经理审核' } },
+            refusals: { refuse: { message: '已拒绝。' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('points a `nodes` key over an `approval` node at its step label', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { manager_review: { label: 'x' } } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.manager_review'],
+    ]);
+    expect(findings[0].message).toBe(
+      'Translations are keyed to node "manager_review", which flow "opportunity_approval" declares as an ' +
+        '`approval` node; its step label is keyed `approvals.manager_review.label`.',
+    );
+  });
+
+  it('points a `nodes` key over an untitled `screen` node at its heading', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { collect: { label: 'x' } } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.collect'],
+    ]);
+    expect(findings[0].message).toContain('`screens.collect.title`');
+  });
+
+  it('accepts a `nodes` key over a screen that authors its own `config.title`, beside that screen\'s heading key', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: { greet: { label: '问候' } },
+            screens: { greet: { title: '你好 {{ vars.name }}' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('offers a titled screen as the nearest node for a misspelt `nodes` key', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gret: { label: 'x' } } } }));
+    expect(findings.map((f) => f.rule)).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(findings[0].message).toContain('Did you mean "greet"?');
+  });
+
+  it('refuses a `nodes` key over an UNKNOWN node, with the nearest labelled node offered', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gaet: { label: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.nodes.gaet');
+    expect(findings[0].message).toContain(
+      'Translations are keyed to node "gaet", which flow "opportunity_approval" does not declare, so its drawn ' +
+        'step keeps its authored label.',
+    );
+    expect(findings[0].message).toContain('Did you mean "gate"?');
+    expect(findings[0].hint).toBe("Node-label translations are keyed by a node's `id`, not its `label`.");
   });
 });
 
@@ -3718,6 +3891,7 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
         fieldGroups: [{ key: 'basics', label: 'Basics' }],
         actions: [{ name: 'convert_lead', label: 'Convert' }],
         validations: [{ name: 'lead_needs_name', type: 'script', message: 'Name is required' }],
+        activityMilestones: [{ field: 'name', value: 'won', summary: 'Lead won: {name}' }],
       },
     ],
     views: [{ name: 'open_leads', objectName: 'crm_lead', label: 'Open Leads' }],
@@ -3773,10 +3947,20 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
       ghost: { _tabs: { ghost_tab: { label: 'Ghost' } } },
       path: 'translations[0].en.objects.crm_lead._tabs.ghost_tab',
     },
+    _relatedLists: {
+      kind: 'reference-checked',
+      ghost: { _relatedLists: { ghost_list: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._relatedLists.ghost_list',
+    },
     _validations: {
       kind: 'reference-checked',
       ghost: { _validations: { ghost_rule: { message: 'Ghost' } } },
       path: 'translations[0].en.objects.crm_lead._validations.ghost_rule',
+    },
+    _milestones: {
+      kind: 'reference-checked',
+      ghost: { _milestones: { name: { ghost_value: { summary: 'Ghost' } } } },
+      path: 'translations[0].en.objects.crm_lead._milestones.name.ghost_value',
     },
   };
 
@@ -3813,6 +3997,7 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
         _actions: { convert_lead: { label: 'Convert' } },
         _tabs: { urgent: { label: 'Urgent' } },
         _validations: { lead_needs_name: { message: 'A name is required' } },
+        _milestones: { name: { won: { summary: 'Lead won: {name}' } } },
       }),
     );
     expect(findings).toEqual([]);
@@ -4705,6 +4890,10 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     '`screen` node; its heading is keyed',
     'declares no node for, so the step keeps',
     '`approval` node; its step label is keyed',
+    '`decision` node, not a `screen`; its label is keyed',
+    'not an `approval`; its label is keyed',
+    'so its drawn step keeps its authored label',
+    '`screen` node; its heading is keyed `screens.collect.title`',
     'is not a form view, so no title resolves this key',
     'Translations are keyed to parameter "',
     'does not declare in `outcomeMessages`',

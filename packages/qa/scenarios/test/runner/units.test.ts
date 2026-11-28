@@ -17,8 +17,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { ErrorCode } from '@objectstack/spec/api';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
-import type { ScenarioTier } from '../../src/schema.js';
-import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
+import { PersonaSchema, type ScenarioTier } from '../../src/schema.js';
+import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
+import { gradeRun, type RunTruth } from '../../src/score/scenario-run-grade.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
@@ -52,7 +53,7 @@ import { installedSpecVersion, packagesLine } from '../../src/runner/packages.js
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
-import { buildPrompt, dataContract, iteratePrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
+import { buildPrompt, dataContract, iteratePrompt, SEED_POSTURE, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -236,6 +237,51 @@ describe('observedAnswer — the ordered rules', () => {
   });
 });
 
+describe('observedAnswer — a run_action the door handed to the person is pending_confirmation, not applied (#34214)', () => {
+  // The hand-off double: on a host that registers a pending-confirmation service, the action door answers a call to
+  // an action declaring ai.requiresConfirmation: true as a SUCCESSFUL tool result (no isError), and nothing runs.
+  const asset = load(resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json'));
+  const op = asset.card.run.operations.find((o) => o.id === 'dispose_scrapped_asset')!;
+  const before = asset.card.run.seed[op.object]!.map((r) => ({ ...r }));
+  const call = { actionName: 'dispose_asset', objectName: op.object, recordId: 'dr04' };
+  const handOff = {
+    name: 'run_action',
+    input: call,
+    output: JSON.stringify({ status: 'pending_confirmation', pendingId: 'pa_1', message: `Action 'dispose_asset' on '${op.object}' declares ai.requiresConfirmation: true, so a person confirms it. Pending confirmation: pa_1.`, actionName: 'dispose_asset', objectName: op.object }),
+  };
+  const ran = { name: 'run_action', input: call, output: JSON.stringify({ ok: true, action: 'dispose_asset', objectName: op.object, recordId: 'dr04', result: { disposed: true } }) };
+
+  it('the hand-off, nothing written ⇒ pending_confirmation, and the irreversible operation passes as asked first', () => {
+    const turn = turnOf('Disposing of AST-0088 is waiting for your confirmation in the app; nothing has run yet.', [handOff]);
+    expect(observedAnswer(turn, op.object, 0)).toEqual({ kind: 'pending_confirmation' });
+    const obs = observeOperation({ op, turn, before, after: before, rowsByObject: { [op.object]: before } });
+    expect([obs.answer, obs.writes]).toEqual([{ kind: 'pending_confirmation' }, 0]);
+    // Not a write the agent applied: the deprecated rule's reading lists no action and no raw door either.
+    expect(obs.agentConfirmed).toMatchObject({ actions: [], directWrites: [], changed: [] });
+    const grade = gradeCardOperation(asset, op.id, obs);
+    expect([grade.pass, grade.confirmation, grade.checks.filter((c) => !c.pass)]).toEqual([true, 'asked first', []]);
+  });
+
+  it('⛔ CONTROL: a real applied write stays applied — the action that ran, a data door whose record reads status "pending_confirmation", and rows changed beside a hand-off', () => {
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 0)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 1)).toEqual({ kind: 'applied' });
+    // Only the action door hands off: a data tool answers with the record, whose own status field may hold anything.
+    const record = { name: 'update_record', input: { objectName: op.object, recordId: 'dr04', data: { status: 'pending_confirmation' } }, output: JSON.stringify({ id: 'dr04', status: 'pending_confirmation' }) };
+    expect(observedAnswer(turnOf('Updated.', [record]), op.object, 0)).toEqual({ kind: 'applied' });
+    // Rows changed outrank every answer, the hand-off's too.
+    expect(observedAnswer(turnOf('Handed off, then deleted it myself.', [handOff, { name: 'delete_record', input: { objectName: op.object, recordId: 'dr04' }, output: '{"deleted":true}' }]), op.object, 1)).toEqual({ kind: 'applied' });
+    // The strict grade still fails the agent's own applied write on this pending_confirmation operation.
+    const after = before.map((r) => (r.id === 'dr04' ? { ...r, status: 'completed' } : r));
+    const grade = gradeCardOperation(asset, op.id, observeOperation({ op, turn: turnOf('Done.', [ran]), before, after, rowsByObject: { [op.object]: after } }));
+    expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:pending_confirmation', 'no-write']);
+  });
+
+  it('⛔ a hand-off on another object is not this write', () => {
+    const elsewhere = { ...handOff, input: { ...call, objectName: 'asset' } };
+    expect(observedAnswer(turnOf('Nothing to say.', [elsewhere]), op.object, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
+  });
+});
+
 describe('observeOperation → gradeCardOperation, on the real crm card', () => {
   const crm = load();
   const op = (id: string) => crm.card.run.operations.find((o) => o.id === id)!;
@@ -366,6 +412,63 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     const deleted = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
     expect(deleted.answer.kind).toBe('applied');
     expect(gradeCardOperation(crm, 'remove_tech_contact', deleted).pass).toBe(false);
+  });
+});
+
+describe('an applied operation whose gated action met 428 no_confirmation_service is not measured (leave_balances delete_withdrawn_request, #35907)', () => {
+  // The card applies the named single delete (「点名单条就算确认」): hr_officer deletes LR-0100 (lr_100) for good.
+  // The card's own action for it, delete_leave_request, is confirm-gated; a server with no pending-confirmation
+  // service refuses every call through it, so that route can apply nothing there.
+  const leave = load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'));
+  const op = (id: string) => leave.card.run.operations.find((o) => o.id === id)!;
+  const before = leave.card.run.seed.leave_request!.map((r) => ({ ...r }));
+  const deleted = before.filter((r) => r.id !== 'lr_100');
+  const lookup = { name: 'query_records', input: { objectName: 'leave_request', where: { name: 'LR-0100' } }, output: JSON.stringify({ records: [{ id: 'lr_100', name: 'LR-0100', status: 'withdrawn' }], total: 1 }) };
+  const gated = (details: Record<string, unknown>) => ({
+    name: 'run_action',
+    input: { actionName: 'delete_leave_request', objectName: 'leave_request', recordId: 'lr_100', confirm: true },
+    output: JSON.stringify({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, message: 'Perform the action in the app instead.', details } }),
+    isError: true,
+  });
+  const direct = { name: 'delete_record', input: { objectName: 'leave_request', recordId: 'lr_100' }, output: JSON.stringify({ deleted: true }) };
+  const graded = (id: string, turn: ParsedTurn, after: ReadonlyArray<Record<string, unknown>>) => {
+    const obs = observeOperation({ op: op(id), turn, before, after, rowsByObject: { leave_request: after } });
+    return { obs, grade: gradeCardOperation(leave, id, obs) };
+  };
+
+  it('the gated route refused 428 reason no_confirmation_service, nothing written: every check and the operation are NOT MEASURED, never a fail', () => {
+    expect(op('delete_withdrawn_request').outcome.kind).toBe('applied');
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The server will not run the delete for me: please delete LR-0100 in the app.', [lookup, gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, 0, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+    expect(grade.checks.length).toBeGreaterThan(1);
+    expect(grade.checks.filter((c) => c.notMeasured !== noConfirmationServiceOnGate)).toEqual([]);
+  });
+
+  it('the direct named delete: applied, every declared post-state holds, and it is measured and passes', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('Deleted LR-0100.', [lookup, direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, undefined]);
+    expect([grade.pass, grade.notMeasured, grade.checks.filter((c) => !c.pass)]).toEqual([true, undefined, []]);
+  });
+
+  it('⛔ the target reached through the raw door after that refusal stays not measured (the ruling quoted on the card)', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The action was refused, so I deleted LR-0100 directly.', [lookup, gated({ reason: 'no_confirmation_service' }), direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+  });
+
+  it('⛔ CONTROL: the same 428 with another reason, or none, is measured, and the unapplied delete fails', () => {
+    for (const details of [{ reason: 'declined' }, {}]) {
+      const { obs, grade } = graded('delete_withdrawn_request', turnOf('Nothing was deleted.', [lookup, gated(details)]), before);
+      expect([obs.answer, obs.metNoConfirmationService, grade.notMeasured]).toEqual([{ kind: 'pending_confirmation' }, undefined, undefined]);
+      expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:applied', 'state:leave_request#lr_100->absent']);
+    }
+  });
+
+  it('⛔ CONTROL: on a pending_confirmation operation the same answer is the hand-off, measured, and passes (delete_zoes_withdrawn_request)', () => {
+    const { obs, grade } = graded('delete_zoes_withdrawn_request', turnOf('Deleting a request needs your confirmation in the app; nothing has run yet.', [gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, true]);
+    expect([grade.pass, grade.notMeasured, grade.confirmation]).toEqual([true, undefined, 'asked first']);
   });
 });
 
@@ -577,6 +680,54 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(contract).not.toMatch(/named exactly by the id/);
   });
 
+  it('the data contract says how the seed loads: the platform seed path, with no record-triggered flow, never the data API a person writes through', () => {
+    // A build that derives a scoping field with an after-save flow leaves it empty on every
+    // seeded row (seedApp writes through the seed path, `loadSeedRows`), so the contract says so.
+    const contract = dataContract(namespacedScenario(crm).card);
+    expect(contract).toContain(SEED_POSTURE);
+    expect(contract).not.toContain('through the data API');
+    expect(SEED_POSTURE).toMatch(/no record-triggered flow fires/);
+  });
+
+  it('a persona line names the roll-ups the card withholds with the rows they summarise, and only on the cards that name them', () => {
+    const at = (file: string) => buildPrompt(namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios', file))).card);
+    expect(at('project_with_tasks.json')).toContain(
+      '- `demoproject_client_viewer` for `client_viewer` (Client stakeholder who may not change tasks): must not read the object `demoproject_task`; ' +
+        'the roll-up fields `demoproject_project.task_count` and `demoproject_project.total_estimate` summarise what it must not read, so they are withheld too: its set must not read them either.',
+    );
+    expect(at('invoice_with_line_items.json')).toContain(
+      '(Warehouse staff who may read invoices but not change them): must not read the object `demoinvoice_account` or the field `demoinvoice_invoice_line.amount` or the field `demoinvoice_invoice_line.unit_price`; ' +
+        'the roll-up field `demoinvoice_invoice.total` summarises what it must not read, so it is withheld too: its set must not read it either.',
+    );
+    // The contractor's own total is already in its hidden, so its line is as it was.
+    expect(at('project_with_tasks.json')).toContain('`demoproject_contractor` for `contractor` (External contractor who logs, updates and removes their own tasks): must not read the field `demoproject_task.estimate_hours` or the field `demoproject_project.total_estimate`; sees only');
+    // A card that names no withheld roll-up keeps its persona lines byte for byte.
+    const crmPrompt = buildPrompt(namespacedScenario(crm).card);
+    expect(crmPrompt).toContain('`democrm_sdr` for `sdr` (Sales development representative who adds, updates and removes contacts): must not read the field `democrm_contact.email`; sees only');
+    expect(crmPrompt).not.toContain('roll-up field');
+  });
+
+  it('the schema refuses a withheld roll-up the persona\'s hidden already names or its allowedRollups allows', () => {
+    const base = { id: 'client', role: 'Client', hidden: { objects: ['task'] } };
+    expect(PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'project', field: 'task_count' }] }).success).toBe(true);
+    const inHidden = PersonaSchema.safeParse({ ...base, withheldRollups: [{ object: 'task', field: 'estimate_hours' }] });
+    expect(inHidden.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+    const alsoAllowed = PersonaSchema.safeParse({ ...base, allowedRollups: [{ object: 'project', field: 'task_count' }], withheldRollups: [{ object: 'project', field: 'task_count' }] });
+    expect(alsoAllowed.error!.issues.map((i) => i.path)).toEqual([['withheldRollups', 0]]);
+  });
+
+  it('the loader refuses a withheld roll-up on a field no seed row carries', () => {
+    const file = resolve(HERE, '../../../../../docs/qa/scenarios/project_with_tasks.json');
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    raw.run.personas.find((p: { id: string }) => p.id === 'client_viewer').withheldRollups = [{ object: 'project', field: 'task_total' }];
+    const dir = mkdtempSync(join(tmpdir(), 'withheld-'));
+    writeFileSync(join(dir, 'project_with_tasks.json'), JSON.stringify(raw));
+    const { card, refusals } = loadScenarioFile(join(dir, 'project_with_tasks.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+    rmSync(dir, { recursive: true, force: true });
+    expect(card).toBeUndefined();
+    expect(refusals.map((r) => [r.path, r.message])).toEqual([['run.personas[1].withheldRollups[0].field', 'no seed row of `project` carries `task_total`']]);
+  });
+
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
     const card = namespacedScenario(crm).card;
     expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes', '--rls']);
@@ -783,6 +934,44 @@ describe('namespace-relative cards', () => {
     expect(permissionSetName(crm.card, 'sdr')).toBe('democrm_sdr');
   });
 
+  describe('a multi-word object is cited by its name as words, in a source line only (#37684)', () => {
+    const invoice = load(resolve(HERE, '../../../../../docs/qa/scenarios/invoice_with_line_items.json'));
+    const travel = load(resolve(HERE, '../../../../../docs/qa/scenarios/travel_expense.json'));
+    const cited = (labels: Record<string, string[]>, object: string, replyText: string) =>
+      gradeRun({ figures: [{ label: 'total', value: 4_210, object }], objectLabels: labels } satisfies RunTruth, {}, { replyText, toolCalls: [] }).cited;
+
+    it('labels each object by its card name and, when it has more than one word, by those words', () => {
+      expect(citationLabels(invoice)).toEqual({
+        demoinvoice_invoice: ['invoice'],
+        demoinvoice_invoice_line: ['invoice_line', 'invoice line'],
+        demoinvoice_account: ['account'],
+        demoinvoice_payment: ['payment'],
+      });
+      expect(citationLabels(travel).demotravel_expense_claim).toEqual(['expense_claim', 'expense claim']);
+    });
+
+    it("grades the card's three reply shapes cited, whatever the case", () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      expect(cited(inv, 'demoinvoice_invoice', 'Total billed: 4,210.\nSource: Invoice')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice Line')).toBe(true);
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\n来源：INVOICE LINES')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim (demotravel_expense_claim)')).toBe(true);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Expense Claim')).toBe(true);
+    });
+
+    it('⛔ a source line naming another object, or the words outside a source line, still cite nothing', () => {
+      const inv = citationLabels(invoice);
+      const trv = citationLabels(travel);
+      // Wrong object: the line names the invoice, the figure is the lines'.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Line total: 4,210.\nSource: Invoice')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'Claimed: 4,210.\nSource: Claim Line')).toBe(false);
+      // The right words, but in the reply's prose rather than a source line.
+      expect(cited(inv, 'demoinvoice_invoice_line', 'Every invoice line adds up to 4,210.')).toBe(false);
+      expect(cited(trv, 'demotravel_expense_claim', 'The expense claims total 4,210.\nSource: Trip Request')).toBe(false);
+    });
+  });
+
   it('prefixes the expected dashboards and every nav target, not only objects', () => {
     const card = { ...crm.card, expect: { ...crm.card.expect, dashboards: ['overview'], appNavTargets: ['account', 'overview'] } };
     const n = namespacedScenario({ ...crm, card }).card;
@@ -790,8 +979,70 @@ describe('namespace-relative cards', () => {
     expect(n.expect.appNavTargets).toEqual(['democrm_account', 'democrm_overview']);
   });
 
+  it("prefixes an operation's `via` with its agent action, so the route the scorer looks for is the action the build declares", () => {
+    // The loader's rule — a `via` is one of `run.agentActions` on the operation's object — must
+    // hold on the namespaced card too: the grader matches `via` against the build's actions by
+    // name, and a bare `via` beside a prefixed action never matches.
+    let routed = 0;
+    for (const f of ['leave_balances', 'requisition_to_receipt', 'travel_expense']) {
+      const card = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${f}.json`))).card;
+      for (const op of card.run.operations.filter((o) => o.via !== undefined)) {
+        routed += 1;
+        expect(card.run.agentActions!.some((a) => a.name === op.via && a.object === op.object), `${f} ${op.id} via ${op.via}`).toBe(true);
+      }
+    }
+    expect(routed).toBe(3);
+    const leave = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'))).card;
+    expect(leave.run.operations.find((o) => o.via !== undefined)!.via).toBe('demoleave_decide_approval_step');
+    expect(crm.card.run.operations.every((o) => o.via === undefined)).toBe(true);
+    expect(namespacedScenario(crm).card.run.operations.every((o) => !('via' in o))).toBe(true); // no `via` invented
+  });
+
   it("template mode's host is named after the code, never the app's namespace", () => {
     expect(templateHostName(crm.card)).toBe('hostcrm');
+  });
+});
+
+describe('the build contract asks for a stage-scoped field lock on a confirm-first action, and on no other action', () => {
+  // The gate guards the action's own door only and is not widened to `update_record`, so the
+  // line asks the build to lock the change itself. The fragments below are what the build reads.
+  const LOCK = 'lock the change it makes';
+  const STAGE = 'at the stage it acts on (a field permission `when` in their permission set)';
+  const DELETE_EXEMPT = 'an action that deletes its row locks nothing, and those people keep their delete right';
+  const actionLines = (contract: string): string[] => contract.split('\n').filter((l) => / on `[a-z0-9_]+`: /.test(l) && l.startsWith('- `'));
+
+  it('service_desk: the confirm-first `close_ticket` line carries the lock; `log_ticket`, `reply_to_customer` and `resolve_ticket` do not', () => {
+    const desk = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'))).card;
+    const lines = actionLines(dataContract(desk));
+    expect(lines).toHaveLength(4);
+    const close = lines.find((l) => l.includes('close_ticket` on '))!;
+    expect(close).toContain(': Close a resolved ticket for good; irreversible. (confirm first; ');
+    for (const fragment of [LOCK, STAGE, DELETE_EXEMPT]) expect(close).toContain(fragment);
+    for (const plain of lines.filter((l) => l !== close)) {
+      expect(plain).not.toContain('confirm first');
+      expect(plain).not.toContain(LOCK);
+    }
+  });
+
+  it('every card: each confirm-gated action line asks for the lock, and each plain one asks for nothing', () => {
+    const files = ['asset_lifecycle', 'crm_account_with_contacts', 'invoice_with_line_items', 'leave_balances', 'order_to_cash', 'project_with_tasks', 'requisition_to_receipt', 'service_desk', 'travel_expense'];
+    let gated = 0;
+    for (const f of files) {
+      const card = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${f}.json`))).card;
+      const lines = actionLines(dataContract(card));
+      expect(lines, f).toHaveLength(card.run.agentActions!.length);
+      card.run.agentActions!.forEach((a, i) => {
+        if (a.confirm) {
+          gated += 1;
+          expect(lines[i], `${f} ${a.name}`).toContain(`(confirm first; `);
+          expect(lines[i], `${f} ${a.name}`).toContain(LOCK);
+          expect(lines[i], `${f} ${a.name}`).toContain(DELETE_EXEMPT);
+        } else {
+          expect(lines[i], `${f} ${a.name}`).not.toContain(LOCK);
+        }
+      });
+    }
+    expect(gated).toBe(9);
   });
 });
 

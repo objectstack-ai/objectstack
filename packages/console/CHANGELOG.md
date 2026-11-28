@@ -1,5 +1,107 @@
 # @objectstack/console
 
+## 19.0.0-next.2
+
+No changes in this release.
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 50b4bf8: perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console's first load (the chunks every page fetches before it can draw) is 97,612 bytes smaller gzipped: 1,899,348 across 123 chunks, from 1,996,960 across 124 on `main`.
+  
+  - **`@objectstack/spec`.** The build now marks each module-scope initializer it cannot otherwise prove side-effect free (a spread of another schema's shape, an `.extend()` / `.pick()` chain, a table derived from a schema) as droppable, so a bundler that tree-shakes leaves out the ones an application never reads, together with the schema graphs they hold. Initializers that write into an object that already exists (`Object.assign(Existing, …)`, `Object.defineProperty(Existing, …)`) are never marked. Nothing changes for code that reads an export: every export that is used evaluates exactly as before. `TRANSLATABLE_METADATA_TYPES` is now built from a plain list of names instead of from the translator table, so reading it no longer keeps every metadata translator.
+  - **`@object-ui/plugin-form`.** One new export on the published `@object-ui/plugin-form/core` subpath, `createKeepsField` (the same function the package root already exports); nothing is removed or renamed, and the package root exports the same names as before. This is the widening the `Clause-②` line names; `@objectstack/spec`'s public surface does not change.
+  - **`@object-ui/app-shell`.** The record page's related-record actions read `createKeepsField` from `@object-ui/plugin-form/core`, so the form package is no longer part of the first load.
+  - **`@object-ui/console`, `@objectstack/console`.** The Console's `plugin-form-core` chunk group also claims `createKeepsField`, so it lands with the other side-effect-free form helpers; the Console build `@objectstack/console` ships carries the smaller first load.
+  
+  Nothing to migrate.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- ce4d8c7: perf(console): the sidebar no longer redraws every entry each time the console re-renders during first load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While a console page first loads, the shell re-renders about ten times as its boot reads land. Each time, the sidebar redrew every navigation entry, and with each entry its ⋯ menu and tooltip: about 2,700 components per pass, several passes before the page could paint.
+  
+  Now an entry is redrawn only when what it shows changes: its label, icon, colour, address, or the gates that decide whether it shows. The ⋯ menu redraws its menu tree only when its own text or entries change. The console's expression evaluator is no longer rebuilt on every render, because that rebuild alone made every entry redraw.
+  
+  On a list page's first load this halves the components drawn before first paint. Nothing changes in what the sidebar shows or does.
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- d25d912: fix(console): the approvals inbox keeps its tab, filters, search and sort across a request's page and Back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening a request from the approvals inbox and pressing Back used to bring the inbox back on "My Pending" with every filter cleared: the tab, the status, process and object filters, the search text and the sort were held in component state only, and the inbox is rebuilt when the reader comes back. Someone working through "All" filtered to "Recalled" had to pick the tab and rebuild the filters after every request.
+  
+  They now ride the inbox's address as page-scoped params: `scope` (the tab: `submitted` or `all`), `status`, `process`, `object`, `q` (the search text) and `sort` (`oldest` or `amount`). So Back, a reload and a copied link all reopen the inbox as the reader left it.
+  
+  - A value at its default is left out, so an untouched inbox keeps a bare address.
+  - Every change replaces the current history entry instead of adding one, so Back leaves the inbox rather than stepping through filter changes.
+  - The search text reaches the address after the same short pause the server search already waited for. A search typed and opened at once is written before the request opens, so Back still returns to it.
+  - A value the inbox does not offer (an unknown tab, sort or status, or a status on "My Pending", which has no status filter) reads as the default. A process or object the address names is checked once, when the first requests arrive, and is dropped only if those requests are the whole list (on "My Pending", or when the first page holds every request) and none of them carries it. On "Submitted by me" and "All", a value past the first page is kept and shown in its dropdown, so a filter picked after loading more pages survives Back, a reload and a copied link.
+  - Switching tabs still clears the filters, search and sort, now in the address too. Other params are kept.
+  - The `?request=` notification link still opens that request.
+  
+  The tab rides `scope`, not `tab`, because `tab` is the console's reserved record-page tab param. Nothing to migrate.
+- 93bd459: feat(console): an app's documentation pages draw in the app shell from 768 px up
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  From 768 px up every app page lost the top bar and keeps the app menu, search, notifications and account in the sidebar. An app's documentation pages (`/apps/APP/docs`, a book, a flat doc link, an article) were the one exception: they kept the top bar at every width and mounted no sidebar. They now draw like every other app page there: no top bar, the resident sidebar with its usual head (the app-name menu, collapse, search, notifications) and foot (the account), and the page header's button group (assistant and help) at the top right.
+  
+  The documentation still has one navigation, its own: the sidebar's body carries the docs column (「← Back to APP」, every book of the app with the current one open, a title filter and 「All documentation」) in place of the app's menu. The reader no longer draws that column inside the page there. The app's other docs pages (its docs index, a book with no articles, a book or doc that is not found) carry the same column in the sidebar instead of a back link above the page.
+  
+  Unchanged: every docs address resolves to the same page as before, and a phone keeps its app bar, no sidebar and the in-page column. The `/docs` portal draws in the same frame from 768 px up too, in a variant that belongs to no app (its own entry describes it). Nothing to migrate.
+- fc21674: feat(console): the documentation portal draws in the app shell's frame from 768 px up, belonging to no app
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The documentation portal (`/docs`, a book, an article) was the one documentation page that still drew a top bar on a desktop, in a frame of its own, while an app's documentation pages draw in the app shell. From 768 px up the portal now draws in the same frame, in a variant that belongs to no app: no top bar; the sidebar with search (when there is an app to search) and notifications in its head and the account at its foot; standing notices (impersonation, usage, storage, a lost connection) at the top of the page's content, beside the sidebar rather than over it; the page header's assistant and help buttons at the top right. Where an app's name sits in its sidebar, the portal's sidebar shows a neutral 「Documentation」 heading; it opens the list of your apps (none marked current) and 「Add app」, and choosing an app opens it. The sidebar's body is the documentation tree: 「All documentation」 first, a title filter, then every book under the heading of the app that carries it, as the portal's index groups them, with the book being read open. Books are named as the index names them, so a platform app's book reads as the app does (for example 「系统设置」) instead of its package's short name.
+  
+  Opening the portal does not pick an app: no app's colours are applied, and the app you last used, and the one you had open, stay what they were.
+  
+  「All documentation」 is now also the first documentation row of an app's documentation sidebar, right under 「← Back to APP」 and above the title filter and the books, so the two documentation sidebars match.
+  
+  Unchanged: every documentation address resolves to the same page as before, and a phone keeps the portal's documentation bar and the in-page column, with 「All documentation」 at its foot. Nothing to migrate.
+- 4805d83: perf(console): an object list and a record page no longer load the Studio designer's string table on first paint
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Opening an object list or a record page downloaded the Studio designer's English string table (about 69 KB gzipped) and the designer's header and Customize controls with it, before the page could paint, for every user, designer or not. The running app's save paths that load with those pages (a list's view save, the record page's tabs and arrangement saves, the header-pin save) read small pure helpers that lived inside the designer's component modules, and importing a helper loaded the whole module.
+  
+  Those helpers now live in modules of their own, so each page's first load is about 94 KB gzipped lighter on the Console build this was measured on. Nothing changes in what the pages show or save: every name is still exported from where it was, and the designer loads its string table when it opens, as before.
+
 ## 18.6.0
 
 ### Patch Changes

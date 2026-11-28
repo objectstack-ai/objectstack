@@ -49,6 +49,13 @@ import { getDisplayTimeZone } from './date-display.js';
  * Walks any plain-object / array structure recursively. Non-string values
  * (and unknown tokens) are passed through untouched.
  *
+ * Only a value that is ENTIRELY one placeholder resolves. A value that merely
+ * contains one (`'from {today} on'`, `'range: {a}..{b}'`) is a literal and is
+ * returned as written: that is the reading the spec declares
+ * (`FILTER_TOKEN_WRAPPED_RE` in `@objectstack/spec/data`) and the server's
+ * resolver applies, so a filter matches the same rows whichever side
+ * resolves it.
+ *
  * ## Which clock decides "today"
  *
  * The calendar tokens (`today`, the period bounds, `N_days` / `N_weeks` /
@@ -183,26 +190,18 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
     return null;
   };
 
-  const tokenRe = /\$?\{([a-zA-Z0-9_]+)\}/g;
-
   const walk = (value: any): any => {
     if (value == null) return value;
     if (typeof value === 'string') {
+      // Only a WHOLE-string placeholder is a macro, as on the server
+      // (`resolveFilterTokens` in `@objectstack/core`): a value that merely
+      // contains one (`'from {today} on'`) is a literal and is left as
+      // written, so one filter selects one row set on either side of the wire.
       const wholeMatch = value.match(/^\$?\{([a-zA-Z0-9_]+)\}$/);
-      if (wholeMatch) {
-        const tok = wholeMatch[1];
-        if (macros[tok]) return macros[tok]();
-        const param = resolveParam(tok);
-        if (param != null) return param;
-      }
-      let touched = false;
-      const replaced = value.replace(tokenRe, (m, tok) => {
-        if (macros[tok]) { touched = true; return macros[tok](); }
-        const param = resolveParam(tok);
-        if (param != null) { touched = true; return param; }
-        return m;
-      });
-      return touched ? replaced : value;
+      if (!wholeMatch) return value;
+      const tok = wholeMatch[1];
+      if (macros[tok]) return macros[tok]();
+      return resolveParam(tok) ?? value;
     }
     if (Array.isArray(value)) return value.map(walk);
     // Only a PLAIN object (prototype `Object.prototype` or `null`) is walked;

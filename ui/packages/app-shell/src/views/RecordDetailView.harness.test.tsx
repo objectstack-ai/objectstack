@@ -46,7 +46,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
+import { render, waitFor, cleanup, screen, act, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
 import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
@@ -61,11 +61,13 @@ import { recentItemObject } from '../console/home/recentItemTypeLabel';
 import { NavigationProvider, useNavigationContext } from '../context/NavigationContext';
 import { RecentItemsProvider, useRecentItems, type RecentItem } from '../context/RecentItemsProvider';
 import { RecordDetailView } from './RecordDetailView';
+import { usePageCommands, type PublishedPageCommand } from '../chrome/paletteCommands';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u1', name: 'Ada', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // The wire is the global `fetch` this file stubs; the authenticated fetch hands its requests to it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -711,14 +713,14 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   /**
    * The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as
    * the display locale. Since objectstack#27055 the record page draws the audit
-   * entries in the one 动态 stream, each change as one compact line
-   * (`data-stream-change`).
+   * entries in the one 动态 stream; since objectstack#36290 each changed field
+   * is its own line under the entry (`data-field-change`).
    */
   async function diffLine(locale: string): Promise<string> {
     renderHistory(locale);
     let text = '';
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
+      const line = Array.from(document.querySelectorAll('[data-field-change]')).find((el) =>
         (el.textContent ?? '').startsWith('Close date'),
       );
       expect(line).toBeTruthy();
@@ -729,7 +731,7 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   }
 
   const expected = (locale: string) =>
-    `Close date ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
+    `Close date: ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
 
   beforeEach(() => {
     // Unrelated chrome on this view reaches for the platform API; answering it
@@ -754,13 +756,13 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   describe('RecordDetailView — the audit history dates follow the display locale (objectui#10442)', () => {
     it('formats the date diff as de-CH under an English UI with a de-CH display locale', async () => {
       const text = await diffLine('de-CH');
-      expect(text, `got: ${text}`).toBe('Close date 3.3.2020 → 4.3.2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3.3.2020 → 4.3.2020');
       expect(text).toBe(expected('de-CH'));
     });
 
     it('control: formats the date diff as en-US under an en-US display locale', async () => {
       const text = await diffLine('en-US');
-      expect(text, `got: ${text}`).toBe('Close date 3/3/2020 → 3/4/2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3/3/2020 → 3/4/2020');
       expect(text).toBe(expected('en-US'));
     });
 
@@ -892,17 +894,16 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
         </LocalizationProvider>
       </I18nProvider>,
     );
-    // One audit entry draws its changes as one compact line (`data-stream-change`),
-    // joined with `; `, so each field's part is split out and keyed by label.
+    // One audit entry draws each changed field as its own line under the entry
+    // (`data-field-change`, objectstack#36290), keyed here by label.
     const lines: Record<string, string> = {};
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
-        (el.textContent ?? '').includes('Amount'),
+      const parts = Array.from(document.querySelectorAll('[data-field-change]')).map((el) =>
+        (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
       );
-      expect(line, 'no History diff line').toBeTruthy();
-      const parts = (line!.textContent ?? '').replace(/\s+/g, ' ').trim().split('; ');
+      expect(parts.length, 'no History diff line').toBeGreaterThan(0);
       for (const label of ['Amount', 'List price']) {
-        const part = parts.find((p) => p.startsWith(`${label} `));
+        const part = parts.find((p) => p.startsWith(`${label}: `));
         expect(part, `no change for ${label} in: ${parts.join(' | ')}`).toBeTruthy();
         lines[label] = part!;
       }
@@ -934,17 +935,17 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
   describe('RecordDetailView — a dynamic currency diff reads in the tenant currency (objectstack#27640)', () => {
     it('formats a dynamic-mode change from 1500 to 2500 with the EUR face under an EUR tenant', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount €1,500.00 → €2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: €1,500.00 → €2,500.00');
     });
 
     it('keeps a record-mode change a plain number: the tenant currency is not its fallback', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price 1,500.00 → 2,500.00');
+      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price: 1,500.00 → 2,500.00');
     });
 
     it('control: with no tenant currency, the dynamic change reads as a plain number', async () => {
       const lines = await diffLines(undefined);
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount 1,500.00 → 2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: 1,500.00 → 2,500.00');
     });
   });
 });
@@ -1577,7 +1578,8 @@ describe('RecordDetailView.relatedListTitlePlural-11733', () => {
  *      for it; since objectstack#29188 it shows the load-failure notice, not
  *      the empty state;
  *   5. a refused `sys_comment` read beside an answered `sys_activity` read
- *      keeps the activity rows and says the comments are withheld.
+ *      keeps the activity rows and says the comments are withheld (since
+ *      objectstack#36075 in the comment panel, which holds the comments).
  *
  * The harness is `RecordDetailView.feedLoading.test.tsx`'s: the synthesized
  * record page composes `record:discussion`, so the panel arrives through the
@@ -1648,7 +1650,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
     } as any;
   }
 
-  function renderDetail(dataSource: any) {
+  function renderDetail(dataSource: any, { embedded = true }: { embedded?: boolean } = {}) {
     return render(
       <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
@@ -1658,7 +1660,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
             onEdit={() => {}}
             objectNameOverride={OBJECT_NAME}
             recordIdOverride={RECORD_ID}
-            embedded
+            embedded={embedded}
           />
         </MetadataCtx.Provider>
       </MemoryRouter>,
@@ -1809,14 +1811,26 @@ describe('RecordDetailView.feedRefusal-11195', () => {
           }),
       });
 
-      renderDetail(dataSource);
+      window.localStorage.clear();
+      // objectstack#36225 — the comment panel is the full page's: a preview has none.
+      renderDetail(dataSource, { embedded: false });
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
-      const notice = await screen.findByTestId('activity-access-denied');
-      expect(notice.textContent).toContain(COMMENTS_DENIED);
-      expect(notice.textContent).not.toContain(ACTIVITY_DENIED);
-      expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
-      expect(notice.querySelector('[data-denied-source="activity"]')).toBeNull();
+      // The 动态 stream holds no comments, so their refusal is not its to say.
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      const button = await waitFor(() => {
+        const el = document.querySelector('[data-comments-button]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      // The icon names no count for comments it may not read.
+      expect(button.querySelector('[data-comments-count]')).toBeNull();
+      fireEvent.click(button);
+      const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+      expect(panel.querySelector('[data-comments-note="denied"]')).not.toBeNull();
+      expect(panel.textContent).toContain(COMMENTS_DENIED);
+      expect(panel.textContent).not.toContain(ACTIVITY_DENIED);
+      expect(panel.querySelector('[data-comments-composer]')).toBeNull();
     });
   });
 });
@@ -1943,8 +1957,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       expect(cardOrder(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'showcase_call.project']);
     });
 
-    it('with relatedLists: the declared lists first in that order, the rest after them in the derived order', async () => {
+    it('with relatedLists: only the declared lists, in that order; an unlisted side list draws nothing (objectstack#35897)', async () => {
       const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project']));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project']);
+    });
+
+    it('with relatedLists listing every list: the declared order, nothing dropped (control)', async () => {
+      const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project', 'showcase_task']));
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
       expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project', 'showcase_task.project']);
     });
@@ -2145,16 +2165,14 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
 // ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
 
 /**
- * objectstack#27056, as objectstack#35595/#35596 lay the page out — the related
- * lists load counts first and never block the details. Every list is a tab;
- * the 概览 tab's right rail lists, under 「其他相关」, the lists that have
- * records, with their first three rows. Measured:
+ * objectstack#27056, as objectstack#35890 lays the page out — the related
+ * lists load counts first and never block the details. Every list is a tab
+ * (the right rail that previewed their first rows is retired). Measured:
  *
  *  - the details draw from the record read alone, while every related read is
  *    still out, with every list's tab drawn (no number yet) and no rail card;
  *  - the six counts go out as ONE request set, before any of them answers;
- *  - once they answer, rows are read for the lists counted above 0 only, three
- *    rows each — never for a list counted at 0.
+ *  - once they answer, no list's rows are read while its tab is closed.
  */
 
 describe('RecordDetailView.relatedCountsFirst-27056', () => {
@@ -2334,7 +2352,7 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
       expect(container.querySelector('[data-record-summary-other]')).toBeNull();
     });
 
-    it('asks the six counts as one request set, then three rows of each list counted above 0 only', async () => {
+    it('asks the six counts as one request set, and no list\'s rows while its tab is closed (objectstack#35890: no rail)', async () => {
       const { container } = renderPage();
       await idle();
       // One request set: every list's count, all out before any answered, and
@@ -2347,25 +2365,14 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const rowReads = reads.filter(isRowRead);
-      // Every list counted above 0; never the second, counted at 0.
-      const withRecords = CHILDREN.filter((c) => TOTALS[c] > 0);
-      expect(rowReads.map((r) => r.object).sort()).toEqual([...withRecords].sort());
-      for (const r of rowReads) expect(r.query.$top).toBe(3);
-      expect(reads.some((r) => r.object === C2 && isRowRead(r))).toBe(false);
-
-      await act(async () => {
-        for (const r of reads.filter((read) => !read.answered)) r.answer();
-      });
-      await idle();
-      const rail = column(container, 'right')!;
-      const rowsOf = (c: string) =>
-        rail.querySelector(`[data-record-summary-card="${c}.account"]`)?.querySelectorAll('[data-record-summary-row]') ?? [];
-      expect(rowsOf(C1)).toHaveLength(3);
-      expect(rowsOf(C3)).toHaveLength(2);
-      // CONTROL: the list counted at 0 has no rail card at all, but keeps its tab.
-      expect(rail.querySelector(`[data-record-summary-card="${C2}.account"]`)).toBeNull();
+      // objectstack#35890 — the rail that drew three rows of each list is
+      // retired: on 「详情」 no list's rows are read, counted above 0 or not.
+      expect(reads.filter(isRowRead)).toEqual([]);
+      expect(column(container, 'right')).toBeNull();
+      expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+      // CONTROL: the list counted at 0 keeps its tab, marked empty.
       expect(container.querySelector(`[data-record-tab="${C2}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(true);
+      expect(container.querySelector(`[data-record-tab="${C1}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(false);
     });
   });
 });
@@ -2623,7 +2630,8 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
  *   - the premise, re-read live: the spec refuses each such page at `regions`;
  *   - a `full` page whose region places nothing, and one with no `regions`,
  *     draw the explanation naming the page, and no page body at all;
- *   - the record drawer draws the same explanation;
+ *   - the record drawer draws the standard page, with no explanation: an
+ *     authored page applies on the desktop full page only (objectstack#36150);
  *   - CONTROLS: the same page placing a component draws that page; a `slotted`
  *     page with no slots, and no assigned page, draw the default record page.
  */
@@ -2756,10 +2764,11 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     expect(panel.textContent).not.toContain('"{{name}}"');
   });
 
-  it('the record drawer explains it the same way', async () => {
+  it('the record drawer draws the standard page and no explanation: the authored page does not apply there (objectstack#36150)', async () => {
     const { container } = await mount([PLACES_NOTHING], true);
-    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
-    expect(container.querySelector('[data-page-type]')).toBeNull();
+    await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
+    expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
   });
 
   it('CONTROL: the same page placing a component draws that page, and no explanation', async () => {
@@ -3022,7 +3031,9 @@ describe('RecordDetailView.recordEditState-35599', () => {
 
   const headerButton = (label: string) =>
     (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
-  const pencils = (container: HTMLElement) => container.querySelectorAll('button[aria-label="Double-click to edit"]').length;
+  // The field list's pencil is named for a click (objectstack#36147), every other face's for a double-click.
+  const pencils = (container: HTMLElement) =>
+    container.querySelectorAll('button[aria-label="Double-click to edit"], button[aria-label="Click to edit"]').length;
   const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
   const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
   const summaryInput = (container: HTMLElement) =>
@@ -3051,30 +3062,43 @@ describe('RecordDetailView.recordEditState-35599', () => {
     fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
   }
 
-  /** The pencil of the Summary field (the inline-edit entry), on the details column. */
+  /**
+   * The pencil of the Summary field (the inline-edit entry), on the details
+   * column: the keyboard's way in on the field list, named for a click
+   * (objectstack#36147).
+   */
   const summaryPencil = (container: HTMLElement) =>
-    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Double-click to edit"]')) as HTMLElement[])
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Click to edit"]')) as HTMLElement[])
       .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
   const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
-  const detailInputValues = (container: HTMLElement) =>
-    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).map((i) => i.value);
 
-  it('ruling B (「全部保留」): a page drawing body tables keeps inline edit, which saves the record alone through the save bar; the edit state offers none', async () => {
+  /** The Summary field's in-place editor (objectstack#36475): a layer over the value, outside the column. */
+  const summaryInPlace = () =>
+    document.querySelector('[data-field-in-place-editor="summary"] input') as HTMLInputElement | null;
+  /** Press a header button as a pointer does: the press lands outside an open in-place editor first. */
+  const pressHeader = (label: string) => {
+    const button = headerButton(label)!;
+    fireEvent.pointerDown(button);
+    fireEvent.mouseDown(button);
+    fireEvent.click(button);
+  };
+
+  it('ruling B (「全部保留」): a page drawing body tables keeps editing a field in place, which saves the record alone; the edit state offers none', async () => {
     const view = renderPage(objectsWith());
     await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
     await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
     fireEvent.click(summaryPencil(view.container)!);
-    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
-    // Inline edit is the field alone: the body tables stay tables, no editor.
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    // The field alone (objectstack#36475): no save bar, the body tables stay tables.
+    expect(saveBar()).toBeNull();
     expect(editor(view.container, 'showcase_line.quote')).toBeNull();
-    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
-    const barSave = Array.from(saveBar()!.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Save')!;
-    await act(async () => { fireEvent.click(barSave); });
+    fireEvent.change(summaryInPlace()!, { target: { value: 'Inline' } });
+    await act(async () => { fireEvent.keyDown(summaryInPlace()!, { key: 'Enter' }); });
     await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
     expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
     // The edit state: Edit opens it (not the record form), and there inline edit is not offered.
-    await waitFor(() => expect(saveBar()).toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(summaryInPlace()).toBeNull(), { timeout: 5000 });
     fireEvent.click(headerButton('Edit')!);
     await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
     expect(view.onEdit).not.toHaveBeenCalled();
@@ -3085,56 +3109,36 @@ describe('RecordDetailView.recordEditState-35599', () => {
     expect(headerButton('Edit')).toBeNull();
   });
 
-  it('one mode at a time: Edit with unsaved inline changes asks first — Keep editing stays inline, Discard enters the edit state with the stored values', async () => {
+  it('a field edited in place is saved when Edit is pressed, and the edit state opens without asking (objectstack#36475)', async () => {
     const view = renderPage(objectsWith());
     await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
     await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
     fireEvent.click(summaryPencil(view.container)!);
-    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
-    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Inline' } });
-    expect(headerButton('Edit')?.disabled).toBe(false);
-    // The question is the page's own dialog, never the browser's.
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInPlace()!, { target: { value: 'Inline' } });
     const nativeConfirm = vi.fn(() => true);
     vi.stubGlobal('confirm', nativeConfirm);
-    fireEvent.click(headerButton('Edit')!);
-    const dialog = await waitFor(() => {
-      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
-      expect(el).not.toBeNull();
-      return el!;
-    });
-    expect(dialog.textContent).toContain('Discard changes?');
-    expect(nativeConfirm).not.toHaveBeenCalled();
-    // Keep editing: the dialog closes, the inline draft stays, no edit state.
-    fireEvent.click(Array.from(dialog.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Keep editing')!);
-    await waitFor(() => expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull(), { timeout: 5000 });
-    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
-    expect(detailInputValues(view.container)).toContain('Inline');
-    // Discard: the draft goes, the edit state opens over the stored record.
-    fireEvent.click(headerButton('Edit')!);
-    const again = await waitFor(() => {
-      const el = document.querySelector('[data-record-edit-discard-inline]') as HTMLElement | null;
-      expect(el).not.toBeNull();
-      return el!;
-    });
-    fireEvent.click(Array.from(again.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === 'Discard')!);
+    await act(async () => { pressHeader('Edit'); });
+    // The press outside the editor saved the field alone, through the plain update.
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
     await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
-    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
-    expect(detailInputValues(view.container)).not.toContain('Inline');
-    expect(headerButton('Save')).not.toBeNull();
+    expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
     expect(nativeConfirm).not.toHaveBeenCalled();
-    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(summaryInPlace()).toBeNull();
     expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
   });
 
-  it('CONTROL — an inline session with no changes is simply ended: Edit enters the edit state without asking', async () => {
+  it('CONTROL — a field opened in place with no change writes nothing: Edit enters the edit state without asking', async () => {
     const view = renderPage(objectsWith());
     await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
     await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
     fireEvent.click(summaryPencil(view.container)!);
-    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
-    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    await act(async () => { pressHeader('Edit'); });
     await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
     expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
+    expect(view.dataSource.update).not.toHaveBeenCalled();
   });
 
   it('one Save sends ONE batch carrying the record and both body tables', async () => {
@@ -3260,5 +3264,595 @@ describe('RecordDetailView.recordEditState-35599', () => {
     await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
     await waitFor(() => expect(headerButton('Edit')).toBeNull(), { timeout: 5000 });
     expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(0);
+  });
+});
+
+// ── RecordDetailView.approvalSubjectTitle-35415 ─────────────────────────────
+
+/**
+ * objectstack#35415 — an approval request's page is named by the business
+ * record the request asks a decision on, and the name opens that record.
+ *
+ * The request's own declared title is its flow's label (`process_label`, the
+ * object's `nameField`), which lists and search keep. On the request's page
+ * the H1 reads the subject's title the approvals get serves (`record_title`).
+ * Where the get serves none, or serves the bare record id, the H1 keeps the
+ * flow's label: the subject is never named by a raw id.
+ *
+ * The name links to the subject only once one of the page's own reads of it
+ * returned the record (`recordReadReport.ts`). This synthesized page draws no
+ * reader of the subject, so here the name is plain text; the link and its
+ * click are pinned on the served page, where the record card reads it
+ * (`approvalRequestsDataSource.servedPageRecordLink-12557.test.tsx`), and on
+ * the title itself (`approvalSubjectTitle.test.tsx`).
+ *
+ * Measured on the real `RecordDetailView` and the real `page:header` of the
+ * synthesized page, in the desktop top bar. Direction, written before the run:
+ * with the host's title not handed to the header, the subject case REDs
+ * (`Invoice Sign-off`), every other case GREEN.
+ */
+describe('RecordDetailView.approvalSubjectTitle-35415', () => {
+  restoreAfterBlock();
+
+  const REQUEST_OBJECT = 'sys_approval_request';
+  const REQ = 'req_35415';
+  const FLOW_LABEL = 'Invoice Sign-off';
+  const SUBJECT = 'Acceptance T-002 (mail thread link)';
+
+  const REQUEST_DEF = {
+    name: REQUEST_OBJECT,
+    label: 'Approval Request',
+    nameField: 'process_label',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      process_label: { label: 'Flow', type: 'text' },
+      object_name: { label: 'Object', type: 'text' },
+      record_id: { label: 'Record', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+  };
+
+  const SERVED = {
+    id: REQ,
+    process_label: FLOW_LABEL,
+    object_name: 'purchase_request',
+    record_id: 'PR-2549',
+    status: 'pending',
+  };
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  const h1 = () => document.querySelector('h1');
+
+  /** The subject's object, so the page's record route reaches it. */
+  const SUBJECT_DEF = {
+    name: 'purchase_request',
+    label: 'Purchase Request',
+    nameField: 'name',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
+  };
+
+  function renderRequestPage(row: Record<string, unknown>, objectDef: Record<string, unknown> = REQUEST_DEF) {
+    const objectName = objectDef.name as string;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ ...row })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => objectDef,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${objectName}/record/${REQ}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={(
+                  <RecordDetailView
+                    dataSource={ds as never}
+                    objects={[objectDef, SUBJECT_DEF] as never}
+                    onEdit={() => {}}
+                    objectNameOverride={objectName}
+                    recordIdOverride={REQ}
+                  />
+                )}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  describe('RecordDetailView — the approval request page is named by its record, which the name opens (objectstack#35415)', () => {
+    it('the H1 reads the served subject title, not the flow label; unread by the page, it links nowhere', async () => {
+      const { ds } = renderRequestPage({ ...SERVED, record_title: SUBJECT });
+      await waitFor(() => expect(h1()?.textContent).toBe(SUBJECT));
+      expect(h1()!.querySelector('a')).toBeNull();
+      // The title reads nothing itself.
+      expect(ds.findOne.mock.calls.some((call: unknown[]) => call[0] === 'purchase_request')).toBe(false);
+    });
+
+    it('no subject title served: the H1 keeps the flow label, with no link', async () => {
+      renderRequestPage({ ...SERVED });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.querySelector('a')).toBeNull();
+    });
+
+    it('a subject title that is the bare record id: the H1 keeps the flow label and never prints the id', async () => {
+      renderRequestPage({ ...SERVED, record_title: 'PR-2549' });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.textContent).not.toContain('PR-2549');
+    });
+
+    it('CONTROL — another object with the same fields keeps its own declared title', async () => {
+      const other = { ...REQUEST_DEF, name: 'flow_ticket_35415', label: 'Ticket' };
+      renderRequestPage({ ...SERVED, record_title: SUBJECT }, other);
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+    });
+  });
+});
+
+// ── RecordDetailView.embeddedStageReread-36309 ──────────────────────────────
+
+/**
+ * objectstack#36309 — the header's stage menu draws in a drawer too (the list
+ * drawer, and the drawer a record page opens over itself, both mount this view
+ * `embedded`). A 409 on a Move there re-reads the record, so the next Move
+ * carries the version that is stored. The drawer still draws no Refresh entry:
+ * showing the entry and re-reading the record are two context members.
+ */
+describe('RecordDetailView.embeddedStageReread-36309', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36309';
+  const ID = 'd1';
+  const DEF = {
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      stage: {
+        label: 'Stage',
+        type: 'select',
+        options: [
+          { value: 'prospecting', label: 'Prospecting' },
+          { value: 'negotiation', label: 'Negotiation' },
+        ],
+      },
+    },
+  };
+  const versionAt = (read: number) => `2026-11-22T0${read}:00:00.000Z`;
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [DEF], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  /** Every read answers a newer version; the first Move is refused with a 409. */
+  function renderDeal(embedded: boolean) {
+    let reads = 0;
+    const conflict = Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+    let writes = 0;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => {
+        reads += 1;
+        return { id: ID, name: 'Wayne deal', stage: 'prospecting', updated_at: versionAt(reads) };
+      }),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => {
+        writes += 1;
+        if (writes === 1) throw conflict;
+        return {};
+      }),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => DEF,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[DEF] as never}
+              onEdit={() => {}}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  const stageMenu = () => document.querySelector('[data-record-stage-menu]') as HTMLElement | null;
+  const moreTrigger = () =>
+    document.querySelector('header [aria-label="More actions"], [data-record-top-bar-actions] [aria-label="More actions"]') as HTMLElement | null;
+
+  async function pickNegotiation() {
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    fireEvent.pointerDown(stageMenu()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-record-stage-menu-list] [data-stage-value="negotiation"]') as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(option);
+    return screen.findByRole('dialog');
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('in a drawer, a 409 on Move re-reads the record and the second Move carries the new version', async () => {
+    const { ds } = renderDeal(true);
+    const dialog = await pickNegotiation();
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(1) });
+    // The refusal re-reads the record in place.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) });
+  });
+
+  it('CONTROL — the drawer still draws no Refresh entry in the header', async () => {
+    const { ds } = renderDeal(true);
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    const trigger = moreTrigger();
+    if (trigger) {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      await waitFor(() => expect(document.querySelector('[role="menu"]')).toBeTruthy());
+    }
+    expect(document.querySelector('[data-page-refresh]')).toBeNull();
+  });
+
+  it('CONTROL — on the record page the same 409 re-reads too, and the page keeps its Refresh entry', async () => {
+    const { ds } = renderDeal(false);
+    const dialog = await pickNegotiation();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await waitFor(() => expect(moreTrigger()).toBeTruthy());
+    fireEvent.pointerDown(moreTrigger()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await waitFor(() => expect(document.querySelector('[data-page-refresh]')).toBeTruthy());
+  });
+});
+
+describe('RecordDetailView.paletteEdit-36286', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36286';
+  const ID = 'd1';
+  const defWith = (extra: Record<string, unknown> = {}) => ({
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+    ...extra,
+  });
+
+  /** What the ⌘K palette reads: the commands the page publishes. */
+  let published: readonly PublishedPageCommand[] = [];
+  function CommandsProbe() {
+    const commands = usePageCommands();
+    React.useEffect(() => {
+      published = commands;
+    });
+    return null;
+  }
+
+  function renderDeal({ embedded = false, def = defWith() }: { embedded?: boolean; def?: ReturnType<typeof defWith> } = {}) {
+    const pages: any[] = [];
+    const metadata = {
+      objects: [def], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ id: ID, name: 'Wayne deal', status: 'new' })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => def,
+    } as Record<string, any>;
+    const onEdit = vi.fn();
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <CommandsProbe />
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[def] as never}
+              onEdit={onEdit}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds, onEdit };
+  }
+
+  /** The header row's Edit, as the page draws it. */
+  async function headerEdit(): Promise<HTMLButtonElement> {
+    return waitFor(
+      () => {
+        const header = document.querySelector('[data-record-top-bar-actions]') as HTMLElement | null;
+        expect(header).toBeTruthy();
+        const edit = within(header!).getAllByRole('button').find((b) => b.textContent?.trim() === 'Edit');
+        expect(edit).toBeTruthy();
+        return edit as HTMLButtonElement;
+      },
+      { timeout: 5000 },
+    );
+  }
+  const editCommand = () => published.find((command) => command.id === 'edit-record');
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  });
+
+  beforeEach(() => {
+    published = [];
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('the record page publishes the header\'s Edit, and running it runs what the button runs', async () => {
+    const { onEdit } = renderDeal();
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(editCommand()?.disabled).toBe(false);
+    expect(button.disabled).toBe(false);
+
+    act(() => editCommand()!.run());
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith({ id: ID }, OBJECT);
+    fireEvent.click(button);
+    expect(onEdit).toHaveBeenCalledTimes(2);
+    expect(onEdit.mock.calls[1]).toEqual(onEdit.mock.calls[0]);
+  });
+
+  it('off exactly when the header\'s Edit is off (edit.disabledWhen holds on the record)', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'new'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(button.disabled).toBe(true));
+    await waitFor(() => expect(editCommand()?.disabled).toBe(true));
+  });
+
+  it('CONTROL: a disabledWhen that does not hold leaves both pressable', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'closed'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(button.disabled).toBe(false);
+    expect(editCommand()?.disabled).toBe(false);
+  });
+
+  it('CONTROL: a record in a drawer or pane publishes nothing (the page behind it is the list)', async () => {
+    const { ds } = renderDeal({ embedded: true });
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText('Wayne deal').length).toBeGreaterThan(0), { timeout: 5000 });
+    await act(async () => {});
+    expect(editCommand()).toBeUndefined();
+  });
+});
+
+// ── RecordDetailView.approvalActivityLine-35723 ─────────────────────────────
+
+/**
+ * objectstack#35723 — plugin-approvals writes one `sys_activity` entry per
+ * approval step about the record it governs (`type: 'system'`,
+ * `metadata.kind: 'approval'`, the request as its source). The record page's
+ * stream draws it as the one-line approval entry, and the page wires its
+ * 「看审批」 to the record's approvals: the 审批 tab the header's approval tag
+ * opens (objectstack#35595). With no approvals served to the reader the line
+ * keeps no link.
+ */
+describe('RecordDetailView.approvalActivityLine-35723', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'os_35723_memo';
+  const RECORD = 'm1';
+  const REQUEST = 'req_35723';
+
+  const MEMO_DEF = {
+    name: OBJECT,
+    label: 'Memo',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
+  };
+
+  const ENTRY = {
+    id: 'act_submit',
+    type: 'system',
+    summary: 'Submitted for approval',
+    timestamp: '2026-11-20T09:00:00.000Z',
+    actor_id: 'u_submitter',
+    actor_name: 'Sam Submitter',
+    object_name: OBJECT,
+    record_id: RECORD,
+    source_object: 'sys_approval_request',
+    source_id: REQUEST,
+    metadata: JSON.stringify({ kind: 'approval', action: 'submit' }),
+  };
+
+  const REQUEST_ROW = {
+    id: REQUEST,
+    process_name: 'flow:memo_review',
+    object_name: OBJECT,
+    record_id: RECORD,
+    status: 'pending',
+    submitter_id: 'u_submitter',
+    current_step: 'review',
+    pending_approvers: ['user:u_approver'],
+    viewer: { can_act: false, is_submitter: false, can_override: false },
+  };
+
+  /** The approvals door: the record's requests, as this reader is served them. */
+  function stubApprovals(requests: Record<string, unknown>[]) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      const body = u.includes('/approvals/requests?object=')
+        ? { data: requests }
+        : u.endsWith(`/approvals/requests/${REQUEST}`) ? (requests[0] ?? {}) : { data: [] };
+      return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+    }) as never);
+  }
+
+  function renderMemo() {
+    const pages: any[] = [];
+    const metadata = {
+      objects: [MEMO_DEF], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null, getItemsByType: () => pages,
+    } as any;
+    const ds = {
+      find: vi.fn(async (object: string) => (object === 'sys_activity'
+        ? { data: [ENTRY], total: 1 }
+        : { data: [], total: 0 })),
+      findOne: vi.fn(async () => ({ id: RECORD, name: 'Budget memo' })),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => MEMO_DEF,
+    } as Record<string, any>;
+    return render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${RECORD}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <RecordDetailView
+            dataSource={ds as never}
+            objects={[MEMO_DEF] as never}
+            onEdit={() => {}}
+            objectNameOverride={OBJECT}
+            recordIdOverride={RECORD}
+          />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+  }
+
+  /** The stream is the page's 动态 tab: open it. */
+  async function openStream(container: HTMLElement) {
+    const tab = await waitFor(() => {
+      const found = container.querySelector('[role="tab"][data-record-tab="timeline"]');
+      expect(found).not.toBeNull();
+      return found as HTMLButtonElement;
+    }, { timeout: 5000 });
+    await act(async () => { fireEvent.click(tab); });
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('draws the entry as the approval line, and 「看审批」 opens the 审批 tab', async () => {
+    stubApprovals([REQUEST_ROW]);
+    const { container } = renderMemo();
+    // The page draws its 审批 tab once the reader is served the request.
+    await waitFor(() => expect(container.querySelector('[role="tab"][data-record-tab="approvals"]')).not.toBeNull(), { timeout: 5000 });
+    await openStream(container);
+    const link = await waitFor(() => {
+      const found = container.querySelector('[data-stream-approval-row] [data-stream-view-approval]');
+      expect(found).not.toBeNull();
+      return found as HTMLButtonElement;
+    }, { timeout: 5000 });
+    expect(container.querySelector('[data-related-enlarged="approvals"]')).toBeNull();
+    await act(async () => { fireEvent.click(link); });
+    await waitFor(() => expect(container.querySelector('[data-related-enlarged="approvals"]')).not.toBeNull());
+  });
+
+  it('CONTROL — no approvals served to the reader: the line, with no link', async () => {
+    stubApprovals([]);
+    const { container } = renderMemo();
+    await openStream(container);
+    await waitFor(() => expect(container.querySelector('[data-stream-approval-row]')).not.toBeNull(), { timeout: 5000 });
+    await act(async () => {});
+    expect(container.querySelector('[data-stream-view-approval]')).toBeNull();
   });
 });

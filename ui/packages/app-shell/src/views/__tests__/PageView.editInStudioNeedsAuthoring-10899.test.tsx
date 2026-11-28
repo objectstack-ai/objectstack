@@ -19,6 +19,13 @@
  * Real subjects: `PageView` under the real `MePermissionsProvider`, seeded with
  * the `/me/permissions` payloads each persona receives (`initialPermissions`,
  * so no request is made). The role is the stubbed axis.
+ *
+ * objectstack#36111 — the floating pencil is the phone's face since the page
+ * header and the shell's button group arrived: from the phone breakpoint up
+ * the top bar's 「Edit app」 (and the group's, once the shell turns it on)
+ * opens the same surface through the same gate
+ * (`ShellPageActions-36111`). So this file reads the pencil at a
+ * phone's width.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -114,13 +121,15 @@ async function mount(perms: MePermissionsResponse) {
 }
 
 beforeEach(() => {
+  // The pencil's face: a phone (objectstack#36111).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   viewer.isAdmin = true;
   // objectui#12615 — the app's package is served writable, so the pencil's
   // package half passes and this file's own questions are the ones asked.
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () =>
         String(url).endsWith('/api/v1/packages')
@@ -131,6 +140,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   cleanup();
   vi.unstubAllGlobals();
 });

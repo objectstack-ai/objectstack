@@ -67,7 +67,7 @@ import { boundObjectOf } from '@objectstack/metadata/stored-item-package';
 // [ruling 6677709817 (c)] The snapshot body both history writers store: the
 // written body without what the type's redactor marks not carried forward.
 import { historySnapshotBody } from '@objectstack/metadata/history-snapshot';
-import { ENVIRONMENT_HISTORY_MARK, PACKAGE_SLOTTED_STORE_TYPES, historyRowAttribution } from '@objectstack/metadata';
+import { ENVIRONMENT_HISTORY_MARK, PACKAGE_SLOTTED_STORE_TYPES, historyRowAttribution, refusePlatformRecordRestore } from '@objectstack/metadata';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import type {
   MetadataRepository,
@@ -102,6 +102,7 @@ import type { MetadataAuthoringClient, MetadataAuthoringSurface } from '@objects
 // [#24395] The draft save's per-key provenance — the diff, the keep rule and
 // the stored form, one module the strict draft read reads it back through.
 import { draftChangedPaths, mergeDraftChanges, storedDraftChanges, type DraftChangeStamp } from './draft-changes.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
@@ -886,7 +887,8 @@ export class SysMetadataRepository implements MetadataRepository {
    */
   private async withTxn<T>(cb: (ctx: any) => Promise<T>): Promise<T> {
     if (typeof this.engine.transaction === 'function') {
-      return this.engine.transaction(cb);
+      // ADR-0067 D2: after a transaction that does not commit, the reads answer only committed rows.
+      return retireOverlayCacheOnRollback(this.engine, () => this.engine.transaction!(cb));
     }
     return cb(undefined);
   }
@@ -1748,6 +1750,16 @@ export class SysMetadataRepository implements MetadataRepository {
        */
       expectedDraftHash?: string | null;
       /**
+       * [#36601] The stored hash of the ACTIVE row the caller means to
+       * replace, or `null` when it asserts that no active row exists at the
+       * address this promotion writes. Stated → it is the `put`'s
+       * `parentVersion`, so the store's own lock refuses the promotion with a
+       * {@link ConflictError} when the active row is another one — the check
+       * and the write are one call, not a read and a later write. Omitted →
+       * the active row read here is the parent (unpinned), as before.
+       */
+      expectedActiveHash?: string | null;
+      /**
        * [#22877] The bundle member whose draft is promoted; omitted, the
        * canonical one (see {@link get}). The draft, the active parent and the
        * drain are all read under it, and the put writes the member its body
@@ -1819,7 +1831,8 @@ export class SysMetadataRepository implements MetadataRepository {
     const promotable = historySnapshotBody(ref.type, draft.body);
     const activeBody = opts.deriveActiveBody ? opts.deriveActiveBody(promotable) : promotable;
     const result = await this.put(ref, activeBody, {
-      parentVersion: currentActive?.hash ?? null,
+      // [#36601] The caller's pin on the active row, when it states one.
+      parentVersion: opts.expectedActiveHash !== undefined ? opts.expectedActiveHash : currentActive?.hash ?? null,
       actor: opts.actor,
       source: opts.source ?? 'sys-metadata-repo.publish',
       message: opts.message ?? `publish draft (hash ${draft.hash})`,
@@ -1928,6 +1941,18 @@ export class SysMetadataRepository implements MetadataRepository {
        * version of the name, as before.
        */
       versionOf?: HistoryVersionOwner;
+      /**
+       * [#37130] Refuse the restore when the active row it would write is the
+       * platform's own record (`refusePlatformRecordRestore`,
+       * `@objectstack/metadata`: `409 RESOURCE_CONFLICT`, the metadata
+       * service's `rollback` prescription), read where the write reads it,
+       * before anything is written. [#37604] So is a version the platform
+       * registered, restored into a package's row. The protocol's two restore doors
+       * (`rollbackMetaItem`, the restore limb of `revertCommit`) state it.
+       * Omitted → no such check: an undo write puts back what the same
+       * operation found, byte for byte.
+       */
+      refusePlatformRecord?: boolean;
     },
   ): Promise<{ version: string; seq: number; item: MetadataItem }> {
     this.assertOpen();
@@ -2000,6 +2025,16 @@ export class SysMetadataRepository implements MetadataRepository {
       where: this.whereFor(ref, 'active', 'packageId' in opts ? (opts.packageId ?? null) : undefined, member),
       context: { isSystem: true },
     });
+    // [#37130] The row this restore writes, judged before the write. [#37604]
+    // …and the version it writes: one the platform registered is never
+    // written into a package's row.
+    if (opts.refusePlatformRecord === true) {
+      refusePlatformRecordRestore(ref.type, ref.name, activeRow as Record<string, unknown> | null, {
+        historyRow: row as Record<string, unknown>,
+        version: targetVersion,
+        intoPackageId: 'packageId' in opts ? (opts.packageId ?? null) : ((activeRow as { package_id?: string | null } | null)?.package_id ?? null),
+      });
+    }
     const activePackageId =
       (activeRow as { package_id?: string | null } | null)?.package_id ?? null;
     const currentActive = activeRow ? this.rowToItem(ref, activeRow) : null;

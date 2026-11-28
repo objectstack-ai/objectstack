@@ -163,7 +163,7 @@ Per-package customization read request: the base package id, no query parameters
 
 ## GetPackageCustomizationsResponse
 
-Per-package customization read: overrides, extensions and switched-off items of one installed base, and the fields, flows and navigation items other packages contribute to it.
+Per-package customization read: overrides, extensions, arrangements and switched-off items of one installed base, and the fields, flows and navigation items other packages contribute to it.
 
 ### Properties
 
@@ -172,9 +172,10 @@ Per-package customization read: overrides, extensions and switched-off items of 
 | **packageId** | `string` | ✅ | The base package the customizations are of (the request's id). |
 | **overrides** | `{ type: string; name: string; member?: string; basedOn?: string; … }[]` | ✅ | Every ACTIVE item of the base's paired `<base>.custom` package that declares `overrides.package` = the base and that the effective read serves over the base's item of the same name: the rows the served-override predicate admits (a declaration from any other package, and an undeclared pair item, are not listed), minus the stored rows every read declines (a shipped flow name). Ordered by type, name and member. |
 | **extensions** | `{ object: string; kind: Enum<'field' \| 'validation' \| 'index'>; name?: string; fields?: string[] }[]` | ✅ | Every field, validation rule and index the paired `<base>.custom` package declares in an object extension (`objectExtensions`) of an object the base owns, one entry per member, as the extension declares it. Ordered by object, kind and name. |
+| **arrangements** | `{ object: string; key: Enum<'fieldGroups' \| 'relatedLists' \| 'actionLayout'> }[]` | ✅ | Every arrangement the paired `<base>.custom` package writes in an object extension of an object the base owns: one entry per object and key the extension carries a value under (an empty list included), whichever of the base's pairs writes it. The extension declares that arrangement whole and it replaces the owner's (ADR-0146 D10); the entry names it and nothing more: its content is the pair's `object_extension` item, and nothing is compared with the base. Ordered by object, then key in the order `fieldGroups`, `relatedLists`, `actionLayout`. |
 | **switchedOff** | `{ type: string; name: string }[]` | ✅ | Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and `active: false`: the base's items this deployment switched off. Ordered by type and name. |
 | **contributions** | `({ kind: Enum<'field' \| 'flow'>; object: string; name: string; packageId: string } \| { kind: 'nav'; app: string; group?: string; name: string; … })[]` | ✅ | Every field, flow and navigation item another installed package contributes to the base, one entry per item and contributing package: the fields of every object extension of an object the base owns, from any package but the base and its pair (a disabled package's are not listed, as the served object withholds its extension); every flow registered under such a package whose trigger object the base owns (a flow of a disabled package is not served, so not listed); and every navigation item such a package contributes to an app the base owns (a disabled package's are not listed). The entry shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, group (an entry with no group first), name and package. |
-| **counts** | `{ overrides: integer; extensions: integer; switchedOff: integer; contributions: integer }` | ✅ | Each list's length, derived from the lists in this same answer. |
+| **counts** | `{ overrides: integer; extensions: integer; arrangements: integer; switchedOff: integer; … }` | ✅ | Each list's length, derived from the lists in this same answer. |
 
 ### Nested Shape: `GetPackageCustomizationsResponse.overrides[number]`
 
@@ -194,6 +195,13 @@ Per-package customization read: overrides, extensions and switched-off items of 
 | **kind** | `Enum<'field' \| 'validation' \| 'index'>` | ✅ | Which collection of the object the member joins. |
 | **name** | `string` | optional | The member's declared name: the field name, the validation rule name, the index name. Absent only for an index declared without a name. |
 | **fields** | `string[]` | optional | For an index: the fields it covers. Absent for a field or a validation. |
+
+### Nested Shape: `GetPackageCustomizationsResponse.arrangements[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The base-owned object whose arrangement the pair's extension declares. |
+| **key** | `Enum<'fieldGroups' \| 'relatedLists' \| 'actionLayout'>` | ✅ | Which arrangement the extension writes, under its key (`CUSTOM_ARRANGEMENT_KEYS`): `fieldGroups`, the record page's field groups; `relatedLists`, its tab list (order, titles, hidden tabs); `actionLayout`, its action layout. |
 
 ### Nested Shape: `GetPackageCustomizationsResponse.switchedOff[number]`
 
@@ -231,6 +239,7 @@ A navigation item another installed package contributes to an app the base owns,
 | :--- | :--- | :--- | :--- |
 | **overrides** | `integer` | ✅ | `overrides.length`. |
 | **extensions** | `integer` | ✅ | `extensions.length`: members, not objects. |
+| **arrangements** | `integer` | ✅ | `arrangements.length`: object and key pairs, not objects. |
 | **switchedOff** | `integer` | ✅ | `switchedOff.length`. |
 | **contributions** | `integer` | ✅ | `contributions.length`: items, not packages. |
 

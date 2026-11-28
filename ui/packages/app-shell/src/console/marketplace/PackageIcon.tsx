@@ -25,7 +25,7 @@ export function PackageIcon({
   displayName,
   manifestId,
   className = 'h-10 w-10',
-  initialClassName = 'text-base font-semibold',
+  initialClassName = 'text-base font-medium',
 }: PackageIconProps) {
   const [broken, setBroken] = useState(false);
   const initial = ((displayName ?? manifestId ?? '?').trim()[0] ?? '?').toUpperCase();

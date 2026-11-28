@@ -48,41 +48,6 @@ export const ActivityViews = defineView({
       },
     },
   },
-  // The default form — what the create and edit surfaces render.
-  form: {
-    type: 'simple',
-    sections: [
-      {
-        name: 'activity_details',
-        label: 'Activity Details',
-        columns: 2,
-        fields: [
-          { field: 'subject',          required: true },
-          { field: 'type',             required: true },
-          { field: 'status',           required: true },
-          { field: 'due_date' },
-          { field: 'duration_minutes' },
-        ],
-      },
-      {
-        name: 'related_records',
-        label: 'Related Records',
-        columns: 2,
-        fields: [
-          { field: 'contact' },
-          { field: 'account' },
-          { field: 'opportunity' },
-        ],
-      },
-      {
-        name: 'notes',
-        label: 'Notes',
-        columns: 1,
-        fields: [
-          { field: 'description' },
-          { field: 'outcome' },
-        ],
-      },
-    ],
-  },
+  // No form here: the create and edit forms lay an activity out by the
+  // object's `fieldGroups` (objects/activity.object.ts).
 });

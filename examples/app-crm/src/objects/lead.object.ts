@@ -13,6 +13,7 @@ export const Lead = ObjectSchema.create({
   label: 'Lead',
   pluralLabel: 'Leads',
   icon: 'funnel',
+  color: 'green',
   description: 'An inbound prospect not yet qualified as an opportunity.',
   // The record's most important fields: the hover card, list columns and
   // the record picker read them. The stage is not here: the record header
@@ -23,6 +24,22 @@ export const Lead = ObjectSchema.create({
   // log records every change either way; this opt-in flag is what makes the
   // record page show it.
   enable: { trackHistory: true },
+
+  // [ADR-0085 §5] The record's sections: the create and edit forms, the
+  // drawer and the record page lay a lead out by these groups, each listing
+  // its members in display order (so `company` comes second here, wherever
+  // it sits among the fields). The public Web-to-Lead form keeps its own
+  // section: it is a named, shared form (views/lead.view.ts).
+  fieldGroups: [
+    {
+      key: 'lead_information',
+      label: 'Lead Information',
+      fields: ['name', 'company', 'email', 'phone', 'title', 'source'],
+    },
+    { key: 'qualification', label: 'Qualification', fields: ['status', 'lead_score', 'assigned_to', 'account'] },
+    { key: 'conversion', label: 'Conversion', fields: ['converted_opportunity', 'is_closed'] },
+    { key: 'notes', label: 'Notes', fields: ['notes'] },
+  ],
 
   fields: {
     name: Field.text({

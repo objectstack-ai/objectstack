@@ -1,5 +1,573 @@
 # @objectstack/driver-sql
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/observability@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [7e638ba]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/observability@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+
+### Patch Changes
+
+- 24cc61f: fix(driver-sql): `distinct()` and aggregate group keys read a stored text `'0'` / `'false'` boolean as `false`, as `find()` does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A declared `Field.boolean` / `Field.toggle` column can hold the text `'0'`, `'1'`, `'true'` or `'false'` on SQLite: a column whose type changed to boolean without a rebuild keeps TEXT affinity, and rows a boot has not converged yet still hold the legacy text. Record reads presented those values as their boolean, but `distinct()` and an `aggregate()` group key presented them as `Boolean(value)`, so a stored `'0'` or `'false'` showed as `true`. A group-by over a yes/no field then counted un-ticked rows in a `true` bucket, and `distinct()` could answer `[true]` for a column with no ticked row.
+  
+  Both doors now present a boolean through the same function the record read uses: `0`, `'0'` and `'false'` read as `false`; `1`, `'1'` and `'true'` read as `true`. Any other value reads as it did. Postgres is unchanged, since it stores a real boolean. `min` / `max` / `sum` / `avg` over a boolean still answer a number, as before. No metadata key, value or default changes.
+- 65b67be: feat(mcp): `aggregate_records` orders, cuts and counts its groups in the database
+  
+  Clause-②: yes (widening: `orderBy` and `limit` arguments on `aggregate_records`)
+  Metadata-protocol: none
+  
+  A ranking question ("the top five customers by revenue") over more groups than the tool's row cap used to come back as every group, or the first page of them, in no stated order, and the client ranked what it happened to get. `aggregate_records` now takes `orderBy` — a list of `{ field, order }` naming an aggregation alias or a group key (its alias when it has one) — and `limit` (at most the row cap). The database orders the groups, cuts them, and counts how many groups it formed before the cut, in one statement; the result carries the groups, `totalGroups` (the key the tool already answers, now the database's count of the groups before the cut), and `truncated: true` when more groups existed than came back.
+  
+  - An order key that names no column of the aggregated row is refused `INVALID_SORT` / 400, naming the columns the query projects.
+  - Only a driver that runs the cut in its own SQL statement serves it: `driver-sql` (every dialect it speaks; the window `count(*) over ()` needs MySQL 8 or later), the WASM SQLite driver, and the Turso driver's local and replica faces. Every other driver (the in-memory driver, MongoDB, OData, Turso's remote face), an aggregate the engine computes in memory (a date bucket, a reference timezone or a measure filter the driver does not run), and an aggregate with `having` are refused `INVALID_QUERY` / 400 before anything is read. Groups are never ordered or cut in the application.
+  - On an order key without a `rank`, a NULL ranks last in either direction, except a `sum` or a count with no value, which ranks as the `0` it is served as. Group keys the order does not name, and a group key it names only by a `rank`, break ties, ascending, NULL last, so two runs of one call answer the same groups in the same order.
+  - An order key may carry a `rank`, a list of the column's values: the statement ranks each listed value by its position and every other value (a NULL among them) on one rank past them, before the cut, so the unlisted values come after the listed ones ascending and before them descending; among themselves they follow the column's own ascending order, NULL last. It is the tool's own, never an `aggregate_records` argument.
+  - A `limit` with no `orderBy` keeps the declared option order the uncut answer already follows: groups keyed by a leading select or radio field come back in the order the field declares its options, a value no option declares last, and the database takes that order before the cut, so the cut keeps the first declared groups. An `orderBy` the caller sends overrides it.
+  - The cut answer carries what the uncut one does: a fixed-currency amount's currency in `currencies`, and `KEY__label` beside each lookup or master-detail group key, the record's name read with the caller's own permissions.
+  - An amount whose records each carry their own currency is ranked by its bare numbers across currencies: the tool description says to rank it inside one currency by filtering `where` on its currency code field.
+  - Without `orderBy` and `limit` the tool answers as before.
+  
+  `@objectstack/objectql` exports `AGGREGATE_ORDER_CUT`, the engine-internal read option of `aggregate` that carries the request (a symbol, so no wire request can set it), with the `AggregateOrderCutRequest`, `AggregateOrderKey` and `AggregateOrderCutOutcome` types. `McpDataBridge` gains the optional member `aggregateGroups`; a bridge without it refuses `orderBy` / `limit` with `NOT_IMPLEMENTED` / 501 and keeps serving the rest of the tool. Nothing that was accepted before is refused.
+- 1caee8c: feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
+  
+  Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
+  Metadata-protocol: none
+  
+  `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
+  
+  - The row is chosen among the rows the caller may read and the `where` admits: a group whose newest row is hidden from the caller answers its newest readable row, never the hidden one and never nothing. The organization wall holds inside the choice. Field masking still applies to the returned rows.
+  - A partition or order field the caller may not read is refused as it is in `orderBy`; a computed, JSON or multi-value field, or a dotted path, is refused as a partition or order field.
+  - `limit` counts groups, capped at the tool's `maxLimit` like any list. The answer is `{ object, records, hasMore }` and never a `total`; when more groups exist than came back it carries `truncated: true`.
+  - Served by the SQL driver (Postgres, MySQL, SQLite) and by `driver-sqlite-wasm` and the Turso driver on a local or embedded-replica database: the driver compiles a `ROW_NUMBER()` window over the read's own scoped selection. Every other driver (in-memory, Turso's remote connection, MongoDB), an object with an `afterFind` hook and an object with object-scoped read middleware refuse with `INVALID_QUERY` / 400 before anything is read. The Turso driver's remote face refuses the directive itself too.
+  - New exports: `LATEST_PER`, `LATEST_PER_MAX_KEYS` and the `LatestPerRequest` / `LatestPerOrder` / `LatestPerOutcome` types from `@objectstack/objectql`; `LATEST_PER_DIRECTIVE`, `latestPerDirectiveOf` and the `LatestPerDirective` / `LatestPerDirectiveOrder` types from `@objectstack/driver-sql`; `McpLatestPer` from `@objectstack/mcp`. The request rides an in-process read option, never a wire or query key; `@objectstack/spec` is unchanged.
+  
+  Without `latestPer`, `query_records` and every read are unchanged.
+- 61722e9: feat: Change Owner cascade — a relationship declares `transferBehavior: 'cascade'`, and the Change Owner dialog offers it as a tick
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36713
+  
+  A Change Owner can now move related records along with the record, relationship by relationship.
+  
+  - **The declaration.** A `lookup` or `master_detail` field takes `transferBehavior: 'none' | 'cascade'`, beside `deleteBehavior` (omitted means `'none'`). `'cascade'` on the child's reference field to a parent says: when the parent's owner changes, the child records that point at it and are owned by the parent's previous owner may move to the new owner too. No other child records move; there is no filter key.
+  - **Refused where it could never act.** The key is refused on any other field type, `'cascade'` is refused on a reference to a `sys_` object and on a multi-value reference (`multiple: true`), and `'cascade'` is refused on a field of an object that does not offer Change Owner itself: one that is not structurally eligible (no reassignable owner), a `controlled_by_parent` detail (its access already follows its master), or one whose `userActions.transfer` is off. Each refusal names the field and the fix.
+  - **The request.** `POST /api/v1/data/:object/:id/change-owner` and `POST /api/v1/data/:object/change-owner` take an optional `cascade: [{ object, field }]` naming the relationships to move along (`data.changeOwner` / `data.changeOwnerMany` in `@objectstack/client`). A relationship that does not declare `'cascade'`, or whose child does not offer Change Owner, is refused `400 VALIDATION_ERROR` before anything is written; so is a cascade with a queue target. Each cascaded record is updated as the caller, so it needs the caller's own transfer grant on the child object. Each relationship's outcome in the answer's `cascade[]` lists every record the caller's write refused, with its id, code and sentence: a related record whose `owner_id` is locked on it (read-only, or under a `readonlyWhen` that holds) is refused `FIELD_NOT_ACCESSIBLE` and keeps its owner, as the record itself would be, while the record's own move stands. One call moves at most 500 related records; the records past that limit are counted in `remaining`, still with the previous owner, not listed. When a relationship's records could not be read, its outcome carries `readFailure` and none of them moved.
+  - **The candidates.** `GET /api/v1/data/:object/change-owner/cascades` (`data.changeOwnerCascades`) lists the relationships declared to an object whose child offers Change Owner. A child whose declared API exposure does not serve `update` is left out, and so is a child of a disabled package.
+  - **The Studio.** The field form and the object form's field rows offer `transferBehavior` beside `deleteBehavior`, on `lookup` and `master_detail` fields; the row's label and help text ship in the metadata-forms locale packs of `@objectstack/platform-objects`.
+  - **The dialog.** For a person target, the Change Owner dialog lists those relationships on which the explain engine allows the caller the `transfer` operation, one tick each, sends the ticked ones, and draws each relationship's outcome, every record it did not move included.
+  
+  A plain `owner_id` update is unchanged: the declaration is read only by the Change Owner action.
+- c0484c8: fix(driver-sql): on SQLite, a boolean field retyped from text stores `1` / `0`, so a saved `false` no longer reads as `true`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On SQLite, a field whose type changed from `text` to `boolean` keeps its TEXT column. Every write of that field (create, update, upsert, bulk create, bulk update, update-many) stored `false` as the text `'0.0'` and `true` as `'1.0'`, because the JS number a boolean was bound as reached SQLite as a REAL. Reads then answered `true` for both, `distinct()` and group keys counted every row as `true`, and an `= false` filter disagreed with what the rows showed.
+  
+  - **Writes.** A declared scalar `boolean` / `toggle` value is now bound as the text `'1'` / `'0'`. A column the driver created still stores the integer `1` / `0`, so its stored form does not change; a retyped TEXT column stores `'1'` / `'0'`, which reads back as the boolean that was written.
+  - **Filters.** A boolean comparand on such a field is bound the same way, so `= false`, `= true` and `in [false]` select exactly the rows that read as that boolean.
+  - **Existing rows.** The boot's boolean storage convergence now also rewrites the `'1.0'` / `'0.0'` that earlier writes left, the same as it rewrites `'true'` / `'false'`; `os migrate plan` counts them under `normalize_boolean_storage`. Nothing to run by hand: the next start converges them.
+- 643fe3b: feat(driver-sql, driver-turso): the SQL drivers compile the `SharedRecordIds` fixed-read leaf to a subquery (ADR-0155, step 3 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **The compile** (`@objectstack/driver-sql`). A `SharedRecordIds` leaf in a field's `$in` compiles to one subquery in the list's own position: `id IN (SELECT record_id FROM sys_record_share WHERE object_name = ? AND recipient_type = 'user' AND recipient_id = ? AND record_id IS NOT NULL AND record_id <> '')`. The write form adds `AND access_level IN (…)` inside the subquery. Every value is bound. The subquery carries no tenant scope (ADR-0155 ① ruled A), and the outer statement's tenant wall is unchanged. It compiles on every read verb and on `updateMany`, for SQLite, PostgreSQL, MySQL, SQL Server and Oracle. SQLite and PostgreSQL were run live for this release. MySQL, SQL Server and Oracle are pinned at compile shape, and MySQL also runs live in CI's Temporal Conformance job. On PostgreSQL, an object whose `id` column is not text (an integer- or uuid-keyed federated table) fails the compiled subquery with `DATABASE_ERROR` (42883) instead of answering its rows. That case is open on #35906 (ADR-0155 D-0) and is settled before the sharing plugin writes the leaf. On Oracle the `<> ''` half is left out, because Oracle stores `''` as NULL. `SqliteWasmDriver` and Turso's local mode inherit the compile.
+  - **The remote transport** (`@objectstack/driver-turso`). Turso's remote mode compiles the same subquery with its own compiler, from the same predicates.
+  - **The declaration.** `SqlDriver.supports.fixedReadLeaves` is `['SharedRecordIds']`, and `TursoDriver` inherits it in every mode. The engine's seam now hands the leaf to these drivers instead of refusing it.
+  - **The refusal.** A leaf anywhere other than a field's `$in` comparand is refused before any statement runs, with `INTERNAL_ERROR` / 500, and logged at `error` once per driver.
+  - **New exports** (`@objectstack/driver-sql`). `findMisplacedFixedReadLeaf`, `fixedInnerReadPredicates` and `misplacedFixedReadLeafMessage` are the walk, the predicates and the refusal text the two compilers share.
+  - **The shared case-set** (`@objectstack/spec`). `SHARED_RECORD_IDS_CASE_SET` gains a note (`n5`) on a doc whose only grant is stamped in another organization, and a nested case read under a tenant. Together they witness, in the nested position, that the inner read carries no tenant scope.
+- 850bcec: feat(driver-sql): on PostgreSQL the share-grant subquery compares `record_id` as the outer key's own type (ADR-0155 O2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step, and this makes that step safe on PostgreSQL tables whose key is not text.
+  
+  - **PostgreSQL, a key that is not text.** The compiled subquery `id IN (SELECT record_id FROM sys_record_share WHERE …)` now projects `record_id` cast to the base type of the column it is compared with: `CAST(NULLIF(record_id, '') AS <type>)`. A federated table keyed by `integer`, `bigint`, `smallint`, `numeric`, `uuid`, `character(n)` or a domain over one of them answers the same rows as the id list of the same grants: `07` names 7, an upper-case or braced uuid names its lower-case twin, and a padded grant names a `character(n)` key. Before, an integer or uuid key failed the statement with `DATABASE_ERROR` (42883), and a `character(n)` key silently missed a padded grant.
+  - **A malformed grant id** (`abc` against an integer key) fails the statement with `DATABASE_ERROR` / 500, the same answer the id list gives for it.
+  - **How the type is known.** The driver reads the column types of the compared table from `pg_catalog` once, the first time a statement holding the leaf reaches that table, and outside a transaction keeps the answer for the life of the driver (inside one, see the next bullet). A statement with no leaf reads nothing. A failed or empty catalog read records nothing and is asked again by the next statement.
+  - **No reading, no statement.** On PostgreSQL a statement whose leaf is compared with a table the driver holds no catalog reading of is refused with `INTERNAL_ERROR` / 500 (logged once), and never runs uncast, which on a `character(n)` key would miss a padded grant silently. A table has no reading when the catalog read fails or finds no such relation; nothing is recorded, and the next statement reads the catalog again.
+  - **Read where the statement runs.** A statement in the caller's transaction reads the catalog on that transaction's own connection, inside a savepoint: it needs no second pooled connection, it sees a table the transaction created, and a failed read rolls back the savepoint alone, so the caller's transaction stays usable. That reading is kept for that transaction only, and reaches every savepoint derived from it, so a write the driver itself retries in a savepoint (an `updateMany` on an object whose `updated_at` column is only presumed) compiles with it; a reading a savepoint takes never reaches its parent. Each transaction therefore pays one savepoint and one catalog read per table it compares a leaf against. A statement outside a transaction reads on the pool and the reading is kept for the life of the driver.
+  - **Unchanged, and what text keys get.** A `text` or `varchar` key, which is every table the platform creates, compiles to exactly step 3's statement, with no cast. What is new for it: the first leaf statement on that table (once per driver, or once per transaction inside one) is preceded by the catalog read, and if that read fails, or finds no such relation, the statement is refused with `INTERNAL_ERROR` / 500 instead of being run. SQLite, MySQL, SQL Server and Oracle compile exactly as before and read no catalog; SQLite answers the list's rows by column affinity. MySQL and SQL Server keys are not measured against a live server yet. An Oracle `RAW(16)` uuid key is expected to fail the statement (ORA-01465, by reading: the subquery converts a dashed uuid grant to `RAW` implicitly, where the id list binds its undashed hex); it is not measured, and is tracked on #35952.
+- 907b378: feat(driver-sql): on Oracle the share-grant subquery converts `record_id` the way the id list binds a `RAW(16)` uuid key (ADR-0155 O2)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step, and this makes that step answer the right rows on Oracle tables keyed by a `RAW(16)` uuid (`SYS_GUID()` keys).
+  
+  - **Oracle, a `RAW(16)` uuid key.** The compiled subquery `id IN (SELECT record_id FROM sys_record_share WHERE …)` now projects the id list's own conversion when the compared column is a `RAW(16)` uuid column, the same catalog reading that makes the list bind its members as `HEXTORAW(?)`: `HEXTORAW(CASE WHEN REGEXP_LIKE(record_id, UUID_PATTERN, 'i') THEN REPLACE(record_id, '-', '') ELSE 'not-a-uuid' END)`. A grant in upper, lower or mixed case, dashed (8-4-4-4-12) or as 32 undashed digits, names the same row it names in the list. `UUID_PATTERN` is the list's own uuid-text check, written for Oracle from the same constant. Before, Oracle compared the column as its upper-case hex text: the subquery matched no row and its negation every row, with no error.
+  - **A grant the id list refuses fails the statement.** The list refuses a value that is not uuid text before any statement (`INVALID_FILTER` / 400). Every such stored grant fails the subquery's statement instead, with `DATABASE_ERROR` / 500 (ORA-01465), on the read and on its negation: hex of another length (31 or 33 digits, `0123`), 32 digits with dashes out of place, a grant of dashes only, a blank or a padded uuid, a braced uuid, or text that is not hex. None of them answers a row, and none empties a negation.
+  - **Unchanged.** Any other Oracle key compiles exactly as before; a `NUMBER` key converts each grant as it converts the list's text binds (measured: the same rows, and the same ORA-01722 for a grant that is not a number). Every other dialect compiles exactly as before.
+- 521b4f6: fix(driver-sql): on Oracle, a read scoped by a parent with a RAW(16) uuid key answers its rows on a driver that has not read the parent yet
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A child read whose composed `ReadableIds` scope names a federated parent with a `RAW(16)` uuid key, such as the read plugin-security derives for a `controlled_by_parent` object, answered no row on Oracle, and its negation answered every row, with no error. It recovered only once something had read the parent on that driver. The driver reads a federated table's `RAW(16)` columns from the Oracle catalog before it binds a comparand, and it read them for the door's own object only, so the parent's ids bound as text and Oracle compared them with the column's upper-case hex.
+  
+  Each door that compiles a filter (`find`, `findOne`, `count`, `distinct`, `aggregate`, its measure filters and its joined parents, `updateMany`, `deleteMany`, `findWithWindowFunctions` and `analyzeQuery`) now also reads the `RAW(16)` columns of every object a composed `ReadableIds` scope in that filter names, at any depth. The parent's ids bind through `HEXTORAW`, for a list of ids and for the share-grant subquery alike. Nothing changes for any other dialect.
+- 9a82465: fix(analytics)!: the native dataset face and the draft preview refuse `=` / `$in` / `$ne` on a single-value `image` or `file` column the driver stores as JSON, as the data door does
+  
+  Clause-②: yes (narrowing) — widened: `SqlDriver.jsonColumnFieldClass` (`@objectstack/driver-sql`) is now public, and so on every class that extends it (`TursoDriver`, `SqliteWasmDriver`), and the exported `AnalyticsServiceConfig` (`@objectstack/service-analytics` root) gains the optional key `jsonColumnFieldClass`; narrowed: the native dataset face and the draft preview newly answer `400 INVALID_FILTER` for a scalar comparison on a single-value media column the driver stores as JSON, which they answered `200` with a wrong count before
+  Metadata-protocol: none
+  Skills-docs: none — no published skill documents the dataset door's filter vocabulary per storage class; the refusal text itself carries the prescription (the media-column move), and the operator contract `skills/` describes (`$contains` for membership on a JSON column) is unchanged
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is the answer the native dataset face and the draft preview give a scalar comparison on a single-value media column, so no stored row, registry key or authored value changes and there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a caller of the dataset query door whose filter compares a single-value `file` / `image` / `avatar` / `video` / `audio` field with `=` (explicit or implicit), `$in`, `$ne`, `$nin`, an ordering comparison, `$between` or the non-membership text family, on a deployment still inside the ADR-0104 dual-encoding window (its media columns not yet moved, which is every deployment that has not run the move).
+  
+  - FROM: the native dataset face compiled the comparison against the stored JSON string (`"file_1"`) and answered `200` with the wrong count — `{ pic: 'file_1' }` and `{ pic: { $in: ['file_1'] } }` counted `0`, `{ pic: { $ne: 'file_1' } }` counted every row — and the draft preview answered `200` with its own counts, matching the bare id a drafted row holds. `POST /api/v1/data/:object/query` and this door's ObjectQL strategy already refused the same filter `400` `INVALID_FILTER`.
+  - TO: all four faces refuse it `400` `INVALID_FILTER`, in `@objectstack/core`'s one refusal text for this column class — the media-column move, not the `$contains` membership repair, which finds no member in a single JSON string.
+  
+  **Widened, alongside.** `SqlDriver.jsonColumnFieldClass(table, field)` is now a public, read-only member: it answers `'single-value-media'`, `'multi-value-or-json'` or `undefined` for a column on this deployment, the same answer the data door's refusal reads. A subclass that redeclares it as `protected` must widen it to `public`. `AnalyticsServiceConfig.jsonColumnFieldClass` is the optional hook the analytics host reads it through; `AnalyticsServicePlugin` wires it from the driver that stores the object, and a host that wires nothing keeps its earlier behaviour. `TursoDriver` answers it on the remote face from the same registry its remote transport already reads.
+  
+  **Not moved.** `$contains` / `$notContains` and the null predicates (`$null`, `$exists`, `$empty`) on such a column, every operator on a scalar column, the multi-value and structured-JSON class (unchanged since it was refused on these faces), and a deployment whose media columns have moved — the column is not JSON there, and the comparison is answered.
+  
+  The fix for a caller: filter on the record the attachment belongs to, ask presence with `$null` / `$empty`, or finish the deployment's media-column move (the column step of `objectstack migrate files-to-references --apply`, which the refusal text prescribes) so the column is comparable.
+- b572420: Clause-②: no
+  Metadata-protocol: none
+  
+  A column's literal DEFAULT now follows the field's declaration on a table an earlier release created, not only on a fresh database. When a field drops its literal `defaultValue`, schema drift reports the column's leftover DEFAULT (`drop_column_default`); when the declared literal changes, it reports the old one (`set_column_default`). Both are `safe`: dev auto-reconcile, a publish of the object, the artifact-pinned boot and `os migrate apply` apply them, in place on PostgreSQL and MySQL and by the table rebuild on SQLite. Before, the table kept the old DEFAULT, every insert that left the field unset stored the old value where a new database stored the declared one (or nothing), and `os migrate plan` showed nothing. Stored rows are never rewritten, and a DEFAULT that is an expression (a `NOW()` default, a sequence) is left alone. A plain production boot still alters no existing column: it logs the entry, and `os migrate apply` applies it.
+- 70194ff: feat(audit): a record's activity stream shows each changed field's old → new values by default, with a new `fieldHistory` off switch on the object and the field, and a reader is served only the changes of fields they may read
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  A record's activity stream now shows `Field: old → new` for every changed field, on every object, unless the object or the field turns it off. Before, values showed only for a field that declared `trackHistory: true`. Every other change was named by its field label alone.
+  
+  - **New `enable.fieldHistory`, with no default.** Absent: values show. `false`: off for the object, and a change names its fields only. It has no default so that a parsed body never writes one. A built artifact or a stored definition therefore gets values when it is upgraded, with no rebuild.
+  - **`enable.trackHistory: false` alone no longer turns values off.** The flag keeps its meaning: with `true`, the default record page shows the compliance ledger's field changes to a reader the ledger serves, and the derived `history` API verb is served. To keep an object's activity free of values, write `enable: { fieldHistory: false }`. Every platform object that wrote `trackHistory: false` now also writes `fieldHistory: false`.
+  - **New field `fieldHistory`, with no default: the field's off switch.** Absent shows the values, `false` names the change without them, `true` shows them (a media or JSON type included). Under an object with `enable.fieldHistory: false`, values stay off whatever a field says.
+  - **Field `trackHistory: false` no longer means anything: it reads like absent, so the values show.** The field designer wrote it on every save while the key meant nothing, so a stored `false` cannot be told from a choice. `trackHistory: true` keeps one job: it opts a media or JSON field in. A credential field (`secret`, and `password` off better-auth objects) never shows values, because both sides are the same mask. A media or structured-JSON field (`image`, `file`, `avatar`, `video`, `audio`, `signature`, `composite`, `repeater`, `record`, `location`, `address`, `code`, `json`, `vector`) shows them only with an explicit `true` (`fieldHistory` or `trackHistory`).
+  - **The new field key is classified where every `FieldSchema` key is.** The SQL driver counts `fieldHistory` as a presentation key, so creating a column never reads it. The field-level-security scrub keeps it as written, because a boolean names no field.
+  - **Who reads a value:** the field-change code (`metadata.summary_message`) is now served to readers. It is narrowed change by change with the same field answer as `metadata.old` and `metadata.new`. A reference field's change is kept only for a reader served the referenced record's title. When a reader is not served some of a summary's changes, the summary is rebuilt from the changes they are served instead of being dropped whole. The full audit ledger is not widened.
+  - **A long value no longer fails the activity insert.** The stored summary is fitted to `sys_activity.summary`'s `maxLength` (500): each side is cut first, then trailing changes are left out. The code keeps every change, with each side capped at 1,000 characters.
+  
+  To keep an object's activity free of values, set `enable: { fieldHistory: false }` on it. For one field, set `fieldHistory: false` on that field; `trackHistory: false` does not turn values off.
+- 28588d0: feat(spec): a field can say it is not asked for when a record is created (`showOnCreate`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36455
+  
+  `FieldSchema` gains `showOnCreate`, an optional boolean. Absent or `true`, the field is asked for when a record is created, as today. `false` says the business does not ask for it at creation: every create surface (the create dialog, the full-page create, an action-opened create) leaves it out, while editing, the record page and lists keep showing it, so the value is filled in after the record exists.
+  
+  - The one pair refused is `showOnCreate: false` on a `required: true` field, at the field's `showOnCreate` key, at every door that parses a field (`defineStack`, `os validate`, the metadata save): a required field is always asked for when a record is created, so the person creating it sees every value the record must have. The message names both fixes (keep the field on create, or drop `required`). A declared `defaultValue` makes no exception: the field is still asked for, with its default filled in. A `requiredWhen` field is accepted, since its gate is a predicate the parse cannot judge; the write door still refuses a create born inside it.
+  - No create surface reads the key yet: it is `planned` in the liveness ledger, and the Console's create surfaces read it in the change that follows. Nothing that parses today is refused, and no parsed field's output changes (the key has no default).
+  - `@objectstack/driver-sql` and `@objectstack/metadata-core` classify the new key in their every-field-key ledgers: `FIELD_KEY_STORAGE_CLASS` marks `showOnCreate` `presentation` (the DDL never reads it), and `FIELD_REFERENCE_POSITIONS` keeps it, since it is a boolean that names no field. Neither changes what it does with any field.
+- 89ce4fb: fix(driver-sql): removing a field's default stores NULL on MySQL 8, and never leaves a NOT NULL column refusing writes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  #36245 made schema sync drop a column DEFAULT the field no longer declares. On MySQL 8 the drop left the column with no default at all, so an insert that omitted the field was refused ("Field … doesn't have a default value") where Postgres and SQLite store NULL. On a nullable column MySQL now sets the default to NULL instead, so an unset insert stores NULL on all three databases.
+  
+  On a NOT NULL column the drop no longer travels alone, because the database would then refuse every insert that omits the field. When the field does not hold the column NOT NULL (no `storage.notNull` and not `required`, or `storage: { notNull: false }` in words), the drop is reported together with relaxing the column, both `needs_confirm`: `os migrate apply` applies them, and so do the publish of the object and the managed install of its package when the field declares `storage: { notNull: false }`. Afterwards an unset insert stores NULL. Dev auto-reconcile applies neither, as before for a relax. When the field still holds the column NOT NULL (`storage: { notNull: true }` or `required`), the column is left alone and the stale default is reported as `destructive`, which no automatic path applies. No metadata key, value or default changes.
+- e845656: fix(driver-sql): a `storage.notNull` field added to an object whose table already holds rows no longer fails that object's schema sync
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The additive schema sync emitted `ALTER TABLE … ADD COLUMN … NOT NULL` with no DEFAULT. Every existing row would hold NULL in the new column, so SQLite (`Cannot add a NOT NULL column with default value NULL`) and Postgres (`column … contains null values`) refused it, the object's whole sync failed, and the object became unwritable on upgrade.
+  
+  The column is now added nullable when the table already holds a row and the field declares no literal or `NOW()` default those rows can take. The drift report names it as `tighten_not_null`, and `os migrate apply --allow-destructive` imposes the constraint after the backfill, which is the path the `storage.notNull` description promises. A column added to an empty table, or one whose declared default fills the existing rows, is still added `NOT NULL`. `required` is unaffected: the engine still refuses a write that omits the field.
+- c3c04a2: fix(driver-sql): a MySQL TEXT column carries its field's declared literal default
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - On MySQL, a text-family field (`text`, `textarea`, `markdown`, `html`, `richtext`, `code`, an unbounded `string`, …) that declares a literal `defaultValue` now gets that DEFAULT on its column. Before, the DEFAULT was silently left out of the DDL, because MySQL takes a DEFAULT on a TEXT column only in the expression form (`DEFAULT ('d')`, MySQL 8.0.13+ / MariaDB 10.2+). So adding such a field with `storage: { notNull: true }` to a table that already held rows filled every existing row with `''` instead of the declared value, and any insert that left the field out was refused (`Field '…' doesn't have a default value`). Postgres and SQLite are unchanged.
+  - The schema differ reads MySQL's spelling of that DEFAULT (`_utf8mb4\'d\'`) as an expression, so it no longer proposes restating a default the column already carries.
+  - A table an earlier release created keeps its TEXT column without a DEFAULT. Nothing reports that difference, as before. Writes through the engine still store the declared default there.
+- 7291c6f: fix(driver-turso): the remote face gives a declared field's column the DEFAULT the local face gives it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none (no key or value an author can write changes, and `defaultValue` means what it meant: the remote face now writes the column DEFAULT the local face already writes for the same declaration)
+  
+  - **A `storage.notNull` field with a literal `defaultValue`, added to a table that already holds rows, now syncs on a hosted Turso/libSQL environment.** The remote face emitted no column DEFAULT for any field, so SQLite refused `ADD COLUMN … NOT NULL` there (`Cannot add a NOT NULL column with default value NULL`), and that object's whole sync failed through `syncSchema` and `syncSchemasBatch`; the local face accepted the same declaration. Both faces now add the column NOT NULL with the DEFAULT, and the existing rows take it.
+  - **A fresh remote table carries the same column DEFAULTs as a fresh local one**, on `CREATE TABLE` and on `ADD COLUMN`, for every field that declares a literal or `NOW()` default, nullable fields included. A multi-value column, a runtime token other than `NOW()` (such as `current_user`) and an object default get none, as on the local face. The shared drift differ reads a remote column as no drift.
+  - **A nullable field with a literal `defaultValue`, added to a remote table that already holds rows, now fills those rows with the default**, as on the local face; before, they read NULL.
+  - **Known limit: the remote face cannot change a column DEFAULT once it has written one.** If an author later edits or removes a literal `defaultValue`, the drift differ reports it (`set_column_default` / `drop_column_default`), but on the remote face both need a table rebuild, which the remote transport does not run. The column keeps the old DEFAULT, so an insert that omits the field stores the old value, and the finding stays reported. Tracked in #37430.
+  - **Not changed: a `NOW()` default on a column added to a table that already holds rows.** SQLite refuses a non-constant DEFAULT on that statement, so the remote face leaves it out and keeps its earlier answer: a nullable field is added with no DEFAULT, and a `storage.notNull` field is still refused. The local face currently refuses both; that defect is tracked separately.
+  - New `@objectstack/driver-sql` exports for drivers that write SQLite DDL as text: `emitsDeclaredColumnDefault` (which fields get a column DEFAULT), `sqliteDeclaredColumnDefaultSql` (that DEFAULT's SQLite text, or `null`) and `sqliteNowColumnDefaultSql` (the SQLite `NOW()` expression for a column type, the one the knex path uses).
+- e0b0471: fix(driver-sql,driver-turso): a `NOW()`-defaulted field added to a SQLite table that already holds rows no longer fails the object's schema sync
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  SQLite refuses a non-constant DEFAULT on `ALTER TABLE … ADD COLUMN` once the table holds a row. So adding a field that declares `defaultValue: 'NOW()'` (`datetime`, `date`, `time` or any scalar type) to a populated table used to fail the whole sync with `Cannot add a column with non-constant default`. Both the local face and the Turso remote face now give the same answer:
+  
+  - The column is added nullable and with no DEFAULT.
+  - In the same transaction, one statement fills the existing rows that hold NULL with the sync instant, the value the DEFAULT would have given. This holds on every door: the managed table, a rotation shard, and the remote `syncSchema` and `syncSchemasBatch`.
+  - The drift report then lists what is still owed: `set_column_default`, plus `tighten_not_null` when the field declares `storage.notNull`.
+  
+  The drift report now lists `set_column_default` for **any** SQLite column whose field declares `NOW()` but which has no DEFAULT. That includes columns created before this release. On a local SQLite database the entry is `safe`, so it is applied unattended by a full table rebuild:
+  
+  - at dev boot under `autoMigrate: 'safe'`;
+  - when the object is published;
+  - at an artifact-pinned boot.
+  
+  The rebuild rewrites no stored value.
+  
+  `tighten_not_null` is `destructive`, and two consequences follow:
+  
+  - Plain `os migrate apply` does not apply it; `os migrate apply --allow-destructive` does.
+  - While that entry stands, an artifact-pinned boot of a local SQLite database is refused, even though the sync has filled every row.
+  
+  On the Turso remote face, neither entry is applied by `os migrate apply` or by any boot: both need a table rebuild, which that face does not run yet. They stay listed by `os migrate plan`.
+  
+  New `@objectstack/driver-sql` exports, so both faces share one source:
+  
+  - `declaresSqliteNowColumnDefault(field)`: whether a field's SQLite column DEFAULT is the `NOW()` expression.
+  - `sqliteNowBackfillSql(table, added)`: the NULL-only fill statement.
+  - `quoteSqliteIdentifier(name)`: the SQLite identifier spelling that both faces write.
+- 702b0cf: fix(driver-sql)!: a boolean field is stored as a boolean whatever spelling the caller sends
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the write door of the SQLite-family drivers (SqlDriver on SQLite, both faces of TursoDriver, SqliteWasmDriver) for a direct caller: a value on a declared boolean or toggle field that spells no boolean is refused instead of stored, and the spellings it accepts are stored as the boolean they spell. The engine's own door already refuses those values with invalid_boolean, so no authored metadata, seed or stored row is rewritten and nothing needs a tombstone. -->
+  
+  **BREAKING** for a caller that writes through a SQLite-family driver directly (`create`, `update`, `upsert`, `bulkCreate`, `bulkUpdate`, `updateMany`) and sends a declared `boolean` / `toggle` field a value that spells no boolean, such as `'yes'`, `'TRUE'`, `''`, `2` or an array: it used to be stored as written and is now refused with `VALIDATION_ERROR` / 400 before anything is written. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes a driver call, so `Metadata-protocol` is `none`, and the engine's door already refuses those values.
+  
+  A declared scalar `Field.boolean` / `Field.toggle` is now stored as a boolean on SQLite whatever spelling the write sends. `true` / `false`, the numbers `1` / `0` and the text `'1'` / `'0'`, `'true'` / `'false'` and `'1.0'` / `'0.0'` are bound as the boolean they spell, so a column the driver created holds the INTEGER `1` / `0` and a `text` column retyped to `boolean` holds the text `'1'` / `'0'`. These are the spellings the local boot convergence already rewrites, read from the same table. Before, a string reached the column as text, on the local and the remote face of `TursoDriver` alike, so filters, sorts and groups did not read the row as the boolean it was written as. That includes a `beforeInsert` / `beforeUpdate` hook that assigns a string to such a field: the engine's own rewrite runs before the hooks, so the assignment now lands as a boolean too. On the remote face, a number written to a `toggle` field is stored as `'1'` / `'0'` instead of `'1.0'` / `'0.0'`.
+  
+  A remote `TursoDriver.bulkCreate` checks every row before it writes the first one, so a refused row refuses the batch with nothing written, as the local face's single INSERT already did. `null` still writes NULL. Rows stored before this change keep their stored form.
+  
+  To keep a direct write working, send `true` or `false` (or one of the spellings above) for a boolean or toggle field.
+- db9e34a: Clause-②: no
+  Metadata-protocol: none
+  
+  The drift plan's `safe` column entries for a declared field (`widen_date_to_datetime`, `widen_varchar`, `drop_column_default`) now name the remedy per object kind, as the `relax_not_null` entry already does. For an object authored in this environment, publishing the object applies the entry. For an object a package provides, which is sealed and cannot be published here, the message names `os migrate apply`, which applies it for either kind. Before, the date-to-datetime entry told a package object's reader to publish the object, which cannot apply it.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/observability@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -59,11 +59,16 @@ record sharing enforces writes (an object with an `owner_id` whose OWD is
 the floor for that row: ownership at the caller's write depth or
 `modifyAllRecords`, and, for an update, an `edit` share. On an update, a row
 sitting in a queue the caller belongs to gets the same `allow` under any OWD. A
-by-id write takes that replacement, and so does a predicate write unless an
-app-authored `using` policy for the write applies to the caller (then it keeps
-the floor beside that policy). A write made on another user's behalf keeps the
-floor. A `controlled_by_parent` detail's by-id write is
-judged by its master gate instead of the floor. An app-authored policy is never
+by-id write and a predicate write both take that replacement unless an
+app-authored `using` policy for the write applies to the caller; then the write
+keeps the floor beside that policy, so a row the caller created stays writable
+and the policy bounds every other row. A write made on another user's behalf
+keeps the floor. A `controlled_by_parent` detail's write, by id or by
+predicate, is judged by its master gate instead of the floor: a caller who may
+edit the master (or read it, where the detail declares
+`writeRequiresMasterRead`) writes the detail rows under it whoever created
+them, and a predicate write that reaches a master the caller may not write
+under is refused whole. An app-authored policy is never
 replaced. The Layer 0 tenant wall always ANDs on top. See
 [Sharing & OWD](/docs/permissions/sharing-rules#how-viewallrecords--modifyallrecords-interact-with-the-owd)
 and `plugin-security/src/security-plugin.ts` (`computeLayeredRlsFilter`).
@@ -154,7 +159,7 @@ Field-level security controls visibility and editability of individual fields pe
 | `opportunity.amount` | Visible, Editable | Visible, Editable | Visible, Editable | Visible | Visible |
 | `opportunity.margin` | Visible, Editable | Visible, Editable | Hidden | Hidden | Hidden |
 
-**View All / Modify All reach every field.** The Sales Manager column follows from section 2: `sales_manager_access` holds `viewAllRecords` on `contact` and `modifyAllRecords` on `opportunity`, and a set holding View All on an object reads every field of it that its own field rules do not hide, while Modify All reads and edits every field (ADR-0066 D2 ⑧ as amended). Field rules in other sets cannot hide `contact.ssn` from that manager. To keep a field from someone, withhold it in a set that grants the object without Modify All, and give them no other set that reads the field.
+**View All / Modify All widen records, not fields.** Each column is one set held alone: `sales_manager_access` names none of these fields, so each follows its object grant. View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) reach every record of the object and cast no field vote (ADR-0066 D2 ⑧, v19), so a manager who also holds `sales_rep_access` does not read `contact.ssn` or `opportunity.margin` through them: the rep set's `readable: false` row is the only vote on those fields. A set that must read every field whatever other sets say carries `viewAllFields: true` on the object; it votes read, never edit. A high-sensitivity field is gated by `requiredPermissions` on the field itself ([Field-level security](/docs/permissions/field-level-security#choosing-by-sensitivity)).
 
 ### FLS States
 

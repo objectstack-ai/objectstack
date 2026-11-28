@@ -27,6 +27,9 @@
         "platform-core.bare-name-one-holder-refusal"
       ]
     },
+    "ai_context": {
+      "waived": "WAIVED 2026-11-25 — the kind is new (ADR-0160 row 5, #37140) and no item has been run against it yet. What exists: the showcase declares two context packs (examples/app-showcase/src/ai/record-context.ai-context.ts) and mounts the record-context service, so a booted showcase serves `get_record_context` over MCP; the executor's rules (order of judgement, the naming bound, field- and row-level omission, the body outline and anchors, the read set) are pinned in packages/services/service-record-context/src/__tests__/record-context-tools.test.ts, and the tool on both MCP transports in packages/mcp/src/mcp-record-context-tools.test.ts. WHAT RETIRES THIS WAIVER — the next coverage sweep authors an `ai.` item that boots the showcase, calls `get_record_context` for a project (the brief pack) and a task (the notes pack, outline then one anchor) with an admin and a member osk_ key, and reads the answer against REST; the same edit replaces this waiver with `items` naming it."
+    },
     "analytics_cube": {
       "items": [
         "dashboards.cube-query"
@@ -48,7 +51,6 @@
         "search.command-palette-navigation",
         "platform-core.marketplace-install-local-lifecycle",
         "platform-core.marketplace-console-honesty",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.app-and-nav-properties"
       ]
     },
@@ -213,6 +215,9 @@
         "integration-system.job-package-key"
       ]
     },
+    "knowledge_source": {
+      "waived": "WAIVED 2026-11-26 — the kind is new (ADR-0161 K4, #37304) and no item has been run against it yet. What exists: the showcase declares one source (examples/app-showcase/src/ai/task-notes.knowledge-source.ts) and mounts the knowledge service with the in-memory store, so a booted showcase indexes its tasks and serves `search_knowledge`; the loader's rules (boot read, add, change, remove with the index dropped) are pinned in packages/services/service-knowledge/src/__tests__/knowledge-source-loader.test.ts, one name per source in knowledge-source-registry.test.ts beside it, and the two authoring guards in packages/rest/src/meta-type-write-capability.test.ts and packages/rest/src/meta-write-door-capability-enumeration.test.ts. WHAT RETIRES THIS WAIVER — the next coverage sweep authors an `ai.` item that boots the showcase, searches the task-notes source as an admin and as a member, saves a second source in Studio with and without `manage_knowledge_sources`, removes it and reads that its index is gone; the same edit replaces this waiver with `items` naming it."
+    },
     "manifest": {
       "items": [
         "platform-core.manifest-install-contract",
@@ -276,7 +281,6 @@
         "platform-core.nav-surfaces-render",
         "search.command-palette-navigation",
         "platform-core.marketplace-console-honesty",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.authored-page-slots-and-variables",
         "studio-authoring.uninstalled-package-refused",
         "api-backend.meta-qualified-item-read",
@@ -353,7 +357,6 @@
         "dashboards.dataset-report-authoring",
         "dashboards.drill-through-range",
         "search.command-palette-navigation",
-        "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.report-authoring-options",
         "studio-authoring.package-customize-restore-display",
         "dashboards.report-measure-drill-scope"
@@ -414,6 +417,9 @@
         "records-forms.validation-rule-type-matrix",
         "studio-authoring.validation-rules-authoring"
       ]
+    },
+    "form": {
+      "waived": "WAIVED 2026-11-26 — the kind is new (ADR-0159 card ②, #37086) and no checklist item has been run against an authored `form` item yet. What exists: the showcase authors one `form` item, `forms: [FeedbackForm]` (examples/app-showcase/src/ui/forms/feedback.form.ts, public at /forms/showcase-feedback, an address no other form holds); its contact-us form is still an old `view` shape (examples/app-showcase/src/ui/views/inquiry.view.ts), which the anonymous doors read through the one projection, so access-security.public-form-intake keeps driving the same door and the same answers. The type's own rules are pinned below the checklist — FormSchema, the projection and the intake layer in packages/spec/src/ui/form-item.test.ts, the two-type withdrawal, FORM_ADDRESS_TAKEN on save, publish and restore, the old-shape row removal and the package-less list refusal on both doors in packages/rest/src/public-form-two-type-withdrawal.test.ts, and the authoring rules in packages/lint/src/validate-form-items.test.ts. WHAT RETIRES THIS WAIVER — an item that drives GET /forms/showcase-feedback and its submit for the authored form, a `form` override that withdraws it, and the 409 for a second form left open on the address; the same edit replaces this waiver with `items` naming it. Card ④ (#37088: the examples, their translation keys and the docs move to `forms:`) moves the contact-us form, after which access-security.public-form-intake drives an authored form too."
     },
     "view": {
       "items": [

@@ -52,6 +52,9 @@ import type { ListViewVisualization } from '@object-ui/core';
 import { slugify } from './metadata-admin/createDerive.js';
 import { romanizeHan, useHanRomanizer } from './metadata-admin/romanizeHan.js';
 import { datasetOptionLabel, useObjectDatasetBinding } from './studio-design/objectDatasets.js';
+import { usePickerLoad } from './metadata-admin/loadState.js';
+import type { CapabilityAudience } from './capabilityAudience.js';
+import { ViewAudiencePicker } from './ViewAudiencePicker.js';
 import {
   deriveFieldOptions,
   isImageLikeField,
@@ -881,7 +884,7 @@ export function CreateViewDialog({
                 <div id={labelId} className="text-xs font-medium leading-tight">{typeLabel}</div>
                 <div
                   id={textId}
-                  className="text-[10px] leading-tight text-muted-foreground"
+                  className="text-xs leading-tight text-muted-foreground"
                   data-testid={`create-view-type-${type}-text`}
                 >
                   {unavailableReason ?? description}
@@ -943,13 +946,13 @@ export function CreateViewDialog({
                     disabled={noEligible || pending}
                   />
                   {rf.helpI18nKey && !noEligible && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {t(rf.helpI18nKey)}
                     </p>
                   )}
                   {noEligible && (
                     <p
-                      className="flex items-center gap-1 text-[11px] text-destructive"
+                      className="flex items-center gap-1 text-xs text-destructive"
                       data-testid={`create-view-error-no-field-${rf.key}`}
                     >
                       <AlertCircle className="h-3 w-3" />
@@ -979,7 +982,7 @@ export function CreateViewDialog({
             className="h-9"
           />
           {isDuplicate && (
-            <p className="text-[11px] text-destructive" data-testid="create-view-error-duplicate">
+            <p className="text-xs text-destructive" data-testid="create-view-error-duplicate">
               {t('console.objectView.duplicateViewName')}
             </p>
           )}
@@ -1001,15 +1004,15 @@ export function CreateViewDialog({
             className="h-9 font-mono"
           />
           {nameMissing ? (
-            <p className="text-[11px] text-muted-foreground" data-testid="create-view-machine-name-help">
+            <p className="text-xs text-muted-foreground" data-testid="create-view-machine-name-help">
               {t('console.objectView.viewNameRequired')}
             </p>
           ) : nameInvalid ? (
-            <p className="text-[11px] text-destructive" data-testid="create-view-error-machine-name">
+            <p className="text-xs text-destructive" data-testid="create-view-error-machine-name">
               {t('console.objectView.viewNameInvalid')}
             </p>
           ) : (
-            <p className="text-[11px] text-muted-foreground" data-testid="create-view-machine-name-help">
+            <p className="text-xs text-muted-foreground" data-testid="create-view-machine-name-help">
               {t('console.objectView.viewNameHelp')}
             </p>
           )}
@@ -1082,6 +1085,14 @@ export interface InPlaceViewRequest {
   scope: 'personal' | 'shared';
   /** Carry the list's unsaved filters and sort into the new view. */
   includeCurrent: boolean;
+  /**
+   * objectstack#34908 — a shared view's audience gate as the card's picker
+   * left it: the capabilities a reader must all hold (`[]` = no gate). Present
+   * only when the card offered the picker, and then it is authoritative over
+   * any gate the new view would otherwise inherit from the open one; absent,
+   * the host builds the body as before.
+   */
+  requiredPermissions?: string[];
 }
 
 export interface CreateViewCardProps {
@@ -1112,6 +1123,15 @@ export interface CreateViewCardProps {
   onCreate: (request: InPlaceViewRequest) => boolean | Promise<boolean>;
   /** Back to the view list. */
   onBack: () => void;
+  /**
+   * objectstack#34908 — read the audience catalog (the capabilities the
+   * environment knows, the permission sets granting each, the positions
+   * holding them). Given ⇒ the shared scope offers 「Who sees this view」;
+   * read once the reader picks Shared. Absent ⇒ no picker.
+   */
+  loadAudience?: () => Promise<CapabilityAudience>;
+  /** The open view's gate, the picker's starting value (the new view starts from the open one). */
+  initialRequiredPermissions?: readonly string[];
 }
 
 /**
@@ -1138,6 +1158,8 @@ export function CreateViewCard({
   shownFields,
   onCreate,
   onBack,
+  loadAudience,
+  initialRequiredPermissions,
 }: CreateViewCardProps) {
   const { t } = useObjectTranslation();
   const allTypes = useMemo(() => buildViewTypeMeta(t), [t]);
@@ -1159,6 +1181,12 @@ export function CreateViewCard({
   const [includeCurrent, setIncludeCurrent] = useState(true);
   const [scope, setScope] = useState<'personal' | 'shared'>(canCreatePersonal ? 'personal' : 'shared');
   const [submitting, setSubmitting] = useState(false);
+  const [requiredPermissions, setRequiredPermissions] = useState<string[]>(() => [...(initialRequiredPermissions ?? [])]);
+  const offersAudience = scope === 'shared' && !!loadAudience;
+  const audience = usePickerLoad<CapabilityAudience>(useMemo(
+    () => (offersAudience ? loadAudience! : null),
+    [offersAudience, loadAudience],
+  ));
   const submittingRef = useRef(false);
   const baseId = useId();
   // Loads the pinyin dictionary for a Chinese name, so the key reads as it.
@@ -1202,7 +1230,12 @@ export function CreateViewCard({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await onCreate({ config, scope, includeCurrent: hasUnsavedConditions && includeCurrent });
+      await onCreate({
+        config,
+        scope,
+        includeCurrent: hasUnsavedConditions && includeCurrent,
+        ...(offersAudience ? { requiredPermissions } : {}),
+      });
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -1219,7 +1252,7 @@ export function CreateViewCard({
           type="button"
           onClick={onBack}
           data-testid="create-view-card-back"
-          className="flex items-center gap-1 rounded-sm px-1.5 py-1 text-[13px] font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
+          className="flex items-center gap-1 rounded-sm px-1.5 py-1 text-sm font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
         >
           <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
           {t('view.switcher.addView', { defaultValue: 'Add view' })}
@@ -1239,12 +1272,12 @@ export function CreateViewCard({
             onFocus={(e) => { if (!touched) e.currentTarget.select(); }}
             onChange={(e) => { setLabel(e.target.value); setTouched(true); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submit(); } }}
-            className="h-8 text-[13px] max-sm:h-11"
+            className="h-8 text-sm max-sm:h-11"
             data-testid="create-view-card-name"
           />
         </div>
         {isDuplicate && (
-          <p className="text-[11px] text-destructive" data-testid="create-view-card-duplicate">
+          <p className="text-xs text-destructive" data-testid="create-view-card-duplicate">
             {t('console.objectView.duplicateViewName')}
           </p>
         )}
@@ -1254,7 +1287,7 @@ export function CreateViewCard({
             {t('view.switcher.typeLabel', { defaultValue: 'View type' })}
           </label>
           <Select value={selectedType} onValueChange={setSelectedType}>
-            <SelectTrigger id={typeId} className="h-8 text-[13px] max-sm:h-11" data-testid="create-view-card-type">
+            <SelectTrigger id={typeId} className="h-8 text-sm max-sm:h-11" data-testid="create-view-card-type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1296,7 +1329,7 @@ export function CreateViewCard({
         })}
 
         {hasUnsavedConditions && (
-          <label htmlFor={includeId} className="flex cursor-pointer items-center gap-2 text-[13px]">
+          <label htmlFor={includeId} className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               id={includeId}
               type="checkbox"
@@ -1334,14 +1367,19 @@ export function CreateViewCard({
           </div>
         )}
         {scope === 'shared' && (
-          <p className="text-[11px] text-muted-foreground" data-testid="create-view-card-shared-hint">
-            {t('view.switcher.scopeHint', { defaultValue: 'Shared views are seen by everyone who can see this list' })}
+          <p className="text-xs text-muted-foreground" data-testid="create-view-card-shared-hint">
+            {t('view.switcher.scopeHint', {
+              defaultValue: 'Shared views are seen by everyone who can see this list, unless the view is limited to the holders of a capability',
+            })}
           </p>
+        )}
+        {offersAudience && (
+          <ViewAudiencePicker audience={audience} value={requiredPermissions} onChange={setRequiredPermissions} disabled={submitting} />
         )}
 
         <Button
           type="button"
-          className="h-8 w-full text-[13px] max-sm:h-11"
+          className="h-8 w-full text-sm max-sm:h-11"
           disabled={!canSubmit || submitting}
           onClick={() => void submit()}
           data-testid="create-view-card-submit"

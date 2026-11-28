@@ -504,10 +504,18 @@ const SITES = [
       },
       {
         direction: 'missing',
-        keys: ['datasourceMapping', 'capabilities', 'docs', 'books', 'tools', 'skills', 'picklists'],
+        keys: ['forms'],
+        reason:
+          'not offered yet (ADR-0159 card ②): a `form` item is named `OBJECT.KEY` and is checked against its '
+          + '`object` (the name\'s prefix must equal it), so a map key standing in for the name would carry a '
+          + 'second spelling of that identity; the array form is the one the record and its conversion write.',
+      },
+      {
+        direction: 'missing',
+        keys: ['datasourceMapping', 'capabilities', 'docs', 'books', 'tools', 'skills', 'aiContexts', 'knowledgeSources', 'picklists'],
         reason:
           'no map form has ever been offered for these. `datasourceMapping` is a rule LIST whose precedence is '
-          + 'positional, so a map would lose the ordering that decides which rule wins; the other six are '
+          + 'positional, so a map would lose the ordering that decides which rule wins; the others are '
           + 'array-only authoring surfaces (`picklists` since it was declared). Offering a map form for any of them WIDENS what parses — an '
           + 'acceptance change, which belongs to its own reviewed diff rather than to this gate.',
       },
@@ -560,8 +568,8 @@ const SITES = [
         keys: [
           'datasources', 'datasourceMapping', 'objectExtensions', 'apps', 'jobs', 'emailTemplates',
           'docs', 'books', 'positions', 'capabilities', 'sharingRules', 'webhooks', 'tools', 'skills',
-          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
-          'queues', 'assignmentRules',
+          'aiContexts', 'knowledgeSources', 'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
+          'queues', 'assignmentRules', 'forms',
         ],
         reason:
           'DRIFT in the opposite direction, under the same acceptance constraint: ADDING a member widens '
@@ -754,8 +762,8 @@ const SITES = [
           'datasources', 'datasourceMapping', 'translations', 'objects', 'objectExtensions', 'apps',
           'views', 'pages', 'dashboards', 'reports', 'datasets', 'actions', 'flows', 'jobs',
           'emailTemplates', 'docs', 'books', 'apis', 'webhooks', 'agents', 'tools', 'skills',
-          'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
-          'queues', 'assignmentRules',
+          'aiContexts', 'knowledgeSources', 'hooks', 'mappings', 'analyticsCubes', 'connectors', 'data', 'picklists', 'picklistExtensions',
+          'queues', 'assignmentRules', 'forms',
         ],
         reason:
           'DELIBERATE — a four-collection SUBSET, not an enumeration of the collection set. This block '

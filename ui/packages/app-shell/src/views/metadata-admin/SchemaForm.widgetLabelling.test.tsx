@@ -51,6 +51,9 @@
  * that renders nothing, and that green would mean nothing.
  */
 
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 
@@ -153,6 +156,9 @@ const CASES: Case[] = [
   { key: 'ref-multi:permission', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, ctx: { permissionSets: loaded([{ name: 'sales_rep' }, { name: 'support_agent' }]) }, value: ['sales_rep'] },
   // No `ctx` at all: the hosts that feed no catalog get the typed-name box inside the same named list (objectui#12126).
   { key: 'ref-multi:permission', variant: 'no-catalog', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['sales_rep'] },
+  { key: 'ref-multi:capability', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, ctx: { capabilityAudience: loaded({ capabilities: [{ name: 'view_deal_sales', grantedBy: ['sales_rep_set'] }], positions: [] }) }, value: ['view_deal_sales'] },
+  // No `ctx` at all: a closed list says the capabilities are not available here, inside the same named list (objectstack#34908).
+  { key: 'ref-multi:capability', variant: 'no-catalog', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['view_deal_sales'] },
   { key: 'filter-mode', schema: { type: 'object', title: TITLE }, ctx: { objectFields: loaded([{ name: 'status' }]) }, value: { element: 'dropdown' } },
   { key: 'object-selector', schema: { type: 'string', title: TITLE }, ctx: { objectNames: loaded(['account']) }, value: 'account' },
   { key: 'object-selector', variant: 'multiple', schema: { type: 'array', title: TITLE }, spec: { multiple: true }, ctx: { objectNames: loaded(['account', 'contact']) }, value: ['account'] },
@@ -169,10 +175,12 @@ const CASES: Case[] = [
   { key: 'master-detail', schema: { type: 'array', title: TITLE, items: { type: 'object', properties: { name: { type: 'string' } } } }, value: [{ name: 'a' }] },
   { key: 'master-detail', variant: 'untyped-items', schema: { type: 'array', title: TITLE, items: {} }, value: [] },
   { key: 'string-tags', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['a'] },
+  { key: 'related-list-entries', schema: { type: 'array', title: TITLE }, value: ['task', { list: 'quote_line', label: 'Lines', columns: ['product'] }] },
   { key: 'multiselect', schema: { type: 'array', title: TITLE, items: { type: 'string', enum: ['grid', 'kanban'] } }, value: ['grid'] },
   { key: 'multiselect', variant: 'no-options', schema: { type: 'array', title: TITLE, items: { type: 'string' } }, value: ['a'] },
   { key: 'code', schema: { type: 'string', title: TITLE }, spec: { language: 'javascript' }, value: 'x = 1' },
   { key: 'secret', schema: { type: 'string', title: TITLE }, value: 's3cr3t' },
+  { key: 'field-history', schema: { type: 'boolean', title: TITLE }, formData: { type: 'json' }, value: false },
   { key: 'dynamic-config', schema: { type: 'object', title: TITLE }, spec: { dependsOn: 'driver' }, formData: { driver: 'pg' }, ctx: { dynamicSchemas: { pg: { properties: { host: { type: 'string' } } } } }, value: {} },
   { key: 'dynamic-config', variant: 'unconfigured', schema: { type: 'object', title: TITLE }, spec: { dependsOn: 'driver' }, formData: { driver: '' }, value: {} },
 ];

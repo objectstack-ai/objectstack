@@ -101,6 +101,7 @@ export * from './item-key-discriminators.js';
 // axis. Sunk here because the doors live in `@objectstack/runtime` and
 // `@objectstack/rest`, which share no other common home.
 export * from './meta-write-capability.js';
+export * from './knowledge-source-save-admission.js';
 // [#27884] The read-side twin: which readers a stored metadata document of a
 // capability-gated type (datasource, external_catalog) is served to, asked by the
 // `/meta` type gate (`@objectstack/rest`) and the engine's stored-row read gate
@@ -186,3 +187,11 @@ export * from './customization-pair-lookup.js';
 // objectql's lean entry, which `@objectstack/metadata-protocol` stays out of,
 // and every one of them already depends on this package.
 export * from './package-closure.js';
+
+// [ADR-0150 D3, #37609] The package-scoped resolution rule itself
+// (`resolvePackageScopedHolders`, its refusal and its vocabulary), moved here
+// from `@objectstack/core` beside the closure walk above, so the author-time
+// surface (`@objectstack/lint`, which depends on this package and never on a
+// runtime) judges a bare name by the one rule the runtime resolves it with.
+// `@objectstack/core` re-exports every name, so its public API is unchanged.
+export * from './package-scoped-resolution.js';

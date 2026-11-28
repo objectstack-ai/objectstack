@@ -52,6 +52,7 @@ import { bindRuleHooks, unbindAllRuleHooks, SHARING_RULE_HOOK_PACKAGE } from './
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { SysSharingRule } from './objects/sys-sharing-rule.object.js';
+import { inMembers } from './shared-record-ids.testkit.js';
 
 interface Row { [k: string]: any }
 
@@ -61,19 +62,20 @@ const ADMIN_SESSION = { isSystem: false, userId: 'admin' };
 
 type HookEntry = { event: string; handler: (ctx: any) => any; options: Row };
 
-function matches(row: Row, f: any): boolean {
+function matches(row: Row, f: any, shares?: Row[]): boolean {
   if (!f || typeof f !== 'object') return true;
   // A combinator is CONJOINED with its sibling field keys, never a
   // short-circuit that returns before they are read (#7676) — `listRules`
   // composes `{object_name, active, $or:[…org scope…]}`.
-  if (Array.isArray(f.$or) && !f.$or.some((x: any) => matches(row, x))) return false;
-  if (Array.isArray(f.$and) && !f.$and.every((x: any) => matches(row, x))) return false;
+  if (Array.isArray(f.$or) && !f.$or.some((x: any) => matches(row, x, shares))) return false;
+  if (Array.isArray(f.$and) && !f.$and.every((x: any) => matches(row, x, shares))) return false;
   for (const [k, v] of Object.entries(f)) {
     if (k === '$or' || k === '$and') continue;
     const rv = row[k];
     if (v != null && typeof v === 'object' && !Array.isArray(v)) {
       const op: any = v;
-      if ('$in' in op) { if (!op.$in.includes(rv)) return false; continue; }
+      // [ADR-0155] A share-grant leaf resolves over the double's own share rows.
+      if ('$in' in op) { if (!inMembers(op.$in, shares).includes(rv)) return false; continue; }
       if ('$ne' in op) { if (rv === op.$ne) return false; continue; }
       if ('$gte' in op) { if (!(rv >= op.$gte)) return false; continue; }
     }
@@ -112,7 +114,7 @@ function makeEngine() {
         throw err;
       }
       const f = opts?.filter ?? opts?.where;
-      return ensure(o).filter((r) => matches(r, f)).slice(0, opts?.limit ?? 10000);
+      return ensure(o).filter((r) => matches(r, f, tables.sys_record_share)).slice(0, opts?.limit ?? 10000);
     },
     /**
      * [#14754] A recipient whose `sys_record_share` INSERT the engine refuses,
@@ -136,7 +138,7 @@ function makeEngine() {
       const t = ensure(o);
       const targets = verdict.kind === 'by-id'
         ? t.filter((r) => r.id === verdict.id)
-        : t.filter((r) => matches(r, options?.where));
+        : t.filter((r) => matches(r, options?.where, tables.sys_record_share));
       for (const r of targets) Object.assign(r, data);
       return verdict.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
     },
@@ -974,10 +976,15 @@ describe('two rules reaching one user on one record keep one grant each — the 
       .filter((r) => r.record_id === recordId && r.recipient_id === 'u_p')
       .map((r) => `${r.source_id}:${r.access_level}`)
       .sort();
-  /** Does P's read scope reach `recordId`? Through the same filter every `find` is AND-ed with. */
+  /**
+   * Does P's read scope reach `recordId`? Through the same filter every `find`
+   * is AND-ed with, applied by the double to the stored record: the share arm
+   * is the leaf (ADR-0155), which carries no id to search the filter for.
+   */
   const readsRecord = async (recordId = 'prj_1') => {
     const filter: any = await h.sharing.buildReadFilter(OBJECT, P);
-    return JSON.stringify(filter).includes(`"${recordId}"`);
+    const rows = await h.engine.find(OBJECT, { where: { $and: [{ id: recordId }, filter ?? {}] } });
+    return rows.length === 1;
   };
 
   beforeEach(() => {

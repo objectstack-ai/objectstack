@@ -124,6 +124,14 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
       + "org-scoped grant (showcase_ops and the other sets that carry readScope: 'org').",
   },
 
+  // ── Internal create / edit forms the Console no longer loads (warning) ────
+  // None. The showcase lays every object's create and edit forms out by its
+  // fieldGroups and showOnCreate, and declares no internal form it does not
+  // load. `view "showcase_task" · form` is not one: three `type: 'form'`
+  // actions open it by its served name `showcase_task.form` (Log Time, New
+  // Task, the Overview's Create Task), so it keeps loading and the rule does
+  // not report it (#36545). A new internal form fails this test unlisted.
+
   // ── Fixtures ─────────────────────────────────────────────────────────────
   { rule: 'flow-loop-body-uncontained', where: "flow 'showcase_nested_fan_out_reminders' · loop 'each_task' body → parallel 'fan_out_audiences' branch 0 · node 'notify_owner' (notify)", reason: NESTED_FAN_OUT },
   { rule: 'flow-loop-body-uncontained', where: "flow 'showcase_nested_fan_out_reminders' · loop 'each_task' body → parallel 'fan_out_audiences' branch 1 · node 'notify_watcher' (notify)", reason: NESTED_FAN_OUT },

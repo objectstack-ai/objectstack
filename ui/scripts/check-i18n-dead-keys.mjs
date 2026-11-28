@@ -176,10 +176,11 @@
  * the reason is the whole point of deriving the population rather than listing
  * it. That card made nine of the ten catalogues lazy, so a module that holds a
  * pack OBJECT and indexes into it no longer has to NAME a pack in its import —
- * it asks the registry for whatever is resident. `outboundAgentText.ts` is
- * exactly that module and it changed in precisely that way: same dynamic
- * `ai?.[key]` read, same four keys kept alive, and it fell straight out of a
- * derivation keyed on pack NAMES. ⇒ the class this leg covers is "reaches a
+ * it asks the registry for whatever is resident. The console's outbound-text
+ * resolver was exactly that module (until objectstack#37682 retired it with
+ * the plan cards whose text it sent): same dynamic `ai?.[key]` read, and it
+ * fell straight out of a derivation keyed on pack NAMES; `flowResponse.ts`
+ * below reaches its pack the same way. ⇒ the class this leg covers is "reaches a
  * pack object and indexes into it", ⛔ never "writes a pack's name in an
  * import"; a widening here is the correct response to a new way of reaching
  * one, and a bullet quietly disappearing is not.
@@ -223,20 +224,6 @@
  *     is exactly the server-down boot it exists to explain, so it deliberately
  *     does not call `useObjectTranslation` (its own comment says so). It reads
  *     its pack subtree through a local binding. Covered BY DESIGN.
- *   - `packages/app-shell/src/console/ai/outboundAgentText.ts` — indexes its
- *     pack subtree DYNAMICALLY (`ai?.[key]`), so NEITHER leg sees the read: no
- *     dotted key, no property chain, no call site. Its four keys land in
- *     NEEDS-REVIEW anyway, but only because those property names happen to
- *     appear as string literals in the `OutboundAgentTextKey` union a few lines
- *     above them — BY LUCK, NOT BY DESIGN. Do NOT read this file as covered by
- *     the leg. Replace that union with anything generated and all four keys
- *     drop to CONFIRMED with a live consumer still reading them.
- *     ⚠️ Since objectui#7479 it reaches the pack through
- *     `getLoadedBuiltInLocales()` rather than a static `zh`/`en` import. NOTHING
- *     about the reading above changed — same dynamic index, same four keys, same
- *     luck — but the DERIVATION had to be widened to keep seeing it (see the
- *     alternation above). It is the one importer in this list whose membership
- *     depends on that widening, which is why it is said here as well as there.
  *   - `packages/plugin-grid/demo/main.tsx` and
  *     `packages/plugin-grid/demo/bulk-actions.tsx` — whole-pack `resources`
  *     wiring only, no per-key property reads: nothing for the leg to see and
@@ -263,8 +250,7 @@
  *     the first argument of the `t()` call each default sits inside, so the AST
  *     pass reads them directly and neither is ever a candidate (measured: both
  *     absent from CONFIRMED and from NEEDS-REVIEW). ⇒ read this bullet as
- *     covered BY COINCIDENCE, the same tier as `outboundAgentText` above and
- *     for an unrelated reason. Build either key from a template, or move the
+ *     covered BY COINCIDENCE. Build either key from a template, or move the
  *     default away from its call site, and both go dark to every leg while a
  *     shipping component still renders them — and that edit would read as a
  *     tidy-up.
@@ -274,16 +260,22 @@
  *     import. Two chains, each written straight off the call so the
  *     derivation can follow them: the table tag the active locale reads as
  *     (`resolveBuiltInLanguage`, objectstack#30511) is RUNTIME-indexed (an
- *     opaque row, class 1 below, like `outboundAgentText`), and the `en`
+ *     opaque row, class 1 below), and the `en`
  *     fallback is spelled in full and resolves to that leaf. It is
  *     a TWO-segment key, under the property-chain leg's three-segment floor,
  *     so that leg is blind to it; the full-key probe sees it only because the
  *     same dotted key is spelled in this file's own comments. ⇒ covered BY
- *     COINCIDENCE, the same tier as the two bullets above. Nothing is at risk
+ *     COINCIDENCE, the same tier as the bullet above. Nothing is at risk
  *     today for a second, unrelated reason: the record form reads the same key
  *     as a literal `t()` argument, so the AST pass keeps it live. Drop both the
  *     comment spelling and the form's call and this read goes dark while a
- *     failed flow still shows it.
+ *     failed flow still shows it. A SECOND key is read the same two ways:
+ *     `actions.serviceUnavailable`, the line a `type: 'api'` action shows when
+ *     the service behind its target is not composed (objectstack#36840). It too is
+ *     two segments, seen by the full-key probe only through this file's own
+ *     comment spelling, and it has NO literal `t()` call keeping it live
+ *     elsewhere: drop the comment spelling and it reads as dead while every
+ *     such refusal still shows it. ⇒ covered BY COINCIDENCE, and only that.
  *
  * The rest of the matches are TEST-only importers, deliberately not listed one
  * by one. A key read only by a test is not a key a user can see, so a test
@@ -349,14 +341,13 @@
  * somewhere else going stale (this sentence used to open with one, and it said
  * three while four were listed):
  *
- *   1. A pack-object reader that indexes DYNAMICALLY — the `outboundAgentText`
- *      shape above. No dotted key, no property chain, no call site. Measured on
- *      this checkout, and it corrects the note above: its four keys are demoted
- *      to NEEDS-REVIEW by CHANGELOG entries and test files that spell them, NOT
- *      by the neighbouring type union, whose members are bare property names
- *      (`'planApproveMessage'`) and therefore match neither probe. The luck is
- *      real, it is not where objectui#6666 recorded it, and nothing holds it in
- *      place — a CHANGELOG is not a liveness argument.
+ *   1. A pack-object reader that indexes DYNAMICALLY — the `ai?.[key]` shape
+ *      the outbound-text resolver had (objectui#6666). No dotted key, no
+ *      property chain, no call site. Its keys were demoted to NEEDS-REVIEW
+ *      only by CHANGELOG entries and test files that spelled them, NOT by the
+ *      neighbouring type union, whose members were bare property names and
+ *      therefore matched neither probe — and a CHANGELOG is not a liveness
+ *      argument.
  *   2. A key built by CONCATENATION (`'console.' + 'objectView.' + 'new'`), or
  *      by a builder shape the key-builder leg does not read: anything but one
  *      returned template literal, and anything that composes the head across
@@ -767,7 +758,6 @@ const IMPORTER_SEARCH_DIRS = ['packages', 'apps', 'examples', 'e2e'];
  */
 export const ANALYSED_PACK_OBJECT_IMPORTERS = Object.freeze([
   'packages/app-shell/src/chrome/LoadingScreen.tsx',
-  'packages/app-shell/src/console/ai/outboundAgentText.ts',
   'packages/plugin-grid/demo/main.tsx',
   'packages/plugin-grid/demo/bulk-actions.tsx',
   'packages/react/src/utils/nonGridRowCeiling.tsx',

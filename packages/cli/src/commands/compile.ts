@@ -15,7 +15,7 @@ import {
   type ConversionNotice,
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
-import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectSeedFiles, datasetsOf, placeSeedFiles } from '../utils/bundle-seed-files.js';
 import { collectConnectorSpecFiles, placeConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
@@ -26,6 +26,9 @@ import { artifactPackages, runPerPackageAuthoringRules } from '../utils/artifact
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
+import { judgeSeedRowRefusals, seedRowPairsNotJudged } from '@objectstack/lint';
+import { evaluateValidationRules } from '@objectstack/objectql';
+import { resolveTenantFieldName } from '@objectstack/core';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
 import {
   preflightDeclaredCapabilities,
@@ -96,6 +99,10 @@ import { findOverrideDeclarationRefusals } from '../utils/override-declarations.
 // `os validate` step 3a-iv runs, over the save and install doors' own judge
 // (`judgeExtensionFieldSuffix`).
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+// [ADR-0146 D10] …and the arrangement of an extended object, the paired
+// `.custom` package's alone: the same walk and the same doors' judge
+// (`judgeExtensionArrangement`).
+import { findExtensionArrangementRefusals } from '../utils/extension-arrangement.js';
 
 // [#29051] An undeclared top-level flow cycle — the walk `os validate` step
 // 3a-vii runs, over the automation engine's own judge.
@@ -935,6 +942,28 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
+      // 3b-iii-bis-2. [ADR-0146 D10] An extended object's whole arrangement
+      //     is the paired `.custom` package's, at build time — the SAME call
+      //     `os validate` makes at its step 3a-iv-bis
+      //     (`judgeExtensionArrangement`): `fieldGroups` or `relatedLists` on
+      //     an `objectExtensions` entry of any other package is refused, with
+      //     the prescription naming `place`, and no artifact is written.
+      const arrangementRefusals = findExtensionArrangementRefusals(result.data as Record<string, unknown>);
+      if (arrangementRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: arrangementRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = arrangementRefusals.length;
+        console.log('');
+        printError(`${n} object extension key${n > 1 ? 's declare' : ' declares'} an arrangement only a paired \`.custom\` package declares (ADR-0146 D10)`);
+        printBulletList(
+          arrangementRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-arrangement refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3b-iii-ter. [#28893] Flow region shape (ADR-0031) is judged by the
       //     rule table at step 3b since #29049 (`flow-region-shape-invalid`),
       //     the same verdict `os validate` and `os lint` give.
@@ -1307,6 +1336,39 @@ export default class Compile extends Command {
         printError(`Seed record values the seed load refuses (${seedValueIssues.length} issue${seedValueIssues.length > 1 ? 's' : ''})`);
         for (const issue of seedValueIssues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message} (${issue.code})`));
         this.exit(1);
+      }
+
+      // 4a-0-bis. [#35653] Seed RECORDS the seed load refuses — a record its
+      //     own validation rule refuses, and (#35486) a keyed record with a
+      //     blank key field — the gate `os validate` runs at its step 3d-quater,
+      //     with the write path's own evaluator. Each such record fails the
+      //     build here, naming the record and the rule, rather than being
+      //     dropped at boot.
+      const seedRowStack = authoringRuleUnionStack(finalBundle);
+      const seedRows = judgeSeedRowRefusals({
+        datasets: datasetsOf(finalBundle),
+        stack: seedRowStack,
+        evaluateValidationRules,
+        resolveTenantFieldName,
+      });
+      if (seedRows.refusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'seed records refused', issues: seedRows.refusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        // One line per refusal; the heading counts records (a record two rules refuse is one record).
+        const n = new Set(seedRows.refusals.map((refusal) => refusal.location)).size;
+        console.log('');
+        printError(`Seed records the seed load refuses (${n} record${n > 1 ? 's' : ''})`);
+        for (const refusal of seedRows.refusals) console.log(chalk.red(`  ✗ ${refusal.location}: ${refusal.message}`));
+        this.exit(1);
+      }
+      const seedPairsNotJudged = seedRowPairsNotJudged(seedRows);
+      if (seedPairsNotJudged > 0 && !flags.json) {
+        console.log(chalk.dim(
+          `  ${seedPairsNotJudged} seed record × validation rule pair(s) not judged here: the rule reads a value ` +
+            'the load decides (a reference, a default, a formula or roll-up, a hook, the stored row); the load still judges them',
+        ));
       }
 
       // 4a. [#25779] The files seed records name with `seedFile(path)`, read

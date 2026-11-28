@@ -29,10 +29,10 @@ describe('action:group — placement', () => {
   it('renders only actions that declare the requested location', () => {
     renderGroup({
       type: 'action:group',
-      location: 'list_toolbar',
+      location: 'list',
       actions: [
-        { name: 'here', label: 'Here', type: 'script', locations: ['list_toolbar'] },
-        { name: 'elsewhere', label: 'Elsewhere', type: 'script', locations: ['record_header'] },
+        { name: 'here', label: 'Here', type: 'script', locations: ['list'] },
+        { name: 'elsewhere', label: 'Elsewhere', type: 'script', locations: ['record_page'] },
       ],
     });
     expect(screen.getByText('Here')).toBeInTheDocument();
@@ -42,11 +42,11 @@ describe('action:group — placement', () => {
   it('treats an undeclared placement the same as an empty one — both hide', () => {
     renderGroup({
       type: 'action:group',
-      location: 'list_toolbar',
+      location: 'list',
       actions: [
         { name: 'undeclared', label: 'Undeclared', type: 'script' },
         { name: 'empty', label: 'Empty', type: 'script', locations: [] },
-        { name: 'here', label: 'Here', type: 'script', locations: ['list_toolbar'] },
+        { name: 'here', label: 'Here', type: 'script', locations: ['list'] },
       ],
     });
     // Pre-#3142 `Undeclared` rendered and `Empty` did not — same key, two answers.
@@ -60,7 +60,7 @@ describe('action:group — placement', () => {
       type: 'action:group',
       actions: [
         { name: 'a', label: 'Alpha', type: 'script' },
-        { name: 'b', label: 'Beta', type: 'script', locations: ['record_header'] },
+        { name: 'b', label: 'Beta', type: 'script', locations: ['record_page'] },
       ],
     });
     expect(screen.getByText('Alpha')).toBeInTheDocument();

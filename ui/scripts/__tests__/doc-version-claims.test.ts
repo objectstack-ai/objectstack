@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { rootWorkflowsDir } from './helpers/root-ci';
 import { labelPath, skillBundleBase, skillsWalk } from '../skill-bundle-root.mjs';
+import { workspaceRoot } from '../workspace-root.mjs';
 
 /**
  * objectui#3697: nothing in this repository looks at a version literal written
@@ -1046,6 +1048,28 @@ const PEER_19 = 'react' + TICK + ' ^19.0.0';
 const PEER_RESTATEMENT_OK =
   'Restates this package peerDependencies.react verbatim; asserted against the manifest by the peer-line assertion below (objectui#3717), no longer by a human reading it.';
 
+/**
+ * The `@objectstack/spec` manifest this tree resolves: the package its own dependency
+ * (`ui/package.json`, `workspace:^`) points at, found the way node finds it. Under the
+ * objectstack monorepo that is `packages/spec/package.json` in the workspace root, the
+ * file the version step rewrites, and the pin in "the source of the spec major" below holds
+ * it there. In a standalone objectui checkout it is the installed package. A fixed
+ * workspace path would name a file that layout does not have, and this file would
+ * throw on load before any test ran.
+ */
+const SPEC_MANIFEST = createRequire(import.meta.url).resolve('@objectstack/spec/package.json');
+
+/**
+ * The major of `@objectstack/spec` this tree builds, read from that package's own
+ * manifest. The objectui skill's `compatibility:` pin states it, and the version step
+ * rewrites the pin together with the manifest, so its KNOWN_CLAIMS row is keyed on this
+ * value rather than on a literal major that the next release would leave stale.
+ */
+const SPEC_MAJOR = Number.parseInt(
+  (JSON.parse(fs.readFileSync(SPEC_MANIFEST, 'utf8')) as { version: string }).version,
+  10,
+);
+
 const KNOWN_CLAIMS: KnownClaim[] = [
   // --- content/docs ------------------------------------------------------------
   {
@@ -1159,7 +1183,7 @@ const KNOWN_CLAIMS: KnownClaim[] = [
   // the measurement and for why two of these blocks anchor and one does not.
   {
     file: 'skills/objectui/SKILL.md',
-    claim: '@objectstack/spec 18.x',
+    claim: `@objectstack/spec ${SPEC_MAJOR}.x`,
     kind: 'anchored',
     why: 'The `compatibility:` pin of the frontmatter. The bundle moved into the objectstack monorepo\'s published `skills/` catalog at the cutover (decision C, objectstack#25803), and that catalog REQUIRES the pin: the repo root\'s `scripts/check-skill-compatibility-version.mjs` reds a skill that declares none and reds this one when its major differs from `packages/spec/package.json`, whose `--fix` derives it. That gate is the anchor, run outside this tree, so no field here can name it. The sentence this replaced stated no version for the reason this file exists; it now states one that a gate re-derives.',
   },
@@ -2192,6 +2216,29 @@ const manifestVersionChecks: ManifestVersionCheck[] = KNOWN_CLAIMS.flatMap((entr
       declared: manifestFieldValue(field),
     },
   ];
+});
+
+describe('doc version claims - the source of the spec major', () => {
+  // The skill row's claim is keyed on SPEC_MAJOR, so the manifest it is read from is
+  // load-bearing: a resolution that drifted to some other copy of the package would key
+  // the row on that copy's major and stay green against a stale pin.
+  const workspaceManifest = path.join(workspaceRoot(), 'packages/spec/package.json');
+
+  it('under the monorepo, resolves the workspace spec package the version step rewrites', () => {
+    if (!fs.existsSync(workspaceManifest)) {
+      // Standalone objectui: there is no workspace spec package, so the resolution must
+      // land on an installed one rather than inside this tree's own sources.
+      expect(SPEC_MANIFEST.split(path.sep)).toContain('node_modules');
+      return;
+    }
+    expect(fs.realpathSync(SPEC_MANIFEST)).toBe(fs.realpathSync(workspaceManifest));
+  });
+
+  it('reads a real major from it', () => {
+    const { version } = JSON.parse(fs.readFileSync(SPEC_MANIFEST, 'utf8')) as { version: string };
+    expect(Number.isInteger(SPEC_MAJOR) && SPEC_MAJOR > 0).toBe(true);
+    expect(version.startsWith(`${SPEC_MAJOR}.`)).toBe(true);
+  });
 });
 
 describe('doc version claims - the scan itself', () => {

@@ -13,34 +13,27 @@ import * as React from 'react';
 import { ShareDialog } from '@object-ui/components';
 import {
   useAgents,
-  agentHasCapability,
   agentRouteName,
-  isAskAgent,
   isBuiltinAgentName,
   resolveAgentParam,
 } from '@object-ui/plugin-chatbot/core';
-import {
-  ChatPane,
-  isThreadBoundToPackage,
-  type PendingFirstMessage,
-} from '../console/ai/AiChatPage.js';
+import { ChatPane, type PendingFirstMessage } from '../console/ai/AiChatPage.js';
 import { ConversationsSidebar } from '../console/ai/ConversationsSidebar.js';
-import { BuildDebugDrawer } from '../console/ai/BuildDebugDrawer.js';
 import { resolvePublicShareBase } from '../console/organizations/resolveHomeUrl.js';
 import { useChatConversation, type HydratedUIMessage } from '../hooks/index.js';
 import { fetchConversation } from '../hooks/useChatConversation.js';
+import { useConversationLabel } from '../hooks/useConversationList.js';
 import { chatConversationScope, chatProductOfAgent } from '../hooks/chatScope.js';
-import { makerConvergedOnBuild, resolveSurfaceAgent } from '../hooks/surfaceAgent.js';
-import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { resolveSurfaceAgent } from '../hooks/surfaceAgent.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
+import { useConversationFocus } from './chatFocus.js';
 import {
-  ambientAppPackage,
   sameDockTarget,
   type ChatDockConversationActions,
-  type ChatDockHandoff,
   type ChatDockPresentation,
   type ChatDockTarget,
+  type ShownConversation,
 } from './chatDockTarget.js';
 import { ChatDockControlProvider, useChatDockControl, type ChatDockControl } from './chatDockControl.js';
 
@@ -54,9 +47,9 @@ export interface ChatDockConversationProps {
    */
   defaultAgent?: string;
   /**
-   * objectui#10926 — the owning package (`_packageId`) of the app the console
-   * is showing. Only a `build` thread binds to it, and only when it is
-   * authorable (see {@link ChatDockConversation}). Absent → app-less.
+   * objectstack#30043 — the owning package (`_packageId`) of the app the
+   * console is showing, sent as the turn's `context.activeApp`. Absent →
+   * app-less.
    */
   appPackageId?: string;
   /**
@@ -73,27 +66,27 @@ export interface ChatDockConversationProps {
    * Absent → the ambient thread described on {@link ChatDockConversation}.
    */
   target?: ChatDockTarget;
-  /** Replaces the target in place: a picked history row, a minted fresh thread, a binding. */
+  /** Replaces the target in place: a picked history row or a minted fresh thread. */
   onTargetChange?: (target: ChatDockTarget | undefined) => void;
-  /** A Builder handoff to seed once as the build thread's first message. */
-  handoff?: ChatDockHandoff;
   /** Rail (history behind a button), full window (history beside the chat), or phone sheet. */
   presentation?: ChatDockPresentation;
   /** Rail and sheet only: the history list shown over the chat. */
   historyOpen?: boolean;
   onHistoryOpenChange?: (open: boolean) => void;
   /**
-   * objectstack#35445 — the drawer's title bar offers Share and the Build
-   * Doctor in its 「···」 menu. A host that passes this receives what those
-   * two items act on, and the pane's own header row stops drawing them. The
-   * share dialog and the doctor's drawer stay here; the host opens them
-   * through the four props below, as it opens the history.
+   * objectstack#35445 — the drawer's title bar offers Share in its 「···」
+   * menu. A host that passes this receives what that item acts on, and the
+   * pane's own header row stops drawing it. The share dialog stays here; the
+   * host opens it through the two props below, as it opens the history.
    */
   onActionsChange?: (actions: ChatDockConversationActions | undefined) => void;
   shareOpen?: boolean;
   onShareOpenChange?: (open: boolean) => void;
-  debugOpen?: boolean;
-  onDebugOpenChange?: (open: boolean) => void;
+  /**
+   * ui ADR-0057 Amendment A5 — told the conversation this body shows, and
+   * again whenever it changes, so the host can record it at a close.
+   */
+  onShownConversationChange?: (shown: ShownConversation) => void;
 }
 
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
@@ -104,28 +97,16 @@ const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
  * window) or behind the header's History button (rail, sheet). Renders nothing
  * when the AI catalog is empty (OSS / no seat).
  *
- * With no target the drawer shows its AMBIENT thread, scoped per ADR-0057 as
- * amended for objectui#10926 (maintainer ruling 「绑定当前应用（推荐）」): inside
- * an AUTHORABLE app — its package is not a `com.objectstack.*` built-in, the
- * A1.b switcher's own predicate — a `build` thread binds to that app.
- * `editPackageId` is the app's package, the scope is `app:PKG:build`, the key
- * the Studio copilot resolves, so the two show ONE thread; the chip, the empty
- * state and the agent context (`context.packageId`) name the app. `ask` stays
- * ambient, and outside an authorable app the key is the product alone. The
- * product-only thread is never cleared: it stays under its own key and in the
- * history, and — through the A1.b migration read — it is adopted into the
- * app's scope only when its own history is bound to that app.
+ * With no target the drawer shows its AMBIENT thread, keyed per ADR-0057 on
+ * the product alone: the ask thread is the same in every app (A2).
  *
  * objectstack#34608 — a target names the thread instead (a history row, an old
- * `/ai…` link, "Edit with AI", the agent launcher): its agent, conversation,
- * package or a fresh start, exactly as named — a target never infers the app.
- * A new build stays UNBOUND until the build creates its package (ADR-0057 A1),
- * and then re-keys to that app in place (A1.b bind-on-create).
+ * `/ai…` link, the agent launcher): its agent, conversation or a fresh start,
+ * exactly as named.
  *
- * objectstack#35014 — a target belongs to the app it was opened in (or the app
- * it names); the host withholds it everywhere else, so the drawer's thread
- * follows the app with no prompt. `ask` stays ambient (A2): its key carries no
- * app, so the ask thread is the same in every app.
+ * objectstack#35014 — a target belongs to the app it was opened in; the host
+ * withholds it everywhere else, so the drawer's thread follows the app with
+ * no prompt.
  */
 export function ChatDockConversation({
   userId,
@@ -136,33 +117,20 @@ export function ChatDockConversation({
   surfaceArtifactLabel,
   target,
   onTargetChange,
-  handoff,
   presentation = 'rail',
   historyOpen = false,
   onHistoryOpenChange,
   onActionsChange,
   shareOpen: shareOpenProp,
   onShareOpenChange,
-  debugOpen: debugOpenProp,
-  onDebugOpenChange,
+  onShownConversationChange,
 }: ChatDockConversationProps) {
   const { agents, isLoading, error } = useAgents({ apiBase });
   const catalogNames = React.useMemo(() => agents.map((a) => a.name), [agents]);
-  // cloud#1674 maker convergence — the console dock is a maker surface, so an
-  // authoring-capable principal's ambient thread upgrades ask→build inside the
-  // ONE resolver; business sessions keep the ask ambient thread unchanged.
-  const canAuthorMetadata = useCanAuthorMetadata();
   const aiStudioEnabled = isAiStudioEnabled();
-  const makerConverged = makerConvergedOnBuild(agents, canAuthorMetadata, aiStudioEnabled);
   const ambientAgent = React.useMemo(
-    () =>
-      resolveSurfaceAgent('default', {
-        agents,
-        appDefaultAgent: defaultAgent,
-        aiStudioEnabled,
-        canAuthorMetadata,
-      }),
-    [agents, defaultAgent, aiStudioEnabled, canAuthorMetadata],
+    () => resolveSurfaceAgent('default', { agents, appDefaultAgent: defaultAgent, aiStudioEnabled }),
+    [agents, defaultAgent, aiStudioEnabled],
   );
 
   // ── The target's agent ──────────────────────────────────────────────────
@@ -177,15 +145,7 @@ export function ChatDockConversation({
     targetAgent && agents.length > 0 && !namedAgent && !isBuiltinAgentName(targetAgent) && !target?.conversationId
       ? targetAgent
       : undefined;
-  let activeAgent = ambientAgent;
-  if (namedAgent) {
-    // cloud#1674 — a maker opening the bare ask agent lands on the converged
-    // build composer; an existing ask conversation still opens on its own agent.
-    activeAgent =
-      makerConverged && isAskAgent(namedAgent) && !target?.conversationId
-        ? resolveAgentParam('build', catalogNames) ?? namedAgent
-        : namedAgent;
-  }
+  const activeAgent = namedAgent ?? ambientAgent;
   const activeAgentRoute = activeAgent ? agentRouteName(activeAgent) : undefined;
 
   React.useEffect(() => {
@@ -215,46 +175,35 @@ export function ChatDockConversation({
     ? `${apiBase}/agents/${encodeURIComponent(activeAgent)}/chat`
     : undefined;
   const product = chatProductOfAgent(activeAgent);
-  const ambientPackageId = ambientAppPackage(appPackageId);
-  // objectstack#35014 — a target reaches this body only in the app it belongs
-  // to: the host (`useConsoleChatDock`) hands it down there and nowhere else,
-  // so moving to another app arrives here as "no target" and the new app's
-  // ambient thread resolves below.
-  const editPackageId =
-    product === 'build' ? (target ? target.packageId : ambientPackageId) : undefined;
-  const scope = activeAgent
-    ? chatConversationScope({ appId: editPackageId, product })
-    : undefined;
-  const adoptLegacyBuildThread = React.useCallback(
-    (messages: HydratedUIMessage[]) =>
-      editPackageId !== undefined && isThreadBoundToPackage(messages, editPackageId),
-    [editPackageId],
-  );
+  const scope = activeAgent ? chatConversationScope({ product }) : undefined;
   const requestedConversationId = legacyConversationId ? undefined : target?.conversationId;
   const forceNew = Boolean(target?.fresh) && !requestedConversationId;
+  // The user the conversation resolves for (none until the agent is known).
+  const conversationUserId = activeAgent && !legacyConversationId ? userId : undefined;
   const {
     conversationId,
     conversationScope,
     initialMessages,
     ensureConversation,
     createError,
-    rekeyScope,
   } = useChatConversation({
-    userId: activeAgent && !legacyConversationId ? userId : undefined,
+    userId: conversationUserId,
     scope,
     apiBase,
     activeId: requestedConversationId,
     forceNew,
-    legacyScope: editPackageId && !target ? product : undefined,
-    adoptLegacy: editPackageId && !target ? adoptLegacyBuildThread : undefined,
   });
-  // #2450 — hand the pane only a scope-matched conversation. Moving between
-  // apps changes the scope while the dock stays mounted; until the hook
-  // re-resolves, `conversationId` is still the previous app's thread, and a
-  // pane mounted on it would pair that thread with the new app's package.
+  // #2450 — hand the pane only a scope-matched conversation. Switching agents
+  // changes the scope while the dock stays mounted; until the hook
+  // re-resolves, `conversationId` is still the previous agent's thread.
   const scopeMatched = conversationScope === scope;
   const paneConversationId = scopeMatched ? conversationId : undefined;
   const paneInitialMessages = scopeMatched ? initialMessages : EMPTY_INITIAL_MESSAGES;
+
+  // ui ADR-0057 Amendment A5 — the host records what this body shows at a close.
+  React.useEffect(() => {
+    onShownConversationChange?.({ conversationId: paneConversationId, agent: activeAgentRoute });
+  }, [onShownConversationChange, paneConversationId, activeAgentRoute]);
 
   // ── A fresh target names its thread once the first send mints it ────────
   // Snapshot the id visible when the fresh target appears, and never record
@@ -274,42 +223,31 @@ export function ChatDockConversation({
     });
   }, [forceNew, target, paneConversationId, staleFresh, activeAgentRoute, onTargetChange]);
 
-  // ── A1.b bind-on-create ─────────────────────────────────────────────────
-  // The build just minted (or its history reveals) package `pkg` while this
-  // thread is keyed product-only: re-key it to `app:PKG:build` first (the
-  // scope flips synchronously, so the #2450 gate stays matched and the pane is
-  // never remounted), then name the package on the target.
-  const handlePackageBound = React.useCallback(
-    (pkg: string) => {
-      if (!pkg || editPackageId || product !== 'build' || !activeAgentRoute) return;
-      if (scope !== product || conversationScope !== scope || !conversationId) return;
-      rekeyScope(chatConversationScope({ appId: pkg, product }));
-      onTargetChange?.({ agent: activeAgentRoute, conversationId, packageId: pkg });
-    },
-    [editPackageId, product, activeAgentRoute, scope, conversationScope, conversationId, rekeyScope, onTargetChange],
-  );
-
   const pendingFirstMessageRef = React.useRef<PendingFirstMessage | null>(null);
-  const [pendingFirstMessageSeq, setPendingFirstMessageSeq] = React.useState(0);
-  // ADR-0057 P4 — seed a handed-off build prompt as the build thread's first
-  // message, once per handoff; the pane's deferred-send replay sends it when
-  // the id lands. Targeted at the build agent (#2450), so a pane still bound to
-  // the previous agent mid-switch never consumes it.
-  const seededHandoffRef = React.useRef(0);
-  React.useEffect(() => {
-    const prompt = handoff?.state.handoffPrompt;
-    if (!handoff || !prompt || seededHandoffRef.current === handoff.seq) return;
-    seededHandoffRef.current = handoff.seq;
-    pendingFirstMessageRef.current = { content: prompt, targetAgentRoute: 'build' };
-    setPendingFirstMessageSeq((s) => s + 1);
-  }, [handoff]);
   // ADR-0028 — the composer's picked model, held here so it outlives the keyed
   // pane's remount when the first send mints the conversation.
   const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>(undefined);
+  // objectstack#36999 — the thread's focus (the record the user pinned it to),
+  // held here for the same reason. It rides on the thread the scope resolved
+  // and never re-keys it: a focus does not change which conversation the
+  // drawer shows (ADR-0057 as amended for objectui#10926).
+  // objectstack#37142 — keyed on the target too: a hand-off's carry goes to the
+  // thread this target resolves, never to a history row or another app's
+  // thread the user moves to before the first send.
+  const focusTarget = React.useMemo(() => (target ? JSON.stringify(target) : undefined), [target]);
+  const conversationFocus = useConversationFocus(paneConversationId, createError, focusTarget);
+  // A first send creates the conversation: the id it mints takes the focus
+  // pinned before it (and no other arriving id does).
+  const { markSending: markFocusSending } = conversationFocus;
+  const ensureConversationForSend = React.useCallback(() => {
+    // With no user there is nothing to create: no mark, so no id that
+    // arrives later takes the focus as this send's.
+    if (conversationUserId) markFocusSending();
+    return ensureConversation();
+  }, [conversationUserId, markFocusSending, ensureConversation]);
 
   // ── The drawer's own controls over its thread ───────────────────────────
-  // The launcher, the app switcher and the handoff in the pane open targets
-  // through the host. Picking the agent the ambient thread already runs goes
+  // The launcher in the pane opens targets through the host. Picking the agent the ambient thread already runs goes
   // back to the ambient thread rather than an unbound copy of it.
   const host = useChatDockControl();
   const drawerControl = React.useMemo<ChatDockControl | null>(() => {
@@ -331,9 +269,9 @@ export function ChatDockConversation({
   }, [host, ambientAgent, catalogNames]);
 
   const startNewConversation = React.useCallback(() => {
-    onTargetChange?.({ agent: activeAgentRoute, packageId: editPackageId, fresh: true });
+    onTargetChange?.({ agent: activeAgentRoute, fresh: true });
     onHistoryOpenChange?.(false);
-  }, [onTargetChange, activeAgentRoute, editPackageId, onHistoryOpenChange]);
+  }, [onTargetChange, activeAgentRoute, onHistoryOpenChange]);
   const openConversation = React.useCallback(
     (conversation: { id: string; agentId?: string }) => {
       const next: ChatDockTarget = {
@@ -350,38 +288,67 @@ export function ChatDockConversation({
   // new thread after its first answer, so the list is re-read a little later.
   const [refreshKey, setRefreshKey] = React.useState(0);
   const titledRef = React.useRef<Set<string>>(new Set());
+  // ui ADR-0057 Amendment A5 — until the server answers with the thread's
+  // label, the header reads the user's first message of it, which is what the
+  // history row shows for a thread the server has not titled.
+  const [sentHint, setSentHint] = React.useState<{ id: string; text: string } | undefined>(undefined);
   const handleSent = React.useCallback(
     (firstUserMessage?: string) => {
       setRefreshKey((k) => k + 1);
       if (!firstUserMessage || !conversationId || titledRef.current.has(conversationId)) return;
       titledRef.current.add(conversationId);
+      setSentHint({ id: conversationId, text: firstUserMessage.trim() });
       setTimeout(() => setRefreshKey((k) => k + 1), 2500);
       setTimeout(() => setRefreshKey((k) => k + 1), 6000);
     },
     [conversationId],
   );
+  // The header's ＋ through a ref: the action reaches the chrome through an
+  // effect, which must not re-run on a callback's identity (ui AGENTS.md #10).
+  const startNewRef = React.useRef(startNewConversation);
+  React.useLayoutEffect(() => {
+    startNewRef.current = startNewConversation;
+  });
+  const [startNew] = React.useState(() => () => startNewRef.current());
+  const labelReading = useConversationLabel({ apiBase, conversationId: paneConversationId, refreshKey });
+  const hint = sentHint && sentHint.id === paneConversationId && sentHint.text ? sentHint.text : undefined;
+  const headerLabel = labelReading.label ?? hint;
+  const labelPending = Boolean(paneConversationId) && !labelReading.settled && !hint;
 
-  // Share and the Build Doctor: the drawer's 「···」 menu offers them when its
-  // host takes them (objectstack#35445), else the pane's header does.
+  // Share: the drawer's 「···」 menu offers it when its host takes it
+  // (objectstack#35445), else the pane's header does.
   const [ownShareOpen, setOwnShareOpen] = React.useState(false);
-  const [ownDebugOpen, setOwnDebugOpen] = React.useState(false);
   const shareOpen = shareOpenProp ?? ownShareOpen;
-  const debugOpen = debugOpenProp ?? ownDebugOpen;
   const setShareOpen = onShareOpenChange ?? setOwnShareOpen;
-  const setDebugOpen = onDebugOpenChange ?? setOwnDebugOpen;
   const actionsInHost = onActionsChange !== undefined;
   const restApiBase = React.useMemo(
     () => apiBase.replace(/\/v1\/ai$/, '').replace(/\/ai$/, '') || '/api',
     [apiBase],
   );
   const publicShareBase = React.useMemo(() => resolvePublicShareBase(), []);
-  // objectstack#35445 — the Build Doctor reads a build's internals: offered
-  // only to a user who may build, whichever agent the thread runs.
-  const showDebug = agentHasCapability(agents, activeAgent, 'debug') && canAuthorMetadata;
+  const emptyConversation = React.useMemo(
+    () => ({
+      size: presentation === 'full' ? ('large' as const) : ('compact' as const),
+      userId,
+      onOpenConversation: openConversation,
+    }),
+    [presentation, userId, openConversation],
+  );
   const inert = !isLoading && agents.length === 0;
   React.useEffect(() => {
-    onActionsChange?.(inert ? undefined : { conversationId, showDebug });
-  }, [onActionsChange, inert, conversationId, showDebug]);
+    onActionsChange?.(
+      inert
+        ? undefined
+        : {
+            conversationId,
+            showDebug: false,
+            label: paneConversationId ? headerLabel : undefined,
+            labelPending,
+            startNew,
+            agent: activeAgentRoute,
+          },
+    );
+  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew, activeAgentRoute]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
   if (inert) return null;
@@ -391,7 +358,6 @@ export function ChatDockConversation({
       userId={userId}
       apiBase={apiBase}
       activeAgent={activeAgent}
-      includeAskConversations={makerConverged}
       refreshKey={refreshKey}
       activeConversationId={paneConversationId}
       onSelectConversation={openConversation}
@@ -415,27 +381,25 @@ export function ChatDockConversation({
             apiBase={apiBase}
             conversationId={paneConversationId}
             requestedConversationId={requestedConversationId}
-            editPackageId={editPackageId}
-            onPackageBound={handlePackageBound}
-            canBind={Boolean(paneConversationId)}
-            parentHandoffConversationId={handoff?.state.parentConversationId}
             // objectstack#30043 — the app the dock sits in is the selected app,
-            // whichever agent runs and whether or not a build thread binds to it.
+            // whichever agent runs.
             activeAppPackageId={appPackageId}
             surfaceContext={surfaceContext}
             surfaceArtifactLabel={surfaceArtifactLabel}
+            conversationFocus={conversationFocus}
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
-            pendingFirstMessageSeq={pendingFirstMessageSeq}
-            ensureConversation={ensureConversation}
+            ensureConversation={ensureConversationForSend}
             conversationCreateError={createError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}
             onSent={handleSent}
             onShare={() => setShareOpen(true)}
-            onDebug={() => setDebugOpen(true)}
-            showDebug={showDebug}
             actionsInHost={actionsInHost}
+            // objectstack#37862 — the shared empty conversation: large where
+            // the drawer fills the window, compact in the rail and the sheet;
+            // a recent conversation opens here, as a history row does.
+            emptyConversation={emptyConversation}
           />
         </div>
         {/* Rail and sheet: the history covers the chat while open; the pane
@@ -455,14 +419,6 @@ export function ChatDockConversation({
           recordLabel="this conversation"
           apiBase={restApiBase}
           publicBaseUrl={publicShareBase}
-        />
-      ) : null}
-      {conversationId && showDebug ? (
-        <BuildDebugDrawer
-          apiBase={apiBase}
-          conversationId={conversationId}
-          open={debugOpen}
-          onOpenChange={setDebugOpen}
         />
       ) : null}
     </ChatDockControlProvider>

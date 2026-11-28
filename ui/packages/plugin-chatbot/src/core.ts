@@ -46,7 +46,7 @@ export { AI_USAGE_REFRESH_EVENT, emitAiUsageRefresh } from './aiUsageEvents';
 
 // ADR-0038 L3 — the publish-health parse every publish-drafts host shares.
 export { publishHealthFromResponse } from './publishHealth';
-export type { PublishHealth, PublishOutcome } from './publishHealth';
+export type { PublishHealth } from './publishHealth';
 
 // The pending-approval envelope parse the app-shell hydration mapper shares
 // with the live one (objectui#8442). `toolResultParsers` holds only an
@@ -58,7 +58,17 @@ export { detectPendingApproval } from './toolResultParsers';
 export { chartsFromParts, chartAnswerParts } from './toolResultParsers';
 export type { ChartAnswerPart } from './toolResultParsers';
 
+// objectstack#37487 — the one allow-list of the data parts a stored answer
+// keeps (charts + verified record citations), and its writer, which the
+// message cache shares with the `useObjectChat` store rebuild.
+export { storedAnswerParts, STORED_ANSWER_DATA_PARTS } from './toolResultParsers';
+export type { StoredAnswerData, StoredAnswerPart } from './toolResultParsers';
+
 // objectstack#30223 — the HITL continuation marker. The chat transcript, the
 // conversation list preview and the conversation-language probe all skip a
 // user turn that `useHitlInChat` composed for the model.
 export { isHitlContinuation } from './hitlContinuation';
+
+// The localStorage prefix of the question card's skip marks, for a host's
+// sign-out cleanup.
+export { QUESTION_SKIP_STORAGE_PREFIX } from './chat/questionSkip';

@@ -82,6 +82,21 @@ export function isDetachedUnitHandle(handle: unknown): boolean {
  * with that entry's handle and `threaded` (the handle an api carries
  * explicitly) recorded as detached. `txStore` absent (an engine double) leaves
  * only the explicit half.
+ *
+ * [#37705] Also the body of the public `ObjectQL.runOutsideOpenUnits(body)`
+ * (no threaded handle), for work its caller starts and does not await. A
+ * unit's ambient entry reaches every engine call made in its async context,
+ * so such work enrolls in the unit whether the unit's body awaits it or not,
+ * and outlives the body: the unit commits under it, and its next statement on
+ * the enrolled handle fails with "Transaction query already complete". A read
+ * enrolls as surely as a write: its handle is taken when the call starts and
+ * used when the statement runs, which on a single-connection pool is after the
+ * commit. The engine cannot tell awaited work from work that is not, so the
+ * caller that starts it says so there (the run-history terminal write is the
+ * first). Its calls run on their own connection, as outside any unit; a unit
+ * it opens itself is its own; a rollback of the unit open at the call does not
+ * undo them. ⛔ Never route work there that must commit or roll back with the
+ * caller's unit: that work belongs inside it, awaited.
  */
 export function runOutsideOpenUnits<T>(
   txStore: Pick<AsyncLocalStorage<{ transaction?: unknown } | undefined>, 'getStore' | 'exit'> | undefined,
@@ -156,6 +171,12 @@ export function openTrioCommitQueue(handle: unknown): void {
   if (handle !== null && (typeof handle === 'object' || typeof handle === 'function')) trioQueues.set(handle, newUnitCommitQueue());
 }
 
+/** The queue of the unit the trio opened on `handle`, while it is open; `undefined` for any other handle. */
+export function trioCommitQueueOf(handle: unknown): UnitCommitQueue | undefined {
+  if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return undefined;
+  return trioQueues.get(handle);
+}
+
 /** The trio committed (`committed`) or rolled back the unit on `handle`. */
 export function settleTrioCommitQueue(handle: unknown, committed: boolean): void {
   if (handle === null || (typeof handle !== 'object' && typeof handle !== 'function')) return;
@@ -212,6 +233,42 @@ export function runOutsideOpenUnitsOnCommit<T>(
       }
     });
     queue.pending!.push({ commit: start, drop: () => resolve(UNIT_ROLLED_BACK) });
+  });
+}
+
+/**
+ * [#37705] Run `body` once the unit of work open at the call commits, outside
+ * every unit ({@link runOutsideOpenUnits}), in the async context of the call;
+ * never when that unit rolls back; at once, outside the units, when no
+ * unsettled unit is open. The body of the public
+ * `ObjectQL.runAfterOpenUnitsCommit(body)`, for a signal about a row the
+ * caller's unit just wrote: a dispatcher's wake after an outbox or queue
+ * insert. A wake started inside the unit runs its read outside it (a tick must
+ * not take the unit's handle), and on a pooled driver that read cannot see the
+ * row until the unit commits, so the wake is sent at the commit instead. The
+ * unit is the ambient one, which includes a `beginTransaction` trio unit while
+ * an engine call carrying its handle runs (that call publishes the handle with
+ * the trio's queue); a call made outside one, holding the trio handle only
+ * explicitly, does not hold the body back. Errors: with no unit open, a throw
+ * from `body` reaches the caller; at the commit, a synchronous throw is
+ * swallowed with no log (`settleUnitCommitQueue`) and an `async` body's
+ * rejection is unhandled, so `body` handles its own failures. ⛔ Never route
+ * work there that must commit or roll back with the caller's unit: `body` runs
+ * after the commit, outside every unit, and nothing it does is atomic with the
+ * write it follows.
+ */
+export function runAfterOpenUnitsCommit(
+  txStore: Pick<AsyncLocalStorage<QueuedUnitEntry | undefined>, 'getStore' | 'exit'> | undefined,
+  body: () => void,
+): void {
+  const queue = unsettledUnitQueue(txStore, undefined, undefined);
+  if (!queue) {
+    runOutsideOpenUnits(txStore, undefined, body);
+    return;
+  }
+  queue.pending!.push({
+    commit: AsyncResource.bind(() => runOutsideOpenUnits(txStore, undefined, body)),
+    drop: () => undefined,
   });
 }
 

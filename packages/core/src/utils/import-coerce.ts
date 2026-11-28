@@ -89,6 +89,32 @@ export interface RefMatch {
   id?: string;
   ambiguous?: boolean;
   matchedField?: string;
+  /**
+   * [#36794] The SCOPED read was refused: its scope names a target field the
+   * caller cannot read. The miss then says nothing about where the value lives,
+   * so the refusal stays `reference_not_found` and the value is never reported
+   * as a record under another parent.
+   */
+  scopeDenied?: boolean;
+  /**
+   * [#36794] The SCOPED lookup asked nothing: no candidate read answered, and
+   * the engine's filter seam refused a read because the scope names a target
+   * field it cannot filter by (a formula), judged off that refusal's declared
+   * `code` and `fields`. Every other all-refused lookup is a plain miss. The
+   * refusal stays `reference_not_found` and says the lookup could not be made
+   * within the row's scope, never that the value lives under another parent.
+   */
+  scopeUnqueryable?: boolean;
+  /**
+   * [#37717] The SCOPED lookup asked nothing for any other reason: no candidate
+   * read answered, and no refusal said the scope's target field cannot be
+   * filtered by or read (a comparand the field's type cannot take, a missing
+   * read grant, a driver fault). Nothing is known about where the value lives,
+   * so it is not asked again without the scope: the refusal stays
+   * `reference_not_found` with the plain sentence, never
+   * `reference_out_of_scope`.
+   */
+  scopeUnanswered?: boolean;
 }
 
 /**
@@ -142,6 +168,82 @@ function resolveScoped(
   scope: Readonly<Record<string, unknown>> | undefined,
 ): Promise<string | undefined | RefMatch> {
   return scope ? resolveRef(referenceObject, display, meta, scope) : resolveRef(referenceObject, display, meta);
+}
+
+/**
+ * [#36159] A row column a lookup cell was scoped by: the column's API name, its
+ * label and its cell as the importer typed it. Carried beside the scope (whose
+ * keys are the TARGET's fields and whose values are coerced ids) so a refusal
+ * can name what the importer wrote.
+ */
+interface ScopedBy {
+  field: string;
+  label: string;
+  value: string;
+}
+
+/**
+ * [#36159] The refusal for a reference cell that matched nothing. A scoped
+ * miss is asked once more WITHOUT the scope, through the same resolver: when
+ * the value matches a record there (one or several), the row's own scope is
+ * why nothing matched. [#36794] That refusal has its own reason,
+ * `reference_out_of_scope`: its sentence names the scoping columns and the
+ * values the row gave them, e.g. `Contract: no record matches "CTR-0006"
+ * (Account = "Acme")`, and the error carries the same columns as `scope`, so a
+ * client keyed on the code (the Import Wizard) names them in its own text
+ * without parsing the sentence. A value that matches nothing at all keeps
+ * `reference_not_found` and the plain sentence.
+ *
+ * A scoped read the field-predicate guard refused (`RefMatch.scopeDenied`: the
+ * scope names a target field the caller cannot read) is never probed: its miss
+ * says nothing about where the value lives, so it stays `reference_not_found`.
+ * A scoped lookup none of whose reads answered because the engine's filter seam
+ * refused the scope (`RefMatch.scopeUnqueryable`: the scope names a target field
+ * the engine cannot filter by, such as a formula) is not probed either: it
+ * stays `reference_not_found` with its own sentence, which says the lookup
+ * could not be made within the row's scope. [#37717] Nor is a scoped lookup
+ * none of whose reads answered for any other reason
+ * (`RefMatch.scopeUnanswered`: every read refused, say for a scope cell the
+ * field's type cannot take): only a scoped read that ran to a miss says the
+ * value is not within the scope, so that cell stays `reference_not_found` with
+ * the plain sentence.
+ *
+ * The probe is the caller's own read: the resolver runs every lookup as the
+ * importing principal, so it can find only a record that principal can already
+ * read by the same value, and the sentence says nothing of that record. The
+ * qualifier is composed from labels, cells and punctuation only, so it reads
+ * the same under every locale the catalog sentence is rendered in.
+ */
+async function referenceNotFound(
+  meta: ExportFieldMeta,
+  field: string,
+  value: string,
+  ctx: CoerceContext,
+  scope: Readonly<Record<string, unknown>> | undefined,
+  scopedBy: readonly ScopedBy[] | undefined,
+  scopedMatch: RefMatch,
+): Promise<{ error: FieldCoerceError }> {
+  const refusal = coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', value, ctx);
+  if (!scope || !scopedBy || scopedBy.length === 0 || !ctx.resolveRef || !meta.reference) return refusal;
+  // A scope the caller may not filter by was never asked: nothing is known about
+  // where the value lives, so it is not "under another parent".
+  if (scopedMatch.scopeDenied) return refusal;
+  // [#37717] No scoped read answered (every one refused): the scope was never
+  // asked, so a hit without it would claim a fact the import never checked.
+  if (scopedMatch.scopeUnanswered) return refusal;
+  const qualifier = scopedBy.map((s) => `${s.label} = "${s.value}"`).join(', ');
+  // A scope no read could filter by: say the lookup could not be made, not that nothing matched.
+  if (scopedMatch.scopeUnqueryable) {
+    return coerceError(
+      meta, field, 'reference_not_found', 'import_reference_scope_unqueryable', value, ctx, { scope: qualifier },
+    );
+  }
+  const unscoped = normalizeRefMatch(await ctx.resolveRef(meta.reference, value, meta));
+  if (unscoped.id === undefined && !unscoped.ambiguous) return refusal;
+  const outOfScope = coerceError(
+    meta, field, 'reference_out_of_scope', 'import_reference_out_of_scope', value, ctx, { scope: qualifier },
+  );
+  return { error: { ...outOfScope.error, scope: scopedBy.map((s) => ({ field: s.field, value: s.value })) } };
 }
 
 /** Normalise a resolver result (legacy string or structured) to a RefMatch. */
@@ -202,6 +304,12 @@ export interface FieldCoerceError {
    */
   code: FieldErrorCode;
   message: string;
+  /**
+   * [#36794] The row columns a `reference_out_of_scope` cell was resolved
+   * within, each with the cell the row gave it (`ValidateDataIssueSchema.scope`).
+   * Present on that code only.
+   */
+  scope?: Array<{ field: string; value: string }>;
 }
 
 /**
@@ -761,6 +869,20 @@ export async function coerceFieldValue(
   ctx: CoerceContext,
   scope?: Readonly<Record<string, unknown>>,
 ): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
+  return coerceCell(raw, meta, ctx, scope);
+}
+
+/**
+ * {@link coerceFieldValue}, plus the row columns its scope came from
+ * ({@link ScopedBy}), which only {@link coerceRow} knows.
+ */
+async function coerceCell(
+  raw: unknown,
+  meta: ExportFieldMeta | undefined,
+  ctx: CoerceContext,
+  scope?: Readonly<Record<string, unknown>>,
+  scopedBy?: readonly ScopedBy[],
+): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
   const trim = ctx.trimWhitespace !== false;
   const field = meta?.name ?? '';
 
@@ -850,9 +972,7 @@ export async function coerceFieldValue(
         if (m.ambiguous) {
           return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', token, ctx);
         }
-        if (m.id === undefined) {
-          return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', token, ctx);
-        }
+        if (m.id === undefined) return referenceNotFound(meta, field, token, ctx, scope, scopedBy, m);
         out.push(m.id);
       }
       return { value: out };
@@ -866,9 +986,7 @@ export async function coerceFieldValue(
     if (match.ambiguous) {
       return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', display, ctx);
     }
-    if (match.id === undefined) {
-      return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', display, ctx);
-    }
+    if (match.id === undefined) return referenceNotFound(meta, field, display, ctx, scope, scopedBy, match);
     return { value: match.id };
   }
 
@@ -1026,13 +1144,21 @@ export async function coerceRow(
       const ready = pending.filter((k) => scoped.get(k)!.every((s) => settled(s.field)));
       for (const key of ready.length > 0 ? ready : pending) {
         let scope: Record<string, unknown> | undefined;
+        const scopedBy: ScopedBy[] = [];
         if (ready.length > 0) {
           for (const s of scoped.get(key)!) {
             const v = await sourceValue(s.field);
-            if (v !== undefined) (scope ??= {})[s.param] = v;
+            if (v === undefined) continue;
+            (scope ??= {})[s.param] = v;
+            // [#36159] What the importer wrote in the scoping column, by its label.
+            scopedBy.push({
+              field: s.field,
+              label: metaMap.get(s.field)?.label?.trim() || s.field,
+              value: String(sourceRow[s.field]).trim(),
+            });
           }
         }
-        outcomes.set(key, await coerceFieldValue(rawRow[key], metaMap.get(key), ctx, scope));
+        outcomes.set(key, await coerceCell(rawRow[key], metaMap.get(key), ctx, scope, scopedBy));
       }
       pending = pending.filter((k) => !outcomes.has(k));
     }

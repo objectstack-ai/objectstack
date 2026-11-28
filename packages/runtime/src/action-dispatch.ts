@@ -172,6 +172,12 @@ export interface ResolvedActionCall {
          * answer refuses it, and nothing is handed off.
          */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /**
+         * [#34325] The door would ask a client that supports confirmation,
+         * and this call's client does not (`actionExec.ActionConfirmationDoor`):
+         * a `no_confirmation_service` refusal names that route too.
+         */
+        elicitsCapableClients?: boolean;
     };
     /**
      * [ADR-0106 D1] This door's answer for a name nothing declares, where it
@@ -326,6 +332,12 @@ interface Admission {
     recordId: any;
     params: Record<string, unknown>;
     subject: actionExec.ActionSubjectRecordLoad;
+    /**
+     * The caller-scope read of the call's `params._selectedIds`
+     * (`actionExec.loadActionSelectionRecords`); absent when the call carries
+     * none or its arm is not read (`actionExec.actionSelectionIsRead`).
+     */
+    selection?: actionExec.ActionSelectionLoad;
     /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
     handOff: boolean;
     /**
@@ -369,6 +381,7 @@ async function subjectVerdictRefusal(
     try {
         await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, admission.actionDef, {
             objectName, recordId: subjectRecordIdOf(admission.recordId), subject: admission.subject, ec: wiring.ec, envId: wiring.envId,
+            ...(admission.selection !== undefined ? { selection: admission.selection } : {}),
         });
     } catch (error) {
         const thrown = error as Error & { code?: unknown; status?: unknown };
@@ -418,7 +431,7 @@ async function confirmAdmittedAction(
         ...(subjectRecordId !== undefined ? { recordId: subjectRecordId } : {}),
         params,
         door: handOff.door,
-    }, wiring.ec);
+    }, wiring.ec, { elicitsCapableClients: handOff.elicitsCapableClients === true });
     if ('refused' in answer) {
         const { refused } = answer;
         return {
@@ -611,7 +624,7 @@ async function admitResolvedAction(
     // [#25976] The body, and then its params bag, must be objects before the
     // param contract or any handler reads them; `undefined` / `null` stay the
     // legal bodyless call and an absent `params` key keeps its empty bag.
-    const invalidBody = (message: string, failure: { field: string; code: 'invalid_type'; message: string }) =>
+    const invalidBody = (message: string, failure: { field: string; code: 'invalid_type' | 'invalid_value'; message: string }) =>
         refuse({ message, status: VALIDATION_FAILED_STATUS, details: validationFailureDetails(validationFailure(message, [failure])) as ActionRefusal['details'] });
     const bodyFailure = objectValueFailure('(body)', call.body ?? {});
     if (bodyFailure) return invalidBody(`Invalid action body — ${bodyFailure.message}`, bodyFailure);
@@ -627,6 +640,24 @@ async function admitResolvedAction(
         return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
     }
     const params: Record<string, unknown> = reqBody.params ?? {};
+    // An action not bound to an object accepts no record, on any arm and for
+    // any caller: judged on the declaration the call resolved to, never on the
+    // object it was routed under, before any record is read or anything runs.
+    const recordKeyFailure = actionExec.objectLessActionRecordKeyFailure(actionDef, actionSchema, actionName, recordId, params, declaration?.ownerKey);
+    if (recordKeyFailure) return invalidBody(`Invalid action body — ${recordKeyFailure.message}`, recordKeyFailure);
+    // A selection names records by id, as `recordId` names one: its shape is
+    // judged here, beside the record key's, on every arm that reads it.
+    let selectionIds: string[] | undefined;
+    if (actionExec.actionSelectionIsRead(actionDef, wiring.ec)) {
+        try {
+            selectionIds = actionExec.actionSelectionIdsOrRefuse(objectName, params);
+        } catch (error) {
+            const failure = validationFailureDetails(error);
+            if (!failure) throw error;
+            const message = (error as Error).message;
+            return refuse({ message: `Invalid action body — ${message}`, status: VALIDATION_FAILED_STATUS, details: failure as unknown as ActionRefusal['details'] });
+        }
+    }
 
     // [ADR-0104 D2] The declared param contract, before the handler runs.
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, params, { objectName, actionName });
@@ -671,8 +702,15 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
+    // …and each id of its selection the same way, with the same read, in the
+    // caller's own scope; the dispatch consumes the verdict as the subject load's.
+    const selection = selectionIds !== undefined && selectionIds.length > 0
+        ? await actionExec.loadActionSelectionRecords(objectName, selectionIds, (id) =>
+            wiring.callData('get', { object: objectName, id }, wiring.driver, wiring.envId, wiring.ec))
+        : undefined;
     return {
         actionDef, actionType, recordId, params, subject, handOff,
+        ...(selection !== undefined ? { selection } : {}),
         ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
         ...(attribution.holder !== undefined ? { holder: attribution.holder } : {}),
     };
@@ -709,6 +747,9 @@ async function dispatchAdmittedAction(
         // a trusted context. [#28657] Except ahead of an api forward that needs
         // nothing from the row: its target authorizes the caller itself.
         actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject, ec);
+        // The selection's verdict, at the same point: a selection the caller's
+        // scope did not deliver whole runs nothing (an api action is not read).
+        actionExec.refuseUndeliveredActionSelection(objectName, admission.selection, ec);
 
         // ── api forward (#27506) ── a same-origin `type: 'api'` action is
         // forwarded IN-PROCESS to its declared `target` with the caller's own
@@ -721,7 +762,7 @@ async function dispatchAdmittedAction(
             }
             const inject = await actionExec.resolveInProcessRequest(deps, requestContext, envId);
             if (!inject) {
-                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door), status: 503 } };
+                return { kind: 'refused', refusal: { message: actionExec.apiActionForwardUnavailableError(actionDef, door, ec), status: 503 } };
             }
             // [#28657] On a denied load the request is built from the
             // `recordId` alone — ⛔ never from a row the caller could not read.
@@ -1281,6 +1322,21 @@ export async function dispatchActionRequest(
 
 /** One dispatcher per kernel: its deps are the REST door's. */
 const hostDispatchers = new WeakMap<object, HttpDispatcher>();
+
+/**
+ * The one dispatcher a host's in-process doors run on for `kernel`, from the
+ * map {@link dispatchAction} and {@link dispatchActionResume} fill: the
+ * in-process authoring entry (`./in-process-authoring.ts`) runs on the
+ * same dispatcher, and so on the same placement, as a host's action call.
+ */
+export function hostDispatcherFor(kernel: ObjectKernel): HttpDispatcher {
+    let dispatcher = hostDispatchers.get(kernel);
+    if (!dispatcher) {
+        dispatcher = new HttpDispatcher(kernel);
+        hostDispatchers.set(kernel, dispatcher);
+    }
+    return dispatcher;
+}
 
 /**
  * Run one business action from a host's own door — the REST `/actions`

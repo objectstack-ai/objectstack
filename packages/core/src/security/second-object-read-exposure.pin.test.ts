@@ -247,12 +247,34 @@ const CALLERS: Record<string, Classification> = {
       'then expanded by `findData`, which asks its exposure) and checks that a `related` link field points at the parent ' +
       'record; each related list is a `findData` read of the child it names, judged by that door as any list.',
   },
+  // [#37140] `get_record_context` (ADR-0160 D4): the read set and the executor's lookups.
+  'packages/services/service-record-context/src/read-set.ts': {
+    kind: 'executes',
+    read:
+      "`get_record_context`'s lookup display names: each lookup the pack lists is read as an `expand` of the caller's " +
+      "own `query` on the record's object, through the data door, whose `servedExpand` decides each expansion target",
+    decidedIn: 'packages/metadata-protocol/src/protocol-query-validation.ts',
+    also:
+      'reads no record: `lookupTargetOf` names the object a listed lookup points at, for the read set and so the ' +
+      'executor asks that target of the read guard before any read, and checks that a `related` link field points at ' +
+      'the root; each related list is a `query` of the child it names, judged by that door as any list.',
+  },
   'packages/core/src/utils/relation-condition-sites.ts': {
     kind: 'not-a-served-read',
     reason:
       "finds a filter's nested-relation conditions and each one's target; reads no record. Every door that calls it asks " +
       "each target the decision before the engine reads it: the data door's `refuseUnservedRelationTarget`, the MCP " +
       "stdio data bridge's `enforceRelationTargetExposure` and the runtime `callData`'s `refuseUnservedRelationTargets`",
+  },
+  // [#37308] A knowledge search's record scope (ADR-0161 K8, item 17).
+  'packages/services/service-knowledge/src/knowledge-search-scope.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "names the object a knowledge source's listed lookup points at, only to turn a search scope entry that names " +
+      "that parent into a filter on the source's own stored lookup value; it reads no record of the parent and serves " +
+      "nothing of it. The hits are the source's own documents, each re-read as the caller (`applyPermissionFilter`). " +
+      'Pinned by `packages/services/service-knowledge/src/__tests__/knowledge-service.test.ts` (a parent-scoped ' +
+      'search makes no engine call naming the parent object) and `knowledge-search-scope.test.ts`',
   },
   'packages/qa/scenarios/src/score/scenario-graph.ts': {
     kind: 'not-a-served-read',
@@ -280,6 +302,11 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
+  // [#37140] A context pack's `related` link judged against the child's declared references.
+  'packages/lint/src/validate-ai-context.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
   // [#24410] A formula's one-hop read judged against its target's declared fields.
   'packages/lint/src/validate-expressions.ts': {
     kind: 'not-a-served-read',
@@ -287,6 +314,11 @@ const CALLERS: Record<string, Classification> = {
   },
   // [#32529] A stored expression's hop judged as a warning: names the target in the message only.
   'packages/lint/src/stored-expression-inputs.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
+  // [#36714] A `transferBehavior: 'cascade'` judged against the parent's declared Change Owner switch.
+  'packages/lint/src/validate-transfer-cascades.ts': {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
@@ -390,6 +422,18 @@ const CALLERS: Record<string, Classification> = {
       'picks the fields whose target is the user object, then counts and updates rows of the object that DECLARES ' +
       'them, under the caller\'s own context; the only read of the target is the hand-over recipient\'s ban state ' +
       '(a fixed platform object), and no field of it is served',
+  },
+  // [#35315] The Change Owner cascade (ruling 7000907189 point 4).
+  'packages/core/src/security/change-record-owner.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "`transferCascadeRelations` asks only whether a child's `transferBehavior: 'cascade'` field points at the object " +
+      'the Change Owner request ADDRESSES (judged by the route as that object, for `update`); it reads no record of ' +
+      "that target beyond the request's own records. The rows it reads and moves are the CHILD's, the object that " +
+      "DECLARES the field, under the caller's own context, and the child is asked its own exposure for `update` " +
+      '(`canServeApiOperation`) before it is offered or cascaded. Pinned by ' +
+      '`packages/core/src/security/change-record-owner.test.ts` (a child whose exposure does not serve update is no ' +
+      'candidate, and a request naming it is refused before any read)',
   },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',

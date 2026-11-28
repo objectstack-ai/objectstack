@@ -210,6 +210,13 @@ type _SummaryRowShapeWithoutLeadIsRefused = Expect<Equal<Declared<DataTableSchem
 type _FloatingBarIsDeclared = Expect<IsDeclaredOn<'floatingBar'>>;
 type _FloatingBarShape = Expect<Equal<Declared<DataTableSchema>['floatingBar'], React.ReactNode>>;
 
+/**
+ * objectstack#35955 — the column menu's "Hide column" handler, `onColumnHide`:
+ * `data-table.tsx` calls it with the column's key; `ObjectGrid` supplies it.
+ */
+type _OnColumnHideIsDeclared = Expect<IsDeclaredOn<'onColumnHide'>>;
+type _OnColumnHideShape = Expect<Equal<Declared<DataTableSchema>['onColumnHide'], ((columnKey: string) => void) | undefined>>;
+
 describe('objectui#6882 — DataTableSchema declares the two keys data-table reads', () => {
   /**
    * The runtime half exists only so the compile-time pins above have a file

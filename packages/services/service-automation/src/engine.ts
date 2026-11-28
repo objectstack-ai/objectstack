@@ -10,9 +10,9 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult, RecordUpdateStartsInput } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
-import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
+import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal, RecordUpdateStart } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
     validateScreenInputs,
@@ -132,6 +132,8 @@ import {
     type ValueEnvelopeRefusal,
 } from './dag-traversal.js';
 import { activeDryRunExecuteNode, dryRun as dryRunBody, type DryRunHost } from './dry-run.js';
+// [#35928] The record-update preview's body.
+import { listRecordUpdateStarts, type RecordUpdateStartsHost } from './record-update-starts.js';
 // [#25222] The run history's bodies: recording a run's log entry, finishing a
 // refused run, and reading runs and suspended runs back. Each
 // `AutomationEngine` method of the same name calls its body.
@@ -239,6 +241,7 @@ import { FlowActivationProjection } from './flow-activation-projection.js';
 import { packageScopedRefusalMessage, PackageScopedNameRefusedError } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
 import { FlowSlotTable, flowRunKey, flowRunPackage, isSlotKeySpelling, qualifiedFlowKey, unfiledFlowKey, stampFlowRunSlot, type FlowKeyMove, type FlowSlot } from './flow-slots.js';
+import { readRecordRun, readRootRun, stampRootRun, type RecordRun, type RootRun } from './root-run.js';
 import { flowSlotRunStore } from './flow-slot-run-store.js';
 import { ConnectorInstances } from './connector-instances.js';
 import type { ConnectorInstanceOptions } from './plugin-extension-api.js';
@@ -832,7 +835,12 @@ export type FlowFunctionResolver = (
  */
 export type FlowObjectSchemaResolver = (
   objectName: string,
-) => { fields?: readonly string[]; fieldTypes?: Record<string, string> } | undefined;
+) => {
+    fields?: readonly string[];
+    fieldTypes?: Record<string, string>;
+    /** [#36167] The list-valued fields (`ExprSchemaHint.multiValueFields`, `@objectstack/formula`). */
+    multiValueFields?: readonly string[];
+} | undefined;
 
 /**
  * The authorization envelope a `runAs:'user'` run needs to enforce its data
@@ -5965,6 +5973,27 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#35928] Which flows a proposed update of one record would start — the
+     * preview the stage-change confirms show. The contract is
+     * `IAutomationService.listRecordUpdateStarts`; the body lives in
+     * ./record-update-starts.ts, over this engine's own arming state and its
+     * one start-condition gate.
+     */
+    listRecordUpdateStarts(input: RecordUpdateStartsInput): RecordUpdateStart[] {
+        const host: RecordUpdateStartsHost = {
+            flows: this.flows,
+            boundFlowTriggers: this.boundFlowTriggers,
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            resolveTriggerBinding: (...a) => this.resolveTriggerBinding(...a),
+            seedRunVariables: (...a) => this.seedRunVariables(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
+            flowSlotName: (...a) => this.flowSlotName(...a),
+            subflowTargets: (...a) => this.subflowTargets(...a),
+        };
+        return listRecordUpdateStarts.call(host, input);
+    }
+
+    /**
      * [#17396 ruled item 6, #18235] The ONE place that decides why a registered
      * flow is not armed — both the status door ({@link getFlowRuntimeStates})
      * and the boot-time audit ({@link getTriggerBindingAudit}) read it, so the
@@ -6097,6 +6126,30 @@ export class AutomationEngine implements IAutomationService {
     getRunFlow(context: AutomationContext | undefined): FlowParsed | null {
         const key = this.flowKeyOfRun(context);
         return key === undefined ? null : this.flows.get(key) ?? null;
+    }
+
+    /**
+     * [ADR-0162 Execution item 7] The root run of the run `context` belongs
+     * to: the run its tree was started on, at any depth, as the engine
+     * stamped it (`root-run.ts`). `undefined` where the run carries none: a
+     * run parked before root runs were stamped whose chain of parents the
+     * resume could not read whole, a child of such a run, or a context that is
+     * no run's. A node
+     * executor reads it here, as it reads {@link flowKeyOfRun}. Engine-local.
+     */
+    rootRunOf(context: AutomationContext | undefined): RootRun | undefined {
+        return readRootRun(context);
+    }
+
+    /**
+     * [ADR-0162 Execution item 7] The record run of the run `context` belongs
+     * to: the highest run, from that run up, over which the record does not
+     * change (the root run, or a `map` item run whose item is a record), as
+     * the engine stamped it (`root-run.ts`). `undefined` exactly where
+     * {@link rootRunOf} is. Engine-local.
+     */
+    recordRunOf(context: AutomationContext | undefined): RecordRun | undefined {
+        return readRecordRun(context);
     }
 
     /**
@@ -8237,6 +8290,8 @@ export class AutomationEngine implements IAutomationService {
         // (#3456).
         const runContext = await this.resolveRunContext(flow, context, runId);
         stampFlowRunSlot(runContext, flowName, runPackage);
+        // [ADR-0162 item 7] The run's root run: itself, or its parent's.
+        stampRootRun(runContext, { runId, flowName, startedAt });
 
         try {
             // Find the start node
@@ -9596,6 +9651,10 @@ export class AutomationEngine implements IAutomationService {
             error:
                 `Invalid screen input: ${summary} — declared fields: ` +
                 `${declared.map((n) => `'${n}'`).join(', ') || '(none)'}`,
+            // [#37526] The same findings, one per field, so a runner can place
+            // each at its field in its own language rather than show `error`,
+            // which names the screen's declared fields for logs and API callers.
+            fields: issues.map(({ field, code, message }) => ({ field, code, message })),
         };
     }
 
@@ -11559,6 +11618,16 @@ export class AutomationEngine implements IAutomationService {
      *
      * Shared deliberately: a predicate and a value expression that disagreed
      * about what `rows` means would be two dialects wearing one name.
+     *
+     * ## No variable key reaches a prototype
+     *
+     * Every container the builder creates has no prototype, and a key with a
+     * `__proto__` segment binds nothing here — skipped, not refused (a dotted
+     * tail whose head names a value the run holds is still written into that
+     * value);
+     * `./scope-key-segments.ts` states the rule and why `constructor` and
+     * `prototype` stay ordinary keys. The text-hole scope
+     * (`textTemplateScope`) follows the same rule.
      *
      * ## `current_user` — the run's user, or `null` (#19939)
      *

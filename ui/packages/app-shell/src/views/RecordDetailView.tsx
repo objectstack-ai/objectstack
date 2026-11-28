@@ -8,11 +8,13 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { createElement, useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
-import { getIcon } from '../utils/getIcon.js';
+import { activityRowToFeedItem, buildCommentThreads, CommentsButton, CommentsPage, RecordCommentsInPanelContext, composeImpersonatedActor, IMPERSONATED_ACTOR_FALLBACK, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordFieldHistoryContext, RecordTimelineTotalContext, RecordViewApprovalsContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RECORD_PAGE_DETAILS_WIDTH, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
+// objectstack#36075 — the comment panel's unresolved count and the moderator's verdict.
+import { unresolvedThreadCount, useRecordVerdict } from '@object-ui/plugin-detail';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, ObjectIconTile, RecordHeaderBarContext, RecordHeaderStateContext, RecordTopBar, RecordTopBarButton, cn, useRecordStepKeys, type PanelToggleItem, type RecordHeaderBar, type RecordHeaderGroupParts, type RecordHeaderState, type RecordTopBarStepper } from '@object-ui/components';
 import { isActingApprover } from '../utils/approvalDecisionFold.js';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -22,27 +24,33 @@ import type { AnsweredLoadFailure } from '@object-ui/react';
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight, X } from 'lucide-react';
+import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, X } from 'lucide-react';
 import { checkPageRecordPlacesComponent } from '@objectstack/spec/ui';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
 import { ActionParamDialog, type ParamDialogState } from './ActionParamDialog.js';
 import { resolveParamDialogCompanion } from './actionDialogCompanion.js';
 import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog.js';
-import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
+import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
+import { useRecordChangeOwnerOffer } from './changeOwner.js';
+import { FlowRunner, type ScreenSpec } from './FlowRunner.js';
+import { useScreenFlowQueue } from '../hooks/useScreenFlowQueue.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
 import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PrefetchUpcomingRelatedCounts, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
+import { COMMENTS_PANEL_WIDTH, RecordCommentsAside, commentsPanelPlacement, useCommentsPanelOpen, useWindowWidth } from './recordCommentsPanel.js';
 import {
   RECORD_PAGE_ACTIVITY_ROWS,
   RECORD_PAGE_ATTACHMENT_ROWS,
@@ -56,8 +64,10 @@ import {
   type RecordPageStreamsAsk,
 } from './recordPagePayload.js';
 import { applySavedRecordEcho } from './recordSaveEcho.js';
+import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_SECTION_PARAM, RECORD_SECTION_OPENED_STATE, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { focusRecordSection, sectionCandidates } from './recordSectionAnchor.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -66,6 +76,10 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
+import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
+import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -78,13 +92,14 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
-import { placedHeaderActions } from '@object-ui/types';
-import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
+import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
+import type { ActionContext, ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
-import { RecordApprovalsPanel } from './RecordApprovalsPanel.js';
-import { ApprovalBandOnceScope, RecordStageMenu } from '@object-ui/plugin-detail';
+import { RecordApprovalsPanel, stepDisplayText } from './RecordApprovalsPanel.js';
+import { ApprovalBandOnceScope, RecordStageMenu, RelatedListConditionsSlotContext } from '@object-ui/plugin-detail';
+import { renderRelatedListConditions } from './relatedListConditions.js';
 import { DeclaredActionsBar } from './DeclaredActionsBar.js';
 import {
   SYS_APPROVAL_REQUEST_OBJECT,
@@ -92,6 +107,8 @@ import {
   RECORD_APPROVAL_EXCLUDED_ACTIONS,
 } from './recordApprovalActions.js';
 import { useApprovalQueueAdvance } from './approval-decision/approvalQueueAdvance.js';
+import { approvalSubjectTitle } from './approval-decision/approvalSubjectTitle.js';
+import { RecordReadReportContext, recordReadKey, type RecordReadReport } from './approval-decision/recordReadReport.js';
 // Side-effect registration of `record:approvals` — synthesized record pages
 // reference the node whenever the record has approval requests (#3461), so
 // the type must resolve wherever this view renders, not only under hosts
@@ -100,13 +117,13 @@ import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
 import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue, auditImpersonatorId } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
+import { recordFavoriteItem } from '../context/FavoritesProvider.js';
 import {
-  RECORD_RELATED_COLUMN_PREFERENCE,
+  RECORD_DETAILS_WIDTH_PREFERENCE,
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
   objectPreferenceScope,
   useWorkspacePreference,
 } from '../utils/workspacePreference.js';
-import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
 import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
@@ -158,80 +175,6 @@ const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
 const RECORD_PAGE_APPEND_INSET = 'px-3 md:px-4 lg:px-6';
 
 /**
- * `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's right column, the
- * reader's ⊟ (objectstack#27052; objectstack#27524, Target 4). The record
- * page owns the listener and advertises this beside it, under the same gate:
- * a synthesized record page in a tier with a right column.
- *
- * Not `⌘⇧R`: Chromium and Firefox keep Ctrl/⌘+Shift+R (hard reload) for
- * themselves, and the page never receives it. (`⌘⇧.`, the timeline column's
- * switch, retired with the column.)
- */
-const TOGGLE_RELATED_SHORTCUT: AdvertisedShortcut = {
-  id: 'record-toggle-related',
-  group: 'general',
-  chord: { key: ',', mod: true, shift: true },
-  label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleRelated'),
-};
-
-/**
- * How each punctuation chord key is recognised. Shift changes the character
- * those keys type (`.` becomes `>` on a US layout), so a chord that holds
- * Shift is matched by `KeyboardEvent.code`, the physical key — and, beside it,
- * by either character `key` reports for that key (objectstack#27241): an
- * event that carries no `code` (synthetic or injected input, some IMEs and
- * remote desktops) still names the key it typed.
- */
-const PANEL_CHORD_KEYS: Readonly<Record<string, { code: string; keys: readonly string[] }>> = {
-  ',': { code: 'Comma', keys: [',', '<'] },
-};
-
-function matchesPanelChord(
-  e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>,
-  chord: ShortcutChord,
-): boolean {
-  if (e.altKey) return false;
-  if (Boolean(chord.mod) !== (e.metaKey || e.ctrlKey)) return false;
-  if (Boolean(chord.shift) !== e.shiftKey) return false;
-  const punctuation = PANEL_CHORD_KEYS[chord.key];
-  if (punctuation) return e.code === punctuation.code || punctuation.keys.includes(e.key);
-  return e.key.toLowerCase() === chord.key;
-}
-
-/**
- * A keydown aimed at something the reader types into — a text field, a
- * select, a content-editable region, an ARIA textbox: the panel shortcuts
- * leave those alone, so a reader typing in the composer keeps their keys.
- */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  return target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') !== null;
-}
-
-/**
- * Whether this record view is the topmost one, the one a page-wide chord is
- * for. A record page keeps its own tree mounted under the drawer its rows and
- * lookups open (`RecordPageDrawerHost`), and the drawer's sheet is portaled
- * after it, to the end of the body; once the drawer is wide enough for a right
- * column its view listens too (objectstack#27524). The last record root in
- * document order is the one on top.
- */
-function isTopmostRecordView(root: Element | null): boolean {
-  if (!root) return false;
-  const roots = root.ownerDocument.querySelectorAll('[data-record-page-root]');
-  return roots[roots.length - 1] === root;
-}
-
-/** `aria-keyshortcuts` spelling of a chord, for the platform the page runs on. */
-function ariaKeyShortcutsOf(chord: ShortcutChord): string {
-  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
-  return [chord.mod ? (mac ? 'Meta' : 'Control') : null, chord.shift ? 'Shift' : null, chord.key.toUpperCase()]
-    .filter(Boolean)
-    .join('+');
-}
-
-/**
  * The `user` seeded into this view's own `<ActionProvider>` — identity plus, once
  * resolved, the caller's system capabilities.
  *
@@ -240,7 +183,7 @@ function ariaKeyShortcutsOf(chord: ShortcutChord): string {
  * action on the record surface, and `ActionEngine.getActionsForLocation` reads the
  * capability gate off `runner.getContext().user.systemPermissions`. The engine
  * fails OPEN on `undefined` (unknown ≠ denied), so shipping identity alone
- * silently un-gated every `record_header` / `record_more` action that declared
+ * silently un-gated every `record` / `record_page` action that declared
  * `requiredPermissions` — the button rendered, and only the server's 403 stopped
  * it (and only for platform action routes at that).
  *
@@ -257,7 +200,7 @@ function ariaKeyShortcutsOf(chord: ShortcutChord): string {
  * predating ADR-0066), which is exactly the "unknown" case the engine's own
  * `Array.isArray(held)` check fails OPEN on — not "holds nothing". Defaulting
  * it to `[]` here would silently re-introduce the same collapse at this one
- * call site and gate every `record_header` / `record_more` action closed on
+ * call site and gate every `record` / `record_page` action closed on
  * such a deployment. A REPORTED empty array still forwards as `[]` and gates
  * strictly, unchanged.
  */
@@ -340,6 +283,15 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
   let refused = false;
   checkPageRecordPlacesComponent(page, { value: page, issues: [], addIssue: () => { refused = true; } });
   return refused;
+}
+
+/**
+ * Whether a record page is a print page (objectui#11958): it declares `print`
+ * as an object. Only an assigned page can; the default page never does.
+ */
+function pageDeclaresPrintOf(page: unknown): boolean {
+  const print = (page as { print?: unknown } | null | undefined)?.print;
+  return typeof print === 'object' && print !== null && !Array.isArray(print);
 }
 
 /**
@@ -495,6 +447,76 @@ function mergeFeedRows(prev: readonly FeedItem[], incoming: readonly FeedItem[])
 }
 
 /**
+ * Whether a `sys_comment` row's stored `mentions` name `userId`
+ * (objectstack#36075, 「只看我参与的」): a JSON id list, as this page writes
+ * it, or a list of ids or `{ id }` objects, as #36071's `threadsInvolvingUser`
+ * reads it. Anything unreadable names nobody.
+ */
+function rowMentionsUser(raw: unknown, userId: string | undefined): boolean {
+  if (!userId || raw == null) return false;
+  let list: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      return false;
+    }
+  }
+  if (!Array.isArray(list)) return false;
+  return list.some((entry) =>
+    entry != null && typeof entry === 'object'
+      ? String((entry as { id?: unknown }).id) === userId
+      : String(entry) === userId,
+  );
+}
+
+/**
+ * The resolution of a `sys_comment` row as the feed carries it
+ * (objectstack#36071, #36075): `resolved` only where the row carries
+ * `is_resolved` (a deployment that stores none offers no resolve control),
+ * the resolver's id and when, and the resolver's name where this page knows
+ * it — the viewer, or an author of the same discussion (`namesById`).
+ */
+function commentResolutionOf(
+  row: Record<string, unknown>,
+  namesById: ReadonlyMap<string, string>,
+): Pick<FeedItem, 'resolved' | 'resolvedById' | 'resolvedByName' | 'resolvedAt'> {
+  if (row.parent_id != null && row.parent_id !== '') return {};
+  if (!Object.prototype.hasOwnProperty.call(row, 'is_resolved')) return {};
+  const resolved = row.is_resolved === true;
+  if (!resolved) return { resolved: false };
+  const by = row.resolved_by;
+  const byId = by != null && typeof by === 'object' ? (by as { id?: unknown }).id : by;
+  const resolvedById = byId != null && byId !== '' ? String(byId) : undefined;
+  const expandedName = by != null && typeof by === 'object' ? (by as { name?: unknown }).name : undefined;
+  return {
+    resolved: true,
+    resolvedById,
+    resolvedByName:
+      typeof expandedName === 'string' && expandedName !== ''
+        ? expandedName
+        : resolvedById
+          ? namesById.get(resolvedById)
+          : undefined,
+    resolvedAt: typeof row.resolved_at === 'string' ? row.resolved_at : undefined,
+  };
+}
+
+/** The top-level comment a comment's thread is resolved on: its topmost held ancestor. */
+function threadRootIdOf(items: readonly FeedItem[], itemId: string | number): string | number {
+  const byId = new Map(items.map((item) => [String(item.id), item]));
+  let current = byId.get(String(itemId));
+  const seen = new Set<string>();
+  while (current && current.parentId != null && !seen.has(String(current.id))) {
+    seen.add(String(current.id));
+    const parent = byId.get(String(current.parentId));
+    if (!parent) break;
+    current = parent;
+  }
+  return current ? current.id : itemId;
+}
+
+/**
  * The record feed's own read of the activity window (`$top:
  * RECORD_PAGE_ACTIVITY_ROWS`, newest first): the feed's read where the page
  * payload carries no activity, and the 动态 tab's when it opens on a feed that
@@ -638,6 +660,19 @@ const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
  */
 const COMMENT_REACTION_REMOVE_PATH = '/api/v1/comments/reactions';
 
+/**
+ * The comment doors (objectstack#36186, #36191), each `+ /:id` of a
+ * `sys_comment` row: `PUT …/resolution` with `{ resolved }` resolves or reopens
+ * the thread of a top-level comment for anyone who can read it, writing
+ * `is_resolved` alone; `DELETE` removes the caller's own comment, refuses
+ * anyone else's (`403 PERMISSION_DENIED`) and keeps one others replied under
+ * (`409 DELETE_RESTRICTED`). They exist because the data door cannot serve a
+ * rank-and-file member either write: the platform's row floor admits their
+ * update of their own rows alone, and no every-member set may carry the
+ * `delete` grant (ADR-0090 D5).
+ */
+const COMMENT_DOOR_PATH = '/api/v1/comments';
+
 /** The object the record feed's comments and replies are rows of. */
 const COMMENT_OBJECT = 'sys_comment';
 
@@ -688,6 +723,7 @@ function resolveFeedWriteGates(
   comment: boolean;
   commentEdit: boolean;
   commentDelete: boolean;
+  commentDeleteOwn: boolean;
   reactionAdd: boolean;
   reactionRemove: boolean;
   reactionColumn: boolean;
@@ -704,6 +740,9 @@ function resolveFeedWriteGates(
     // under its own grant on `sys_comment`.
     commentEdit: resolveAffordance('feedCommentEdit', source(COMMENT_OBJECT)).allowed,
     commentDelete: resolveAffordance('feedCommentDelete', source(COMMENT_OBJECT)).allowed,
+    // objectstack#36191: without the delete grant, the author's Delete is the
+    // own-comment delete door, asked under the grant the comment was posted under.
+    commentDeleteOwn: resolveAffordance('feedCommentDeleteOwn', source(COMMENT_OBJECT)).allowed,
     reactionAdd: resolveAffordance('feedReactionAdd', source(COMMENT_REACTION_OBJECT)).allowed,
     reactionRemove: resolveAffordance('feedReactionRemove', source(COMMENT_REACTION_OBJECT)).allowed,
     reactionColumn: resolveAffordance('feedReactionColumn', source(COMMENT_OBJECT)).allowed,
@@ -872,6 +911,28 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
   return null;
 }
 
+/** The reader's arrangement is not written while the design mode's tab editor previews the default (objectstack#36499, objectstack#36737). */
+const ignoreArrangementChange = (): void => {};
+
+/**
+ * objectstack#37487 (S5) — the cited section the record page last opened, as
+ * `{ target: RECORD\nANCHOR, opened: CLICK }`, kept beside the component so it
+ * outlives a remount or a swapped page root: a record-form overlay pushed over
+ * the page (and Back after it) redraws the page without the click's history
+ * state, and that redraw is no new click. It is dropped once no record page is
+ * mounted any more, so a later visit to the same link opens its section again.
+ */
+let lastCitedSectionOpen: { target: string; opened: string } | null = null;
+let mountedRecordPages = 0;
+
+/** Whether a cited-section open is a new one, and record it when it is. */
+function claimCitedSectionOpen(target: string, opened: string): boolean {
+  const last = lastCitedSectionOpen;
+  if (last && last.target === target && (opened === '' || opened === last.opened)) return false;
+  lastCitedSectionOpen = { target, opened };
+  return true;
+}
+
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
   const params = useParams<{
@@ -913,12 +974,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Closing — Esc or 「概览」 — pops the entry when this view pushed it, and
   // otherwise replaces the URL without the parameter.
   const enlargedRelatedParam = tabSearchParams.get(RECORD_RELATED_ENLARGE_PARAM) ?? undefined;
-  const openEnlargedRelated = useCallback((id: string) => {
+  // `replace`: the address takes the tab in place of its entry — a pinned page
+  // narrowed out of its layout keeps the tab it implied (objectstack#35890).
+  const openEnlargedRelated = useCallback((id: string, options?: { replace?: boolean }) => {
     const sp = new URLSearchParams(window.location.search);
     const open = sp.get(RECORD_RELATED_ENLARGE_PARAM);
     if (open === id) return;
     sp.set(RECORD_RELATED_ENLARGE_PARAM, id);
-    if (open) {
+    if (open || options?.replace) {
       setTabSearchParams(sp, { replace: true, state: location.state });
       return;
     }
@@ -968,6 +1031,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [pageReturn.stepper, pageReturn.toList, originFromState?.label],
   );
   useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
+  // objectstack#36111 — whether the shell draws its top-right button group on
+  // this page (off while the top bar stands); the page face draws it in its
+  // navigation row, before ✕. A pane or drawer never does: the page under it
+  // has the group already.
+  const renderShellGroup = useShellPageActionsSlot();
+  const shellActions = renderShellGroup !== null && !embedded;
+  // objectstack#36112 — the sidebar's expand button opens the page's
+  // navigation row while the sidebar is collapsed.
+  const renderSidebarExpand = useShellSidebarExpandSlot();
   // `language` is also the language a flow launch reads a refused write's
   // permission line in.
   const { t, language } = useObjectTranslation();
@@ -988,6 +1060,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The discussion feed, stored PER RECORD (objectui#3268). See the
   // `feedRecordKey` block below for why this is a map and not a `FeedItem[]`.
   const [feedItemsByRecord, setFeedItemsByRecord] = useState<Record<string, FeedItem[]>>({});
+  // objectstack#36075 — resolver names this page read by id (`sys_user`),
+  // and the ids it asked for, so a re-read of the discussion asks no user twice.
+  const resolverNamesRef = useRef<Map<string, string>>(new Map());
+  const resolverIdsAskedRef = useRef<Set<string>>(new Set());
   // How each feed read ended (refused, objectui#11195; failed,
   // objectstack#29188), stored under the same per-record key as the rows, so a
   // refusal or a failure on record A never reaches record B's panel.
@@ -1004,8 +1080,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // activity rows of more: the 动态 tab reads the window when it opens.
   const [activityPeekByRecord, setActivityPeekByRecord] = useState<Record<string, boolean>>({});
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
-  // Screen-flow runtime: a paused `screen`-node flow launched from a record action.
-  const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
+  // Screen-flow runtime: the paused `screen`-node flows launched from a record
+  // action, or from a list on this page, shown one after another
+  // (objectstack#36931 — a per-record bulk run can pause many).
+  const screenFlows = useScreenFlowQueue();
+  const enqueueScreenFlow = screenFlows.enqueue;
   // A record-action flow launch that ended `refused` without pausing (objectui#9973).
   const [flowRefusal, setFlowRefusal] = useState<FlowRefusalState>({ open: false });
   const [historyEntries, setHistoryEntries] = useState<any[] | null>(null);
@@ -1019,6 +1098,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
   const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
+  // objectstack#36366 — the object's action arrangement as the header draws
+  // it: staged under the design mode, else as served. Keyed on content for the
+  // synthesized page's memo below.
+  const objectPins = useObjectPins(objectDef as any);
+  const recordPinsKey = JSON.stringify(objectPins.record ?? null);
+  const designModeOn = useDesignModeActive();
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
   // Setup app draws no floating `ManagedByBadge`; the header's object-label
   // chip carries the badge's note instead. Read off the route's `:appName`, so
@@ -1036,10 +1121,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // In a pane, the record's title is what its top bar's breadcrumb names
   // (objectstack#27524, Target 7); the pane's slot for the record's ⊟ is there
   // too (`RecordPaneBarToggles` below).
+  // The report itself waits for `recordCrumbName` below (objectstack#36235).
   const paneBar = useRecordPaneBar();
-  useEffect(() => {
-    if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
-  }, [embedded, paneBar, recordId, recordTitle]);
   // objectstack#35593 — the page's top bar is the record's one header row: its
   // two slots for the record header (`page:header` draws its name and tags,
   // and its button group, into them), and whether a header holds the bar,
@@ -1136,6 +1219,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // keeps ⟳ off those surfaces for now. `undefined` is the opt-out
   // `page:header` reads, so nothing renders there.
   const headerRefresh = embedded ? undefined : handleManualRefresh;
+  // objectstack#36309 — the header's re-read (`RecordContext.reread`) is not
+  // the ⟳: the stage menu draws in a drawer too, and its 409 answer must read
+  // the record again there, so every host provides it. Same `'*'` scope as the
+  // ⟳: a 409 is exactly a write this client never saw.
+  const headerReread = handleManualRefresh;
 
   // Record-scoped presence ("who else is viewing this record"). The default
   // PresenceProvider source is a no-op, so this resolves to `[]` until a
@@ -1147,12 +1235,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   const favoriteRecord = useMemo(() => {
     if (!objectName || !pureRecordId) return null;
-    return {
-      id: `record:${objectName}:${pureRecordId}`,
-      label: recordTitle || pureRecordId || '',
-      href: `/apps/${appName}/${objectName}/record/${pureRecordId}`,
-      type: 'record' as const,
-    };
+    return recordFavoriteItem(appName, objectName, pureRecordId, recordTitle);
   }, [appName, objectName, pureRecordId, recordTitle]);
   const isRecordFavorite = favoriteRecord ? isFavorite(favoriteRecord.id) : false;
   const handleToggleRecordFavorite = useCallback(() => {
@@ -1220,9 +1303,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     () => new Set<string>(objects.map((o: any) => o?.name).filter(Boolean)),
     [objects],
   );
+  // objectstack#36150 — an authored full record page is drawn on the desktop
+  // full page only; on a phone and in an embedded host (drawer, split pane)
+  // the record takes the standard page (`authoredRecordPageApplies`, which
+  // names the two exceptions: a page named in the URL, and the platform
+  // pages listed in `OBJECTS_KEEPING_AUTHORED_PAGE`). Slotted pages are the
+  // standard page already and keep their slots everywhere.
+  const phone = usePhoneViewport();
+  const authoredPageHere = authoredRecordPageApplies({ embedded, phone, objectName, requestedPageName });
   const assignedPage = useMemo(
-    () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
-    [namedPageBlocked, resolvedPage, registeredObjectNames],
+    () => (namedPageBlocked || !authoredPageHere ? null : pruneUnregisteredRecordPageObjects(resolvedPage, registeredObjectNames)),
+    [namedPageBlocked, authoredPageHere, resolvedPage, registeredObjectNames],
   );
   const assignedSlots = useMemo(
     () => (namedPageBlocked ? null : pruneUnregisteredRecordPageObjects(resolvedSlots, registeredObjectNames)),
@@ -1257,48 +1348,117 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // one commit rather than drawn at a width it does not have.
   const [pageRootEl, setPageRootEl] = useState<HTMLDivElement | null>(null);
   const pageColumnsEligible = !assignedPage && !namedPageBlocked;
-  const recordPageTier = useRecordPageTier(pageRootEl, { enabled: pageColumnsEligible });
+  // ─── The record's comment panel (objectstack#36075) ──────────────────
+  // Offered on the desktop full page, wherever the page draws the platform's
+  // own 动态 stream: the default page and a slotted one. That is where the
+  // stream gives its comments up to the panel; a page whose author composed
+  // it keeps its discussion where the author put it (a page is what its
+  // author composes), and an object with feeds off has none. The phone's
+  // comment page is its own surface. Open or closed is the reader's, kept in
+  // this browser; beside the record it takes 380 px from the page, whose tier
+  // is judged on what is left.
+  //
+  // objectstack#36225 — a record drawn embedded (the side preview, and any
+  // drawer a list or a record page opens) has no comment panel and no
+  // comments icon: the comments are the full page's, one 「Open as full page」
+  // away. Its 动态 stream gives them up all the same, so the preview shows
+  // no comment and no composer anywhere.
+  const commentsPhone = usePhoneViewport();
+  const commentsEligible = !!objectDef && objectDef.enable?.feeds !== false && pageColumnsEligible && !!pureRecordId;
+  const commentsPanelOffered = commentsEligible && !commentsPhone && !embedded;
+  const commentsLeftToFullPage = commentsEligible && !!embedded;
+  // objectstack#36076 — the phone's comment page, on the same pages: a page
+  // over the record page, addressed by `?comments=` (empty: the threads; a
+  // top-level comment's id: that thread). A phone draws no drawer or pane.
+  const commentsPageOffered = commentsEligible && commentsPhone && !embedded;
+  // Either surface holds the record's comments, so the 动态 stream gives
+  // them up and names its system entries alone — as it does in a preview,
+  // whose comments are the full page's.
+  const commentsSurfaceOffered = commentsPanelOffered || commentsPageOffered;
+  const streamGivesUpComments = commentsSurfaceOffered || commentsLeftToFullPage;
+  const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
+  const commentsPageOpen = commentsParam !== null;
+  const commentsPageThread = commentsParam ? commentsParam : null;
+  // objectstack#36410 — a comment notice's link (`?comments={thread}`, and
+  // `&comment={reply}` for a reply): on the desktop it opens the panel at
+  // that thread, whatever this browser last chose, without changing the
+  // choice; on the phone the page above opens at it. The comment to scroll
+  // to rides with either.
+  const commentsLinkParam = commentsPanelOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
+  const commentsLinkThread = commentsLinkParam ? commentsLinkParam : null;
+  const commentsLinkComment = commentsLinkThread || commentsPageThread ? tabSearchParams.get(RECORD_COMMENT_PARAM) || null : null;
+  // Opening pushes an entry (Back and 「‹」 return to the record where it was
+  // scrolled: the record stays mounted under the page), a thread pushes one
+  // over the list, and 「‹」 pops the entry this view pushed or, on an entry a
+  // reload or a link reached, replaces the URL one level up.
+  const openCommentsPage = useCallback((thread?: string) => {
+    const sp = new URLSearchParams(location.search);
+    sp.set(RECORD_COMMENTS_PARAM, thread ?? '');
+    // Another thread, or the list: the linked comment was the old thread's.
+    sp.delete(RECORD_COMMENT_PARAM);
+    const state = location.state && typeof location.state === 'object' ? location.state : {};
+    setTabSearchParams(sp, { state: { ...(state as object), [COMMENTS_PUSHED]: true } });
+  }, [setTabSearchParams, location.search, location.state]);
+  const leaveCommentsPage = useCallback(() => {
+    if ((location.state as Record<string, unknown> | null)?.[COMMENTS_PUSHED]) {
+      navigate(-1);
+      return;
+    }
+    const sp = new URLSearchParams(location.search);
+    if (sp.get(RECORD_COMMENTS_PARAM)) sp.set(RECORD_COMMENTS_PARAM, '');
+    else sp.delete(RECORD_COMMENTS_PARAM);
+    sp.delete(RECORD_COMMENT_PARAM);
+    setTabSearchParams(sp, { replace: true, state: location.state });
+  }, [setTabSearchParams, location.search, location.state, navigate]);
+  // Closed, the focus goes back to the comments icon that opened the page.
+  const commentsPageWasOpen = useRef(false);
+  useEffect(() => {
+    if (commentsPageWasOpen.current && !commentsPageOpen) {
+      document.querySelector<HTMLElement>('[data-record-top-bar] [data-comments-button]')?.focus({ preventScroll: true });
+    }
+    commentsPageWasOpen.current = commentsPageOpen;
+  }, [commentsPageOpen]);
+  const [commentsOpenChosen, setCommentsOpenChosen] = useCommentsPanelOpen();
+  const commentsOpen = commentsPanelOffered && (commentsOpenChosen || commentsLinkThread !== null);
+  // Closing a panel a link opened drops the link's params (replacing the
+  // entry), so it stays closed; opening or closing is still the reader's
+  // stored choice.
+  const setCommentsOpen = useCallback((open: boolean) => {
+    if (!open && commentsLinkThread !== null) {
+      const sp = new URLSearchParams(location.search);
+      sp.delete(RECORD_COMMENTS_PARAM);
+      sp.delete(RECORD_COMMENT_PARAM);
+      setTabSearchParams(sp, { replace: true, state: location.state });
+    }
+    setCommentsOpenChosen(open);
+  }, [commentsLinkThread, location.search, location.state, setTabSearchParams, setCommentsOpenChosen]);
+  const commentsPlacement = commentsPanelPlacement(useWindowWidth());
+  const recordPageTier = useRecordPageTier(pageRootEl, {
+    enabled: pageColumnsEligible,
+    reservedWidth: commentsOpen && commentsPlacement === 'beside' ? COMMENTS_PANEL_WIDTH : 0,
+  });
   const pageLaidOut = recordPageTier !== null;
-  const pageHasRightColumn = recordPageTierHasRightColumn(recordPageTier);
-  // ─── The reader's right-column switch ⊟ (objectstack#27052, #27524) ──
-  // Whether the right column (the 动态 panel and the related panels) is drawn
-  // beside the details is each reader's choice, per object, kept in the
-  // console's workspace-preference store — never metadata. A reader who never
-  // chose sees it. The stack does not read it (its panels follow the details);
-  // the choice is kept for when the page widens.
   const columnScope = objectPreferenceScope(objectName ?? '');
-  const [relatedSwitch, setRelatedSwitch] = useWorkspacePreference(
-    RECORD_RELATED_COLUMN_PREFERENCE,
+  // objectstack#35890 — the width the reader dragged the pinned left column
+  // (the details beside the other tabs on a wide full page) to, per object,
+  // kept in the console's workspace-preference store — never metadata. With
+  // no choice: 400.
+  const [detailsWidth, setDetailsWidth] = useWorkspacePreference(
+    RECORD_DETAILS_WIDTH_PREFERENCE,
     columnScope,
-    'on',
+    RECORD_PAGE_DETAILS_WIDTH,
   );
   // objectstack#27055 — the reader's arrangement of the related cards (order,
-  // hidden), per object, in the same store as the switch. Laid over the
-  // default order by `RelatedCardStack`; never metadata.
+  // hidden), per object, in the same store. Laid over the default order by
+  // `RelatedCardStack`; never metadata.
   const [relatedArrangement, setRelatedArrangement] = useWorkspacePreference(
     RECORD_RELATED_ARRANGEMENT_PREFERENCE,
     columnScope,
     EMPTY_RELATED_ARRANGEMENT,
   );
-  // Whether the toolbar draws ⊟ — a right column the page has content for —
-  // set at render below and read by the shortcut, so a shortcut never flips a
-  // switch the reader cannot see: not this page's under a drawer either.
-  const drawnPanelSwitch = useRef(false);
-  useEffect(() => {
-    if (!pageHasRightColumn) return undefined;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing) return;
-      if (!matchesPanelChord(e, TOGGLE_RELATED_SHORTCUT.chord)) return;
-      if (isTypingTarget(e.target)) return;
-      if (!drawnPanelSwitch.current) return;
-      if (!isTopmostRecordView(pageRootEl)) return;
-      e.preventDefault();
-      setRelatedSwitch(relatedSwitch === 'on' ? 'off' : 'on');
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [pageHasRightColumn, pageRootEl, relatedSwitch, setRelatedSwitch]);
-  useAdvertiseShortcut(TOGGLE_RELATED_SHORTCUT, pageHasRightColumn);
+  // objectstack#35890 — the tab the laid-out page shows (`RecordPageColumns`
+  // tells): on a pinned page it is a tab the address may not name.
+  const [shownRecordTab, setShownRecordTab] = useState<string | null>(null);
   const [pageRecord, setPageRecord] = useState<any>(null);
   // objectstack#34586 — a request opened from the approvals queue: the top
   // bar's 「处理后打开下一条」, and the next request once a decision takes this
@@ -1586,6 +1746,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // re-render never republishes an equal row as a new object to the page.
   const readablePageRecord = readableRow(pageRecord, perms, objectName);
 
+  // objectstack#35415 — on an approval request's page, what the page's own
+  // reads of a record learned (`recordReadReport.ts`): the title links to the
+  // record the request is about only where one of them read it. Keyed by
+  // `object::id`; collected only on that page, so no other page re-renders on
+  // its cards' reads.
+  const [readRecords, setReadRecords] = useState<Readonly<Record<string, boolean>>>({});
+  const reportRecordRead = useCallback<RecordReadReport>((target, id, readable) => {
+    const key = recordReadKey(target, id);
+    setReadRecords((prev) => (prev[key] === readable ? prev : { ...prev, [key]: readable }));
+  }, []);
+  const isRecordRead = (target: string, id: string) => readRecords[recordReadKey(target, id)] === true;
+
   // Derive a human-readable record title from the loaded record so
   // favourites (record:*) and the breadcrumb show e.g. "Acme Corporation"
   // instead of the raw record id. It reads `readablePageRecord` above, so a
@@ -1774,8 +1946,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     },
   });
 
-  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; undo?: { label?: string } }) => {
+  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; description?: string; undo?: { label?: string } }) => {
     if (options?.type === 'error') { toast.error(message); return; }
+    // objectstack#37867 — a write that went through with warnings: the
+    // runner's success toast on its warning variant, the warnings under the
+    // title, the Undo button kept (the same toast a record save raises).
+    if (options?.type === 'warning') {
+      toast.warning(message, {
+        duration: options.duration,
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.undo
+          ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+          : {}),
+      });
+      return;
+    }
     if (options?.undo) {
       toast.success(message, {
         duration: options.duration,
@@ -1886,7 +2071,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // action doesn't retarget another object (a child action interpolated
         // from the parent's fields would hit the wrong record; same guard as
         // the recordIdParam fallback below). Without the page-record fallback,
-        // a `record_header` action reaching here through any dispatch path
+        // a `record_page` action reaching here through any dispatch path
         // that doesn't stash `_rowRecord` sent the literal `{id}` on the wire.
         const interpolationRecord = rowRecord
           ?? (!action.objectName || action.objectName === objectName
@@ -1912,7 +2097,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // about — a literal `recordId` override (not a declared ActionDef
           // field; nothing in this repo's metadata sets it today, hence the
           // cast) and the same page-record fallback `interpolationRecord`
-          // above uses for `record_header` actions dispatched with no
+          // above uses for `record_page` actions dispatched with no
           // `rowRecord`. Preserve that priority (row -> override ->
           // page record) and let the helper decide — and word — the
           // refusal only once every source has been tried, instead of the
@@ -1924,7 +2109,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // (the only state the <SkeletonDetail> early return reads) is flipped
           // false in a route-keyed microtask, while `pageRecord` lands one
           // `findOne` round-trip later; for that whole window the real header
-          // renders with every `record_header` action live. Clicking inside it
+          // renders with every `record_page` action live. Clicking inside it
           // seeded from `null`, which `resolveRecordIdParamSeed` deliberately
           // abstains on (no value AND no error — "no row context" is not that
           // guard's business), so the request went out naming no record and the
@@ -2097,7 +2282,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   /**
    * Flow action handler — triggered when an Action with `type: 'flow'` is
-   * invoked from a record-level location (record_header, record_more, …) or
+   * invoked from a record-level location (record, record_page, …) or
    * from a related list on this page. It starts the flow through one of two
    * doors (objectui#12037, triage ruling B; the rule and its reasons live in
    * `utils/flowLaunch`):
@@ -2114,7 +2299,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    *   declared action is absent from `objects`, so it keeps that route too,
    *   as every flow click did before.
    */
-  const flowHandler = useCallback(async (action: ActionDef) => {
+  const flowHandler = useCallback(async (action: ActionDef, context?: ActionContext) => {
     const flowName = action.target || action.name;
     if (!flowName) {
       return { success: false, error: 'No flow target provided for flow action' };
@@ -2167,8 +2352,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // refreshes on completion. The pause keeps the action's own toast
       // silent, so its `successMessage` rides along to the run's completion
       // (objectui#12234 — see FlowRunner's header).
+      // Queued, not written over, as in useConsoleActionRuntime's copy: each
+      // record a per-record bulk run paused shows its screen in turn.
       if (judged.followUp?.kind === 'screen') {
-        setScreenFlow({
+        enqueueScreenFlow({
           flowName: launch.flowName,
           flowLabel: judged.followUp.flowLabel,
           runId: judged.followUp.runId,
@@ -2177,8 +2364,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the per-record bulk fan-out of a
+      // list on this page) gets it on `judged.result.refusal` instead, as
+      // useConsoleActionRuntime's copy does, so no notice stacks on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) notifyViewChanged();
@@ -2186,7 +2376,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     } catch (error) {
       return { success: false, error: (error as Error).message };
     }
-  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource]);
+  }, [authFetch, pureRecordId, objectName, objects, language, t, fieldLabel, dataSource, enqueueScreenFlow]);
 
   // Server-side action handler — POST /api/v1/actions/{object}/{action},
   // built from @object-ui/core's `createServerActionHandler` via the shared
@@ -2472,15 +2662,39 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `resolveRecordHeaderActionGates(objectDef, perms)`: the affordance-to-grant
   // map asks both itself (objectui#12082), so this view no longer threads
   // either one by hand.
+  // objectstack#36499 — an administrator arranges this object's record-page
+  // tabs in place, as part of the design mode (objectstack#36737): while the
+  // mode is on, the tab row is the editor, and the page is drawn from the
+  // object with the draft's `relatedLists` (`tabsConfig.previewObject`), the
+  // preview of what the mode's Save writes.
+  const canReadChild = useMemo(
+    () => (permissionsLoaded ? (name: string) => canOnObject(name, 'read') : undefined),
+    [permissionsLoaded, canOnObject],
+  );
+  const tabsConfig = useRecordTabsConfig({
+    objectDef,
+    objects,
+    // Not while the record's own edit state is open: the record is being
+    // edited there, so its tab row is not the layout's (the gate the record's
+    // ⋯ entry kept before the tabs joined the design mode).
+    enabled: !embedded && !phone && pageColumnsEligible && !recordEditState,
+    canRead: canReadChild,
+    titleOf: (list) => {
+      if (list.title) return list.title;
+      const childDef = objects.find((o: any) => o.name === list.childObject);
+      return childDef ? servedObjectPluralLabel(childDef, language, objectPluralLabel, list.childLabel) : list.childLabel;
+    },
+  });
+  const tabsObjectDef = tabsConfig.previewObject ?? objectDef;
   const childRelations = useMemo(
-    () => deriveRelatedLists(objectDef, objects, {
+    () => deriveRelatedLists(tabsObjectDef, objects, {
       canRead: permissionsLoaded ? (name) => canOnObject(name, 'read') : undefined,
       // A related list is a list of the child's records, so the multi-FK
       // title it composes names it with the plural, as the single-FK title
       // below does (objectui#11733).
       listLabel: (child) => servedObjectPluralLabel(child, language, objectPluralLabel, child.name),
     }),
-    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
+    [tabsObjectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
   );
 
   // [objectui#12244] A write to a CHILD re-reads this record, in place.
@@ -2570,6 +2784,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const sittingInQueue = recordSitsInQueue(pageRecord);
   const claimOffered = useQueueClaimOffered(objectDef?.name, pureRecordId, sittingInQueue !== null);
 
+  // objectstack#35403 — Change Owner: the object offers it (structural
+  // eligibility and `userActions.transfer`, the spec's one resolution), the
+  // switch's `visibleWhen` admits this record, and the explain engine's
+  // `transfer` verdict for this record is a definite allow. The verdict rides
+  // the record page's one read below (`explain: ['transfer']`).
+  const changeOwnerOffer = useRecordChangeOwnerOffer(objectDef, pureRecordId, pageRecord);
+  const [changeOwnerOpen, setChangeOwnerOpen] = useState(false);
+
   // ─── The record page payload (objectstack#27627) ─────────────────────
   // Everything this page asks of the server when it opens, in ONE read
   // (`DataSource.getRecordPage`): the record with the `$expand` above, each
@@ -2628,8 +2850,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     if (objectDef?.name && !editOffByObject) explain.push('update');
     if (objectDef?.name && !deleteOffByObject) explain.push('delete');
     // Claim asks a transfer verdict only of a record sitting in a queue; the
-    // payload asks it of every record of an object that has the column.
-    if (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue')) explain.push('transfer');
+    // payload asks it of every record of an object that has the column, and
+    // of every record of an object that offers Change Owner (objectstack#35403).
+    if (
+      changeOwnerOffer.asks
+      || (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue'))
+    ) explain.push('transfer');
     const relatedExpand = (child: string, field: string): string[] => {
       const childDef = objects.find((o: any) => o?.name === child) as { fields?: Record<string, any> } | undefined;
       const expandable = buildExpandFields(childDef?.fields as any).filter((f) => f !== field);
@@ -2642,7 +2868,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
       approvals: true,
     });
-  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
+  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, changeOwnerOffer.asks, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
   // The stream parts ride whichever payload the plan above asks; they never ask
   // one of their own. So they are read off a ref when the payload goes out, not
   // keyed into the plan: an assigned page landing after a synthesized one (which
@@ -2658,7 +2884,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // it opens later (the window effect below).
   const timelineDrawnOnOpen = feedOnOpen && pageColumnsEligible && !!feedPageOnOpen && buildDefaultPageColumns(feedPageOnOpen) !== null;
   const timelinePeekOnOpen = timelineDrawnOnOpen && enlargedRelatedParam !== RECORD_PAGE_TIMELINE_PANEL;
-  const streamDiscussion = feedOnOpen && objectDef?.enable?.feeds !== false;
+  const streamDiscussion = (feedOnOpen || commentsSurfaceOffered) && objectDef?.enable?.feeds !== false;
   const streamActivity = feedOnOpen && objectDef?.enable?.activities !== false;
   const recordPageStreams = {
     ...(streamDiscussion ? { discussion: true } : {}),
@@ -2939,7 +3165,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // Recorded during render, React's pattern for state derived from an earlier
   // render: no effect, and no render that reads the latch unset.
   if (feedConsumerOnScreen && !feedConsumerShown) setFeedConsumerShown(true);
-  const feedWanted = feedConsumerOnScreen || feedConsumerShown;
+  // The activity is read for a block that draws it; the discussion also for
+  // the comment panel (objectstack#36075) and the phone's comment page
+  // (objectstack#36076), whose icon counts the threads at open, closed — so
+  // the discussion rides the open's payload.
+  const activityFeedWanted = feedConsumerOnScreen || feedConsumerShown;
+  const feedWanted = activityFeedWanted || commentsSurfaceOffered;
 
   // The host's own Attachments panel, appended at the page foot for a page
   // that places none (below), is mounted on every open but drawn below the
@@ -3297,8 +3528,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const feedRecordKey = objectName && pureRecordId ? `${objectName}:${pureRecordId}` : null;
   const feedItems = (feedRecordKey ? feedItemsByRecord[feedRecordKey] : undefined) ?? EMPTY_FEED;
   const feedVerdict = feedRecordKey ? feedVerdictByRecord[feedRecordKey] : undefined;
+  // objectstack#36075 — the feed is read in two steps where the comment panel
+  // asks the discussion before any block asks the activity: the key moves
+  // when the activity joins, so the feed shows its loading state again until
+  // that read answers (the panel keeps the threads it holds meanwhile).
   const feedFetchKey =
-    dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled) ? feedRecordKey : null;
+    dataSource && feedRecordKey && (feedsEnabled || activitiesEnabled)
+      ? (activityFeedWanted || !activitiesEnabled ? feedRecordKey : `${feedRecordKey}#discussion`)
+      : null;
   const [settledFeedKey, setSettledFeedKey] = useState<string | null>(null);
   const feedLoading = feedFetchKey !== null && settledFeedKey !== feedFetchKey;
 
@@ -3519,6 +3756,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         for (const c of res.data as Array<{ parent_id?: unknown }>) {
           if (c.parent_id) replyCounts.set(c.parent_id, (replyCounts.get(c.parent_id) ?? 0) + 1);
         }
+        // objectstack#36075 — a resolver this page can name: the viewer, or an
+        // author of this discussion (their stored `author_name`).
+        const namesById = new Map<string, string>();
+        for (const c of res.data as Array<{ author_id?: unknown; author_name?: unknown }>) {
+          if (c.author_id != null && typeof c.author_name === 'string' && c.author_name !== '') {
+            namesById.set(String(c.author_id), c.author_name);
+          }
+        }
+        if (currentUser.id && currentUser.name) namesById.set(String(currentUser.id), currentUser.name);
+        for (const [id, name] of resolverNamesRef.current) if (!namesById.has(id)) namesById.set(id, name);
         const mapped: FeedItem[] = res.data.map((c: any) => ({
           id: c.id,
           type: 'comment' as const,
@@ -3536,6 +3783,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // feed never derives it.
           edited: c.is_edited === true,
           authoredByViewer: isCommentAuthor(c.author_id, currentUser.id),
+          // objectstack#36075 — the thread's resolution (#36071) and whether
+          // the row mentions the viewer (「只看我参与的」).
+          ...commentResolutionOf(c, namesById),
+          mentionsViewer: rowMentionsUser(c.mentions, currentUser.id),
           reactions:
             reactionStore === 'records'
               ? toReactions(records?.stored.get(String(c.id)))
@@ -3550,6 +3801,48 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ...prev,
           [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
         }));
+        // objectstack#36075 — a resolver the page cannot name (neither the
+        // viewer nor an author here) is read by id: ONE `sys_user` read of
+        // exactly those ids, after the discussion is drawn, so it never waits
+        // on it. A refused or failed read leaves the mark at 「已解决」.
+        const unnamedResolvers = Array.from(new Set(
+          mapped
+            .filter((item) => item.resolved === true && !item.resolvedByName && item.resolvedById != null)
+            .map((item) => String(item.resolvedById))
+            .filter((id) => !resolverIdsAskedRef.current.has(id)),
+        ));
+        if (unnamedResolvers.length > 0) {
+          for (const id of unnamedResolvers) resolverIdsAskedRef.current.add(id);
+          void Promise.resolve(dataSource.find('sys_user', {
+            $filter: { id: { $in: unnamedResolvers } },
+            $top: unnamedResolvers.length,
+            $select: ['id', 'name'],
+          }))
+            .then((usersRes: any) => {
+              const users: any[] = Array.isArray(usersRes) ? usersRes : usersRes?.data || [];
+              const names = new Map<string, string>();
+              for (const u of users) {
+                if (u?.id != null && typeof u.name === 'string' && u.name !== '') names.set(String(u.id), u.name);
+              }
+              for (const [id, name] of names) resolverNamesRef.current.set(id, name);
+              if (names.size === 0) return;
+              setFeedItemsByRecord(prev => {
+                const held = prev[threadId];
+                if (!held) return prev;
+                let named = false;
+                const next = held.map((item) => {
+                  const name = item.resolved === true && !item.resolvedByName && item.resolvedById != null
+                    ? names.get(String(item.resolvedById))
+                    : undefined;
+                  if (!name) return item;
+                  named = true;
+                  return { ...item, resolvedByName: name };
+                });
+                return named ? { ...prev, [threadId]: next } : prev;
+              });
+            })
+            .catch(() => undefined);
+        }
       })
       // A refused comment read is the same panel's other half (objectui#11195):
       // the panel says the member may not see the comments, instead of "No
@@ -3591,7 +3884,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // activity to sees the panel say so, not "no activity". The verdict is
     // `isRefusedFeedRead`, the one the `record:activity` block's self-fetch
     // uses, so the two surfaces cannot disagree about what a refusal is.
-    const activityRead: Promise<any> | null = !activitiesEnabled || (retrying && !retrying.has('activity'))
+    const activityRead: Promise<any> | null = !activitiesEnabled || !activityFeedWanted || (retrying && !retrying.has('activity'))
       ? null
       : fromPage?.activity
         // objectstack#28470 — the payload's activity: the newest rows it
@@ -3664,7 +3957,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // objectstack#30035 — `recordInvalidationNonce`: a change to this record
     // reads its feed again (#2269, refresh data in place), as it reads the
     // record again in the record-load effect above.
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, activityFeedWanted, feedFetchKey, reactionStore, feedWanted, feedPlanReady, feedRetryNonce, recordInvalidationNonce]);
 
   // objectstack#29188 — the load-failure notice's Retry: read this record's
   // FAILED feed reads again, and only those. The feed shows its loading state
@@ -3689,7 +3982,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // window is read here — once per record, merged into its slice by id as the
   // feed's own read merges. A record whose rows the payload held whole (none,
   // or fewer than the panel's) reads nothing.
-  const timelineTabOpen = enlargedRelatedParam === RECORD_PAGE_TIMELINE_PANEL;
+  // objectstack#35890 — a pinned page opens on its first other tab without
+  // naming it: 动态, for a record with no related list.
+  const timelineTabOpen = enlargedRelatedParam === RECORD_PAGE_TIMELINE_PANEL
+    || shownRecordTab === RECORD_PAGE_TIMELINE_PANEL;
   const activityPeekHeld = feedRecordKey ? activityPeekByRecord[feedRecordKey] === true : false;
   useEffect(() => {
     if (!timelineTabOpen || !activityPeekHeld || !dataSource || !objectName || !pureRecordId || !activitiesEnabled) return;
@@ -3726,9 +4022,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // comment writes. `null` (no count answered): the stream counts its rows.
   const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
   const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
+  // objectstack#36075, objectstack#36076 — where the comment panel or the
+  // phone's comment page holds the comments (and in a preview, whose comments
+  // are the full page's, objectstack#36225), the 动态 stream names its system
+  // entries alone.
   const timelineTotal = timelineServed
-    ? Math.max(0, timelineServed.total - timelineServed.comments + heldCommentCount)
+    ? Math.max(0, timelineServed.total - timelineServed.comments + (streamGivesUpComments ? 0 : heldCommentCount))
     : null;
+  // The comments icon's number: the record's unresolved threads (#36075 item
+  // 8; every thread where the deployment stores no resolution), unknown while
+  // the read was refused or failed.
+  const commentThreadCount = useMemo(() => unresolvedThreadCount(buildCommentThreads(feedItems)), [feedItems]);
+  const commentsCount =
+    feedVerdict?.comments === 'refused' || feedVerdict?.comments === 'failed' ? null : commentThreadCount;
+  const commentsButton = commentsPanelOffered ? (
+    <CommentsButton count={commentsCount} pressed={commentsOpen} onPressedChange={setCommentsOpen} />
+  ) : null;
+  // The phone's icon opens the comment page; at touch size.
+  const phoneCommentsButton = commentsPageOffered ? (
+    <CommentsButton
+      count={commentsCount}
+      pressed={commentsPageOpen}
+      onPressedChange={() => openCommentsPage()}
+      className="h-11 min-w-11 px-2 text-sm"
+    />
+  ) : null;
 
   /**
    * Note: comment-mention → notification fan-out lives on the server
@@ -3822,8 +4140,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const threadId = `${objectName}:${pureRecordId}`;
       const roster = await mentionRosterFor(text);
       const mentionIds = extractMentions(text, roster);
+      let stored: unknown;
       try {
-        await dataSource.create('sys_comment', {
+        stored = await dataSource.create('sys_comment', {
           id: newItem.id,
           thread_id: threadId,
           author_id: currentUser.id,
@@ -3836,13 +4155,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       } catch (err) {
         throw commentWriteFailed(err);
       }
+      // objectstack#36075 — a new thread is unresolved (the platform says so,
+      // #36071): resolvable at once where the stored row, or any comment of
+      // this discussion, shows the deployment stores resolution.
       const key = feedRecordKey;
+      const storesResolution =
+        (!!stored && typeof stored === 'object' && Object.prototype.hasOwnProperty.call(stored, 'is_resolved'))
+        || (feedItemsByRecord[key] ?? EMPTY_FEED).some(item => typeof item.resolved === 'boolean');
+      if (storesResolution) newItem.resolved = false;
       setFeedItemsByRecord(prev => ({
         ...prev,
         [key]: [...(prev[key] ?? EMPTY_FEED), newItem],
       }));
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, feedItemsByRecord, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
   );
 
   const handleAddReply = useCallback(
@@ -3884,13 +4210,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const key = feedRecordKey;
       setFeedItemsByRecord(prev => {
         const updated = [...(prev[key] ?? EMPTY_FEED), newItem];
+        // objectstack#36071 — a reply into a resolved thread reopens it (the
+        // platform does so on the stored row); the panel shows it reopened.
+        const rootId = threadRootIdOf(updated, parentId);
         return {
           ...prev,
-          [key]: updated.map(item =>
-            item.id === parentId
+          [key]: updated.map(item => {
+            let next = item.id === parentId
               ? { ...item, replyCount: (item.replyCount ?? 0) + 1 }
-              : item
-          ),
+              : item;
+            if (next.id === rootId && next.resolved === true) {
+              next = { ...next, resolved: false, resolvedById: undefined, resolvedByName: undefined, resolvedAt: undefined };
+            }
+            return next;
+          }),
         };
       });
     },
@@ -3960,13 +4293,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   /**
    * The author's Delete on their own comment or reply (objectui#12268), offered
-   * on the same rows under the delete grant (`feedGates.commentDelete`).
+   * on the same rows under the delete grant (`feedGates.commentDelete`), and,
+   * for a viewer without it, under the comment grant through the own-comment
+   * delete door (`feedGates.commentDeleteOwn`, objectstack#36191): that door
+   * removes the viewer's own comment alone and keeps one others replied under,
+   * so the panel offers it on exactly those rows (`ownCommentDeletesOnly`).
+   * With the grant, the data door's delete is used as before, a moderator's
+   * delete of another member's comment included.
    *
    * It asks first, through the console's ordinary destructive-action confirm:
    * this page's own `confirmHandler`, the `ActionConfirmDialog` the record's
    * Delete opens, painted destructive. A cancel settles `false` and nothing is
-   * sent. The row leaves the panel only once the server has deleted it; a
-   * refused delete raises a localized error and leaves the row where it was.
+   * sent. The row leaves the panel only once the server has deleted it, with a
+   * "Comment deleted" toast (objectstack#36070); a refused delete raises a localized error and leaves the row where it was.
    * A deleted reply takes one off its parent's `replyCount`, the count
    * `handleAddReply` adds one to.
    */
@@ -3988,8 +4327,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       );
       if (!confirmed) return;
       try {
-        if ((await dataSource.delete(COMMENT_OBJECT, String(itemId))) === false) {
-          throw new Error('The comment was not deleted.');
+        if (feedGates.commentDelete) {
+          if ((await dataSource.delete(COMMENT_OBJECT, String(itemId))) === false) {
+            throw new Error('The comment was not deleted.');
+          }
+        } else {
+          const res = await authFetch(
+            `${import.meta.env.VITE_SERVER_URL || ''}${COMMENT_DOOR_PATH}/${encodeURIComponent(String(itemId))}`,
+            { method: 'DELETE', credentials: 'include' },
+          );
+          if (!res.ok) throw new Error(`The comment was not deleted (HTTP ${res.status}).`);
+          // objectstack#36423 — the own-comment door is not the data source,
+          // so no mutation event carries this delete: announce it, for a
+          // reader that counts this record's threads (a board card's footer).
+          notifyDataChanged({ objectName: COMMENT_OBJECT, recordId: String(itemId) });
         }
       } catch (err) {
         toast.error(
@@ -4010,9 +4361,133 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               : item,
           ),
       }));
+      // The row is gone; say so, so the reader knows the delete went through
+      // and the comment did not just scroll away (objectstack#36070).
+      toast.success(t('detail.commentDeleted', { defaultValue: 'Comment deleted' }));
     },
-    [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t],
+    [dataSource, feedRecordKey, feedItemsByRecord, confirmHandler, t, feedGates.commentDelete, authFetch],
   );
+
+  /**
+   * Resolve or reopen a thread (objectstack#36071, #36075 item 7), by its
+   * top-level comment, through the platform's resolution door
+   * (`PUT /api/v1/comments/:id/resolution` with `{ resolved }`,
+   * objectstack#36186). The door admits whoever can read the thread and may
+   * post a comment on it (maintainer ruling record 7063285032: the same gate
+   * as posting) and writes `is_resolved` alone, so a
+   * rank-and-file member resolves a colleague's thread too: on the data door
+   * the platform's row floor refuses their update of a row they did not
+   * create. The platform stamps who and when; the row changes only once the
+   * server has stored it, from the stored resolution the door answers with,
+   * and a refused write raises a localized error and leaves the thread as it
+   * was.
+   */
+  const handleResolveComment = useCallback(
+    async (itemId: string | number, resolved: boolean) => {
+      if (!dataSource || !feedRecordKey) return;
+      const key = feedRecordKey;
+      const row = (feedItemsByRecord[key] ?? EMPTY_FEED).find(item => item.id === itemId);
+      if (!row || row.type !== 'comment' || row.parentId != null) return;
+      let stored: Record<string, unknown> | null | undefined;
+      try {
+        const res = await authFetch(
+          `${import.meta.env.VITE_SERVER_URL || ''}${COMMENT_DOOR_PATH}/${encodeURIComponent(String(itemId))}/resolution`,
+          {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolved }),
+          },
+        );
+        if (!res.ok) throw new Error(`The thread was not updated (HTTP ${res.status}).`);
+        // objectstack#36423 — the resolution door is not the data source
+        // either (see the own-comment delete): announce the stored write.
+        notifyDataChanged({ objectName: COMMENT_OBJECT, recordId: String(itemId) });
+        const envelope = (await res.json().catch(() => null)) as { data?: unknown } | null;
+        stored = envelope && typeof envelope.data === 'object' ? (envelope.data as Record<string, unknown> | null) : null;
+      } catch (err) {
+        toast.error(
+          t('detail.commentResolveFailed', { defaultValue: 'The thread was not updated. Please try again.' }),
+        );
+        throw err instanceof Error ? err : new Error(String(err));
+      }
+      // The stored row's word where it answers with one; the viewer resolved it.
+      const names = new Map<string, string>();
+      if (currentUser.id && currentUser.name) names.set(String(currentUser.id), currentUser.name);
+      const fromStored =
+        stored && typeof stored === 'object' && Object.prototype.hasOwnProperty.call(stored, 'is_resolved')
+          ? commentResolutionOf({ ...stored, parent_id: null }, names)
+          : null;
+      const next: Pick<FeedItem, 'resolved' | 'resolvedById' | 'resolvedByName' | 'resolvedAt'> = fromStored
+        ?? (resolved
+          ? {
+              resolved: true,
+              resolvedById: currentUser.id ? String(currentUser.id) : undefined,
+              resolvedByName: currentUser.name || undefined,
+              resolvedAt: new Date().toISOString(),
+            }
+          : { resolved: false });
+      setFeedItemsByRecord(prev => ({
+        ...prev,
+        [key]: (prev[key] ?? EMPTY_FEED).map(item =>
+          item.id === itemId
+            ? { ...item, resolved: next.resolved, resolvedById: next.resolvedById, resolvedByName: next.resolvedByName, resolvedAt: next.resolvedAt }
+            : item,
+        ),
+      }));
+    },
+    [currentUser, dataSource, feedRecordKey, feedItemsByRecord, t, authFetch],
+  );
+
+  // objectstack#36075 item 6 — may the viewer edit and delete OTHER people's
+  // comments here? The server admits a comment's author, or a caller whose
+  // by-id update of the record is admitted (`comment-access-hooks.ts`,
+  // "Parent EDIT"): the explain engine's record verdict for `update`, the
+  // question `recordWriteAllowed` asks. Asked three-state and offered only on
+  // a definite allow: failing open here would offer every member a delete of
+  // their colleagues' words that the server refuses. The page's own edit
+  // gates (approval lock, `userActions.edit`, its predicates) are not the
+  // server's comment rule, so they do not join. Asked once the panel is open:
+  // where `userActions.edit: false` keeps the page from asking it, opening the
+  // record still sends no explain for it (objectui#13045); elsewhere the page's
+  // own question answers this one from the same cache.
+  const moderatesComments = useRecordVerdict(
+    objectDef?.name,
+    pureRecordId,
+    'update',
+    commentsOpen || commentsPageOpen,
+  ) === true;
+
+  // objectstack#36075 — may the viewer update a comment they did NOT write?
+  // The platform's row floor (`owner_only_writes`) lets a rank-and-file member
+  // update only the rows they created, and it runs before the comment rules
+  // (the parent-editor rule above), so a member's Edit of a colleague's
+  // comment is refused; ✓ goes through the resolution door instead
+  // (objectstack#36186) and does not ask this. The explain engine answers the
+  // floor: ONE probe, `update` of the first top-level comment here the viewer
+  // did not write; the floor answers the same for every such row. Edit on
+  // others' rows is offered only on its definite allow (pending, a refusal, an error, no explain service,
+  // or a stale answer offer them on the viewer's own rows alone). Asked when
+  // the reader first reaches into the open panel (pointer or focus), so
+  // opening the record, and opening the panel, still read nothing more
+  // (objectstack#28470, objectui#13045).
+  const [commentsEngagedFor, setCommentsEngagedFor] = useState<string | null>(null);
+  const engageComments = useCallback(() => {
+    if (feedRecordKey) setCommentsEngagedFor((prev) => (prev === feedRecordKey ? prev : feedRecordKey));
+  }, [feedRecordKey]);
+  const commentsEngaged = feedRecordKey != null && commentsEngagedFor === feedRecordKey;
+  const foreignRootCommentId = useMemo(() => {
+    const root = feedItems.find(
+      (item) => item.type === 'comment' && item.parentId == null && item.authoredByViewer !== true,
+    );
+    return root ? String(root.id) : undefined;
+  }, [feedItems]);
+  const updatesOthersComments = useRecordVerdict(
+    COMMENT_OBJECT,
+    foreignRootCommentId,
+    'update',
+    (commentsOpen || commentsPageOpen) && commentsEngaged && foreignRootCommentId != null,
+  ) === true;
 
   /**
    * A reaction click shows at once and is stored in the background, and a
@@ -4275,17 +4750,26 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `@object-ui/plugin-detail/RecordDetailDrawer`.
 
     // Filter actions for the record page header and deduplicate by name.
-    // Both header locations are included: `record_header` renders inline,
-    // `record_more` renders inside the header's ⋯ overflow menu (the spec's
-    // "overflow menu under the More/⋯ button" location — PageHeaderRenderer
-    // routes record_more-only actions into the overflow; #2358 trap 2).
+    // Both record page words are included: `record_page` and `record` (which
+    // `actionRendersAt` draws on the record page too). An action folded into
+    // the header's ⋯ overflow menu says so with `component: 'action:menu'`,
+    // which PageHeaderRenderer routes into the overflow (#2358 trap 2;
+    // until protocol 19 the `record_more` location said it, objectstack#36495).
     // The set is `placedHeaderActions` (`@object-ui/types`): the ONE reader an
     // authored `page:header` with `placedActions: true` reads too
     // (objectstack#29951), so the synthesized header and such a page draw the
     // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
-        .map((a: any) => localizeActionTexts(objectDef.name, a));
+      // objectstack#36366 — the object's record scope arrangement
+      // (`actionLayout.record`): `pinned` chooses which of them are buttons, in
+      // order, and `more` orders the rest in ⋯. The same list feeds the side
+      // preview (an embedded mount) and the phone's bottom bar (the header's
+      // `bar` face). No arm: the header's own choice, as before.
+      const base = arrangedHeaderActions<any>(
+        placedHeaderActions<any>(objectDef.actions as any[] | undefined),
+        objectPins.record,
+        'record',
+      ).map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
@@ -4431,7 +4915,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // `recordPinsKey`: the record scope arrangement (objectstack#36366), staged under
+  // the design mode without `objects` changing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `objectPins` is keyed on content by `recordPinsKey`
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id, recordPinsKey]);
   // objectstack#30344 — whether this record page shows the record's field
   // history: the history gate, AND this reader's audit read answered. A read
   // the server refuses (or that fails) answers nothing, so the stream offers
@@ -4456,10 +4943,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // in a bar at the bottom of the page (the header draws them there, through
   // `PageHeaderPhoneContext`), its top bar is one way back, a page pushed from
   // a related row has a path row, and going back to a page restores where it
-  // was scrolled. A record drawn in a pane is never on a phone.
-  const phone = usePhoneViewport();
+  // was scrolled. A record drawn in a pane is never on a phone. (`phone` is
+  // read where the page is assigned, above.)
   const phonePage = phone && !embedded;
   const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
+  // objectstack#36151 — the top bar's right end, where the record's `⋯` is
+  // drawn on a phone (Edit among its entries).
+  const [phoneMoreEl, setPhoneMoreEl] = useState<HTMLSpanElement | null>(null);
   const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
   useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
 
@@ -4490,6 +4980,60 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // only for a loaded record with nothing to be named by.
   const holdsRouteRecord =
     pageRecordFor === routeRecordKey && !!readablePageRecord && typeof readablePageRecord === 'object';
+  // ADR-0160 D9 — `?section=ANCHOR`, a passage the assistant cited: once the
+  // record is held, the body heading the anchor names is scrolled to and
+  // marked (`recordSectionAnchor.ts`); a stale anchor leaves the page at its
+  // top. Judged once per record, anchor and chip click: a click carries a
+  // fresh `RECORD_SECTION_OPENED_STATE`, so the same chip clicked again opens
+  // the section again, while a tab switch (which keeps the state) does not.
+  // Opening another section takes the earlier mark off.
+  // objectstack#37487 (S5) — the click is the last string value the state
+  // carried, kept until a NEW one arrives: a navigation that drops the history
+  // state (an overlay's `replace`, a pushed form and Back) is no new click, so
+  // it neither re-runs the effect nor scrolls the page back to the heading;
+  // `claimCitedSectionOpen` carries the same judgement across a redraw of the
+  // page itself (the record-form overlay remounts it without the state).
+  const sectionAnchor = tabSearchParams.get(RECORD_SECTION_PARAM) || null;
+  const sectionOpenedState = (location.state as Record<string, unknown> | null)?.[RECORD_SECTION_OPENED_STATE];
+  const [sectionOpened, setSectionOpened] = useState('');
+  if (typeof sectionOpenedState === 'string' && sectionOpenedState !== sectionOpened) {
+    setSectionOpened(sectionOpenedState);
+  }
+  const citedSectionCandidates = useMemo(
+    () =>
+      holdsRouteRecord
+        ? sectionCandidates(objectDef?.fields, readablePageRecord as Record<string, unknown>, sectionAnchor)
+        : [],
+    [holdsRouteRecord, objectDef?.fields, readablePageRecord, sectionAnchor],
+  );
+  const citedSectionKey =
+    citedSectionCandidates.length > 0
+      ? `${routeRecordKey}\n${sectionAnchor}\n${sectionOpened}`
+      : null;
+  const citedSectionCandidatesRef = useRef(citedSectionCandidates);
+  citedSectionCandidatesRef.current = citedSectionCandidates;
+  useEffect(() => {
+    if (!pageRootEl || !citedSectionKey) return undefined;
+    // Claimed when the page would move, so a re-run before that does not spend
+    // it; a redraw at a section already opened marks it again and scrolls nothing.
+    const target = `${routeRecordKey}\n${sectionAnchor}`;
+    const opened = sectionOpened;
+    return focusRecordSection(pageRootEl, citedSectionCandidatesRef.current, undefined, () =>
+      claimCitedSectionOpen(target, opened),
+    );
+    // The key spells the record, anchor and click; the effect reads them through it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRootEl, citedSectionKey]);
+  useEffect(() => {
+    mountedRecordPages += 1;
+    return () => {
+      mountedRecordPages -= 1;
+      // A remount mounts the next page in the same commit, before this runs.
+      setTimeout(() => {
+        if (mountedRecordPages === 0) lastCitedSectionOpen = null;
+      }, 0);
+    };
+  }, []);
   const landedRecordName = holdsRouteRecord && !recordTitle && objectDef
     ? getRecordDisplayName(objectDef, readablePageRecord)
     : undefined;
@@ -4498,6 +5042,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     || (holdsRouteRecord
       ? (pureRecordId ? shortRecordId(pureRecordId) : '')
       : objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '');
+  // objectstack#36235 — the pane's bar names the record by what this page
+  // reports, and draws a placeholder until it does. So the report is the
+  // record's title once the page holds the record, and the short id only for a
+  // held record with nothing to be named by; a read in flight reports nothing,
+  // and the bar never reads the raw id while the record loads. A page that
+  // settles WITHOUT the record (not found, deleted, access ended, forbidden,
+  // failed, the object unknown, the named page refused) reports the name its
+  // crumb draws then, the object's label, so the bar's placeholder ends with
+  // the read instead of standing over the page's own state.
+  const settledWithoutRecord = !isLoading && (
+    !objectDef
+    || namedPageState === 'refused'
+    || recordDeleted
+    || pageRecordStatus === 'missing'
+    || pageRecordStatus === 'accessEnded'
+    || pageRecordStatus === 'forbidden'
+    || pageRecordStatus === 'failed'
+  );
+  const paneRecordTitle = recordTitle
+    || ((holdsRouteRecord || settledWithoutRecord) && recordCrumbName ? recordCrumbName : undefined);
+  useEffect(() => {
+    if (embedded && recordId) paneBar?.reportTitle(recordId, paneRecordTitle);
+  }, [embedded, paneBar, recordId, paneRecordTitle]);
 
   // objectstack#27058, Target 3 — the top bar on a phone: one link that
   // returns where the page came from. A top-level page reads
@@ -4783,7 +5350,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const hasAttachments = hasExplicitAttachments(effectivePage as any);
 
   // System actions (Edit / Share / Delete) — synthesized for every record
-  // page so objects without authored record_header actions still surface
+  // page so objects without authored record_page actions still surface
   // the basic affordances.
   //
   // Placement metadata (objectui#2361): the page header now renders up to
@@ -4817,7 +5384,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.claim', { defaultValue: 'Claim' }),
         icon: 'hand',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         order: 95,
         disabled: claiming,
         onClick: handleClaim,
@@ -4834,7 +5401,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.cancel', { defaultValue: 'Cancel' }),
         icon: 'x',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 99,
         disabled: recordEditSaving,
@@ -4847,7 +5414,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : t('detail.save', { defaultValue: 'Save' }),
         icon: 'check',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         // objectstack#35816 — Save is the edit state's one filled button, and
         // keeps its place after Cancel, as a form's footer orders them.
         variant: 'primary',
@@ -4877,13 +5444,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // same `icon` key the app's actions use, so every row draws one kind
         // of entry. `page:header` keeps this CTA a labelled button in the row
         // at every width: it takes none of the app's `maxVisible` slots and
-        // never folds into the `⋯` (objectui#12617). It is the filled primary
-        // button only when the record has no app action ahead of it; next to
-        // app actions it is an outline button, which `page:header` decides —
-        // no `variant` is declared here for it to read.
+        // never folds into the `⋯` (objectui#12617). It is an outline button
+        // in the header row whether or not the record has app actions
+        // (objectstack#36049; before, it drew filled when it had none);
+        // `page:header` decides that — no `variant` is declared here for it
+        // to read.
         icon: 'pencil',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         order: 100,
         // objectui#2572 item 4 — while a shared inline-edit draft is live,
         // the page:header renderer greys this CTA out so the classic form
@@ -4922,15 +5490,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // button's tooltip and accessible description, and as the second
         // line of its `⋯` entry (the phone bar's, where an off Edit goes).
         ...(editReason ? { disabledReason: editReason } : null),
-        // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
-        // first slot is its primary place, and an action that cannot be
-        // pressed never holds it: whichever of the three reasons above turns
-        // this Edit off, it moves into the bar's `⋯` (still drawn, still
-        // off), and the first usable action takes the slot. The approval band
-        // states the lock, and the `editLockedByState` badge the state lock.
-        // The desktop row keeps it greyed in place for every reason, and an
-        // Edit that is on is untouched.
-        ...(phonePage && editOff ? { component: 'action:menu' } : {}),
+        // objectstack#36151 — on a phone Edit is an entry of the `⋯` at the
+        // top bar's right end, on or off: a field's value is edited by a tap
+        // on it, and the bottom bar holds the object's own actions, or is not
+        // drawn when it has none. An Edit that is off is still drawn there,
+        // off, with its reason (objectstack#35099, objectstack#35135). The
+        // desktop row keeps it a button, greyed in place when it is off.
+        ...(phonePage ? { component: 'action:menu' } : {}),
         // objectstack#35599 — a page drawing body tables enters its edit state;
         // every other page opens the record form, as before.
         onClick: () => (recordEditEligible
@@ -4938,11 +5504,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
-    // of Share. A record is never a navigation entry, so this toggles the
-    // `record:` favorite, which the sidebar draws in its Favorites section at
-    // the top.
-    if (favoriteRecord) {
+    // objectstack#36737 — the record's tabs are arranged in the design mode
+    // (its tab row is the editor while the mode is on), so the `⋯` holds no
+    // entry of its own for them.
+    // The record's favorites control is the star beside the record's name
+    // (objectstack#36246), drawn by `page:header` from the record context
+    // below, so the `⋯` holds no second entry. A print page draws no
+    // `page:header`, so no name and no star: there the favorites entry stays
+    // in the `⋯` of its chrome row, ahead of Share. A record is never a
+    // navigation entry, so both toggle the `record:` favorite, which the
+    // sidebar draws in its Favorites section at the top.
+    if (favoriteRecord && pageDeclaresPrintOf(assignedPage)) {
       items.push({
         name: 'sys_favorite',
         label: isRecordFavorite
@@ -4950,7 +5522,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : t('common.addToFavorites', { defaultValue: 'Add to favorites' }),
         icon: 'star',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 105,
         component: 'action:menu',
@@ -4962,7 +5534,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       label: t('detail.share', { defaultValue: 'Share' }),
       icon: 'share',
       type: 'script',
-      locations: ['record_header'],
+      locations: ['record_page'],
       variant: 'outline',
       order: 110,
       component: 'action:menu',
@@ -5004,6 +5576,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }
       },
     } as any);
+    // objectstack#35403 — Change Owner, in the `⋯` ahead of Share's pane
+    // entries: offered only where the object offers it and the explain engine
+    // allows this caller to transfer this record (`useRecordChangeOwnerOffer`).
+    // The title is fixed; the dialog names the object's own owner field.
+    if (changeOwnerOffer.offered) {
+      items.push({
+        name: 'sys_change_owner',
+        label: t('console.changeOwner.title', { defaultValue: 'Change Owner' }),
+        icon: 'user-cog',
+        type: 'script',
+        locations: ['record_page'],
+        variant: 'outline',
+        order: 112,
+        component: 'action:menu',
+        ...(changeOwnerOffer.disabled ? { disabled: true, disabledReason: predicateDisabledReason } : {}),
+        onClick: () => setChangeOwnerOpen(true),
+      } as any);
+    }
     // objectstack#27545 — in a record pane, the way to this record's full page,
     // the last of the `⋯`'s host entries (the destructive band stays below it,
     // objectui#12529). The bar's `⤢` maximizes in place; it no longer routes.
@@ -5013,11 +5603,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.openAsFullPage', { defaultValue: 'Open as full page' }),
         icon: 'arrow-up-right',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 115,
         component: 'action:menu',
         onClick: () => recordPane.openAsPage(),
+      } as any);
+    }
+    // objectstack#36149 — a side preview's header draws no copy-id icon after
+    // the name; the copy is this `⋯` entry instead.
+    if (embedded && paneHeaderBar?.preview && pureRecordId) {
+      items.push({
+        name: 'sys_copy_record_id',
+        label: t('detail.copyRecordId', { defaultValue: 'Copy record ID' }),
+        icon: 'copy',
+        type: 'script',
+        locations: ['record_page'],
+        variant: 'outline',
+        order: 113,
+        component: 'action:menu',
+        onClick: async () => {
+          const label = t('detail.copyRecordId', { defaultValue: 'Copy record ID' });
+          try {
+            await navigator.clipboard.writeText(String(pureRecordId));
+            toast.success(t('detail.copied', { defaultValue: 'Copied!' }));
+          } catch (err: any) {
+            // A clipboard the page may not write (not focused, not https) says so.
+            toast.error(err?.message ? `${label}: ${err.message}` : label);
+          }
+        },
       } as any);
     }
     if (affordances.delete) {
@@ -5028,7 +5642,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // destructive entry apart at the bottom of the menu (objectui#12529).
         icon: 'trash',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'danger',
         order: 120,
         component: 'action:menu',
@@ -5119,9 +5733,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     return items;
   })();
+  // objectstack#36286 — the header's Edit, offered by the ⌘K palette on the
+  // record's own page (not a drawer or a pane over a list).
+  const paletteEdit = embedded
+    ? undefined
+    : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
-  // routed to the record_header location, e.g. Lead.convert) to the page
+  // routed to the record_page location, e.g. Lead.convert) to the page
   // schema. System actions (Edit / Share / Delete) ride through
   // `RecordContext.headerSystemActions` instead, so they reach both
   // synth/slotted pages AND authored full-Lightning pages without
@@ -5136,7 +5755,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : null;
   const composedPage = assignedPage
     ? effectivePage
-    : buildDefaultPageSchema(objectDef as any, {
+    : buildDefaultPageSchema(tabsObjectDef as any, {
         sections: synthParts.sections,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
@@ -5222,30 +5841,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   if (recordEditEligible !== bodyTableIds.size > 0) setRecordEditEligible(bodyTableIds.size > 0);
   const bodyTablesEditable = bodyTablesSaveTogether(objectDef, objects, bodyTableIds);
 
-  // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
-  // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
-  // group (the page's own bar below; a pane's bar through
-  // `RecordPaneBarToggles`), only where the tier has a right column and the
-  // page has a panel for it — never in the stack, and never in a drawer or
-  // pane, which draws no right rail (objectstack#35596).
+  // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the record's
+  // panel switches, drawn in its top bar after its step group (the page's own
+  // bar below; a pane's bar through `RecordPaneBarToggles`). The right-column
+  // ⊟ went with the right rail (objectstack#35890), so none is drawn today.
   const panelToggleItems: PanelToggleItem[] = [];
-  if (
-    pageColumns
-    && pageHasRightColumn
-    && !embedded
-    && (pageColumns.timeline.length > 0 || pageColumns.related.length > 0)
-  ) {
-    panelToggleItems.push({
-      id: 'related',
-      label: t('detail.relatedColumn', { defaultValue: 'Right column' }),
-      icon: PanelRight,
-      pressed: relatedSwitch === 'on',
-      onPressedChange: (pressed) => setRelatedSwitch(pressed ? 'on' : 'off'),
-      shortcut: shortcutKeycaps(TOGGLE_RELATED_SHORTCUT.chord),
-      ariaKeyShortcuts: ariaKeyShortcutsOf(TOGGLE_RELATED_SHORTCUT.chord),
-    });
-  }
-  drawnPanelSwitch.current = panelToggleItems.length > 0;
   const panelToggles =
     panelToggleItems.length > 0 ? (
       <PanelToggles
@@ -5278,10 +5878,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       data-record-bar-title=""
     />
   );
+  // objectstack#35985 — the record row leads with the object's tile: white
+  // glyph on the object's colour, gray without one.
   const objectIconName = typeof (objectDef as any)?.icon === 'string' ? ((objectDef as any).icon as string) : undefined;
-  const objectIcon = objectIconName
-    ? createElement(getIcon(objectIconName), { className: 'h-4 w-4 shrink-0 text-muted-foreground', 'aria-hidden': true })
-    : null;
+  const objectColor = typeof (objectDef as any)?.color === 'string' ? ((objectDef as any).color as string) : undefined;
+  const objectIcon = objectIconName ? <ObjectIconTile icon={objectIconName} color={objectColor} /> : null;
   const pageLeading = embedded ? null : pageTrail.length > 0 ? (
     <>
       {originFrom?.pathname && (
@@ -5366,7 +5967,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     <>
       {objectIcon}
       {!barNamesRecord && (
-        <span className="min-w-0 truncate text-base font-semibold text-foreground" aria-current="page" data-record-page-title="">
+        <span className="min-w-0 truncate text-base font-medium text-foreground" aria-current="page" data-record-page-title="">
           {recordCrumbName}
         </span>
       )}
@@ -5374,15 +5975,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       <span className="flex shrink-0 items-center gap-2 empty:hidden" data-record-page-badges="">{recordBadges}</span>
     </>
   );
-  // objectstack#35853 — ✕ at the far right of the navigation row, on every
-  // desktop face: back to the list the page came from as it was left
+  // objectstack#36557 — ✕ is the first control of the navigation row, on
+  // every desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage ? (
+  const pageClose = closePage ? (
     <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
       <X className="h-3.5 w-3.5" />
     </RecordTopBarButton>
   ) : undefined;
+  // objectstack#36112 — the comments icon is the group's first button.
+  const pageFrame = shellActions ? renderShellGroup?.({ comments: commentsButton }) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
   // parent going back in the history when the page was pushed from it.
@@ -5424,17 +6027,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         leading={phoneBack}
         stepper={pageStepper}
         toggles={approvalQueueSwitch ?? undefined}
+        comments={phoneCommentsButton}
+        // objectstack#36151 — the record's `⋯`, at the bar's right end.
+        frame={<span ref={setPhoneMoreEl} className="flex items-center empty:hidden" data-record-phone-more="" />}
       />
       {phonePathRow}
     </>
   ) : (
     <RecordTopBar
       leadingTestId="record-page-leading"
-      leading={pageLeading}
+      leading={renderSidebarExpand ? <>{renderSidebarExpand()}{pageLeading}</> : pageLeading}
       stepper={pageStepper}
       actionSlotRef={setBarActionSlot}
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
+      comments={shellActions ? undefined : commentsButton}
       frame={pageFrame}
+      close={pageClose}
       record={pageRecordRow}
     />
   );
@@ -5447,8 +6055,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // what it hides). The action is the browser's print preview of it, and it is
   // offered only where the page declares `print`, so every other record page
   // is unchanged.
-  const pagePrint = (renderedPage as { print?: unknown } | null | undefined)?.print;
-  const pageDeclaresPrint = typeof pagePrint === 'object' && pagePrint !== null && !Array.isArray(pagePrint);
+  const pageDeclaresPrint = pageDeclaresPrintOf(renderedPage);
   const printHint = t('common.printDialogHint');
 
   // Shared cross-cutting chrome: lifecycle badge + presence avatars —
@@ -5486,10 +6093,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // pending (or the record lock says one is), 「已退回修改」 / 「已驳回」 for the
   // latest request that ended there. It opens the approval's detail: today the
   // approvals panel on this page (the 审批 tab takes it over).
+  // objectstack#35890 (item 6) — for everyone but the approver, 「审批中 ·
+  // 当前步骤」 names the step the request waits at, when it has one.
+  // The step is drawn by the approvals panel's own rule (`stepDisplayText`).
+  const approvalStep = approvals.pendingRequest
+    ? stepDisplayText(approvals.pendingRequest.step_label, approvals.pendingRequest.current_step) ?? ''
+    : '';
   const approvalTagText = approvals.pendingRequest
     ? isActingApprover(approvals.pendingRequest)
       ? t('approvalsInbox.awaitingYourDecision', { defaultValue: 'Awaiting your approval' })
-      : t('detail.approvalPending', { defaultValue: 'In approval' })
+      : approvalStep
+        ? t('detail.approvalPendingStep', { step: approvalStep, defaultValue: 'In approval · {{step}}' })
+        : t('detail.approvalPending', { defaultValue: 'In approval' })
     : lockedForReader
       ? t('detail.approvalPending', { defaultValue: 'In approval' })
       : approvals.latestRequest?.status === 'returned'
@@ -5502,20 +6117,28 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : approvals.latestRequest?.status === 'rejected' && !approvals.pendingRequest && !lockedForReader
       ? 'border-destructive/30 bg-destructive/10 text-destructive'
       : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300';
+  // Open the record's approvals: the panel where the page draws it, else its
+  // 审批 tab (objectstack#35595). The approval tag below and the activity
+  // stream's 「看审批」 on an approval entry (objectstack#35723) both open it.
+  // A plain function, not a hook: this runs below the page's early returns.
+  const openRecordApprovals = () => {
+    const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
+    if (panel) {
+      panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    // objectstack#35595 — the approvals panel is the page's 审批 tab, not
+    // drawn on 概览: open that tab.
+    if (pageColumns) openEnlargedRelated('approvals');
+    else if (!hasApprovalsNode) handleTabChange('approvals');
+  };
+  // objectstack#35723 — 「看审批」 only where there are approvals this reader is
+  // served, the same condition the page's 审批 tab is drawn on.
+  const viewApprovals = approvals.available && approvals.requests.length > 0 ? openRecordApprovals : null;
   const approvalTag = approvalTagText ? (
     <button
       type="button"
-      onClick={() => {
-        const panel = pageRootEl?.querySelector('[data-testid="record-approvals-panel"]');
-        if (panel) {
-          panel.scrollIntoView({ block: 'start', behavior: 'smooth' });
-          return;
-        }
-        // objectstack#35595 — the approvals panel is the page's 审批 tab, not
-        // drawn on 概览: the tag opens that tab.
-        if (pageColumns) openEnlargedRelated('approvals');
-        else if (!hasApprovalsNode) handleTabChange('approvals');
-      }}
+      onClick={openRecordApprovals}
       className={cn(
         'inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         approvalTagTone,
@@ -5536,14 +6159,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // any (`DeclaredActionsBar`'s header face says which) and the record's own
   // row otherwise. Remind is the submitter's 「催办」 here, so it is not
   // excluded as it was from the band (the approvals panel keeps its own).
-  const recordHeaderState: RecordHeaderState = {
-    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
-      <>
-        {approvalTag}
-        {headerBarForRecord ? stateLockChip : null}
-      </>
-    ) : undefined,
-    group: approvalBarMounted
+  // The pending request's levers, when the viewer has any.
+  const approvalGroup = approvalBarMounted
       ? (parts: RecordHeaderGroupParts) => (
         <>
         <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
@@ -5559,10 +6176,42 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         />
         </>
       )
-      : undefined,
+      : undefined;
+  // objectstack#36366 — under the design mode the group ends with
+  // 「Header buttons」 (the record row, or the approval's levers, unchanged),
+  // on a header that reads the pins: not on one authored with its own
+  // `actions` list, nor on one that draws none of the object's actions.
+  const headerTakesPins = headerReadsPins(assignedPage ?? assignedSlots);
+  const recordHeaderState: RecordHeaderState = {
+    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
+      <>
+        {approvalTag}
+        {headerBarForRecord ? stateLockChip : null}
+      </>
+    ) : undefined,
+    group: designModeOn && objectDef
+      ? (parts: RecordHeaderGroupParts) => (
+        <>
+        {approvalGroup ? approvalGroup(parts) : parts.recordRow}
+        {parts.face === 'row' && headerTakesPins && (
+          <DesignModeHeaderPins
+            objectDef={objectDef as any}
+            page="record"
+            actions={placedHeaderActions<any>((objectDef as any).actions).map((a: any) => localizeActionTexts(objectDef.name, a))}
+          />
+        )}
+        </>
+      )
+      : approvalGroup,
+    // objectstack#36366 — the record scope arrangement the header draws, a staged one
+    // included, for a page that places the object's actions itself.
+    actionLayout: objectPins.record,
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
+    // objectstack#35415 — an approval request's page is named by the record
+    // it asks a decision on, linked to it; else by the request's own title.
+    title: objectName === SYS_APPROVAL_REQUEST_OBJECT ? approvalSubjectTitle(readablePageRecord, isRecordRead) : undefined,
   };
   const sharedChrome = (
     <>
@@ -5582,8 +6231,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         attachments: !!(filesEnabled && !hasAttachments && pureRecordId),
       });
   const pageTree = (
+    // objectstack#35892 — a related tab draws the list page's condition row.
+    <RelatedListConditionsSlotContext.Provider value={renderRelatedListConditions}>
     <RecordHeaderBarContext.Provider value={headerBarForRecord}>
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
+    <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
@@ -5597,7 +6249,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
             // Under a phone's one 44 px bar row; in a pane, over the page's
             // top-right corner, level with its first row (objectstack#35745).
-            pageBar ? 'top-12' : headerBarForRecord ? 'top-3' : 'top-2 sm:top-4',
+            pageBar
+              ? 'top-12'
+              : headerBarForRecord
+                ? 'top-3'
+                : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}
@@ -5612,13 +6268,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         dataSource={dataSource}
         embedded={embedded}
         refresh={headerRefresh}
+        reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
+        // objectstack#36246 — the record's favorite star beside its name, in
+        // every face `page:header` draws (the page's bar, a drawer or pane,
+        // a phone's header): hollow until the record is a favorite, filled
+        // once it is, one press to toggle.
+        isFavorite={isRecordFavorite}
+        onToggleFavorite={favoriteRecord ? handleToggleRecordFavorite : undefined}
       >
-        {/* No `isFavorite` / `onToggleFavorite` here (objectui#12427): the
-            record's favorites entry is the `sys_favorite` item in the header's
-            `⋯` overflow, and the `page:header` chrome draws its star only for
-            a host that wires `onToggleFavorite`, so this page draws none. */}
         {/* objectui#2407 P2 — ONE record-level inline-edit session spanning
             the highlights strip AND the details body (both descend from this
             provider), committed together by the single <InlineEditSaveBar>
@@ -5669,6 +6328,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
         >
+        <PublishRecordEditCommand edit={paletteEdit} />
         <RecordEditStateController
           active={recordEditState}
           onExit={exitRecordEditState}
@@ -5718,7 +6378,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // grant; the panel offers them only on the rows the read marked
           // `authoredByViewer`.
           onEditComment={feedGates.commentEdit ? handleEditComment : undefined}
-          onDeleteComment={feedGates.commentDelete ? handleDeleteComment : undefined}
+          // objectstack#36191: under the delete grant, the data door's delete;
+          // without it, the own-comment delete door, which removes the
+          // viewer's own comment alone and keeps one others replied under.
+          onDeleteComment={feedGates.commentDelete || feedGates.commentDeleteOwn ? handleDeleteComment : undefined}
+          ownCommentDeletesOnly={!feedGates.commentDelete}
+          // objectstack#36071 / #36075 / #36186 — resolve and reopen go
+          // through the resolution door, which admits whoever can read the
+          // thread and may post a comment on it (ruling 7063285032: the same
+          // gate as posting), so the panel offers ✓ on every thread, the
+          // viewer's and others', under the comment grant and wherever the
+          // rows say the deployment stores resolution.
+          onResolveComment={feedsEnabled && feedGates.comment ? handleResolveComment : undefined}
+          moderatesComments={moderatesComments}
+          updatesOthersComments={updatesOthersComments}
           onToggleReaction={
             (reactionStore === 'records'
               ? feedGates.reactionAdd
@@ -5732,6 +6405,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`; on an assigned page,
             for its feed blocks (objectstack#33996). */}
+        <RecordCommentsInPanelContext.Provider value={streamGivesUpComments}>
         <RecordFieldChangesContext.Provider value={timelineFieldChanges}>
         {/* objectstack#30074 — whether this record shows its field history
             (objectstack#30344: to this reader, whose audit read answered):
@@ -5740,6 +6414,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
             its tab and the tab row's probe. */}
         <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
+        {/* objectstack#35723 — the stream's 「看审批」 on an approval entry. */}
+        <RecordViewApprovalsContext.Provider value={viewApprovals}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -5771,7 +6447,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           onModal={modalHandler}
           handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
-          <div className="flex-1 overflow-hidden flex flex-row">
+          <div className="relative flex-1 overflow-hidden flex flex-row">
             {/* objectstack#35745 — no top padding here: the record page under
                 it pads its own top (`RecordPageColumns`, the `page` root), so
                 the tab row sits 12px under the header instead of under a 48px
@@ -5781,8 +6457,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   that declares `print` holds only the printable component
                   types, and `page:header` is not one of them, so the record's
                   header actions have no block to draw them on such a page.
-                  This row draws them: the object's declared `record_header` /
-                  `record_more` actions and the system set the
+                  This row draws them: the object's declared `record` / `record_page` actions and the system set the
                   `RecordContextProvider` above hands over (Edit / Share /
                   Delete), through `PageHeaderActions`, the ONE resolver
                   `page:header` draws them with, so each is gated, ordered,
@@ -5845,7 +6520,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   into the bottom bar below, and the default page's header
                   takes its subtitle from the declared text highlights. */}
               <PageHeaderPhoneContext.Provider
-                value={phonePage ? { actionBar: phoneActionBarEl, subtitle: phoneHeader?.subtitle || undefined } : null}
+                value={phonePage ? { actionBar: phoneActionBarEl, more: phoneMoreEl, subtitle: phoneHeader?.subtitle || undefined } : null}
               >
               <RelatedRecordActionsBridge
                 appName={appName}
@@ -5878,16 +6553,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // A record drawn with no top bar of its own (a host's plain
                   // overlay, not the console's pane) keeps its ⊟ at the end of
                   // the header's action row.
-                  <PageHeaderTrailingContext.Provider value={embedded && !paneBar ? panelToggles : null}>
+                  <PageHeaderTrailingContext.Provider
+                    value={embedded && !paneBar && panelToggles ? panelToggles : null}
+                  >
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
-                    rightColumn={relatedSwitch === 'on'}
-                    // objectstack#35596 — a drawer (or pane) draws no right rail:
-                    // its 审批, 附件 and 动态 are its tabs.
-                    rail={!embedded}
-                    relatedArrangement={relatedArrangement}
-                    onRelatedArrangementChange={setRelatedArrangement}
+                    // objectstack#35890 — a full page pins its details left
+                    // beside the other tabs when it has room; a drawer or pane
+                    // keeps them as its first tab.
+                    fullPage={!embedded}
+                    detailsWidth={detailsWidth}
+                    onDetailsWidthChange={setDetailsWidth}
+                    onShownTabChange={setShownRecordTab}
+                    // objectstack#36499, objectstack#36737 — the design
+                    // mode's tab editor previews the default order, the
+                    // reader's own arrangement set aside.
+                    relatedArrangement={tabsConfig.active ? EMPTY_RELATED_ARRANGEMENT : relatedArrangement}
+                    onRelatedArrangementChange={tabsConfig.active ? ignoreArrangementChange : setRelatedArrangement}
+                    tabRowEditor={tabsConfig.editor ?? undefined}
                     enlargedRelated={enlargedRelatedParam}
                     onEnlargeRelated={openEnlargedRelated}
                     onCloseEnlargedRelated={closeEnlargedRelated}
@@ -6004,27 +6688,52 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                 })}
               />}
             </div>
+            {/* objectstack#36075 — the record's comment panel: beside the
+                record (which gives it the width), or over it. */}
+            {/* objectstack#36076 — the phone's comment page, over the record. */}
+            {commentsPageOpen && (
+              <CommentsPage
+                threadId={commentsPageThread}
+                focusCommentId={commentsLinkComment}
+                onOpenThread={openCommentsPage}
+                onBack={leaveCommentsPage}
+                backLabel={recordCrumbName}
+                onEngage={engageComments}
+              />
+            )}
+            {commentsOpen && (
+              <RecordCommentsAside
+                placement={commentsPlacement}
+                onClose={() => setCommentsOpen(false)}
+                focusThreadId={commentsLinkThread}
+                focusCommentId={commentsLinkComment}
+                onEngage={engageComments}
+              />
+            )}
             <MetadataPanel
               open={showDebug}
               sections={[{ title: 'Page Schema', data: renderedPage }]}
             />
           </div>
           {/* objectstack#27058, Target 7 — the phone's bottom action bar: the
-              header's action row in its bar face (the primary action, one more
-              and the `⋯`), at the foot of the page above the safe area, so
-              the body ends where the bar starts. Empty, it is not drawn. */}
+              header's action row in its bar face (the primary action and one
+              more; the `⋯` is in the top bar, objectstack#36151), at the foot
+              of the page above the safe area, so the body ends where the bar
+              starts. Empty, it is not drawn, and the body runs to the foot. */}
           {phonePage && (
             <div
               ref={setPhoneActionBarEl}
-              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden"
+              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden [&:has(>[role=toolbar]:empty)]:hidden"
               data-record-action-bar=""
             />
           )}
           {modalElement}
         </ActionProvider>
+        </RecordViewApprovalsContext.Provider>
         </RecordTimelineTotalContext.Provider>
         </RecordFieldHistoryContext.Provider>
         </RecordFieldChangesContext.Provider>
+        </RecordCommentsInPanelContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
         </RecordEditStateController>
@@ -6056,6 +6765,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }}
       />
 
+      {/* objectstack#35403 — the Change Owner dialog the header's action opens. */}
+      {changeOwnerOffer.offered && objectDef && pageRecord && (
+        <ChangeOwnerDialog
+          open={changeOwnerOpen}
+          onOpenChange={setChangeOwnerOpen}
+          objectDef={objectDef as any}
+          records={[{ ...pageRecord, id: pureRecordId }]}
+        />
+      )}
+
       {/* Action Result Reveal Dialog */}
       <ActionResultDialog
         state={resultDialogState}
@@ -6065,21 +6784,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         }}
       />
       <FlowRunner
-        state={screenFlow}
+        key={screenFlows.head?.key}
+        state={screenFlows.head?.state ?? null}
         authFetch={authFetch}
         baseUrl={import.meta.env.VITE_SERVER_URL || ''}
         dataSource={dataSource}
         objects={objects}
-        onClose={() => setScreenFlow(null)}
-        onComplete={() => { setScreenFlow(null); notifyRecordChanged(); }}
+        onClose={() => { if (screenFlows.head) screenFlows.settle(screenFlows.head.key); }}
+        onComplete={() => { if (screenFlows.head) screenFlows.settle(screenFlows.head.key); notifyRecordChanged(); }}
       />
       <FlowRefusalNotice
         state={flowRefusal}
         onClose={() => setFlowRefusal(s => ({ ...s, open: false }))}
       />
     </div>
+    </RecordReadReportContext.Provider>
     </RecordHeaderStateContext.Provider>
     </RecordHeaderBarContext.Provider>
+    </RelatedListConditionsSlotContext.Provider>
   );
   // A drawer draws this view embedded and is its own host. A page is the host
   // of the drawer its related rows and lookups open over it

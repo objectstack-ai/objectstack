@@ -364,6 +364,10 @@ export function useObjectGridGenerateColumns({
               // Dropped, the cell fell through to the tenant currency while the
               // metric tile and every whole-def cell read the field's own.
               if (objectDefField.currencyConfig) fieldMeta.currencyConfig = objectDefField.currencyConfig;
+              // A quantity's unit (ADR-0158), verbatim for the same reason: the
+              // cell's `useQuantityUnit` owns what it means. Dropped, a quantity
+              // drew as a bare number.
+              if ((objectDefField as { unitConfig?: unknown }).unitConfig) fieldMeta.unitConfig = (objectDefField as { unitConfig?: unknown }).unitConfig;
               // A formula's declared `returnType` picks its face in the
               // formula cell (`FormulaCellRenderer`): `currency` draws through
               // the currency cell with the `currencyConfig` above. Dropped
@@ -646,6 +650,8 @@ export function useObjectGridGenerateColumns({
             if (fieldDef.currency) fieldMeta.currency = fieldDef.currency;
             // Verbatim, as the ListColumn path copies it (objectui#10354).
             if (fieldDef.currencyConfig) fieldMeta.currencyConfig = fieldDef.currencyConfig;
+            // A quantity's unit (ADR-0158), as path A copies it.
+            if ((fieldDef as { unitConfig?: unknown }).unitConfig) fieldMeta.unitConfig = (fieldDef as { unitConfig?: unknown }).unitConfig;
             // The formula's face, as path A copies it.
             if (fieldDef.returnType !== undefined) fieldMeta.returnType = fieldDef.returnType;
             if (fieldDef.precision !== undefined) fieldMeta.precision = fieldDef.precision;
@@ -840,6 +846,8 @@ export function useObjectGridGenerateColumns({
             if (fieldDef.currency) fieldMeta.currency = fieldDef.currency;
             // Verbatim, as the ListColumn path copies it (objectui#10354).
             if (fieldDef.currencyConfig) fieldMeta.currencyConfig = fieldDef.currencyConfig;
+            // A quantity's unit (ADR-0158), as path A copies it.
+            if ((fieldDef as { unitConfig?: unknown }).unitConfig) fieldMeta.unitConfig = (fieldDef as { unitConfig?: unknown }).unitConfig;
             // The formula's face, as path A copies it.
             if (fieldDef.returnType !== undefined) fieldMeta.returnType = fieldDef.returnType;
             if (fieldDef.precision !== undefined) fieldMeta.precision = fieldDef.precision;

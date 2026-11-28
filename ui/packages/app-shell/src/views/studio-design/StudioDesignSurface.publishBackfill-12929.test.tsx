@@ -5,8 +5,8 @@
  * rows publishes with the option checked and the response count N is shown;
  * unchecked, nothing is written.
  *
- * End to end through the Studio's own publish: the header's Publish opens the
- * real review sheet (confirm posture, every row expanded), the drill-in offers
+ * End to end through the Studio's own publish: 概览's Pending tab (objectstack#37456;
+ * the menu's badge opens it) draws the real changes panel in place, the drill-in offers
  * the unchecked choice naming the object's N records, the sheet's Publish all
  * hands the checked field to the surface, and the surface sends it through the
  * real `MetadataClient` to `POST /packages/:id/publish-drafts`. The server's
@@ -23,6 +23,9 @@
  * panels no assertion reads.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,10 +65,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { toast } from 'sonner';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t, tFormat } from '../metadata-admin/i18n';
 
 window.matchMedia = ((query: string) => ({
@@ -164,7 +167,7 @@ afterEach(() => {
 });
 
 /**
- * Open the sheet the way the author does: the header's Publish, which opens it to confirm.
+ * Open the panel the way the author does: the menu's 概览 badge, onto the Pending tab.
  *
  * Resolves once the backfill option is drawn, NOT once its count is: the drill-in
  * asks the adapter for the record count only after the option renders, and names
@@ -175,14 +178,19 @@ async function openSheet(): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
-  const publish = () => screen.getByRole('button', { name: t('engine.studio.publish', 'en') });
-  await waitFor(() => expect(publish()).toBeEnabled());
-  fireEvent.click(publish());
-  const sheet = await screen.findByTestId('draft-changes-panel');
+  // objectstack#37456 — Publish lives on 概览's Pending tab: the menu's badge opens it.
+  fireEvent.click(await screen.findByTestId('studio-menu-overview-pending', undefined, { timeout: 8000 }));
+  const sheet = await screen.findByTestId('draft-changes-panel', undefined, { timeout: 8000 });
+  expect(sheet).toHaveAttribute('data-embedded');
+  // In place the rows open to review, collapsed: the author opens the object's
+  // row to reach its drill-in (the top bar's Publish opened them all, to confirm).
+  const toggle = await within(sheet).findByTestId('draft-entry-toggle', undefined, { timeout: 8000 });
+  fireEvent.click(toggle);
   await within(sheet).findByTestId('draft-backfill-option');
   return sheet;
 }

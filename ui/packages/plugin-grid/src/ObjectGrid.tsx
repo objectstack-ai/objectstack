@@ -24,7 +24,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectGridSchema, DataSource, ViewData, TableSortItem, DataTableSchema, ListViewExportFormat, RecordNavigateAction } from '@object-ui/types';
 import { isSystemManagedField, detectStatusField } from '@object-ui/types';
-import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites, type AnswerWarningClaim, type RecordSaveFeedback } from '@object-ui/react';
+import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, useAction, useSafeFieldLabel, usePredicateScope, useCapabilityGate, useDrawsAction, useRelatedRecordActions, notifyDataChanged, useMetadata, claimAnswerWarnings, toastRecordSave, useOwnWrites, createOwnWrites } from '@object-ui/react';
 // objectui#8920 — the grid reaches a cell renderer through THIS module and
 // nowhere else. `getCellRenderer` / `resolveCellRendererType` are deliberately
 // NOT imported here: six sites spelling the resolve three different ways is
@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES, resolveFormulaValueType } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -48,7 +48,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { stateMachineNextValues } from './inline-edit-options';
 import { isStateMachineField, stateLabelOf, type StateChangeConfirm } from './objectGridStateConfirm';
 import { useCellRequiredPrompt } from './objectGridRequiredPrompt';
-import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText } from './objectGridCellFacts';
+import { cellReadOnlyKind, readOnlyReasonText, inlineTyping, choiceFromText, inlineEditorPlacement, clearRefusalText, cellValueRefusal, pastesFromText } from './objectGridCellFacts';
 import {
   Badge, Button, NavigationOverlay, EmptyValue,
   legacyRecordDrawerWidthKey, recordOverlayWidthStorageKey,
@@ -71,7 +71,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@object-ui/components';
-import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
+import { captureUpdateUndoData, resolveConditionalFormatting, declaredNameField, collectPredicateFieldRefs, buildExportFileName, resolveAffordance, resolveAffordanceGrant, resolveFieldAffordance, isObjectExportOffered, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate, csvBlob, readActionPayload } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
@@ -79,15 +79,20 @@ import {
   ConcurrentUpdateDialog,
   isConcurrentUpdateError,
   useDetailTranslation,
+  StageChangeStarts,
+  useRecordUpdateStarts,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
   type ConcurrentUpdateConflict,
 } from '@object-ui/plugin-detail';
-import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2 } from 'lucide-react';
-import { useRowColor } from './useRowColor';
+import { ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Download, Rows2, Rows3, Rows4, AlignJustify, Loader2, Check } from 'lucide-react';
+import { useRowColor, rowTintClass } from './useRowColor';
 import { GroupRow } from './GroupRow';
 import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './rowCrudAffordances';
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { useRowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
+import { rankRowActionDefs } from './rowActionArrangement';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
@@ -95,15 +100,16 @@ import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar, FloatingSelectionBarAnchor } from './components/SelectionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
-import type { BulkResult } from './hooks/useBulkExecutor';
+import type { BulkRecordVerdict, BulkResult } from './hooks/useBulkExecutor';
 import type { BulkActionDef } from '@object-ui/types';
 import { type ObjectGridColumnDraft } from './objectGridColumns';
 import { rowRecordId } from './objectGridLinkCell';
 import { useGridTranslation } from './objectGridTranslations';
 import { inlineEditRuleRefusals, inlineRuleRefusalError } from './objectGridInlineRules';
 import { DEFAULT_DISPLAY_PAGE_SIZE, DEFAULT_SELECTION_TYPE, type RowHeightMode, resolvePageSize, resolveRowHeightMode } from './objectGridDefaults';
-import { type BatchSaveOutcome, type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
-import { type RowPatch, mergeSavedRow } from './objectGridRowPatch';
+import { type RowConflictChoice, type WrittenRowVersion, rowVersionOf, rowVersionToSend } from './objectGridRowVersion';
+import { type RowPatch, mergeSavedRow, rowsAsSaved } from './objectGridRowPatch';
+import { usableGroupingFields } from './useGroupedData';
 import { type CellSaveUndo, createCellUndoStack, isCellUndoKey, undoKeyCellOf } from './objectGridCellUndo';
 import { type ObjectGridExternalPaginationProps, type ObjectGridFooterSummary, type ObjectGridRowGroup } from './objectGridProps';
 import { FooterSummaryReport } from './objectGridFooterSummaryReport';
@@ -126,7 +132,8 @@ import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns'
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
 import { useInlineRowActionFold } from './objectGridInlineActionFold';
 import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
-import { useIsListPageGrid } from './listPageScope';
+import { CHANGE_OWNER_BULK_ACTION } from './components/BulkActionBar';
+import { useIsListPageGrid, useListSelectionRequest, usePublishListSelectable, usePublishListSelecting } from './listPageScope';
 import { useInfiniteRowLoad } from './objectGridInfiniteLoad';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
@@ -263,23 +270,31 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   residentSummaryRow?: boolean;
   /**
+   * [objectstack#36149] Draw the phone's card rows (the record's title, one
+   * summary line and its status chip) at any window width: a host whose box
+   * is a phone's width on a desktop window, the side preview's child tab.
+   * Absent: card rows below the 768 px app breakpoint only, as before. A HOST
+   * prop, never authored metadata.
+   */
+  cardFace?: boolean;
+  /**
    * [objectstack#35702] The host's own wording of the record count that leads
    * the footer row (the list's 「42 records」, plural forms included). Absent ⇒
    * the grid's 「Count 42」.
    */
   summaryRowLead?: (count: number) => React.ReactNode;
   /**
-   * [objectstack#35702] Wired only for a reader who may change the view: each
-   * footer cell becomes the menu that picks the column's calculation (`null` =
-   * None). The grid draws the pick at once; the host saves it on the view and
-   * hands it back as the column's `summary`. A host that answers `false`
+   * [objectstack#35702] Each footer cell becomes the menu that picks the
+   * column's calculation (`null` = None). The grid draws the pick at once; the
+   * host keeps it (on the view, or in a draft, objectstack#36194) and hands it
+   * back as the column's `summary`. A host that answers `false`
    * (or a promise of it, or one that rejects) did not save it, and the grid
    * takes the pick back.
    */
   onColumnSummaryPick?: (field: string, summary: ColumnSummaryType | null) => void | boolean | Promise<void | boolean>;
   /**
    * [objectstack#35702] The fields whose calculation `onColumnSummaryPick` can
-   * save (the columns the view itself declares); every other footer cell draws
+   * keep (the columns a saved view would carry); every other footer cell draws
    * its figure with no menu. Absent ⇒ every field column is offered.
    */
   summaryPickFields?: readonly string[];
@@ -365,6 +380,39 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    */
   recordLinkAdornment?: (record: any) => React.ReactNode;
   /**
+   * [objectstack#36897] Host-drawn cells, by column field: a shown column
+   * whose field is a key here draws what the host returns for the row, in
+   * place of the grid's own cell renderer. Called with the row's value at
+   * that field and the row record. A column whose field is not a key keeps
+   * the grid's own cell, and an absent prop changes nothing.
+   *
+   * For a host whose rows are not records of an object (the console's
+   * metadata list: a switch with a confirm, a lock, a clone button): the grid
+   * still owns the table, its header, sort arrows, paging and row clicks; the
+   * host owns what a cell says. Table view only: the phone's card rows keep
+   * the grid's own title and summary.
+   *
+   * The table keeps its columns as state, re-seeded after a change of their
+   * identity: a host whose cells draw from state of its own passes the same
+   * functions on every render and reads that state when called (a ref), so
+   * a change redraws at once.
+   *
+   * A RUNTIME prop, never authored metadata: it is a React node a host
+   * composes, nothing an author writes, and no node key reaches it.
+   */
+  hostCells?: Readonly<Record<string, (value: any, record: any) => React.ReactNode>>;
+  /**
+   * [objectstack#36897] A host-chosen tint for ONE row, as a colour name of
+   * the palette `rowColor` resolves (`red`, `amber`, …). `null`, `undefined`
+   * or a name outside the palette tints nothing; where it names one it wins
+   * over the row's authored `rowColor`. The tint reaches the row's sticky
+   * cells as `rowColor`'s does.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  rowTint?: (record: any) => string | null | undefined;
+  /**
    * [objectstack#33317] Whether a click on a row opens anything, as the HOST
    * that owns the row click knows it. `false` ⇒ the row's record-link cells
    * (the primary field, and columns authored `link: true`) draw their value as
@@ -389,13 +437,19 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * cell and never edits it or opens the record; double-click, Enter, F2 or
    * typing edits (Space included); each committed cell saves at once and
    * updates its own row (objectstack#35685); a cell that opens no editor says
-   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the table keeps
-   * its click-to-edit / click-to-open behaviour, as before this prop existed.
+   * why (`describeCell`, `./objectGridCellFacts`). Absent ⇒ the model follows
+   * whether the grid renders editable (objectstack#36270): an editable grid is
+   * select-first, a read-only one keeps click-to-open.
+   *
+   * Only `true`: the staged opt-out `cellSelection={false}` (click-to-edit, a
+   * pending-changes bar and "Save All") is retired (objectstack#35827). An
+   * editable grid has one editing model; a read-only grid keeps click-to-open
+   * without the prop.
    *
    * A RUNTIME prop, never authored metadata: the host decides it, and no node
    * key reaches it.
    */
-  cellSelection?: boolean;
+  cellSelection?: true;
   /**
    * [objectstack#35876] The column header opens the column menu (sort
    * ascending, sort descending, hide) instead of sorting on a click, as the
@@ -406,6 +460,30 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
    * key reaches it.
    */
   headerMenu?: boolean;
+  /**
+   * [objectstack#35955] Hears the column menu's "Hide column" with the
+   * column's field, as the HOST that keeps the columns shown asks for it (the
+   * list page holds the hidden fields in its draft, as its hide-fields eye
+   * does). The table hides the column either way. Absent ⇒ the hide lives in
+   * the table's own state alone, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  onColumnHide?: (field: string) => void;
+  /**
+   * [objectstack#36015] Opens a record that a lookup cell's chip names, in
+   * place, as the HOST that owns the page does it (the list page opens it in
+   * its side drawer). With {@link cellSelection}, a single click on such a
+   * chip opens its record here and selects the cell, and the cell draws an
+   * edit button on hover and while selected. A chip naming a person
+   * (`sys_user`) is not one: it only selects. Absent ⇒ a chip only selects
+   * its cell, as before this prop existed.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  openReferencedRecord?: (objectName: string, recordId: string) => void;
   /**
    * TWO parameters since objectui#9357, and the second is not decoration: this
    * prop reaches `useNavigationOverlay` as its `onRowClick`, and `handleClick`
@@ -440,9 +518,27 @@ export interface ObjectGridComponentProps extends ObjectGridExternalPaginationPr
   onEdit?: (record: any) => void;
   onDelete?: (record: any) => void;
   onBulkDelete?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — the built-in bulk Change Owner. A host wires it where
+   * the object offers the action; the rows then take a selection (as a bulk
+   * action does), and the selection bar offers 「Change Owner」 among its bulk
+   * actions unless {@link bulkChangeOwnerOffered} is `false` — at any count,
+   * except on a list page, where one selected record shows that record's own
+   * actions instead and the bulk entries start at two. It is handed the
+   * selected rows (the expanded set when 「select all matching」 is on). The host owns the dialog and its per-row report, as
+   * `onBulkDelete`'s host owns the delete confirmation.
+   */
+  onBulkChangeOwner?: (records: any[]) => void;
+  /**
+   * objectstack#35403 — whether the selection bar draws 「Change Owner」 now.
+   * `false` keeps the entry off while {@link onBulkChangeOwner} still makes the
+   * rows selectable: a host that asks the caller's transfer verdict only once
+   * a selection is open needs the selection before it has the answer. Omitted,
+   * the entry is drawn wherever `onBulkChangeOwner` is wired.
+   */
+  bulkChangeOwnerOffered?: boolean;
   onCellChange?: (rowIndex: number, columnKey: string, newValue: any, row: any) => void;
   onRowSave?: (rowIndex: number, changes: Record<string, any>, row: any) => void | Promise<void>;
-  onBatchSave?: (changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>) => void | Promise<void>;
   onRowSelect?: (selectedRows: any[]) => void;
   onAddRecord?: () => void;
 }
@@ -572,7 +668,9 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  *   - the card's speculative list (`pagination`, `manualPagination`, `rowCount`,
  *     `frozenColumns`, `singleClickEdit`, `selectionResetKey`,
  *     `disableInnerScroll`, `borderless`) was already declared then, and is
- *     still declared now;
+ *     still declared now — except `singleClickEdit`, the TABLE's own key, which
+ *     left with the staged editing model (objectstack#35827; the `object-grid`
+ *     key of that name was retired by objectstack#36270);
  *   - the two keys that survived that diff, `renderCellEditor` and
  *     `cellClassName`, were DECLARED by `bf97b98c8` (maintainer ruling
  *     2026-08-30) on three surfaces:
@@ -627,14 +725,23 @@ function getDataConfig(schema: ObjectGridSchema): ViewData | null {
  * deliberately at that package's floor, and that is exactly how `bf97b98c8` took it.
  */
 /**
- * The grid table's frame (objectstack#35548): every header cell 32px tall at
- * 13px, and the row lines a shade off the background rather than a rule.
+ * The grid table's frame (objectstack#35548): every header cell at 13px, and
+ * the row lines a shade off the background rather than a rule.
+ * objectstack#36048 — the header is 36px tall, as the default row is, and a
+ * line of the same shade and weight as the row lines runs between columns in
+ * the header, the rows and the footer row (none after the last cell). The
+ * line is an inset shadow on the cell's right edge, not a border: the table
+ * collapses its borders, and a collapsed border belongs to the table, so a
+ * frozen (sticky) cell's border stays behind when the rows scroll sideways
+ * and the frozen columns lose their lines. The inset shadow is the cell's
+ * own and composes with the last frozen column's scroll shadow.
  */
 export const OBJECT_GRID_TABLE_DENSITY = [
-  '[&_thead_th]:h-8 [&_thead_th]:py-0 [&_thead_th]:text-[13px] [&_tbody_tr]:border-border/50',
+  '[&_thead_th]:h-9 [&_thead_th]:py-0 [&_thead_th]:text-xs [&_tbody_tr]:border-border/50',
+  '[&_th:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_th:not(:last-child)]:inset-shadow-border/50 [&_td:not(:last-child)]:inset-shadow-[-1px_0_0_0] [&_td:not(:last-child)]:inset-shadow-border/50',
   // A referenced record (a lookup's link) is a small chip led by its name's
   // first letter; an option label keeps its colour, less saturated.
-  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
+  '[&_td_a[data-record-link]]:inline-flex [&_td_a[data-record-link]]:h-5 [&_td_a[data-record-link]]:max-w-full [&_td_a[data-record-link]]:items-center [&_td_a[data-record-link]]:gap-1 [&_td_a[data-record-link]]:rounded-md [&_td_a[data-record-link]]:bg-muted [&_td_a[data-record-link]]:px-1.5 [&_td_a[data-record-link]]:text-foreground [&_td_a[data-record-link]]:hover:no-underline [&_td_a[data-record-link]]:hover:bg-accent',
   '[&_td_a[data-record-link]]:before:flex [&_td_a[data-record-link]]:before:h-3.5 [&_td_a[data-record-link]]:before:w-3.5 [&_td_a[data-record-link]]:before:shrink-0 [&_td_a[data-record-link]]:before:items-center [&_td_a[data-record-link]]:before:justify-center [&_td_a[data-record-link]]:before:rounded-sm [&_td_a[data-record-link]]:before:bg-muted-foreground/20 [&_td_a[data-record-link]]:before:text-[10px] [&_td_a[data-record-link]]:before:font-medium [&_td_a[data-record-link]]:before:content-[attr(data-initial)]',
   '[&_td_[data-select-badge]]:saturate-[.6]',
 ].join(' ');
@@ -765,16 +872,29 @@ function ratingScaleOf(fieldDef: unknown): number {
 }
 
 /**
+ * objectstack#36015 — whether a column's cells are reference cells whose chips
+ * open their record in place: a lookup, master-detail or tree field naming a
+ * record of any object but the person object. A chip naming a person only
+ * selects its cell.
+ */
+function opensReferenceInPlace(fieldDef: { type?: unknown; reference?: unknown } | undefined): boolean {
+  const type = fieldDef?.type;
+  if (type !== 'lookup' && type !== 'master_detail' && type !== 'tree') return false;
+  return fieldDef?.reference !== 'sys_user';
+}
+
+/**
  * objectstack#35688 — how wide a field type's editor layer starts. The layer
  * is never narrower than its cell and grows to fit this; the editor fills it.
  */
 function cellEditorWidthClass(type: string): string {
+  // objectstack#36023 — a rich-content field's text box, as wide as a textarea's.
+  if ((RICH_TEXT_FIELD_TYPES as readonly string[]).includes(type)) return 'w-full min-w-80';
   switch (type) {
     case 'address':
     case 'location':
       return 'w-full min-w-[22rem]';
     case 'textarea':
-    case 'markdown':
     case 'code':
     case 'json':
       return 'w-full min-w-80';
@@ -806,6 +926,9 @@ function cellEditorWidthClass(type: string): string {
   }
 }
 
+/** objectstack#35689 — no record waits in its group. */
+const NO_HELD_RECORDS: ReadonlySet<string> = new Set();
+
 export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   schema,
   dataSource,
@@ -814,16 +937,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   rowOperations,
   rowAdornment,
   recordLinkAdornment,
+  hostCells,
+  rowTint,
   rowOpensRecord,
-  cellSelection: hostCellSelection,
+  cellSelection: cellSelectionProp,
   headerMenu: hostHeaderMenu,
+  onColumnHide: hostOnColumnHide,
+  openReferencedRecord,
   onBulkDelete,
+  onBulkChangeOwner,
+  bulkChangeOwnerOffered,
   onRowSelect,
   onRowClick,
   onNavigate,
   onCellChange,
   onRowSave,
-  onBatchSave,
   onAddRecord,
   // The host-driven mode (`ObjectGridExternalPaginationProps`). Every one of
   // these was read out of `...rest` through an `as any` cast until #4277 gave
@@ -850,6 +978,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   showRowNumbers: hostShowRowNumbers,
   onColumnSummaryChange,
   residentSummaryRow,
+  cardFace: hostCardFace,
   summaryRowLead,
   onColumnSummaryPick,
   summaryPickFields,
@@ -857,6 +986,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   onRowGroupsChange,
 }) => {
   const [data, setData] = useState<any[]>([]);
+  // objectstack#36290 — the field change-history card a cell's context menu
+  // opened: which record and field, and where. Ephemeral, like the menu.
+  const [fieldHistoryAt, setFieldHistoryAt] = useState<
+    { recordId: string; field: string; x: number; y: number } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   // Tenant default currency (ADR-0053) backstops amount cells that lack a code.
@@ -876,7 +1010,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `error`). Read only by the undeclared-name warning's readiness below, so a
   // failed read reports the names instead of dropping them silently.
   const [objectSchemaReadFailed, setObjectSchemaReadFailed] = useState(false);
-  const [useCardView, setUseCardView] = useState(false);
+  const [windowCardView, setUseCardView] = useState(false);
+  // The card rows: a phone's window, or a host that asks for them
+  // (`cardFace`, objectstack#36149).
+  const useCardView = windowCardView || !!hostCardFace;
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
   // row's anchor from.
@@ -900,6 +1037,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const [stateChange, setStateChange] = useState<StateChangeConfirm | null>(null);
   const stateChangeDecisionRef = React.useRef<((confirmed: boolean) => void) | null>(null);
   useEffect(() => () => stateChangeDecisionRef.current?.(false), []);
+  // objectstack#35928 — the flows the pending move would start, named under
+  // the confirm's sentence by the reader the record page's confirm shares.
+  const stateChangeStarts = useRecordUpdateStarts(stateChange?.ask ?? null);
   // objectstack#35685 — the rows a select-first save redrew in place, per
   // record id. Each applies while the grid still holds the row object it was
   // saved from (`RowPatch.base`); the next load's rows replace them.
@@ -907,15 +1047,38 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const patchedRowsCacheRef = React.useRef(new WeakMap<any[], { patches: ReadonlyMap<string, RowPatch>; rows: any[] }>());
   // objectstack#35685 — the select-first saves Undo can still take back
   // (`./objectGridCellUndo`), and what an undo reads when it runs, which may
-  // be well after the render that offered it: the patches over the rows.
+  // be well after the render that offered it: the patches over the rows,
+  // which `writeRowInPlace` sets together with the state it renders from.
   const cellUndoRef = React.useRef(createCellUndoStack());
   const rowPatchesRef = React.useRef(rowPatches);
-  useEffect(() => { rowPatchesRef.current = rowPatches; }, [rowPatches]);
+  // objectstack#35689 — the records a select-first save moved to another
+  // group while the reader is still on their row: each stays in the group it
+  // was read in, counted and summed there, until a cell of another row is
+  // selected. Then the groups are read again (`regroupNonce`), and a grid
+  // that buckets in the browser buckets the saved row. Any other save is in
+  // the figures at once (`savedFigureNonce` re-asks the server's headers).
+  const [heldInGroup, setHeldInGroup] = useState<ReadonlySet<string>>(NO_HELD_RECORDS);
+  const heldInGroupRef = React.useRef(heldInGroup);
+  const [regroupNonce, setRegroupNonce] = useState(0);
+  const [savedFigureNonce, setSavedFigureNonce] = useState(0);
+  const leaveHeldRows = useCallback((selectedRecordId: unknown) => {
+    const held = heldInGroupRef.current;
+    const stay = selectedRecordId === undefined || selectedRecordId === null ? undefined : String(selectedRecordId);
+    if (held.size === 0 || (held.size === 1 && stay !== undefined && held.has(stay))) return;
+    const next = stay !== undefined && held.has(stay) ? new Set([stay]) : NO_HELD_RECORDS;
+    heldInGroupRef.current = next;
+    setHeldInGroup(next);
+    setRegroupNonce((n) => n + 1);
+  }, []);
   const [showExport, setShowExport] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [rowHeightMode, setRowHeightMode] = useState<RowHeightMode>(resolveRowHeightMode(schema.rowHeight));
   const [selectedRows, setSelectedRows] = useState<any[]>([]);
+  // objectstack#35883 — a phone's cards select by a long press (or the page's
+  // 「⋮ More」 → 「Select」): while this is on, a tap on a card adds or removes
+  // it instead of opening the record, and each card shows a tick.
+  const [cardSelecting, setCardSelecting] = useState(false);
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   // Bumped to tell the underlying table to drop its internal checkbox selection.
   // The table owns that state, so clearing our `selectedRows` alone would leave
@@ -1044,9 +1207,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const objectTypesPending =
     !!objectName && typeof dataSource?.getObjectSchema === 'function' && !objectFields;
   // [objectstack#3391] Server-resolved effective API operation set for this object
-  // (/me/permissions `apiOperations`). The Export button and handler AND their
-  // gate with this — a missing set (unrestricted object / old backend / no
-  // provider) keeps the current behavior. The frontend consumes the effective
+  // (/me/permissions `apiOperations`). The Export entries and handler AND their
+  // gate with this through `objectExportOffered` below — a missing set
+  // (unrestricted object / old backend / no provider) keeps the current behavior. The frontend consumes the effective
   // set the server resolved; it never reads the raw `apiMethods`.
   const perms = usePermissions();
   const { getObjectApiOperations } = perms;
@@ -1093,6 +1256,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // already knew the server would 403. Resolved here beside its siblings so
   // the three read as one block rather than drifting apart again.
   const addRowGranted = resolveAffordance('gridAddRow', affordanceSource).allowed;
+
+  // [objectstack#35619] The object's export verdict, read by every export entry
+  // this grid draws — the toolbar's Export menu, its handler and the table's own
+  // CSV button. `isObjectExportOffered` (`@object-ui/core`) folds the object's
+  // `userActions.exportCsv` over its `managedBy` default (`false` hides every
+  // format) with the server's effective `export` operation, so neither half is
+  // spelled here. It describes the OBJECT, from `objectSchema` alone, and is not
+  // a grant: who may export is the permission set's `allowExport`, which reaches
+  // this grid through the effective operation set. With no object definition in
+  // hand the bucket default applies, which offers export in every bucket.
+  const objectExportOffered = isObjectExportOffered(
+    objectSchema as SchemaLike | null | undefined,
+    effectiveApiOps,
+  );
 
   // [#5143] Whether THIS principal may edit THIS object's rows in place — the
   // single verdict behind every inline-edit affordance this grid renders
@@ -1147,6 +1324,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // upstream" is exactly the reasoning that left this door open to begin with.
   const inlineEditable = (schema.editable ?? false) && objectInlineEditable;
 
+  // objectstack#36270 — the select-first cell model is how a grid that renders
+  // editable edits, wherever it is drawn: a click selects a cell, double-click,
+  // Enter or typing opens its editor, and each committed cell saves on its own,
+  // with no pending-changes bar and no "Save All" (the model `ListView` and the
+  // related tab ask for by name, objectstack#35684). A grid that renders
+  // read-only keeps click-to-open. A host's `cellSelection` asks for the model
+  // on a read-only grid too (`ListView`); there is no opting out of it on an
+  // editable one (objectstack#35827 retired the staged model).
+  const hostCellSelection = cellSelectionProp === true || inlineEditable;
+
   // When the consumer wired onEdit/onDelete callbacks but the view schema
   // omits an explicit `operations` block, default to allowing those actions.
   // This gives every main list a Row actions kebab out of the box without
@@ -1183,7 +1370,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *
    *   - The PRODUCER derives it. `app-shell/src/views/ObjectView.tsx:1968`
    *     builds this key from `objectDef.actions` filtered by
-   *     `locations.includes('list_item')`, then localizes each def — see its
+   *     `actionRendersAt(action, 'record_row')`, then localizes each def — see its
    *     own docblock there. Twenty lines below it, `bulkActionDefs` is passed
    *     STRAIGHT THROUGH from the view author. The two keys are asymmetric by
    *     construction: one is computed for the grid, the other is authored.
@@ -1195,7 +1382,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *     `rowActionDefs` — which is why this read is a cast in the first place.
    *
    * The AUTHORED way to put an action on a row is unchanged and stays declared:
-   * `locations: ['list_item']` on the object's own action, plus the legacy
+   * `locations: ['record_row']` on the object's own action, plus the legacy
    * `rowActions` name list (`GRID_QUERY_INPUTS`, `index.tsx:190`) that the fold
    * below resolves against the object. Both halves — unlisted here, rejected
    * there — are pinned by `__tests__/gridNonAuthorKeys.test.tsx`, together with
@@ -1207,14 +1394,20 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Legacy `rowActions` carry a bare action NAME, which the runner cannot
   // execute on its own — resolve each against the object's declared actions so
   // it dispatches as a real def (and so a name that duplicates an existing
-  // `list_item` def stops rendering a dead twin of it). A name the object does
+  // `record_row` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
+  const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
   });
+  // objectstack#36494 — the row's menus list the actions the object's record
+  // scope arrangement (`actionLayout.record`, as served) names first, in its
+  // order, then the rest as before (`./rowActionArrangement`). Keyed on the
+  // arm's content so an unchanged arm hands the menus the same defs.
+  const recordArmKey = JSON.stringify((objectSchema as any)?.actionLayout?.record ?? null);
+  const resolvedRowActionDefs = useMemo(() => rankRowActionDefs(foldedRowActionDefs, JSON.parse(recordArmKey)), [foldedRowActionDefs, recordArmKey]);
   // Honor the object's resolved CRUD affordance: the ADR-0103 lifecycle bucket
   // (`managedBy`), the `userActions.edit`/`delete` override — explicit `false`
   // opts out of the generic row Edit/Delete (e.g. sys_environment ships a
@@ -1271,10 +1464,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     recordIds: pageRecordIds,
     update: canEdit || inlineEditable,
     delete: canDelete,
-    // objectstack#34208 — inline cells read `update` while rendering, before any row action is used.
-    // objectstack#35684 — select-first cells read it only when the reader acts
-    // on one, so they ask when a cell is first selected (`onCellSelect` below).
-    updateOnMount: inlineEditable && !hostCellSelection,
+    // objectstack#35684 — select-first cells read `update` only when the
+    // reader acts on one, so they ask when a cell is first selected
+    // (`onCellSelect` below); an editable grid is always select-first
+    // (objectstack#35827), so nothing is asked on mount.
   });
 
   // objectstack#35684 — what the select-first table asks about a cell when
@@ -1282,7 +1475,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // object, an approval lock, the record — `cellReadOnlyKind`), what typing
   // does there and what pasted text stands for. `null` without the host's
   // ask, so every other grid keeps the table it had.
-  const approvalLocks = useRowApprovalLocks(hostCellSelection ? objectName : undefined);
+  //
+  // objectstack#36911 — the row menu reads the same locks: a row an approval
+  // locks offers no Edit, as the record page offers none (objectstack#35593).
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. objectstack#37231 — a master-detail line held
+  // because its MASTER is held (the read's `lockSource: 'master'`) offers no
+  // Delete either: the detail-row lock hook refuses it with `RECORD_LOCKED`.
+  // So the hook also runs on a grid whose rows offer Edit or Delete. It still
+  // reads nothing until it is asked: by a cell being selected, or by a row's
+  // actions being reached for (`demandRowActions` below).
+  const rowMenuReadsLocks = (canEdit && !!onEdit) || (canDelete && !!onDelete);
+  const approvalLocks = useRowApprovalLocks(hostCellSelection || rowMenuReadsLocks ? objectName : undefined);
+  /**
+   * objectstack#36911 — what reaching for a row's actions asks
+   * (`RowActionMenuProps.onActionsDemand`, objectstack#34208): the
+   * record-grained verdicts, and the approval locks of the rows on screen in
+   * one read (objectstack#35795), never on first paint. A repeat call is free:
+   * the hook asks only ids it has not asked yet.
+   */
+  const requestRecordVerdicts = recordVerdict.requestVerdicts;
+  const probeApprovalLocks = approvalLocks.probe;
+  const demandRowActions = useCallback(() => {
+    requestRecordVerdicts();
+    if (rowMenuReadsLocks) probeApprovalLocks(pageRecordIds);
+  }, [requestRecordVerdicts, probeApprovalLocks, rowMenuReadsLocks, pageRecordIds]);
   // objectstack#35956 — a cell change that makes other fields required asks
   // for them first, and saves them with it (`./objectGridRequiredPrompt`).
   const fieldLabelOf = (field: string): string => {
@@ -1318,43 +1535,100 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         }
       : undefined,
   });
-  const gridCellSelection: GridCellSelection | null = hostCellSelection
+  // objectstack#35689 — the value is new only when what `describeCell`
+  // answers from changed (the object, its fields, the reader's permissions,
+  // a verdict or an approval lock landing, the language): the table asks the
+  // selected cell's facts again on a new value, so one new on every render
+  // would ask on every render. The commit question and the chip opener read
+  // what this render holds through `latestCellHooks`.
+  const gridEditable = schema.editable ?? false;
+  const latestCellHooks = React.useRef({ requiredPrompt, askStateMove, openReferencedRecord });
+  React.useLayoutEffect(() => {
+    latestCellHooks.current = { requiredPrompt, askStateMove, openReferencedRecord };
+  });
+  const opensReferencedRecords = !!openReferencedRecord;
+  // The host's predicate scope for the cell gate's lock predicates, as the
+  // edit dialog binds it (objectstack#36806).
+  const cellLockScope = usePredicateScope();
+  const gridCellSelection = useMemo((): GridCellSelection | null => (hostCellSelection
     ? {
         describeCell: (row, columnKey) => {
           const fieldDef = objectFields?.[columnKey];
           const recordId = rowRecordId(row);
+          // objectstack#35795 — read at call time, not from this render: an
+          // edit that waited for the verdict is re-asked before the render
+          // that publishes it.
+          const recordUpdate = recordVerdict.current(recordId, 'update');
           const kind = cellReadOnlyKind({
             fieldDef,
+            row,
+            scope: cellLockScope,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
-            gridEditable: schema.editable ?? false,
+            gridEditable,
             objectEditable: objectInlineEditable,
-            canUpdate: resolveAffordanceGrant('listInlineEdit', affordanceSource),
+            canUpdate: resolveAffordanceGrant('listInlineEdit', {
+              objectSchema: objectSchema as SchemaLike | null | undefined,
+              objectName,
+              perms,
+            }),
             approvalLocked: approvalLocks.isLocked(recordId, row),
-            recordUpdate: recordVerdict(recordId, 'update'),
+            recordUpdate,
           });
+          // objectstack#35795 — while the row's lock or `update` verdict is on
+          // its way, an edit waits for it rather than opening an editor the
+          // answer may refuse.
+          const reads = kind ? [] : [
+            approvalLocks.settling(recordId),
+            recordUpdate === undefined ? recordVerdict.settling() : null,
+          ].filter((read): read is Promise<void> => read !== null);
           const fromText = choiceFromText(fieldDef);
           const type = fieldDef?.type;
           return {
             readOnlyReason: kind ? readOnlyReasonText(kind, t) : null,
+            ...(reads.length > 0 ? { checking: { text: t('grid.readOnlyReason.checking'), settled: Promise.all(reads) } } : {}),
             typing: inlineTyping(type),
             ...(type === 'boolean' || type === 'toggle' ? { toggles: true } : {}),
             // objectstack#36023 — a rating is set in place: digits, or a click on a star.
             ...(type === 'rating' ? { stars: ratingScaleOf(fieldDef) } : {}),
             ...(fromText ? { fromText } : {}),
+            // objectstack#36023 — a picker opens under the cell; a required
+            // field refuses Backspace; a commit is judged by the form's rules.
+            ...(inlineEditorPlacement(type) ? { editor: inlineEditorPlacement(type) } : {}),
+            clearRefusal: clearRefusalText(fieldDef, columnKey, t),
+            validate: (value) => cellValueRefusal(fieldDef, columnKey, value, t),
           };
         },
         onCellSelect: (row) => {
+          // objectstack#35689 — a row held in its group is left. Keyed as
+          // the save keys it (`resolveRecordId`).
+          leaveHeldRows(row?._id ?? row?.id);
           recordVerdict.requestVerdicts();
-          approvalLocks.probe(rowRecordId(row));
+          // objectstack#35795 — one lock read for the page, not one per row selected.
+          approvalLocks.probe([rowRecordId(row), ...pageRecordIds]);
         },
         // objectstack#35685 — a move of a state-machine field is confirmed
         // before anything is written (`./objectGridStateConfirm`). A move that
         // needs fields filled asks for them first; that dialog is the
         // confirmation, so a state-machine move does not ask twice.
-        confirmCommit: (row, columnKey, value) =>
-          requiredPrompt.ask(row, columnKey, value, () => askStateMove(row, columnKey, value)),
+        confirmCommit: (row, columnKey, value) => {
+          const { requiredPrompt: prompt, askStateMove: askMove } = latestCellHooks.current;
+          return prompt.ask(row, columnKey, value, () => askMove(row, columnKey, value));
+        },
+        // objectstack#36015 — a lookup cell's chip opens its record in place.
+        ...(opensReferencedRecords
+          ? {
+              referenceCells: {
+                isReferenceColumn: (columnKey: string) => opensReferenceInPlace(objectFields?.[columnKey]),
+                openRecord: (target: string, recordId: string) =>
+                  latestCellHooks.current.openReferencedRecord?.(target, recordId),
+              },
+            }
+          : {}),
       }
-    : null;
+    : null), [
+    hostCellSelection, opensReferencedRecords, objectFields, objectSchema, objectName, perms,
+    gridEditable, objectInlineEditable, approvalLocks, recordVerdict, pageRecordIds, t, leaveHeldRows, cellLockScope,
+  ]);
   // objectstack#35685 — the state-machine confirm, the grid's next question
   // when the required-fields prompt has nothing to ask.
   function askStateMove(row: any, columnKey: string, value: unknown): Promise<boolean> | null {
@@ -1368,10 +1642,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     );
     const declared = objectFields?.[columnKey]?.label;
     const fallback = typeof declared === 'string' && declared.length > 0 ? declared : columnKey;
+    const recordId = resolveRecordId(row);
     return askStateChange({
       field: columnHeaderOf(columnKey) ?? (objectName ? resolveFieldLabel(objectName, columnKey, fallback) : fallback),
       from: labelOf(row?.[columnKey]),
       to: labelOf(value),
+      ...(objectName && recordId != null && recordId !== ''
+        ? { ask: { object: objectName, recordId: String(recordId), changes: { [columnKey]: value } } }
+        : {}),
     });
   }
 
@@ -1521,11 +1799,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Publishing it into the designer panel and the generated
     // `sdui-intrinsics.d.ts` would advertise an offer nobody can take, which
     // is the option the ruling rejected as the most AI-error-prone of the
-    // three. Programmatic callers already have the channel its nine siblings
+    // three. Programmatic callers already have the channel its eight siblings
     // use: `onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`,
-    // `onBatchSave`, `onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord`
-    // are props on `ObjectGridComponentProps`, and since objectui#9547 this one
-    // is the tenth prop there, which is where a caller should prefer to pass
+    // `onEdit`, `onDelete`, `onBulkDelete` and `onAddRecord` are props on
+    // `ObjectGridComponentProps`, and since objectui#9547 this one is the
+    // ninth prop there, which is where a caller should prefer to pass
     // it. When both are supplied the PROP WINS (maintainer ruling C on
     // objectui#9547), so `schema.onNavigate` below is the fallback read — kept,
     // because a host that builds the node in TypeScript still reaches the slot
@@ -1543,11 +1821,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   });
 
   // --- Action support for action columns ---
-  const { execute: executeAction, updateContext: updateActionContext } = useAction();
+  const { execute: executeAction, updateContext: updateActionContext, runner: actionRunner } = useAction();
 
   // Publish the checkbox selection into the shared ActionRunner context so
   // actions rendered OUTSIDE the grid but inside the same <ActionProvider>
-  // (e.g. `list_toolbar` flow buttons in the ObjectView header) can resolve a
+  // (e.g. `list` flow buttons in the ObjectView header) can resolve a
   // recordId from the selected rows. Cleared on unmount / selection change so
   // a stale selection never leaks into later invocations.
   React.useEffect(() => {
@@ -1610,12 +1888,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const keptDeleteAction = (explicitBulkActions ?? []).filter(
     (a: unknown) => String(a).toLowerCase() === 'delete',
   );
-  const effectiveBulkActions: string[] =
-    explicitBulkActions && explicitBulkActions.length > 0
+  const changeOwnerDrawn = !!onBulkChangeOwner && bulkChangeOwnerOffered !== false;
+  const effectiveBulkActions: string[] = [
+    ...(explicitBulkActions && explicitBulkActions.length > 0
       ? keptDeleteAction
       : canDelete && onBulkDelete && bulkActionDefs.length === 0
         ? ['delete']
-        : [];
+        : []),
+    // objectstack#35403 — the built-in bulk Change Owner, offered wherever its
+    // host wires it and has not held it back (the host judges the object and
+    // the grant).
+    ...(changeOwnerDrawn ? [CHANGE_OWNER_BULK_ACTION] : []),
+  ];
   const hasBulkActions = effectiveBulkActions.length > 0 || bulkActionDefs.length > 0;
   // The names the two folds above did not draw, said once in development, and
   // only once there is nothing left to wait for. Keyed on the RESOLVED
@@ -1661,8 +1945,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   } else if (schema.selectable !== undefined) {
     // Legacy support — read only when `selection` is absent.
     selectionMode = schema.selectable;
-  } else if (hasBulkActions) {
-    // Auto-enable multi-select when bulk actions exist
+  } else if (hasBulkActions || onBulkChangeOwner) {
+    // Auto-enable multi-select when bulk actions exist — and where the host
+    // wires the bulk Change Owner whose grant it reads only once a selection
+    // is open (objectstack#35403): without the selection it never gets asked.
     selectionMode = 'multiple';
   }
   // `selection.type: 'single'` caps the selection at one row (the data-table
@@ -1682,6 +1968,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return () => { updateActionContext({ selectionAvailable: undefined }); };
   }, [rowsSelectable, updateActionContext]);
 
+  // objectstack#35883 — the page's 「Select」 (`requestListSelection`) opens a
+  // card selection with nothing ticked yet. Only a request made after this
+  // grid mounted counts.
+  // The page draws 「Select」 only where it would open one: on cards whose rows
+  // take more than one tick.
+  const cardsSelectRequestable = useCardView && rowsSelectable && !singleSelection;
+  usePublishListSelectable(gridRoot, cardsSelectRequestable);
+  const selectionRequest = useListSelectionRequest(gridRoot);
+  const seenSelectionRequest = React.useRef(selectionRequest);
+  useEffect(() => {
+    if (selectionRequest === seenSelectionRequest.current) return;
+    seenSelectionRequest.current = selectionRequest;
+    if (cardsSelectRequestable) setCardSelecting(true);
+  }, [selectionRequest, cardsSelectRequestable]);
+  // A long press on a card: held 500 ms without moving starts the selection
+  // with that card ticked; the click that follows the press is swallowed.
+  const longPress = React.useRef<{ timer: ReturnType<typeof setTimeout> | null; x: number; y: number; fired: boolean }>({
+    timer: null, x: 0, y: 0, fired: false,
+  });
+  useEffect(() => () => {
+    if (longPress.current.timer) clearTimeout(longPress.current.timer);
+  }, []);
+
   // --- Row color support ---
   const getRowClassName = useRowColor(schema.rowColor);
 
@@ -1695,6 +2004,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // applies per row, read here too so the Actions column's verdict (below the
   // early returns, where no hook may sit) sees the same declared set.
   const mayInvokeRowAction = useCapabilityGate();
+  // [ADR-0160 D7] …and the provider's answer for an `ask_ai` row action.
+  const drawsRowAction = useDrawsAction();
   const getRowStyle = useCallback((row: Record<string, unknown>): React.CSSProperties | undefined => {
     const rules = schema.conditionalFormatting;
     if (!rules || rules.length === 0) return undefined;
@@ -1708,13 +2019,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // The grouping: the group value formatter and date faces, the server group
   // headers and rows, and the grouped data, in hook order (`./objectGridGrouping`).
+  // objectstack#35689 — the rows the figures read: each saved row in place of
+  // the row read (the footer), and, for the groups, a row still held in its
+  // group (`heldInGroup`) as it was read.
+  const savedData = useMemo(() => rowsAsSaved(data, rowPatches), [data, rowPatches]);
+  const groupedData = useMemo(() => rowsAsSaved(data, rowPatches, heldInGroup), [data, rowPatches, heldInGroup]);
   const {
     temporalGroupFaces, groupWhere, groupHeaders, groups, isGrouped, toggleGroup, groupRows,
   } = useObjectGridGrouping({
-    schema, dataSource, objectName, objectFields, objectTypesPending, data, setData,
+    schema, dataSource, objectName, objectFields, objectTypesPending, data: groupedData, setData,
     setTotalMatching, t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey,
     serverPageSize, groupRowQuery, groupingKeyReadable, groupingRefusesNothing,
-    unmaskedGroupingFields, serverGroupedFetch, invalidationNonce,
+    unmaskedGroupingFields, serverGroupedFetch, invalidationNonce, savedFigureNonce, regroupNonce,
   });
   // objectstack#35685 — the rows the grid read, as an undo finds its record
   // among them when it runs: the page's rows, and a server-grouped group's.
@@ -1731,7 +2047,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const {
     bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary, summaryTypes,
   } = useObjectGridSummaries({
-    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
+    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data: savedData, hasInlineData,
     externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
     fetchWindow, serverGroupedFetch, isGrouped, summaryPicks,
   });
@@ -1772,10 +2088,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     onResidentSummaryRowChange?.(residentRowDrawn);
   }, [onResidentSummaryRowChange, residentRowDrawn]);
 
+  // objectstack#35883 — tell the page whether a selection is open (it hides
+  // its floating create button, which would sit on the selection bar).
+  usePublishListSelecting(gridRoot, selectedRows.length > 0 || cardSelecting);
+
   // objectstack#35554 — a host that loads its rows window by window
   // (`onLoadMore`) is asked for the next window as the table's scroll box
   // nears its end, and the box's position is kept across a return to the list
-  // (`./objectGridInfiniteLoad`).
+  // (`./objectGridInfiniteLoad`). On a phone the box is the record cards'
+  // scroller (objectstack#36407).
   useInfiniteRowLoad({
     root: gridRoot,
     enabled: !!onLoadMore,
@@ -1831,11 +2152,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   const handleExport = useCallback((format: ListViewExportFormat) => {
     // Object-level export permission gate. Default-allow: an explicit
-    // `operations.export === false` blocks it, and — when the server hands down
-    // an effective API operation set for this object (objectstack#3391) — so does its
-    // exclusion of `export`. Missing effective set keeps current behavior.
+    // `operations.export === false` blocks it, and so does a closed object export
+    // verdict (`objectExportOffered`: the object's `userActions.exportCsv`, and
+    // the server's effective API operation set excluding `export` when one is
+    // handed down, objectstack#3391). A missing effective set leaves the
+    // object's own verdict alone.
     if (schema.operations?.export === false) return;
-    if (effectiveApiOps && !effectiveApiOps.includes('export')) return;
+    if (!objectExportOffered) return;
     const exportConfig = schema.exportOptions;
     const maxRecords = exportConfig?.maxRecords || 0;
     const includeHeaders = exportConfig?.includeHeaders !== false;
@@ -1967,7 +2290,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       downloadFile(new Blob([JSON.stringify(unmasked, null, 2)], { type: 'application/json' }), fileNameFor('json'));
     }
     setShowExport(false);
-  }, [data, schema.exportOptions, schema.operations?.export, effectiveApiOps, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort, t]);
+  }, [data, schema.exportOptions, schema.operations?.export, objectExportOffered, schema.objectName, objectName, objectSchema, objectFields, objectTypesPending, generateColumns, dataSource, hasInlineData, schemaFilter, schemaSort, t]);
 
   // objectui#9050 step 2 — a refused filter: `schema.filter` (a render-time
   // `useMemo`, which would otherwise have thrown out of render), or a
@@ -1991,7 +2314,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         {/* Separately addressable: this is the half that has to NAME the
             operator, and the technical line below repeats the token
             incidentally. */}
-        <h3 className="text-amber-800 font-semibold" data-testid="grid-malformed-filter-subject">
+        <h3 className="text-amber-800 font-medium" data-testid="grid-malformed-filter-subject">
           {t('view.malformedFilter', { subject: filterRefusalSubject(filterRefusal) ?? '' })}
         </h3>
         <p className="text-amber-700 text-sm mt-1">{filterRefusal.message}</p>
@@ -2010,7 +2333,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md"
         data-testid="grid-grouping-needs-whole-rows"
       >
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{t('grid.grouping.needsWholeRows')}</p>
       </div>
     );
@@ -2023,7 +2346,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   if (loadError) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{loadError.message}</p>
       </div>
     );
@@ -2049,10 +2372,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         </div>
       );
     }
+    // The loading face draws inside the SAME root element the loaded table
+    // draws in (the final return below: same type, same place, same ref), so
+    // React keeps that element across the swap and `gridRoot` — and the list
+    // page's scope answer read off it — is already known when the rows first
+    // render: a list page's rows draw once, without row-end controls
+    // (objectstack#37575).
     return (
-      <div className="p-4 sm:p-8 text-center">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-foreground"></div>
-        <p className="mt-2 text-sm text-muted-foreground">{t('grid.loading')}</p>
+      <div ref={setRootRef} className="relative h-full flex flex-col" data-object-grid-root="">
+        <div className="p-4 sm:p-8 text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-foreground"></div>
+          <p className="mt-2 text-sm text-muted-foreground">{t('grid.loading')}</p>
+        </div>
       </div>
     );
   }
@@ -2071,7 +2402,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md"
         data-testid="grid-grouping-needs-header-query"
       >
-        <h3 className="text-red-800 font-semibold">{t('grid.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('grid.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{t('grid.grouping.needsHeaderQuery')}</p>
       </div>
     );
@@ -2102,6 +2433,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     </p>
   ) : null;
 
+  // objectstack#37278 — the server answered only PART of the view's groups
+  // (`hasMore` on a header answer: the deployment's default page size cut
+  // them). The groups drawn keep their exact counts, so nothing is withheld
+  // and this is no panel: one line in the draft note's strip, saying the list
+  // of groups is not the whole set.
+  const groupsPartialNote = serverGroupedFetch && groupHeaders.partial ? (
+    <p
+      role="status"
+      className="px-3 sm:px-4 py-1.5 text-xs text-muted-foreground border-b bg-muted/40"
+      data-testid="grid-grouping-more-groups-not-loaded"
+    >
+      {t('grid.grouping.moreGroupsNotLoaded')}
+    </p>
+  ) : null;
+
   // The generated columns, enriched and folded, with the persisted widths and
   // order applied (`./objectGridPersistedColumns`).
   const { persistedColumns } = resolveObjectGridPersistedColumns({
@@ -2115,26 +2461,27 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     pinnedRightCols, unpinnedCols, rightPinnedClasses, rightPinnedCellClasses, userLeftPinnedCount,
   } = resolveObjectGridActionsColumn({
     schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
-    wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
-    recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-    setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
+    wantEditAction, wantDeleteAction, mayInvokeRowAction, drawsRowAction, rowOperations, canEdit, canDelete,
+    recordVerdict, approvalLocks, demandRowActions, predicateScope, onEdit, onDelete, editPredicates,
+    deletePredicates, executeAction, setRefreshKey, t, foldInlineRowActions: inlineActionFold.folded,
     drawRowControls: !listPageGrid,
   });
 
   // Density-driven cell padding/font (applied to every column so it actually reaches <td>).
   // `h-*` enforces a minimum row height so the action-button column doesn't dictate it.
-  // objectstack#35548 — the default (`compact`) row is 33px: a 32px cell and
-  // the row's 1px line.
+  // objectstack#36048 — the default (`compact`) row is 36px, its line
+  // included, as the header is (it was a 32px cell, objectstack#35548). The
+  // measured heights are pinned by `e2e/list-frame-geometry-35548.spec.ts`.
   const rowHeightCellClass =
     rowHeightMode === 'compact'
-      ? 'px-3 py-1 h-8 text-[13px] leading-tight'
+      ? 'px-3 py-1 h-9 text-sm leading-tight'
       : rowHeightMode === 'short'
-        ? 'px-3 py-1 h-9 text-[13px] leading-normal'
+        ? 'px-3 py-1 h-9 text-sm leading-normal'
         : rowHeightMode === 'tall'
           ? 'px-3 py-2.5 h-14 text-sm'
           : rowHeightMode === 'extra_tall'
             ? 'px-3 py-3.5 h-16 text-sm leading-relaxed'
-            : 'px-3 py-1.5 h-11 text-[13px] leading-normal';
+            : 'px-3 py-1.5 h-11 text-sm leading-normal';
 
   // Body cells get `px-3` from rowHeightCellClass; give the header the same
   // horizontal padding so header labels line up exactly with the cell content
@@ -2408,6 +2755,26 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     setSelectedRows([]);
     setSelectAllMatching(false);
     setSelectionResetKey(k => k + 1);
+    setCardSelecting(false);
+  };
+
+  // objectstack#35883 — the cards' selection. A row is the same row object
+  // the table selects, keyed by its id; the selection is the grid's one
+  // `selectedRows`, so the page bar's selection face and its actions read it
+  // as they read the table's.
+  const cardRowKey = (row: any) => row?.id ?? row?._id;
+  const toggleCardRow = (row: any) => {
+    const key = cardRowKey(row);
+    const held = selectedRows.some((r) => cardRowKey(r) === key);
+    const next = held ? selectedRows.filter((r) => cardRowKey(r) !== key) : [...selectedRows, row];
+    setSelectedRows(next);
+    onRowSelect?.(next);
+    // Unticking the last card ends the selection.
+    if (next.length === 0) setCardSelecting(false);
+  };
+  const startCardSelection = (row?: any) => {
+    setCardSelecting(true);
+    if (row && !selectedRows.some((r) => cardRowKey(r) === cardRowKey(row))) toggleCardRow(row);
   };
 
   /**
@@ -2428,6 +2795,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const dispatchBulkAction = (action: string, rows: any[]) => {
     void (async () => {
       const expanded = await resolveBulkRows(rows);
+      if (action === CHANGE_OWNER_BULK_ACTION && onBulkChangeOwner) {
+        // objectstack#35403 — the host's dialog takes the rows; the server
+        // judges each one and reports every row it did not move.
+        onBulkChangeOwner(expanded);
+        resetSelection();
+        return;
+      }
       if (action === 'delete' && onBulkDelete) {
         // [objectui#4420] `userActions.delete.visibleWhen` gates the built-in
         // Delete PER RECORD — the same key, the same fail-closed fold and the
@@ -2564,7 +2938,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     def: BulkActionDef,
     row: Record<string, unknown>,
     params: Record<string, unknown>,
-  ): Promise<void> => {
+  ): Promise<BulkRecordVerdict | void> => {
     const source = def.actionDef as Record<string, any> | undefined;
     if (!source) return;
     const {
@@ -2574,13 +2948,22 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       resultDialog: _resultDialog,
       ...rest
     } = stripCollectedActionKeys(source);
-    const res = await executeAction({
+    // [ADR-0160 D7] An action that runs on ONE record (`ask_ai`) is refused
+    // here rather than run once per row, each run pinning a different row.
+    const bulkRefusal = actionRunner.bulkRefusal?.(rest as any);
+    if (bulkRefusal) throw new Error(bulkRefusal);
+    // Dispatched with `reportsRefusal` for this one call (the runner's
+    // `callContext`): a handler that meets a refusal answers it on
+    // `res.refusal` and opens no notice of its own, because the result panel
+    // lists every refused record with its own sentence. One notice per record
+    // would stack N dialogs on that panel; one shared notice would name one.
+    const res = await actionRunner.execute({
       ...rest,
-      // `_rowRecord` is the same row-context key the list_item path attaches,
+      // `_rowRecord` is the same row-context key the record_row path attaches,
       // so `recordIdParam` / `recordIdField` injection behaves identically.
       params: { ...params, _rowRecord: row },
       toast: { showOnSuccess: false, showOnError: false },
-    } as any);
+    } as any, { reportsRefusal: true });
     // Reject so the executor records this row under its own id in the result
     // (and the error CSV) instead of counting a failed action as succeeded.
     // The refusal's producer-marked `userMessage` rides on the rejection, as
@@ -2590,6 +2973,15 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const error = new Error(res?.error || `Action ${def.name} failed`);
       throw res?.userMessage ? Object.assign(error, { userMessage: res.userMessage }) : error;
     }
+    // A refused run is a successful evaluation whose answer was no: it wrote
+    // nothing, so the executor counts it as refused, never as succeeded, and
+    // lists it with this record's own sentence.
+    if (res.refusal) return { refusal: { message: res.refusal.message } };
+    // A run paused at a screen started and waits for input: nothing says it
+    // will finish, so the executor counts it as waiting, never as succeeded
+    // (objectstack#36931). Its screen is the flow handler's to show; the
+    // console queues every paused record's screen, so each can be reached.
+    if (res.paused) return { paused: true };
   };
 
   // Whole-selection dispatcher for a def that opted into
@@ -2640,8 +3032,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Only reset selection when the run actually changed something. A total
     // failure (0 succeeded — e.g. a "推计划" precondition error) leaves the data
     // untouched, so we keep the selection *and* the toolbar so the user can fix
-    // it and retry the same rows.
-    if (result && result.succeeded > 0) {
+    // it and retry the same rows. A run that paused at a screen changed
+    // something too (its steps before the screen may have written), and its
+    // record must not be re-run while its screen waits, so it resets and
+    // re-reads like a success (objectstack#36931).
+    if (result && (result.succeeded > 0 || (result.paused?.length ?? 0) > 0)) {
       resetSelection();
       // Trigger refresh via the same path used by single-record mutations.
       setRefreshKey(k => k + 1);
@@ -2656,14 +3051,13 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Default inline-edit persistence.
   //
-  // When a consumer wires `onRowSave`/`onBatchSave` (React host), we defer to it.
-  // But a declaratively-configured `editable: true` view has no host wiring — so
-  // "Save All" would otherwise just clear pending changes without writing to the
-  // backend. Supply a default that persists through the grid's `dataSource`, then
-  // refresh so the grid reflects persisted values. Reporting failure is
-  // important: DataTable's saveRow keeps a row's pending changes when the save
-  // promise rejects, and saveBatch keeps exactly the rows the batch hands back
-  // as `failed`, so a failed write doesn't silently lose the user's edits.
+  // When a consumer wires `onRowSave` (React host), we defer to it. A
+  // declaratively-configured `editable: true` view has no host wiring, so the
+  // grid supplies a default that persists each committed cell through its own
+  // `dataSource` (objectstack#35827: the table's only save path). Reporting
+  // failure is important: the table keeps a record's edits when the save
+  // promise rejects and marks the refused cells, so a failed write doesn't
+  // silently lose the user's edits.
   // The one place a row's primary key is read for a write. `string`, as
   // `@objectstack/spec` declares every record door — the union this used to
   // annotate was a claim about `any`-typed row data, not a measurement of it
@@ -2879,16 +3273,43 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         if (resolved.outcome === 'reloaded') return resolved;
         answer = resolved.result;
       }
-      setRowPatches((prev) => {
-        const next = new Map(prev);
-        const held = prev.get(id);
-        next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
-        return next;
-      });
+      // The ref is the patches' one source and moves with the write, not after
+      // the render: an undo pressed once this row is drawn, before React's
+      // effects ran, reads this patch and not the one it replaced.
+      const prev = rowPatchesRef.current;
+      const next = new Map(prev);
+      const held = prev.get(id);
+      next.set(id, { base: held && held.row === row ? held.base : row, row: mergeSavedRow(row, shown, answer) });
+      rowPatchesRef.current = next;
+      setRowPatches(next);
+      noteSavedPlace(id, Object.keys(changes));
       return { outcome: 'saved', result: answer };
     } finally {
       releaseOwnWrite();
     }
+  };
+
+  /**
+   * objectstack#35689 — where a landed select-first save of `fields` on
+   * record `id` leaves it in a grouped grid: a save that wrote a grouping
+   * field, or any save on a row already held, keeps the row in the group it
+   * was read in until the reader leaves the row (`leaveHeldRows`); any other
+   * save is in its group's figures at once, which a server-grouped grid asks
+   * its headers for again.
+   */
+  const noteSavedPlace = (id: string, fields: readonly string[]): void => {
+    if (!isGrouped) return;
+    const groupingFields = usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field);
+    const held = heldInGroupRef.current;
+    if (held.has(id)) return;
+    if (fields.some((field) => groupingFields.includes(field))) {
+      const next = new Set(held);
+      next.add(id);
+      heldInGroupRef.current = next;
+      setHeldInGroup(next);
+      return;
+    }
+    if (serverGroupedFetch) setSavedFigureNonce((n) => n + 1);
   };
 
   /**
@@ -2971,147 +3392,36 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // write is one toast.
     const claim = claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id });
     try {
-      if (hostCellSelection) {
-        // objectstack#35685 — the select-first model: the row redraws in
-        // place, and the save can be taken back. What Undo restores is read
-        // off the row before the write (relations as their stored ids); a
-        // written field the row does not carry offers no Undo at all.
-        const key = String(id);
-        const restore = captureUpdateUndoData(Object.keys(changes), row, objectSchema?.fields);
-        const written = await writeRowInPlace(key, changes, row);
-        // A reload re-reads through the bus; there is nothing of ours to show.
-        if (written.outcome === 'reloaded') return;
-        const feedback = claim.take(undefined);
-        if (!restore) {
-          toastRecordSave(toast, t('table.saved', { count: 1 }), feedback);
-          return;
-        }
-        const entry: CellSaveUndo = {
-          objectName,
-          id: key,
-          version: rowVersionOf(written.result),
-          restore,
-          shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
-        };
-        cellUndoRef.current.push(entry);
-        const savedRow = mergeSavedRow(row, changes, written.result);
-        toastRecordSave(toast, t('table.saved', { count: 1 }), feedback, {
-          label: t('actions.undo'),
-          onClick: () => { void undoCellSave(entry, savedRow); },
-        });
+      // objectstack#35685 — the select-first model: the row redraws in
+      // place, and the save can be taken back. What Undo restores is read
+      // off the row before the write (relations as their stored ids); a
+      // written field the row does not carry offers no Undo at all.
+      const key = String(id);
+      const restore = captureUpdateUndoData(Object.keys(changes), row, objectSchema?.fields);
+      const written = await writeRowInPlace(key, changes, row);
+      // A reload re-reads through the bus; there is nothing of ours to show.
+      if (written.outcome === 'reloaded') return;
+      const feedback = claim.take(undefined);
+      if (!restore) {
+        toastRecordSave(toast, t('table.saved', { count: 1 }), feedback);
         return;
       }
-      try {
-        await writeRowGuarded(dataSource, objectName, id, changes, row);
-      } catch (err) {
-        if (!isConcurrentUpdateError(err)) throw err;
-        // A reload re-reads through the bus; there is nothing of ours to show.
-        if ((await resolveRowConflict(dataSource, objectName, id, changes, row, err)).outcome === 'reloaded') return;
-      }
-      // Refresh so the grid shows the persisted values.
-      setRefreshKey(k => k + 1);
-      // objectui#12303 — the write is said, through the console's shared toast
-      // (the one the form, kanban and view surfaces raise). Only here, once the
-      // row landed: a refusal rejects above, and the table flags the row.
-      toastRecordSave(toast, t('table.saved', { count: 1 }), claim.take(undefined));
+      const entry: CellSaveUndo = {
+        objectName,
+        id: key,
+        version: rowVersionOf(written.result),
+        restore,
+        shown: Object.fromEntries(Object.keys(changes).map((field) => [field, row[field]])),
+      };
+      cellUndoRef.current.push(entry);
+      const savedRow = mergeSavedRow(row, changes, written.result);
+      toastRecordSave(toast, t('table.saved', { count: 1 }), feedback, {
+        label: t('actions.undo'),
+        onClick: () => { void undoCellSave(entry, savedRow); },
+      });
     } finally {
       claim.release();
     }
-  };
-
-  const defaultBatchSave = async (
-    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
-  ): Promise<BatchSaveOutcome | undefined> => {
-    if (!dataSource || !objectName) {
-      throw new Error('Cannot persist inline edits: no dataSource/objectName configured on the grid.');
-    }
-    // Update each modified row. The DataSource `bulk`/`bulkUpdate` primitives
-    // apply a single uniform patch across many ids, which does NOT fit per-row
-    // edits (each row has its own field changes), so issue one update per row.
-    //
-    // Each row is its own write and its own outcome (objectui#12292). All are
-    // attempted together and every one is waited for, so a refused row never
-    // hides what happened to the others; a conflict is then put to the user
-    // one row at a time. Nothing the server accepted is taken back: the rows
-    // that landed are reported as saved, and only the rows that did not are
-    // handed back to the table as `failed`.
-    const ids = changes.map(({ row }) => resolveRecordId(row));
-    // objectstack-ai/objectstack#28252 — each row's write answer feedback rides
-    // the one "Save All" toast below, as the single-row save's does.
-    const claims: AnswerWarningClaim[] = ids.flatMap((id) =>
-      id === undefined || id === null ? [] : [claimAnswerWarnings(dataSource, { operation: 'update', resource: objectName, id })],
-    );
-    try {
-      return await saveRowsClaimed(dataSource, objectName, changes, ids, claims);
-    } finally {
-      for (const claim of claims) claim.release();
-    }
-  };
-
-  /** The body of {@link defaultBatchSave}, run while its rows' claims are open. */
-  const saveRowsClaimed = async (
-    dataSource: DataSource,
-    objectName: string,
-    changes: Array<{ rowIndex: number; changes: Record<string, any>; row: any }>,
-    ids: Array<string | undefined>,
-    claims: AnswerWarningClaim[],
-  ): Promise<BatchSaveOutcome | undefined> => {
-    const attempts = await Promise.allSettled(
-      changes.map(({ changes: rowChanges, row }, i) => {
-        const id = ids[i];
-        if (id === undefined || id === null) {
-          return Promise.reject(new Error('Cannot persist inline edit: row has no id/_id.'));
-        }
-        // A row whose edits break a field rule is refused here, unsent; the
-        // other rows still go (each row is its own outcome).
-        const refused = inlineRuleRefusal(rowChanges);
-        if (refused) return Promise.reject(refused);
-        return writeRowGuarded(dataSource, objectName, id, rowChanges, row);
-      }),
-    );
-    const failed: BatchSaveOutcome['failed'] = [];
-    // How many rows the server accepted — the number the toast below names.
-    let saved = 0;
-    for (let i = 0; i < changes.length; i++) {
-      const attempt = attempts[i];
-      if (attempt.status === 'fulfilled') {
-        saved += 1;
-        continue;
-      }
-      const { rowIndex, changes: rowChanges, row } = changes[i];
-      const id = ids[i];
-      const err: unknown = attempt.reason;
-      if (!isConcurrentUpdateError(err) || id === undefined || id === null) {
-        failed.push({ rowIndex, error: err });
-        continue;
-      }
-      try {
-        if ((await resolveRowConflict(dataSource, objectName, id, rowChanges, row, err)).outcome === 'saved') {
-          saved += 1;
-        }
-      } catch (resolutionError) {
-        failed.push({ rowIndex, error: resolutionError });
-      }
-    }
-    if (saved > 0) {
-      // Refresh so the grid shows the persisted values.
-      setRefreshKey(k => k + 1);
-      // objectui#12303 — "Save All" says what it saved, through the console's
-      // shared toast, counting only the rows the server accepted. A row that
-      // failed is not in the count: the table keeps it, flags it and shows
-      // the reason. A reloaded row wrote nothing, so it is not either.
-      // A row that wrote nothing parked nothing, so every claim is read.
-      const feedback: RecordSaveFeedback = { warnings: [] };
-      const notices: string[] = [];
-      for (const claim of claims) {
-        const own = claim.take(undefined);
-        for (const w of own.warnings) if (!feedback.warnings.includes(w)) feedback.warnings.push(w);
-        if (own.notice && !notices.includes(own.notice)) notices.push(own.notice);
-      }
-      if (notices.length > 0) feedback.notice = notices.join('\n');
-      toastRecordSave(toast, t('table.saved', { count: saved }), feedback);
-    }
-    return failed.length > 0 ? { failed } : undefined;
   };
 
   // Determine pagination settings (support both new and legacy formats)
@@ -3232,15 +3542,24 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // objectui#13330 — the host's node beside each row's title (`rowAdornment`):
   // in the declared name field's column when one is shown, else the first
   // shown column. After the cell's own content, never in place of it.
+  // objectstack#36897 — the host's own cells (`hostCells`), by column field.
+  const hostCelledColumns = hostCells
+    ? (orderedColumns as any[]).map((c) => {
+        const draw = typeof c?.accessorKey === 'string' && Object.prototype.hasOwnProperty.call(hostCells, c.accessorKey)
+          ? hostCells[c.accessorKey]
+          : undefined;
+        return draw ? { ...c, cell: (value: any, row: any) => draw(value, row) } : c;
+      })
+    : orderedColumns;
   const tableColumns = (() => {
-    if (!rowAdornment) return orderedColumns;
+    if (!rowAdornment) return hostCelledColumns;
     const declaredTitle = declaredNameField(objectSchema);
-    const shown = (orderedColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
+    const shown = (hostCelledColumns as any[]).filter((c) => c?.accessorKey !== '_actions');
     const titleColumn =
       (typeof declaredTitle === 'string' && declaredTitle !== ''
         ? shown.find((c) => c.accessorKey === declaredTitle)
         : undefined) ?? shown[0];
-    if (!titleColumn) return orderedColumns;
+    if (!titleColumn) return hostCelledColumns;
     const cell = titleColumn.cell;
     const adorned = {
       ...titleColumn,
@@ -3256,8 +3575,23 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         );
       },
     };
-    return (orderedColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
+    return (hostCelledColumns as any[]).map((c) => (c === titleColumn ? adorned : c));
   })();
+
+  // objectstack#36290 — the card a cell's 「Change history」 item opened
+  // (`fieldHistoryAt`, declared with the grid's other state above).
+  const fieldHistoryPopover = fieldHistoryAt && dataSource && schema.objectName ? (
+    <FieldHistoryPopover
+      key={`${fieldHistoryAt.recordId}:${fieldHistoryAt.field}`}
+      at={{ x: fieldHistoryAt.x, y: fieldHistoryAt.y }}
+      onClose={() => setFieldHistoryAt(null)}
+      dataSource={dataSource}
+      objectName={schema.objectName}
+      recordId={fieldHistoryAt.recordId}
+      field={fieldHistoryAt.field}
+      objectSchema={objectSchema}
+    />
+  ) : null;
 
   /**
    * objectstack#28434 — what a right-click (or the context-menu key) on a row
@@ -3274,7 +3608,14 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *   browser's menu: the menu is a second way to reach the row's actions, not
    *   a new surface.
    */
-  const renderRowContextMenu = (row: any, context: { selected: boolean }): React.ReactNode => {
+  const renderRowContextMenu = (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ): React.ReactNode => {
     if (context.selected && selectedRows.length >= 2) {
       return (
         <SelectionContextMenuItems
@@ -3290,12 +3631,41 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         />
       );
     }
+    const recordId = rowRecordId(row);
+    // objectstack#36290 — the change history of the field whose cell the menu
+    // opened on: a field the object declares, whose changes are recorded with
+    // their values, that the reader may read, on a stored record. Offered on
+    // any table that reads its rows from a data source, row actions or none.
+    const historyField =
+      context.column
+      && typeof dataSource?.find === 'function'
+      && schema.objectName
+      && recordId != null && recordId !== ''
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      && fieldHistoryOffered(perms, schema.objectName, context.column, objectSchema)
+        ? context.column
+        : null;
+    const onFieldHistory = historyField
+      ? (at: { x: number; y: number }) =>
+          setFieldHistoryAt({ recordId: String(recordId), field: historyField, ...at })
+      : undefined;
+    // objectstack#36289 — the data cell's own Copy, Paste and Clear, as the
+    // table offers them; Paste only for a field type pasted text can stand
+    // for (`pastesFromText`).
+    const cellFieldType = context.column
+      && Object.prototype.hasOwnProperty.call(objectSchema?.fields ?? {}, context.column)
+      ? (objectSchema as any).fields[context.column]?.type
+      : undefined;
+    const cell = context.cell ? { ...context.cell, pasteable: pastesFromText(cellFieldType) } : undefined;
+    // Something the cell can be changed by: what makes a cell's own section
+    // worth replacing the browser's menu for (its Copy alone is not).
+    const cellWrites = !!cell && ((!!cell.paste && cell.pasteable) || !!cell.clear);
     // The browser's menu stays on a table that offers no row action at all and
     // whose rows cannot be selected — a face-level answer, so a row whose own
     // actions are all hidden by their predicates still opens Open / Open in
-    // new tab like its neighbours.
-    if (!tableOffersRowActions && !selectionMode) return null;
-    const recordId = rowRecordId(row);
+    // new tab like its neighbours — unless the cell offers its field's history
+    // or a change of its value.
+    if (!tableOffersRowActions && !selectionMode && !onFieldHistory && !cellWrites) return null;
     const newTabHref =
       schema.objectName && recordId != null && recordId !== '' && recordLinkHost?.recordHref
         ? recordLinkHost.recordHref(schema.objectName, recordId)
@@ -3307,13 +3677,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const opens = rowOpensRecord !== false
       && (!!onRowClick || (navigation.mode !== 'none' && !schema.navigation?.preventNavigation));
     const openHref = rowOpensRecord === false ? null : newTabHref;
-    // Nothing at all to list for this row: no Open, no URL, no action.
-    if (!opens && !openHref && !rowOffersAction(row)) return null;
+    // Nothing at all to list for this row: no Open, no URL, no history, no
+    // change of the cell, no action.
+    if (!opens && !openHref && !onFieldHistory && !cellWrites && !rowOffersAction(row)) return null;
     return (
       <RowContextMenuItems
         menu={rowActionMenuProps(row)}
         onOpen={opens ? () => navigation.handleClick(row) : undefined}
         newTabHref={openHref}
+        onFieldHistory={onFieldHistory}
+        cell={cell}
       />
     );
   };
@@ -3325,7 +3698,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // On the list page, where rows draw no actions of their own (#35554), one
   // selected record offers that record's actions; elsewhere the row keeps its
   // own menu and the bar offers the bulk actions at any count.
-  const selecting = selectedRows.length > 0;
+  // objectstack#35883 — a card selection opened by 「Select」 shows the bar
+  // before its first card is ticked, so its 「×」 ends it.
+  const selecting = selectedRows.length > 0 || cardSelecting;
   const selectionBar = selecting ? (
     <BulkActionBar
       selectedRows={selectedRows}
@@ -3340,6 +3715,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       totalMatching={canOfferSelectAllMatching ? resolvedTotalMatching : undefined}
       allMatchingSelected={selectAllMatching}
       onSelectAllMatching={canOfferSelectAllMatching ? () => setSelectAllMatching(true) : undefined}
+      open={cardSelecting}
     />
   ) : null;
   // The room a face that is not the table keeps at its scroller's end while
@@ -3439,7 +3815,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // above the table when search/export are handled by the outer toolbar.
     showSelectionCount: false,
     sortable: true,
-    exportable: operations?.export,
+    // The table's own CSV button follows the object's export verdict too
+    // (objectstack#35619): `operations.export` asks for it, the object allows it.
+    exportable: operations?.export && objectExportOffered,
     // Flat list view: drop the rounded outer frame so the table sits flush
     // beneath the toolbar's `border-b`. Matches the Airtable-style grouped
     // mode introduced for `buildGroupedTableSchema`. Metadata can re-enable
@@ -3489,7 +3867,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     renderCellEditor: inlineEditable
       ? (ctx: { column: any; row: any; pendingRow: any; value: any; stage: (v: any) => void; commit: (v?: any) => void }) => {
           const fieldDef = (objectSchema as any)?.fields?.[ctx.column?.accessorKey];
-          if (!fieldDef || !hasFieldEditWidget(fieldDef.type)) return null;
+          // objectstack#36023 — a rich-content field edits in a panel under the cell.
+          if (!fieldDef || !(hasFieldEditWidget(fieldDef.type) || hasInCellPanelEditWidget(fieldDef.type))) return null;
           // objectstack#35688 — a `select` declared `multiple` draws the multi-select
           // check list (`SelectField` hands it to `MultiSelectField`): each check
           // stages, and the edit is saved when the user moves on.
@@ -3552,7 +3931,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           );
         }
       : undefined,
-    singleClickEdit: schema.singleClickEdit ?? true,
     // objectui#11068 — arrow-key cell navigation on the WAI-ARIA grid pattern:
     // the data cells become ONE roving Tab stop that the arrows move (the
     // behaviour is `data-table`'s, documented on `DataTableSchema`). The
@@ -3560,22 +3938,25 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // is the one this grid renders — `inlineEditable`, the authored key AND the
     // viewer's write verdict (#5143), the same value handed down above. So a
     // grid that renders read-only keeps every cell its own Tab stop unless the
-    // author writes `true`, and an explicit `false` turns it off on an editable
-    // grid. Not an alias fallback: the right side is the key's own default.
+    // author writes `true`. On an editable grid the select-first model is the
+    // model (objectstack#36270, the only one since objectstack#35827) and
+    // data-table keeps navigation on under it (`keyboardNavigationProp ||
+    // selectFirst`), so an explicit `false` has no effect there.
+    // Not an alias fallback: the right side is the key's own default.
     keyboardNavigation: schema.keyboardNavigation ?? inlineEditable,
-    // The save bar sits on the grid's own inset, as its cells do (`px-3`),
+    // The toolbar sits on the grid's own inset, as its cells do (`px-3`),
     // never flush against the view's edge (objectstack-ai/objectstack#27520).
-    // objectstack#35548 — a 32px header at 13px over faint row lines.
+    // objectstack#35548 / #36048 — a 36px header at 13px over faint row and column lines.
     className: ['[&>[data-slot=table-toolbar]]:px-3 [&>[data-slot=table-toolbar]]:pt-2', OBJECT_GRID_TABLE_DENSITY, schema.className].filter(Boolean).join(' '),
     cellClassName: rowHeightMode === 'compact'
-      ? 'px-3 py-1 text-[13px] leading-tight'
+      ? 'px-3 py-1 text-sm leading-tight'
       : rowHeightMode === 'short'
-        ? 'px-3 py-1 text-[13px] leading-normal'
+        ? 'px-3 py-1 text-sm leading-normal'
         : rowHeightMode === 'tall'
           ? 'px-3 py-2.5 text-sm'
           : rowHeightMode === 'extra_tall'
             ? 'px-3 py-3.5 text-sm leading-relaxed'
-            : 'px-3 py-1.5 text-[13px] leading-normal',
+            : 'px-3 py-1.5 text-sm leading-normal',
     // objectui#12423 — row numbers only where a host opts in (objectstack#35663).
     showRowNumbers: hostShowRowNumbers ?? false,
     // [#5148] The authored request ∧ the principal's verdict — the conjunction
@@ -3607,7 +3988,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that verdict, which is what this adds.
     showAddRow: !!operations?.create && addRowGranted,
     onAddRecord: onAddRecord,
-    rowClassName: schema.rowColor ? (row: any, _idx: number) => getRowClassName(row) : undefined,
+    rowClassName: schema.rowColor || rowTint
+      ? (row: any, _idx: number) => rowTintClass(rowTint?.(row)) ?? getRowClassName(row)
+      : undefined,
     rowStyle: schema.conditionalFormatting?.length ? (row: any, _idx: number) => getRowStyle(row) : undefined,
     frozenColumns: effectiveFrozenColumns,
     onSelectionChange: (rows: any[]) => {
@@ -3621,7 +4004,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // Install a dataSource-backed default only when the consumer did NOT wire
     // its own handler, so declarative `editable: true` views still persist.
     onRowSave: onRowSave ?? defaultRowSave,
-    onBatchSave: onBatchSave ?? defaultBatchSave,
     onColumnResize: (columnKey: string, width: number) => {
       saveColumnState({
         ...columnState,
@@ -3636,6 +4018,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // on `DataTableSchema` and stays unwired, exactly as the RuntimeOnlyDeclared
     // ledger records it. Which of the two declared spellings survives is still an
     // open ruling and is deliberately NOT settled here.
+    // objectstack#35955 — the column menu's "Hide column", to the host that
+    // keeps the columns shown.
+    ...(hostOnColumnHide ? { onColumnHide: hostOnColumnHide } : {}),
     onColumnsReorder: (newColumns: any[]) => {
       const order = newColumns
         .map((c) => c?.accessorKey)
@@ -4005,6 +4390,21 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // that titles the card, so a first column the name field displaced (the
     // Owner above) reads as an ordinary body row.
     const bodyColumns = displayColumns.filter((c) => c !== titleCol);
+    // objectstack#37010 — a name field that is a FORMULA titles the card with
+    // the fields it reads (`case_number - subject`), and a view shows those
+    // parts as columns of their own, usually its leading ones, since a table
+    // has no use for the concatenation. So the subtitle also skips every
+    // shown column whose field the formula reads: it never repeats the
+    // title's parts and takes the next shown columns instead. The reads are
+    // the formula's `record.<field>` references as `collectPredicateFieldRefs`
+    // names them, the reader this grid's projection names a CEL expression's
+    // reads with; a read through a lookup (`record.account.name`) names the
+    // lookup, so the lookup's column is skipped too. A name field that is not
+    // a formula reads nothing here.
+    const nameFieldDef = nameFieldKey !== undefined ? objectFields?.[nameFieldKey] : undefined;
+    const titleReads = new Set<string>(
+      nameFieldDef?.type === 'formula' ? collectPredicateFieldRefs([nameFieldDef.expression]) : [],
+    );
 
     // objectui#10583 — a MASKED column (the rule that stamps `TableColumn.masked`)
     // is drawn only through its own `cell`, which draws the mask. The branches
@@ -4024,27 +4424,56 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // read), when a column shows it, drawn through that column's own cell as
     // the desktop row draws it. The subtitle joins the first two other shown
     // columns' display values, each through its own cell, and skips a masked
-    // or empty value rather than drawing it.
+    // or empty value rather than drawing it, and a column the title's formula
+    // reads (`titleReads` above).
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
-    // field type is `currency` (the column draft's resolved type, so a view
-    // that presents the field as another type keeps it a plain value). It
-    // never shares the subtitle's width: it gets a line of its own under the
+    // value draws as money (the column draft's resolved type, so a view that
+    // presents the field as another type keeps it a plain value). It never
+    // shares the subtitle's width: it gets a line of its own under the
     // subtitle, drawn whole at the right edge, and the status chip moves to
     // that line's left so the two never compete for one row. A masked amount
     // is not promoted; it stays a subtitle candidate, which skips it.
+    //
+    // objectstack#37890 — money is a `currency` column, and also a `formula`
+    // or `summary` column whose cell draws a number as currency: a formula
+    // declaring `returnType: 'currency'` (an order line's total) or a summary
+    // declaring its currency. That is asked of `resolveFormulaValueType`, the
+    // rule the formula cell draws by, so the slot and the cell cannot disagree.
+    // The slot is chosen once for the whole list (every card keeps one shape),
+    // so the rule is asked how the column draws a NUMBER, not how one row's
+    // value happens to draw: only a numeric value is an amount.
+    const drawsAsMoney = (c: ObjectGridColumnDraft): boolean => {
+      if (c.type === 'currency') return true;
+      if (c.type !== 'formula' && c.type !== 'summary') return false;
+      const def = objectFields?.[c.accessorKey];
+      return def?.type === c.type && resolveFormulaValueType(def, 0) === 'currency';
+    };
     const amountCol = bodyColumns.find(
-      (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
+      (c) => c !== statusCol && drawsAsMoney(c) && !isMaskedCardColumn(c.accessorKey),
     );
-    const subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);
+    const subtitleColumns = bodyColumns
+      .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))
+      .slice(0, 2);
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];
       return col.cell ? col.cell(value, row) : String(coerceToSafeValue(value) ?? '');
     };
 
+    const selectedKeys = new Set(selectedRows.map(cardRowKey));
+    const cardsSelectable = rowsSelectable && !singleSelection;
+    const cancelLongPress = () => {
+      const press = longPress.current;
+      if (press.timer) {
+        clearTimeout(press.timer);
+        press.timer = null;
+      }
+    };
+
     return (row: any, idx: number) => {
+      const cardSelected = cardSelecting && selectedKeys.has(cardRowKey(row));
       const subtitle = subtitleColumns.filter(
         (col) => !isMaskedCardColumn(col.accessorKey) && !isEmptyCardValue(row[col.accessorKey]),
       );
@@ -4063,14 +4492,114 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div
           key={row.id || row._id || idx}
           data-testid="grid-mobile-card"
+          data-selected={cardSelected || undefined}
+          // A control (objectui#13461): a button cannot hold the card's cells,
+          // so the card takes the role, the focus and Enter / Space itself.
+          // While selecting it is a toggle (`aria-pressed`).
+          role="button"
+          tabIndex={0}
+          aria-pressed={cardSelecting ? cardSelected : undefined}
           // A row the host says opens nothing (`rowOpensRecord: false`) draws
           // no pointer and no hover wash on its card either (objectstack#33548).
           className={cn(
-            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation',
-            rowOpensRecord !== false && 'cursor-pointer hover:bg-accent/50',
+            'flex min-w-0 items-center gap-3 rounded-lg border bg-card px-3 py-2 transition-colors touch-manipulation select-none',
+            (rowOpensRecord !== false || cardSelecting) && 'cursor-pointer hover:bg-accent/50',
+            cardSelected && 'border-primary bg-primary/5',
           )}
-          onClick={() => navigation.handleClick(row)}
+          // objectstack#36044 — while a selection is open the card owns every tap
+          // inside it: a tap on a link, a referenced record's chip, an image or
+          // a button the card draws ticks or unticks the card and opens nothing,
+          // as phone apps do in selection mode. The cells stop their own clicks
+          // from reaching the card, so the card takes them first, in the capture
+          // phase. The row's 「⋮」 opens on pointer-down, which the card cancels
+          // first. The click that ends the long press that started the selection
+          // is swallowed here too, whatever it landed on. A node a portal draws
+          // (an open menu) is not the card's.
+          onPointerDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+          }}
+          onClickCapture={(event) => {
+            const press = longPress.current;
+            if (!cardSelecting && !press.fired) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (press.fired) {
+              press.fired = false;
+              return;
+            }
+            toggleCardRow(row);
+          }}
+          // objectstack#36315 — a key is a tap too: the 「⋮」 opens on keydown
+          // (Enter, Space, ArrowDown), so while selecting the card keeps those
+          // keys from the controls inside it. Enter and Space still make the
+          // browser's click, which the capture above turns into a tick.
+          onKeyDownCapture={(event) => {
+            if (!cardSelecting || event.target === event.currentTarget) return;
+            if (!event.currentTarget.contains(event.target as Node)) return;
+            if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') event.stopPropagation();
+          }}
+          onPointerDown={(event) => {
+            const press = longPress.current;
+            // A fresh press never inherits the last one's flag: a long press
+            // the browser ended with no click (a finger that slid off, Android
+            // after its context menu) would otherwise swallow this tap.
+            press.fired = false;
+            if (!cardsSelectable || cardSelecting) return;
+            press.x = event.clientX;
+            press.y = event.clientY;
+            if (press.timer) clearTimeout(press.timer);
+            press.timer = setTimeout(() => {
+              press.timer = null;
+              press.fired = true;
+              startCardSelection(row);
+            }, 500);
+          }}
+          onPointerMove={(event) => {
+            const press = longPress.current;
+            if (press.timer && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 10) {
+              clearTimeout(press.timer);
+              press.timer = null;
+            }
+          }}
+          onPointerUp={cancelLongPress}
+          onPointerCancel={cancelLongPress}
+          onPointerLeave={cancelLongPress}
+          // A phone's long press also asks for the browser's own menu.
+          onContextMenu={(event) => {
+            if (cardsSelectable) event.preventDefault();
+          }}
+          onClick={() => {
+            if (longPress.current.fired) {
+              longPress.current.fired = false;
+              return;
+            }
+            if (cardSelecting) toggleCardRow(row);
+            else navigation.handleClick(row);
+          }}
+          onKeyDown={(event) => {
+            // Only the card's own key: a link or button inside keeps its own.
+            if (event.target !== event.currentTarget) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            if (cardSelecting) toggleCardRow(row);
+            else navigation.handleClick(row);
+          }}
         >
+          {cardSelecting && (
+            <span
+              aria-hidden="true"
+              data-testid="grid-card-check"
+              className={cn(
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
+                cardSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/40',
+              )}
+            >
+              {cardSelected && <Check className="h-3 w-3" strokeWidth={3} />}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             {titleKey !== undefined && (
               <div data-testid="grid-card-title" className="truncate text-sm font-semibold">
@@ -4134,7 +4663,10 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // the match set, so without it a card list never reached past its first
     // page. It turns the same page the table's pager turns, with the table's
     // words, at a touch size, and returns the reader to the top of the list.
-    const cardPageCount = manualPaginationOn && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
+    // objectstack#36407 — a host that loads as the list scrolls
+    // (`onLoadMore`) pages nothing, so the cards draw no pager, as the table
+    // draws none: the next window comes as the card scroller nears its end.
+    const cardPageCount = manualPaginationOn && !onLoadMore && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
       ? Math.ceil(resolvedTotalMatching / manualPageSize)
       : 1;
     const cardPage = Math.min(Math.max(1, manualPage ?? 1), cardPageCount);
@@ -4177,12 +4709,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     return (
       <>
         <div
+          // objectstack#35883 — the cards' root, for the list page's scope and
+          // the page's 「Select」, as the table's root is below.
+          ref={setGridRoot}
           className={cn('h-full overflow-y-auto overflow-x-hidden', selectionBarClearance)}
           data-fab-clearance=""
           data-testid="object-grid-card-scroller"
         >
         {gridDescription}
         {groupingDraftOnlyNote}
+        {groupsPartialNote}
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
@@ -4230,14 +4766,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // key the save gate refuses. Pinned by
   // `__tests__/gridNonAuthorKeys.test.tsx`.
   const showRowHeightToggle = schema.rowHeight !== undefined && !(schema as any).hideRowHeightToggle;
-  // Export is offered only when configured AND not blocked by object-level perms
-  // — including the server's effective API operation set (objectstack#3391): when present
-  // and it excludes `export`, the button is hidden. Missing set → unchanged.
+  // Export is offered only when configured AND not blocked: by the view's
+  // `operations.export`, or by the object's resolved export verdict
+  // (`objectExportOffered`: `userActions.exportCsv` over the bucket default,
+  // ANDed with the server's effective API operation set, objectstack#3391 /
+  // objectstack#35619). Missing set → the object's own verdict alone.
   const exportEnabled =
     !!schema.exportOptions &&
     exportableFormats.length > 0 &&
     schema.operations?.export !== false &&
-    (effectiveApiOps ? effectiveApiOps.includes('export') : true);
+    objectExportOffered;
   const hasToolbar = exportEnabled || showRowHeightToggle;
   const gridToolbar = hasToolbar ? (
     <div className="flex items-center justify-end gap-1 px-2 py-1">
@@ -4343,8 +4881,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         ? opts.find((o: any) => String(o.label) === label || String(o.value) === label)
         : undefined;
       // Same resolution as the cell below the header (`SelectCellRenderer`):
-      // a declared hex renders as declared (objectui#5141/#5183), everything
-      // else keeps resolving to a palette family. `labelColorStyle` carries
+      // a declared hex renders as declared (objectui#5141/#5183), a declared
+      // family name resolves to its palette family, and an option with no
+      // declared colour renders neutral (objectstack#36882). `labelColorStyle` carries
       // the CSS custom properties the hex className reads — the pill needs
       // BOTH halves or it references undefined variables.
       const hexBadge = getBadgeHexAppearance(matched?.color);
@@ -4592,6 +5131,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       </HorizontalOverflowBox>
       {selectionBar && <FloatingSelectionBarAnchor>{selectionBar}</FloatingSelectionBarAnchor>}
       {groupedPager}
+      {fieldHistoryPopover}
     </div>
   ) : (
     <div className="flex flex-col flex-1 min-h-0">
@@ -4604,6 +5144,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <SchemaRenderer schema={dataTableSchema} />
       </div>
       {summaryFooter}
+      {fieldHistoryPopover}
     </div>
   );
 
@@ -4783,6 +5324,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
             })}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        <StageChangeStarts flows={stateChangeStarts} />
         <AlertDialogFooter>
           <AlertDialogCancel>{t('grid.stateChange.cancel')}</AlertDialogCancel>
           <AlertDialogAction onClick={() => settleStateChange(true)}>{t('grid.stateChange.confirm')}</AlertDialogAction>
@@ -4806,6 +5348,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       )}
       {gridDescription}
       {groupingDraftOnlyNote}
+      {groupsPartialNote}
       {gridToolbar}
       <GridHeaderMenuProvider value={hostHeaderMenu === true}>
         <GridCellSelectionProvider value={gridCellSelection}>{renderedGridContent}</GridCellSelectionProvider>

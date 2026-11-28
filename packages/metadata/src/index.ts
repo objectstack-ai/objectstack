@@ -19,13 +19,20 @@ export {
 } from './plugin.js';
 
 // Loaders
-export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions, type MetadataStampOnlyRow } from './loaders/loader-interface.js';
+export { type MetadataLoader, type MetadataKeyedItem, type MetadataLoaderDeleteOptions, type MetadataRowBinding, type MetadataStampOnlyRow } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export {
   DatabaseLoader,
   ENVIRONMENT_HISTORY_MARK,
   historyRowAttribution,
+  // [#37130] The platform's record is never restored: the one refusal the
+  // metadata service's rollback and the metadata protocol's restore doors ask.
+  refusePlatformRecordRestore,
+  // [#37604 N5] …and the one reader of whether a stored row is the platform's
+  // own record, which that refusal, the protocol's overlay census and its
+  // adoption of orphans ask.
+  isPlatformRecordRow,
   type DatabaseLoaderOptions,
   type MetadataHistoryAddress,
 } from './loaders/database-loader.js';
@@ -84,6 +91,9 @@ export { deriveViewContainerObject } from './view-container-expansion.js';
 // converges by package, from this one declaration: a copy of the list there
 // would drift the moment a type joins the set here.
 export { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
+// [#37013] The platform's mark: its one place on an item, read by the store and
+// by every door that refuses or strips it.
+export { PLATFORM_PROVENANCE, carriesPlatformStamp, isPlatformOrigin, withoutPlatformOrigin } from './package-slotted-store.js';
 
 // Re-export types from spec
 export type {

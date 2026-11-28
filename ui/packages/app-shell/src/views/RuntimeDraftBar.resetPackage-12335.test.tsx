@@ -52,7 +52,9 @@ function realClient(): MetadataClient {
           ? json(200, { success: true, reset: true })
           : json(409, { error: AMBIGUOUS, code: 'RESOURCE_CONFLICT' });
       }
-      // The pending draft that makes the bar render.
+      // The pending-drafts ledger `getDraft` asks first lists it (objectui#11799)…
+      if (url.pathname.endsWith('/_drafts')) return json(200, { drafts: [{ type: 'view', name: 'crm_deal.pipeline' }] });
+      // …and the pending draft that makes the bar render.
       return json(200, { type: 'view', name: 'crm_deal.pipeline', item: { label: 'Pipeline' } });
     }) as unknown as typeof fetch,
   });

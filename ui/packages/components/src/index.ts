@@ -41,6 +41,10 @@ export { renderChildren, renderNodeSlot, isEmptyNodeSlot } from './lib/utils';
 export { cva } from 'class-variance-authority';
 export { getLazyIcon, isLucideIconName, LazyIcon, toKebabIconName } from './lib/lazy-icon';
 
+// The one "does the input method own this key?" predicate (objectstack#35996):
+// the list grid and the field widgets of `@object-ui/fields` both ask it.
+export { isImeKey } from './lib/ime-key';
+
 // The inline Markdown subset `element:text` draws (objectui#12778). Exported
 // because app-shell's marketplace README renderer draws its inline text with
 // the same one, so both share the raw-HTML skip and the link-scheme refusal.
@@ -78,7 +82,7 @@ export { isCustomRowActionVisible } from './renderers/complex/data-table';
 // The reason a row action greyed out by its DECLARED `disabled` predicate gives:
 // the text, the tooltip trigger a disabled button sits in, and the menu item's
 // second line with its ARIA. Exported for plugin-grid's row menu item and
-// inline primary button, so a `list_item` / `record_related` action gives the
+// inline primary button, so a `record_row` / `record_related` action gives the
 // same reason on every row surface as on the record header. plugin-grid already
 // depends on this package, so the direction costs nothing new.
 export {
@@ -99,7 +103,9 @@ export type { PageBlockSpan } from './renderers/layout/page-block-span';
 // renderer (objectui#12703): `compact` when the region is narrower than half
 // the page. Exported for the blocks that read it in other packages — the
 // `list-view` block in `@object-ui/plugin-list` draws a short list there.
-export { usePageRegionPosture } from './renderers/layout/page-region-posture';
+// `PageRegionPostureReset` clears it for a surface a block opens over the page
+// (a drill dialog), so the list there draws in full (objectstack#36256).
+export { usePageRegionPosture, PageRegionPostureReset } from './renderers/layout/page-region-posture';
 export type { PageRegionPosture } from './renderers/layout/page-region-posture';
 
 // The count channel a `page:tabs` panel opens to the blocks inside it
@@ -107,8 +113,8 @@ export type { PageRegionPosture } from './renderers/layout/page-region-posture';
 // reports the records its query matched, and the tab's badge shows the sum.
 export { usePageTabCountReporter } from './renderers/layout/containers';
 
-// `page:header`'s action row: a record's declared `record_header` /
-// `record_more` actions and the host's system actions, through the one
+// `page:header`'s action row: a record's declared `record_page` actions
+// (folded ones, `component: 'action:menu'`, into its ⋯) and the host's system actions, through the one
 // resolver `page:header` draws them with (objectui#12906). Exported for the
 // console's record view, which draws the row in its screen-only chrome on a
 // page that declares `print`, where `page:header` is not a printable block.
@@ -116,6 +122,10 @@ export { PageHeaderActions } from './renderers/layout/containers';
 // The host slot at the end of that row (objectstack#27241): the console's
 // record view puts the reader's panel switches there.
 export { PageHeaderTrailingContext } from './renderers/layout/page-header-trailing-context';
+// The host owns the page's title (objectstack#36111): the console's page route
+// draws the page's name and description in its page header, so the page
+// renderer draws neither, and an authored titled `page:header` draws an `h2`.
+export { PageTitleHostContext } from './renderers/layout/page-title-host-context';
 // The phone's host slot (objectstack#27058): the console's record page hands
 // the header its bottom action bar, where the same row is drawn in its bar
 // face, and the subtitle it draws when the header declares none.
@@ -124,7 +134,7 @@ export type { PageHeaderPhoneFace } from './renderers/layout/page-header-phone-c
 // The record's one-row header (objectstack#35593): the host bar's two slots the
 // record header draws into, and the record state's tags and button group.
 export { RecordHeaderBarContext, RecordHeaderStateContext } from './renderers/layout/record-header-bar-context';
-export type { RecordHeaderBar, RecordHeaderGroupParts, RecordHeaderStageParts, RecordHeaderState } from './renderers/layout/record-header-bar-context';
+export type { RecordHeaderBar, RecordHeaderGroupParts, RecordHeaderStageParts, RecordHeaderState, RecordHeaderTitle } from './renderers/layout/record-header-bar-context';
 export type { PageHeaderActionsProps } from './renderers/layout/containers';
 // The form's host slots (objectstack#28104, objectstack#28106): the console's
 // create page names the fields an AI chat draft filled, and the form marks them
@@ -178,6 +188,7 @@ export {
   useGridCellSelection,
   type GridCellSelection,
   type GridCellFacts,
+  type GridReferenceCells,
 } from './context/gridCellSelection';
 
 // The header that opens the column menu instead of sorting (objectstack#35876):

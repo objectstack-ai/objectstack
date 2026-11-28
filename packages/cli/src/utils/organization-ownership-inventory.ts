@@ -860,6 +860,16 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   // organization's administrators author its own units; the platform ships no
   // row, and no parent row anchors a unit.
   { object: 'sys_unit', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // Standard unit settings (`@objectstack/platform-objects`, ADR-0158 U6 and
+  // Open item 10): an organization's administrators set the display decimal
+  // places of a standard unit; the platform ships no row, and no parent row
+  // anchors a setting.
+  { object: 'sys_standard_unit_setting', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  // Tasks and notes (`@objectstack/platform-objects` `work/`): members write
+  // them, and the organization column is stamped from the writing context; no
+  // parent row anchors a task or a note (step 1 links neither to a record).
+  { object: 'sys_task', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
+  { object: 'sys_note', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`, anchors: [] },
   // Working calendars (`@objectstack/platform-objects`, ADR-0157 D1): an
   // organization's administrators author its calendars, and an exception's
   // calendar carries the organization.

@@ -37,7 +37,8 @@ import {
 } from '@object-ui/components';
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
 import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
-import { useObjectTranslation, useRowPredicate, useCapabilityGate, usePredicateScope } from '@object-ui/react';
+import { useObjectTranslation, useRowPredicate, useCapabilityGate, useDrawsAction, usePredicateScope } from '@object-ui/react';
+import { orderRowMenuActions } from '../rowActionArrangement';
 
 const ROW_ACTION_FALLBACKS: Record<string, string> = {
   'grid.openMenu': 'Open menu',
@@ -269,7 +270,8 @@ export interface RowActionMenuPlan {
   /**
    * Menu-bound defs surviving their own `visible`: the surviving primaries that
    * did not fit an inline slot, then the surviving non-primaries — each group in
-   * declared order, primaries above secondaries as before.
+   * declared order, primaries above secondaries as before. The defs the
+   * object's `actionLayout.record` names lead, in its order (objectstack#36494).
    */
   custom: RowActionDef[];
   /** Legacy string row actions. Predicate-free, so all of them render. */
@@ -363,12 +365,14 @@ export function planRowActionMenu(input: {
   const survivingPrimaries = surviving.filter((def) => def.variant === 'primary');
   const inlineBudget = Math.max(0, input.maxInlineActions ?? 1);
   const inline = survivingPrimaries.slice(0, inlineBudget);
-  const custom = [
+  // objectstack#36494 — the object's `actionLayout.record` order leads the
+  // menu (`rankRowActionDefs`); defs it does not rank keep the order below.
+  const custom = orderRowMenuActions([
     // Primaries that outran the inline budget stay above the secondaries, the
     // menu order this surface has always had.
     ...survivingPrimaries.slice(inlineBudget),
     ...surviving.filter((def) => def.variant !== 'primary'),
-  ];
+  ]);
   const legacy = [...(input.rowActions ?? [])];
   return {
     inline,
@@ -384,7 +388,7 @@ export function planRowActionMenu(input: {
  * One schema-driven row-action menu item. Extracted into its own component
  * so the `visible` CEL predicate can be evaluated with a hook
  * (`useCondition`) without violating the rules-of-hooks inside a `.map()`.
- * Mirrors `ActionMenuItem` on the record_header path: when a `visible`
+ * Mirrors `ActionMenuItem` on the record_page path: when a `visible`
  * predicate is present and evaluates false against the row, the item is
  * hidden (so e.g. "Resume" no longer shows on a running record). Bare field
  * references (`status == "active"`, `is_default != true`) resolve against
@@ -602,7 +606,7 @@ export const RowActionInlineButton: React.FC<{
  * THE row-action resolver (objectstack#28434): what ONE row offers, read by
  * both of its entry points — the "⋮" cell ({@link RowActionMenu}) and the row
  * context menu (`./RowContextMenu`). Both menus call this hook, so a
- * `list_item` action shows in both or in neither: same capability gate
+ * `record_row` action shows in both or in neither: same capability gate
  * (ADR-0066 D4), same switch-off, same per-record predicates, same order.
  *
  * `maxInlineActions` is the only input the two read differently: the cell has
@@ -630,13 +634,16 @@ export function useRowActionPlan(
   // declared set so the inline CTA, the overflow menu and `hasMenu` all agree.
   // This surface filters its own actions instead of going through
   // `ActionEngine.getActionsForLocation`, so the engine's gate never reached
-  // `list_item` — a row action declaring a capability nobody holds still
+  // `record_row` — a row action declaring a capability nobody holds still
   // rendered. Unknown capabilities fail OPEN (see `useCapabilityGate`); the
   // server remains the authority.
   const mayInvoke = useCapabilityGate();
+  // [ADR-0160 D7] …and an `ask_ai` row action is absent where the provider has
+  // no in-app assistant.
+  const drawsAction = useDrawsAction();
   const gatedActionDefs = React.useMemo(
-    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions) && !isActionSwitchedOff(d)),
-    [rowActionDefs, mayInvoke],
+    () => (rowActionDefs ?? []).filter(d => mayInvoke((d as any)?.requiredPermissions) && !isActionSwitchedOff(d) && drawsAction(d)),
+    [rowActionDefs, mayInvoke, drawsAction],
   );
   // What this row will ACTUALLY render, per-record predicates applied — the
   // guard and the items read one visibility source, so they cannot disagree.
@@ -657,7 +664,7 @@ export function useRowActionPlan(
   // while the items were filtered a second time, per row, by `visibleWhen` /
   // `visible`. Handlers present + every item suppressed for this record = a "⋮"
   // that opens an empty box — measured at 128×10 with zero `[role=menu]`
-  // children on `sys_approval_request`, whose `list_item` actions (approve /
+  // children on `sys_approval_request`, whose `record_row` actions (approve /
   // reject / recall) are gated for approvers and fail for an admin browsing the
   // "全部" view. The capability gate above was already folded in for exactly
   // this reason (objectstack-ai/objectstack#3923); the per-record predicates were not.

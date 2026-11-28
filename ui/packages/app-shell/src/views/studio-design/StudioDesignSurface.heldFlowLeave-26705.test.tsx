@@ -19,8 +19,8 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
 
@@ -61,7 +61,13 @@ const mockClient = vi.hoisted(() => ({
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
-  return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
+  return { ...mod, useMetadataClient: () => mockClient, // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+      ],
+    }), };
 });
 
 vi.mock('./packages-io', async (importOriginal) => {
@@ -77,10 +83,34 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
-vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+// Stands in for the Pending changes sheet: its entries ask the host to open the
+// flow a draft names, through the surface channel (objectstack#36903).
+vi.mock('../../preview/DraftChangesPanel', async () => {
+  const { createElement, Fragment } = await import('react');
+  const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
+  return {
+    DraftChangesPanel: () => {
+      const openSurface = useSurfaceNavigator();
+      return createElement(
+        Fragment,
+        null,
+        ['approval', 'reminder'].map((name) =>
+          createElement(
+            'button',
+            { key: name, type: 'button', onClick: () => openSurface?.({ type: 'flow', name }) },
+            `Pending flow/${name}`,
+          ),
+        ),
+      );
+    },
+  };
+});
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -88,6 +118,11 @@ import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { browserClick } from '../metadata-admin/previews/__tests__/browserClick';
 import { t } from '../metadata-admin/i18n';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -142,14 +177,25 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
+/** The router's path, for the landing pins. */
+function Where() {
+  const { pathname } = useLocation();
+  return <output data-testid="where">{pathname}</output>;
+}
+const where = () => screen.getByTestId('where').textContent ?? '';
+
 async function openFlow(): Promise<void> {
   // The shell's link guard reads the window's URL to skip a link to the page
   // already shown; `BrowserRouter` keeps the two equal, so this does too.
-  window.history.replaceState(null, '', `/studio/${PKG}/automations`);
+  // objectstack#36903 — the flow designer, full-screen on the flow's address.
+  const at = `/studio/${PKG}/metadata/flow/approval?package=${PKG}`;
+  window.history.replaceState(null, '', at);
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+    <MemoryRouter initialEntries={[at]}>
+      <Where />
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -171,49 +217,64 @@ function reloadAsks(): boolean {
   return e.defaultPrevented;
 }
 
-const pillarLink = (name: string) => within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { name });
+/** objectstack#36899 — the left menu's entry for a type: a link to that type's area list. */
+const menuEntry = (type: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-type:${type}`);
 
 describe('a held flow step guards every departure (objectstack#26705)', () => {
-  it('leaving the pillar asks; Cancel keeps the held step, OK leaves and clears the guard', async () => {
+  it('leaving the pillar through the menu asks; Cancel keeps the held step, OK leaves and clears the guard', async () => {
     await openFlow();
     await holdANotifyStep();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(pillarLink('Data'));
+    fireEvent.click(menuEntry('object'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
-    expect(screen.getByTestId('studio-rail-automations')).toBeInTheDocument();
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(pillarLink('Data'));
+    fireEvent.click(menuEntry('object'));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByTestId('studio-rail-data');
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/object`));
     // The unmounted pillar took its hold back: nothing is asked any more.
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Automations'));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('opening another flow in the rail asks; Cancel keeps the held step, OK opens the other flow', async () => {
+  // objectstack#36903 — another flow opens through ×, ‹ › or ⌘K (decision 7): × and ‹ › ask.
+  it('× back to the list asks; Cancel keeps the held step, OK opens the list', async () => {
     await openFlow();
     await holdANotifyStep();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByTestId('auto-rail-row-reminder'));
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     expect(screen.getByTitle('API name: approval')).toBeInTheDocument();
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
-    // Re-picking the open flow drops nothing, so it asks nothing.
-    fireEvent.click(screen.getByTestId('auto-rail-row-approval'));
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+  });
+
+  it('‹ › to the next flow asks; Cancel keeps the held step, OK opens the next flow', async () => {
+    await openFlow();
+    await holdANotifyStep();
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(next);
     expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTitle('API name: approval')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-held')).toBeInTheDocument();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByTestId('auto-rail-row-reminder'));
+    fireEvent.click(next);
     expect(confirmSpy).toHaveBeenCalledTimes(2);
     await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });
 
@@ -225,14 +286,166 @@ describe('a held flow step guards every departure (objectstack#26705)', () => {
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, the rail, the reload and the pillar link never ask', async () => {
+  it('with no edit held, ‹ ›, the reload and the menu link never ask', async () => {
     await openFlow();
 
-    fireEvent.click(screen.getByTestId('auto-rail-row-reminder'));
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+    fireEvent.click(next);
     await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Data'));
-    await screen.findByTestId('studio-rail-data');
+    fireEvent.click(menuEntry('object'));
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/object`));
     expect(confirmSpy).not.toHaveBeenCalled();
   });
+});
+
+/** Edit the Start step's label from its Configuration aside: a plain edit, complete, so nothing is held. */
+async function editStartLabel(value: string): Promise<void> {
+  await waitFor(() => expect(document.querySelector('[data-node-id="start"] [role="button"]')).not.toBeNull(), { timeout: 8000 });
+  fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
+  const box = await within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, { timeout: 8000 });
+  fireEvent.change(box, { target: { value } });
+  fireEvent.blur(box);
+  await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent(value));
+  expect(screen.queryByTestId('studio-held'), 'a plain edit is unsaved, not held').toBeNull();
+}
+
+/** Every write the designer could send: the draft save and each publish. */
+const sent = () => [
+  ...mockClient.save.mock.calls,
+  ...mockClient.publish.mock.calls,
+  ...mockClient.publishDraft.mock.calls,
+  ...mockClient.publishPackageDrafts.mock.calls,
+];
+
+/** Past the retired autosave's 1.5 s debounce and a round trip: a write that was going to go has gone. */
+const pastTheOldAutosave = () => new Promise((r) => setTimeout(r, 2000));
+
+// objectstack#36511 — an unsaved edit that is NOT held (complete, waiting for
+// Save) is unsaved work too: × and ‹ › ask through the flow's save entry
+// (`dirty`), not through the hold. The held cases above never reach this
+// path, so it is pinned on its own.
+describe('an unsaved, not-held flow edit guards × and › (objectstack#36511)', () => {
+  it('× asks; Cancel keeps the edit, OK opens the list with nothing sent', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+    expect(reloadAsks()).toBe(false);
+  }, 30_000);
+
+  it('› asks; Cancel keeps the edit, OK opens the next flow with nothing sent', async () => {
+    await openFlow();
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(screen.getByTitle('API name: approval')).toBeInTheDocument();
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(true);
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+    // The next flow opens as the server holds it: the edit stayed behind.
+    await waitFor(() => expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Start'), { timeout: 8000 });
+    expect(document.querySelector('[data-node-id="start"]')).not.toHaveTextContent('Kick-off');
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+  }, 30_000);
+
+  // CONTROL: the same edit, saved, is no longer unsaved — neither × nor › asks.
+  it('after Save, neither › nor × asks', async () => {
+    await openFlow();
+    const next = await screen.findByTestId('studio-detail-next', undefined, { timeout: 8000 });
+    await waitFor(() => expect(next).toBeEnabled(), { timeout: 8000 });
+    await editStartLabel('Kick-off');
+    await pressStudioSave();
+    await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 8000 });
+    await waitFor(() => expect(screen.queryByTestId('studio-save')).toBeNull(), { timeout: 8000 });
+
+    fireEvent.click(screen.getByTestId('studio-detail-next'));
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('studio-detail-close'));
+    await waitFor(() => expect(where()).toBe(`/studio/${PKG}/metadata/flow`));
+    expect(confirmSpy).not.toHaveBeenCalled();
+  }, 30_000);
+});
+
+// objectstack#36903 — the Pending changes sheet's request for a flow opens the
+// flow's own address (`requestSurface`); leaving the open flow's unsaved work
+// asks first, as × and ‹ › do.
+describe('the Pending changes sheet opens a flow at its address (objectstack#36903)', () => {
+  const request = (name: string) => fireEvent.click(screen.getByRole('button', { name: `Pending flow/${name}` }));
+
+  it('over an unsaved edit it asks; Cancel keeps the edit, OK opens the flow with nothing sent', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(false);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+
+    confirmSpy.mockReturnValueOnce(true);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+    await pastTheOldAutosave();
+    expect(sent()).toEqual([]);
+  }, 30_000);
+
+  it('over a held step it asks; OK opens the flow', async () => {
+    await openFlow();
+    await holdANotifyStep();
+
+    confirmSpy.mockReturnValueOnce(true);
+    request('reminder');
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+  }, 30_000);
+
+  it('for the flow already open it does nothing: no question, the edit kept', async () => {
+    await openFlow();
+    await editStartLabel('Kick-off');
+
+    request('approval');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/approval`);
+    expect(document.querySelector('[data-node-id="start"]')).toHaveTextContent('Kick-off');
+    expect(screen.getByTestId('studio-save')).toBeInTheDocument();
+  }, 30_000);
+
+  // CONTROL: nothing unsaved, nothing asked.
+  it('CONTROL: with no edit, it opens the flow without asking', async () => {
+    await openFlow();
+    request('reminder');
+    await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
+    expect(where()).toBe(`/studio/${PKG}/metadata/flow/reminder`);
+    expect(confirmSpy).not.toHaveBeenCalled();
+  }, 30_000);
 });

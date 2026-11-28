@@ -42,7 +42,7 @@
       "verifiedAt": "2026-09-15",
       "evidenceScope": "cross-repo",
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/agent-runtime.ts#buildRequestOptions — applies model, temperature and maxTokens onto AIRequestOptions; model.provider and topP have no reader anywhere in cloud.",
-      "note": "PARTIAL — model/temperature/maxTokens applied; model.provider + topP DEAD."
+      "note": "PARTIAL — model/temperature/maxTokens applied; topP DEAD. model.provider REMOVED 2026-11-27 (#37712) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error, the 18.x emitted default `openai` is stripped as residue) and stripped from sources by the protocol-19 conversion `agent-model-provider-removed`. A nested key has no row of its own, so this container row carries it; the provider is the deployment's AI settings."
     },
     "skills": {
       "status": "live",

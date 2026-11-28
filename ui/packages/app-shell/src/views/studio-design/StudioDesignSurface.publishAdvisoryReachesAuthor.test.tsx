@@ -26,6 +26,9 @@
  * what is under test, so it is reduced to the button that fires `onPublish`.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -64,7 +67,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // Rail siblings / docks irrelevant to the top bar — keep the render light.
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: ({ onPublish }: { onPublish?: () => void | Promise<void> }) =>
     onPublish ? (
@@ -76,6 +78,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 import { toast } from 'sonner';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 
 // jsdom/happy-dom ship neither; useIsMobile / useIsWideViewport and the Radix
 // popover's floating-ui measurement need them.
@@ -174,7 +177,8 @@ async function publishFromTheWorkbench(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );

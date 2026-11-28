@@ -41,7 +41,7 @@ const BASE = {
   name: 'sales_copilot',
   label: 'Sales Copilot',
   active: true,
-  model: { provider: 'openai', model: 'gpt-4o' },
+  model: { model: 'gpt-4o' },
   instructions: 'You are a helpful sales assistant.',
   skills: ['summarize_account'],
 } satisfies Record<string, unknown>;

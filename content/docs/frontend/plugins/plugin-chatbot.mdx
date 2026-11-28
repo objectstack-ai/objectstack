@@ -168,7 +168,9 @@ const schema: ChatbotSchema = {
   the composer shows a model picker. A model whose entry carries a
   `costMultiplier` shows it as `×N` beside its label; with the allowance usage
   served (`GET /api/v1/ai/usage`) the list notes the share left; a pick at
-  `×20` or above asks once before it applies
+  `×20` or above asks once before it applies. Closed, the picker shows the
+  model's `tierLabel` (its tier name alone) when the entry carries one, and
+  its `label` otherwise; the open list always shows the `label`
 - **Lightweight**: Pure React components with minimal dependencies
 
 ## Schema API
@@ -489,49 +491,15 @@ const systemMessage: ChatMessage = {
 
 Tool messages represent results from tool invocations during AI streaming. They are generated automatically by the vercel/ai SDK when the backend performs tool calls (e.g., fetching weather, querying a database). The SDK may emit tool messages as well as populate the assistant message's `toolInvocations` array.
 
-By default, `ChatbotEnhanced` renders tool invocations as a compact agent activity summary. Repeated calls are grouped, raw tool names are hidden, and reasoning text is not shown. Use `processVisibility="debug"` for developer/admin views that need the full reasoning panel, raw tool names, parameters, and results. Use `processVisibility="hidden"` to suppress non-interactive activity entirely; approval and draft-review actions remain visible.
+By default, `ChatbotEnhanced` renders tool invocations as a compact agent activity summary. Repeated calls are grouped, raw tool names are hidden, and reasoning text is not shown. Use `processVisibility="debug"` for developer/admin views that need the full reasoning panel, raw tool names, parameters, and results. Use `processVisibility="hidden"` to suppress non-interactive activity entirely; approval actions remain visible.
 
 In every mode, an answer whose data tools returned a `source` block ends with one collapsed "How this was computed" block: per tool, the object, the filter, the grouping, the aggregations, how many records the figures cover, and whether only the reader's visible records were read. An answer computed through `query_dataset` draws that tool's `provenance` block in the same place instead: the dataset, each metric by its label with its name beside it, the grouping, and the filter the question added (a dataset's own filter is never shown, so no added filter reads as such rather than as all records). It draws that block alone, never the rest of the tool payload.
+
+When an answer carries a verified record-citations part (the `data-record-citations` part, `RecordCitationsSchema` in `@objectstack/spec/ai`), the console draws it beside that block as one chip per citation, each showing the quoted passage, and verifies nothing again on display; a part that does not parse draws nothing. The chips appear on a live answer whose stream carries the part, and are drawn again when the conversation is reloaded or reopened: the history rebuild, the display cache and the `useObjectChat` store rebuild keep the data parts one allow-list names (`STORED_ANSWER_DATA_PARTS`: charts and record citations), and read the list back through the same parse, verifying nothing again. A chip calls `onOpenRecord({ objectName, recordId, anchor })` with the citation's own record (the root record, even when the passage came from a related-list row) and the body section it cites. The console opens the record at `/apps/APP/OBJECT/record/ID?section=ANCHOR`: the record page scrolls to that heading of the body and marks it, opens a `textarea` body at the field, and opens at the top when the anchor names no heading any more.
 
 Each step is named by the locale pack's `chatbot.tool.<tool_name>` entry, a
 short sentence in the user's language ("List the existing objects"). A tool
 the pack has no entry for falls back to its name, title-cased.
-
-The AI build conversation's two cards draw only what the build agent's tool
-results declare. The plan card (`propose_blueprint`) reads the result's
-`planCard`: a chip per field with the format its sample data is held to, a
-dashed chip for a field the agent added on its own, the record's name field,
-one line per view, the assumptions, the sample data the build will stage, and
-how the build will land (`posture`: live at once, or saved as a draft).
-A plan whose result says `decision: 'iterate_or_new'` overlaps an app the user
-already has (`existingAppOverlap`, by `name` and `label`). Its card draws no
-"Build it" button: in its place it asks whether to keep improving that app or
-build a separate one, naming the app, and each choice sends its answer as a
-chat message (`planExtendExistingMessage(app)` and `planBuildNewAppMessage`,
-which the console picks by the conversation's language). The question survives
-a reload from server history and from the console's message cache.
-The result card (`apply_blueprint`, then a later `verify_build` in the same
-turn) reads `checklist`: a passed/total chip, the verified lines in two
-columns, and the app and package that "Open app" and "View in Studio" open.
-A result without those keys keeps the simpler rows the cards drew before.
-
-The change card (a `changes_proposed` result) draws what the copilot's tools
-say about how a change will land. When the result carries a `posture`, the
-card is headed "Change plan · N changes" and draws one row per change: a
-symbol for add, change or remove, the kind (field, view, object), the
-`object · field` it touches, and its type and parameters in small type. A
-change to an app that is live and holds records (`posture.mode: 'draft'`) is
-saved as a Studio draft: the card's note says so in amber, and the primary
-button reads "Save as draft" when `primaryAction` is `save_draft` (the message
-it sends is still `changesConfirmMessage`). Once applied, the card shows the
-result's `appliedCard` title and lines, "Review changes and publish" through
-`onReviewDrafts(packageId)`, and "Undo" through `onDiscardDrafts(packageId)`.
-Undo is meant for `POST /api/v1/packages/:id/discard-drafts`, which discards
-every pending draft of the package, so the card asks first whenever other
-drafts are pending: it reads `draftState.others` from the result, and the live
-count from `fetchPendingDraftCount` when the host provides one. A host without
-`onReviewDrafts` keeps the inline Publish button; a result without these keys
-draws the card as before.
 
 Use `surface="plain"` for full-page chat workspaces where the surrounding app
 already provides navigation chrome. The default `surface="card"` remains a
@@ -577,6 +545,120 @@ const toolMessage: ChatMessage = {
   ],
 };
 ```
+
+### Question card
+
+`QuestionCard` is the card an AI's clarifying question is answered on. It is a
+pure component: pass the questions you parsed and handle the two events. It
+does not detect the question or send anything itself.
+
+```tsx
+import { QuestionCard } from '@object-ui/plugin-chatbot';
+
+export function PendingQuestion({ messageId, onSend, onDismiss }: {
+  messageId: string;
+  onSend: (text: string) => void;
+  onDismiss: () => void;
+}) {
+  return (
+<QuestionCard
+  key={messageId}            // a new question is a new card
+  questions={[
+    {
+      header: 'Region',
+      question: 'Which region should the total cover?',
+      options: [
+        { label: 'All regions', description: 'Every region added together', recommended: true },
+        { label: 'East only' },
+      ],
+    },
+  ]}
+  announce                   // "A question is waiting for your answer" in a polite live region
+  onAnswer={onSend}
+  onSkip={onDismiss}
+/>
+  );
+}
+```
+
+- One question: a click on an option calls `onAnswer` with its label at once.
+- Two questions: an option on the first moves to the second; the second waits
+  on Send with a one-line summary, and Back keeps both choices. The answer is
+  one `header: answer` line per question; the question text stands in for a
+  missing `header`.
+- The last row, "Type something else…", takes a one-line answer; typing clears
+  the picked option and Enter moves on or sends.
+- Keys act only while focus is inside the card, which never takes focus on its
+  own: 1–4 pick, ↑/↓ move, Ctrl/⌘+Enter moves on or sends.
+- Choices survive a re-render, so after a failed send the user can press Send
+  again; remount the card with a new `key` for a new question.
+- Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
+  card is right-to-left in Arabic.
+
+`ChatbotEnhanced` draws the card itself. When a turn ends on a question tool's
+result that `parseAskQuestionEnvelope` (`@objectstack/spec/ai`) reads — the
+question envelope, or a legacy `ask_which` result — and the envelope's `reply`
+is the turn's last text, the card takes the composer's place:
+
+- It shows only once the stream has ended, and never while a typed message is
+  queued, while a write approval waits in the same turn, after a skip, or on a
+  `readOnly` transcript.
+- The composer is not unmounted: it is hidden and `inert`, so a draft and its
+  attachments come back after Skip or an answer.
+- An answer is sent through `onSendMessage` as the next user message. If the
+  send fails and the message is rolled back, the card returns with its choice.
+- Skip is remembered on this device, per conversation, when the host passes
+  `conversationId`: the key is `QUESTION_SKIP_STORAGE_PREFIX` followed by
+  `:` and the conversation id. A host's sign-out cleanup should clear that
+  prefix.
+- The conversation draws the question from its envelope: pending, the question
+  alone; answered or skipped, a collapsed "AI asks: …" that expands to its
+  options. Copy still copies the full reply, and a pending question has no
+  Regenerate.
+
+### Draft review card
+
+`DraftReviewCard` lists the drafts an ask turn saved, under the answer. A host
+whose admin skill saves metadata drafts from the chat ends such a turn with one
+`data-draft-review` part (`DRAFT_REVIEW_PART_TYPE`, whose data is a
+`DraftReviewListSchema` list from `@objectstack/spec/ai`). `ChatbotEnhanced`
+reads the part through that schema (`extractDraftReview`) and draws the card
+itself; a part the schema refuses draws nothing.
+
+```tsx
+import { DraftReviewCard } from '@object-ui/plugin-chatbot';
+import type { DraftReviewListParsed } from '@objectstack/spec/ai';
+
+export function TurnDrafts({ review, navigate }: {
+  review: DraftReviewListParsed;
+  navigate: (path: string) => void;
+}) {
+  return (
+    <DraftReviewCard
+      review={review}
+      onOpenReviewLink={navigate}                     // in-app navigation keeps the live conversation
+      reviewLinkHref={(path) => `/_console${path}`}  // the router's basename, for a new tab
+    />
+  );
+}
+```
+
+- One row per draft: its label (or name), its type, the verdict as a badge
+  ("Will publish", "N problems", or "Verdict withheld" when no verdict was
+  read) and a Review link to the draft's own review in Studio. A verdict read
+  by the save rather than at the turn's end says "checked when saved".
+- Rows are grouped by package, in save order; each package has one "Review and
+  publish" link to its Changes drawer. `omitted` shows as "+N more".
+- The card has no publish and no discard control: a person publishes or
+  discards in Studio, through the links.
+- A plain click on a link calls `onOpenReviewLink` with the Console path; a
+  modified or middle click keeps the browser's own behaviour, on the href
+  `reviewLinkHref` returns. Without either prop the links are ordinary anchors
+  on the path itself.
+- The card is drawn on a live answer only: the part is not one of
+  `STORED_ANSWER_DATA_PARTS`, so a conversation reloaded from history shows no
+  card.
+- Strings come from the `chatbot.draftReview.*` keys of `@object-ui/i18n`.
 
 ## Examples
 
@@ -845,10 +927,8 @@ import type { ObjectChatMessage } from '@object-ui/plugin-chatbot'
 ```
 
 It is the authoring shape plus the render-only keys API mode really carries
-(`buildProgress`, `blueprintProgress`, `charts`, and `pendingActionId` /
-`draftReview` / `proposedPlan` / `proposedChanges` / `builderHandoff` on each
-tool invocation — the approval card, the "Review N changes" affordance, the plan
-card, the build panel, the inline charts), with `timestamp` narrowed to `string`
+(`charts`, and `pendingActionId` on each tool invocation — the inline charts
+and the approval card), with `timestamp` narrowed to `string`
 because both modes absorb an authored `Date` before emitting.
 
 In API mode its tool invocations can also carry the AI SDK's three approval

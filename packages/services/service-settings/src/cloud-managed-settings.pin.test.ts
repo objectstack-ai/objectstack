@@ -21,7 +21,7 @@ import type { IHttpRequest, IHttpResponse } from '@objectstack/spec/contracts';
 import { SettingsService } from './settings-service.js';
 import { registerSettingsRoutes } from './settings-routes.js';
 import { MockHttp } from './__tests__/settings-door.testkit.js';
-import { aiSettingsManifest, builtinSettingsManifests } from './manifests/index.js';
+import { aiSettingsManifest, builtinSettingsManifests, withAiEmbedderSection } from './manifests/index.js';
 import {
   CLOUD_MANAGED_HIDDEN_SETTINGS,
   CLOUD_MANAGED_SERVED_AI_KEYS,
@@ -37,7 +37,12 @@ function hosted(on: boolean): void {
 
 async function boot(): Promise<{ service: SettingsService; http: MockHttp }> {
   const service = new SettingsService({ env: {} });
-  for (const m of builtinSettingsManifests) service.registerManifest(m as any);
+  // The `ai` page as a deployment that mounts the knowledge service serves it:
+  // the embedder section joined (#33933), so the hosted projection is judged
+  // over every key it can hide, the embedder ones included.
+  for (const m of builtinSettingsManifests) {
+    service.registerManifest((m.namespace === 'ai' ? withAiEmbedderSection(m) : m) as any);
+  }
   const http = new MockHttp();
   registerSettingsRoutes(http, service, {
     contextFromRequest: () => ({ enforced: true, permissions: ['manage_platform_settings', 'setup.access'], userId: 'usr_admin' }),
@@ -85,7 +90,8 @@ const idsOf = (manifest: any, type: string): string[] =>
 
 describe('#33891 — the hosted projection table', () => {
   it('classifies every ai key: hidden, or served — none both, none neither', () => {
-    const declared = keysOf(aiSettingsManifest);
+    // The page with its knowledge-mounted embedder section joined (#33933).
+    const declared = keysOf(withAiEmbedderSection(aiSettingsManifest));
     const served = new Set(CLOUD_MANAGED_SERVED_AI_KEYS);
     for (const key of declared) expect(HIDDEN_AI.includes(key) !== served.has(key), key).toBe(true);
     for (const key of served) expect(declared, key).toContain(key);

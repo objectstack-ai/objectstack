@@ -275,6 +275,188 @@ function safeStringify(value: unknown): string {
     }
 }
 
+/** One link of an error's `cause` chain, as an operator's fault line prints it. */
+export interface FaultCauseLine {
+    message: string;
+    /** Absent when the cause was not an `Error`, or carried none. */
+    stack?: string;
+}
+
+/**
+ * How many `cause` links a fault line prints before it says it stopped. A
+ * wrapper around a wrapper around a driver error is three; past five the
+ * chain is a loop in all but name, and the line must stay one line.
+ */
+export const FAULT_CAUSE_DEPTH_LIMIT = 5;
+
+/**
+ * The `cause` chain under a thrown value, outermost first, for the fault log.
+ *
+ * A producer that wraps an original on `cause` (`new Error(say, { cause })`)
+ * hands the door a sentence the caller may read; the original is the
+ * operator's. The line used to print the wrapper's message and stack only, so
+ * the root cause of every wrapped fault was missing from the one place an
+ * operator looks. Each link is its message and stack, so the line reads the
+ * way Node's own `Caused by:` rendering does, as data a JSON sink can index.
+ *
+ * Bounded both ways: a cycle (`a.cause = b; b.cause = a`) stops at the first
+ * repeat, and a chain deeper than {@link FAULT_CAUSE_DEPTH_LIMIT} stops there;
+ * either says so in a last link, so a cut chain never reads as a whole one.
+ * A link whose read throws ends the chain in a marker link too.
+ *
+ * A non-Error object cause is serialized with `isRedacted` applied key by
+ * key, at every depth. The default is `ObjectLogger`'s own rule over its
+ * default redact list (`LoggerConfig.redact`'s default words, whole-word
+ * matched). ⚠️ Only the default words: the console fallback has no logger
+ * config, so a host's own `redact` list is not applied to the line it writes;
+ * a door handed a configured logger gets that logger's list instead.
+ *
+ * ⛔ Operator-only. It feeds the log line; no door puts it on the wire, and a
+ * 5xx answer withholds even the wrapper's own sentence.
+ *
+ * `@objectstack/core`'s `ObjectLogger` renders the same shape for every
+ * `logger.error(message, err)`. It keeps its own copy because its `./logger`
+ * entry is browser-safe and bundled by `@objectstack/client`, which does not
+ * depend on this package; `logger-error-cause.test.ts` there pins the two to
+ * the same output.
+ */
+export function faultCauseChain(
+    thrown: unknown,
+    isRedacted: (key: string) => boolean = isDefaultRedactedFieldName,
+): FaultCauseLine[] {
+    const limit = FAULT_CAUSE_DEPTH_LIMIT;
+    const lines: FaultCauseLine[] = [];
+    const seen = new Set<unknown>([thrown]);
+    let current = causeOf(thrown);
+    while (current !== undefined && current !== null) {
+        if (seen.has(current)) {
+            lines.push({ message: '[cause chain cycle: this link repeats an earlier one]' });
+            break;
+        }
+        if (lines.length >= limit) {
+            lines.push({ message: `[cause chain truncated after ${limit} links]` });
+            break;
+        }
+        seen.add(current);
+        try {
+            lines.push(causeLine(current, isRedacted));
+        } catch {
+            // A link whose name, message or stack read throws (a hostile getter, a Proxy)
+            // ends the chain in a marker; it must not cost the whole line.
+            lines.push({ message: '[cause chain link unreadable: reading it threw]' });
+            break;
+        }
+        current = causeOf(current);
+    }
+    return lines;
+}
+
+function causeOf(value: unknown): unknown {
+    if (typeof value !== 'object' || value === null) return undefined;
+    try {
+        return (value as { cause?: unknown }).cause;
+    } catch {
+        // A throwing `cause` getter ends the chain; it must not cost the line.
+        return undefined;
+    }
+}
+
+/**
+ * `LoggerConfig.redact`'s default words (`@objectstack/spec` `logging.zod.ts`),
+ * which `ObjectLogger` also applies when it is given none.
+ */
+const DEFAULT_REDACTED_WORDS = ['password', 'token', 'secret', 'key'] as const;
+
+/**
+ * The default field-name rule, matched the way `ObjectLogger` matches its
+ * redact list: on word boundaries, the maintainer's ruling on #5573, so a bare
+ * `keys` / `tokens` or a `monkey` / `keyword` / `secretary` is not withheld,
+ * while `apiKey`, `refresh_tokens` and `accesstoken` are.
+ *
+ * A copy of `@objectstack/core`'s matcher (`tokenizeFieldName` and
+ * `fieldWordsMatchPattern` in `logger.ts`), for the same reason
+ * {@link faultCauseChain} is one; `logger-error-cause.test.ts` there runs a
+ * fixture of these spellings through both and fails on any drift.
+ */
+function isDefaultRedactedFieldName(key: string): boolean {
+    const nameWords = tokenizeFieldName(key);
+    return DEFAULT_REDACTED_WORDS.some((word) => fieldWordsMatchPattern(nameWords, [word]));
+}
+
+function tokenizeFieldName(name: string): string[] {
+    return name
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+        .split(/[^A-Za-z0-9]+/)
+        .filter(Boolean)
+        .map((word) => word.toLowerCase());
+}
+
+function singularizeWord(word: string): string {
+    if (/(?:ss|us|is)$/.test(word)) return word;
+    if (/(?:ch|sh|s|x|z)es$/.test(word)) return word.slice(0, -2);
+    if (/[a-z0-9]s$/.test(word)) return word.slice(0, -1);
+    return word;
+}
+
+/** Glued qualifiers that mark the secret sense: `apikey`, `accesstoken`, `clientsecret`. */
+const CONCATENATED_SECRET_QUALIFIERS = new Set([
+    'access', 'account', 'admin', 'api', 'app', 'auth', 'bearer', 'client', 'csrf', 'db', 'database',
+    'encryption', 'id', 'jwt', 'master', 'oauth', 'private', 'public', 'refresh', 'root', 'secret',
+    'service', 'session', 'shared', 'sign', 'signing', 'ssh', 'token', 'user', 'webhook', 'xsrf',
+]);
+
+function isQualifiedConcatenation(word: string, redactWord: string): boolean {
+    for (const base of [word, singularizeWord(word)]) {
+        if (base.length <= redactWord.length || !base.endsWith(redactWord)) continue;
+        if (CONCATENATED_SECRET_QUALIFIERS.has(base.slice(0, base.length - redactWord.length))) return true;
+    }
+    return false;
+}
+
+function containsWordRun(words: string[], run: string[]): boolean {
+    for (let i = 0; i + run.length <= words.length; i++) {
+        if (run.every((word, offset) => words[i + offset] === word)) return true;
+    }
+    return false;
+}
+
+function fieldWordsMatchPattern(nameWords: string[], patternWords: string[]): boolean {
+    if (patternWords.length === 0 || nameWords.length === 0) return false;
+    if (patternWords.length > 1) {
+        const glued = patternWords.join('');
+        return (
+            containsWordRun(nameWords, patternWords) ||
+            nameWords.some((word) => word === glued || singularizeWord(word) === glued)
+        );
+    }
+    const redactWord = patternWords[0];
+    const isCompound = nameWords.filter((word) => /[a-z]/.test(word)).length > 1;
+    return nameWords.some(
+        (word) =>
+            word === redactWord ||
+            (isCompound && singularizeWord(word) === redactWord) ||
+            isQualifiedConcatenation(word, redactWord),
+    );
+}
+
+function causeLine(cause: unknown, isRedacted: (key: string) => boolean): FaultCauseLine {
+    if (cause instanceof Error) {
+        return {
+            message: `${cause.name}: ${cause.message}`,
+            ...(cause.stack ? { stack: cause.stack } : {}),
+        };
+    }
+    if (typeof cause === 'string') return { message: cause };
+    try {
+        const text = JSON.stringify(cause, (key, value) => (key !== '' && isRedacted(key) ? '***REDACTED***' : value));
+        return { message: text ?? String(cause) };
+    } catch {
+        return { message: String(cause) };
+    }
+}
+
 /**
  * The human half of the line: `[5xx] 500 GET /api/v1/packages — <message>`.
  * Split out so both the emitted record and a test can name the same string.
@@ -321,6 +503,11 @@ export function serverFaultLogMeta(input: ServerFaultLogInput): Record<string, u
  * because a declared absence is an envelope a door COMPOSED and never a throw,
  * so there is no stack to carry. Emission never throws — a logging failure must
  * not become a second fault on top of the one being reported.
+ *
+ * The thrown value's `cause` chain rides the line too ({@link faultCauseChain}):
+ * as `causes` beside `stack` on the console fallback, and through the logger's
+ * own error rendering when one is injected (`ObjectLogger` prints it under
+ * `error.causes`), so a wrapped fault never logs without its root cause.
  */
 export function logServerFault(
     input: ServerFaultLogInput,
@@ -350,7 +537,14 @@ export function logServerFault(
             };
         }).console;
         if (absence) sink?.warn?.(message, meta);
-        else sink?.error?.(message, { ...meta, ...(err?.stack ? { stack: err.stack } : {}) });
+        else {
+            const causes = faultCauseChain(input.error);
+            sink?.error?.(message, {
+                ...meta,
+                ...(err?.stack ? { stack: err.stack } : {}),
+                ...(causes.length > 0 ? { causes } : {}),
+            });
+        }
         return true;
     } catch {
         // Log emission must never throw — the original fault is still answered.

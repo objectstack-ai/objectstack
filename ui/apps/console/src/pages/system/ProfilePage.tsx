@@ -36,8 +36,9 @@ import {
   SelectValue,
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/fields';
-import { ConsolePageHeader } from '@object-ui/app-shell';
-import { resolveBuiltInLanguage, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
+import { toast } from 'sonner';
+import { ConsolePageHeader, passwordDoorRefusalMessages } from '@object-ui/app-shell';
+import { resolveBuiltInLanguage, useAppContentLanguages, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { resolveFieldAffordance } from '@object-ui/core';
@@ -567,16 +568,20 @@ interface LanguageCardProps {
  * `Alert` success/failure pair, the same disabled-while-saving submit, the
  * same `profile.saving` label.
  *
- * ## The UI language is a different thing, and is deliberately not touched
+ * ## One setting with the globe menu (objectui#10059)
  *
- * `@object-ui/i18n`'s provider keeps the interface language in `localStorage`
- * (`LOCALE_STORAGE_KEY`), seeded per device from the server's resolved locale
- * for the last signed-in owner (`/auth/me/localization`). `sys_user.locale` is a server-stored, per-user
- * column that the messaging channels read per recipient at delivery time.
- * Saving here therefore does NOT call `changeLanguage`, and switching the UI
- * language from the globe menu does NOT write this column. Wiring the two
- * together is a product decision nobody has made; this control states the
- * distinction in its own description instead of guessing.
+ * This column is also the interface language: for a signed-in user
+ * `sys_user.locale` is the only decider (`useUserLocale` in
+ * `@object-ui/app-shell`). The globe menu writes this same column through the
+ * same adapter (`useLanguageSelection`), and the shell's one reader
+ * (`useSignedInUserLocale`) applies the column on every `sys_user` mutation
+ * the data-invalidation bus reports, this card's own save included. So a save
+ * here switches the interface language at once without this card calling
+ * `changeLanguage`, and a pick in the globe menu is what this card reads. The
+ * messaging channels read the same column per recipient at delivery time.
+ * `@object-ui/i18n`'s per-device `localStorage` slot is only a cache of it.
+ * The card's description therefore names ONE setting, for the interface and
+ * for what is sent to the user, the same one as the globe menu.
  *
  * ## What is offered, and what happens when the write route is not there
  *
@@ -584,7 +589,7 @@ interface LanguageCardProps {
  * (every platform locale table language, as table tags, objectstack#35425),
  * which is what `LocaleSwitcher` renders too. ⛔ No second list is introduced here.
  * A chosen language the deployment's own content is not translated into
- * (outside the provider's `appContentLanguages`, when that is known) carries
+ * (outside `useAppContentLanguages()`, when that is known) carries
  * the same one-line hint the globe menu shows on that row.
  * A stored tag that is not in that set is prepended so the control shows the
  * truth rather than rendering blank.
@@ -601,7 +606,8 @@ interface LanguageCardProps {
  * card's own "hidden ... rather than rendering a control that answers 403".
  */
 function LanguageCard({ userId }: LanguageCardProps) {
-  const { t, offerableLanguages, appContentLanguages } = useObjectTranslation();
+  const { t, offerableLanguages } = useObjectTranslation();
+  const appContentLanguages = useAppContentLanguages();
   const adapter = useAdapter();
   const perms = usePermissions();
 
@@ -686,6 +692,15 @@ function LanguageCard({ userId }: LanguageCardProps) {
       });
       setStored(choice);
       setSaved(true);
+      // The inline alert above is local state, and a save that changes the
+      // interface language loses it: the signed-in user's locale reader
+      // applies the new column to the UI language, and the console shell
+      // remounts every page under `key={language}` (objectstack#36972). The
+      // console's toaster sits above that key, so the same sentence is also a
+      // toast, which the remount does not take away.
+      toast.success(t('profile.language.saved', { defaultValue: 'Language preference updated.' }), {
+        id: 'profile-language-saved',
+      });
     } catch (err) {
       // A malformed tag comes back as `400 VALIDATION_FAILED` carrying
       // `{ field: 'locale', code: 'invalid_format' }` and a localized message.
@@ -718,7 +733,7 @@ function LanguageCard({ userId }: LanguageCardProps) {
         <CardDescription>
           {t('profile.language.description', {
             defaultValue:
-              'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+              'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
           })}
         </CardDescription>
       </CardHeader>
@@ -865,7 +880,15 @@ function PasswordCard({ changePassword, setInitialPassword, hasLocalPassword, hi
       }
       reset();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // A refusal's `code` picks the localized sentence, as on the set-password
+      // and reset-password pages: a cloud-managed runtime, an SSO-only account
+      // or a pending SSO person refuses both doors with 409
+      // `RESOURCE_CONFLICT`, whose server text is English in every language.
+      // Any other code keeps the server's own message.
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      const refusals = passwordDoorRefusalMessages(t);
+      const localized = code && Object.prototype.hasOwnProperty.call(refusals, code) ? refusals[code] : undefined;
+      setError(localized ?? (err instanceof Error ? err.message : String(err)));
     } finally {
       setSubmitting(false);
     }

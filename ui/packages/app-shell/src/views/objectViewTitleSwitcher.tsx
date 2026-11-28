@@ -35,15 +35,19 @@
  * a view dropdown of its own.
  */
 
-import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type SetStateAction } from 'react';
+import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { usePublishPageCommand } from '../chrome/paletteCommands.js';
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
 import { useDisplayLocale, pickLocalized } from '@object-ui/i18n';
 import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Settings2 } from 'lucide-react';
+import { PhonePanelSheet, useListPhonePanels, PHONE_CHIP } from '@object-ui/plugin-list';
 import { viewRowId } from '../utils/viewIdentity.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
+import { usePackagesRefusingSaves } from '../hooks/useStudioDesignGate.js';
+import { studioPackageId } from '../utils/appRoute.js';
 import { useListViewFavorites, type ListViewFavorites } from '../layout/listViewFavorites.js';
 import type { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import type { useServedViewItems } from '../hooks/useServedViewItems.js';
@@ -51,8 +55,9 @@ import { VIEW_TYPE_ICONS } from './objectViewHelpers.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
-import { ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
+import { FOOTER_ITEM, ObjectViewSwitcherMenu, type SwitcherCreateOptions } from './objectViewSwitcherMenu.js';
 import { useCreateViewInPlace } from './objectViewViewCrud.js';
+import type { CapabilityAudience } from './capabilityAudience.js';
 
 type TFn = ReturnType<typeof useObjectTranslation>['t'];
 
@@ -138,7 +143,14 @@ export function ObjectViewTitleSwitcher({
     create,
     t,
 }: ObjectViewTitleSwitcherProps) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpenState] = useState(false);
+    // The ⌘K palette's 「Add view」 opens the dropdown on its create card; any
+    // other open shows the views.
+    const [startOnCreate, setStartOnCreate] = useState(false);
+    const setOpen = (next: boolean) => {
+        setOpenState(next);
+        if (!next) setStartOnCreate(false);
+    };
     const listState = useContext(ListRecordCountContext);
     const displayLocale = useDisplayLocale();
 
@@ -151,6 +163,95 @@ export function ObjectViewTitleSwitcher({
         setOpen(false);
         if (viewId !== activeViewId) onViewChange(viewId);
     };
+
+    const menu = (phone: boolean, footerEnd?: ReactNode) => (
+        <ObjectViewSwitcherMenu
+            views={views}
+            activeViewId={activeViewId}
+            onChoose={choose}
+            onClose={() => setOpen(false)}
+            pinnedViewId={pinnedViewId}
+            onPinnedViewChange={onPinnedViewChange}
+            recentViewIds={recentViewIds}
+            favorites={favorites}
+            viewTypeIcons={viewTypeIcons}
+            onManageViews={onManageViews}
+            onRenamePersonalView={onRenamePersonalView}
+            onDeletePersonalView={onDeletePersonalView}
+            create={create}
+            onAddView={onAddView}
+            phone={phone}
+            footerEnd={footerEnd}
+            startOnCreate={startOnCreate}
+            t={t}
+        />
+    );
+
+    // objectstack#36286 — 「Add view」 in the ⌘K palette's Current page group,
+    // offered exactly where the dropdown offers it, running what it runs: the
+    // create card in the dropdown, or the host's Create View dialog.
+    usePublishPageCommand(create || onAddView ? {
+        id: 'add-view',
+        run: () => {
+            if (create) {
+                setStartOnCreate(true);
+                setOpenState(true);
+            } else {
+                onAddView?.();
+            }
+        },
+    } : null);
+
+    // objectstack#35883 / #35884 — in the list's phone toolbar the switcher is
+    // its first pill (the view's name, its count, the caret) and opens the
+    // same menu in the list's bottom sheet; a view chosen there opens at once
+    // and the sheet closes, so it has no 「✓」. 视图设置 is its last row.
+    const phonePanels = useListPhonePanels();
+    if (phonePanels) {
+        const openSettings = phonePanels.openViewSettings;
+        return (
+            <>
+                <button
+                    type="button"
+                    data-testid="list-view-switcher"
+                    title={description}
+                    onClick={() => setOpen(true)}
+                    className={cn(PHONE_CHIP, 'max-w-full justify-start text-foreground', open && 'bg-muted')}
+                >
+                    {/* The view's name and its count, as the card draws it: no type icon, so a
+                        name keeps the room the three pills beside it leave. */}
+                    <span className="min-w-0 truncate" data-testid="list-view-switcher-label">{activeLabel}</span>
+                    {count !== null && (
+                        <span className="shrink-0 font-normal tabular-nums text-muted-foreground" data-testid="list-view-switcher-count">
+                            {count.toLocaleString(displayLocale)}
+                        </span>
+                    )}
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" data-testid="list-view-switcher-caret" aria-hidden="true" />
+                </button>
+                <PhonePanelSheet
+                    open={open}
+                    onOpenChange={setOpen}
+                    title={t('view.switcher.label', { defaultValue: 'Views' })}
+                    testId="list-view-switcher-menu"
+                >
+                    {menu(true, openSettings ? (
+                        <button
+                            type="button"
+                            data-testid="list-view-switcher-settings"
+                            onClick={() => {
+                                setOpen(false);
+                                openSettings();
+                            }}
+                            className={FOOTER_ITEM}
+                        >
+                            <Settings2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                            {t('list.viewSettings', { defaultValue: 'View settings' })}
+                        </button>
+                    ) : undefined)}
+                </PhonePanelSheet>
+            </>
+        );
+    }
 
     return (
         <span className="inline-flex min-w-0 max-w-full items-baseline gap-1.5">
@@ -166,7 +267,7 @@ export function ObjectViewTitleSwitcher({
                             // Below `sm` the trigger is a 44 px touch target.
                             // One trigger, 28px tall and 13px like every control of the
                             // view bar (objectstack#35548): type icon, label, count, caret.
-                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
+                            'inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md px-1.5 text-left text-sm font-medium leading-none max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
@@ -194,27 +295,21 @@ export function ObjectViewTitleSwitcher({
                     data-testid="list-view-switcher-menu"
                     aria-label={t('view.switcher.label', { defaultValue: 'Views' })}
                 >
-                    <ObjectViewSwitcherMenu
-                        views={views}
-                        activeViewId={activeViewId}
-                        onChoose={choose}
-                        onClose={() => setOpen(false)}
-                        pinnedViewId={pinnedViewId}
-                        onPinnedViewChange={onPinnedViewChange}
-                        recentViewIds={recentViewIds}
-                        favorites={favorites}
-                        viewTypeIcons={viewTypeIcons}
-                        onManageViews={onManageViews}
-                        onRenamePersonalView={onRenamePersonalView}
-                        onDeletePersonalView={onDeletePersonalView}
-                        create={create}
-                        onAddView={onAddView}
-                        t={t}
-                    />
+                    {menu(false)}
                 </PopoverContent>
             </Popover>
         </span>
     );
+}
+
+/**
+ * objectstack#34908 — the open view's audience gate, the create card's
+ * starting pick: a new shared view starts from the open one, gate included.
+ * Read where a view carries it — its body, or a view item's `config`.
+ */
+function requiredPermissionsOf(view: Record<string, any> | undefined): string[] {
+    const own = view?.requiredPermissions ?? view?.config?.requiredPermissions;
+    return Array.isArray(own) ? own.filter((p: unknown): p is string => typeof p === 'string' && p.trim() !== '') : [];
 }
 
 /** The field names an open view's columns list (a name, or `{ field }`). */
@@ -249,7 +344,7 @@ export function useObjectViewTitleSwitcher({
     viewAccess,
     activeViewId,
     handleViewChange,
-    isAdmin,
+    canManageViews,
     handleAddView,
     setManageViewsOpen,
     pinnedViewId,
@@ -271,7 +366,12 @@ export function useObjectViewTitleSwitcher({
     viewAccess: ReturnType<typeof useMetaItemRefusal>;
     activeViewId: string | undefined;
     handleViewChange: (viewId: string) => void;
-    isAdmin: boolean;
+    /**
+     * May the reader change the object's views (objectstack#36448): an
+     * administrator holding `manage_metadata` (`mayManageViews`). Gates Add
+     * view and Manage views, whose every write the server refuses without it.
+     */
+    canManageViews: boolean;
     handleAddView: () => void;
     setManageViewsOpen: Dispatch<SetStateAction<boolean>>;
     /** The reader's pinned view for this object (`LIST_PINNED_VIEW_PREFERENCE`). */
@@ -291,6 +391,8 @@ export function useObjectViewTitleSwitcher({
         canCreatePersonal: boolean;
         canCreateShared: boolean;
         hasUnsavedConditions: boolean;
+        /** objectstack#34908 — the audience catalog for a shared view's 「Who sees this view」. Absent ⇒ no picker. */
+        loadAudience?: () => Promise<CapabilityAudience>;
     };
     onRenamePersonalView?: (viewId: string) => void;
     onDeletePersonalView?: (viewId: string) => void;
@@ -313,6 +415,8 @@ export function useObjectViewTitleSwitcher({
             hasUnsavedConditions: create.hasUnsavedConditions,
             shownFields: shownFieldsOf(create.activeView),
             onCreate: createInPlace,
+            loadAudience: create.canCreateShared ? create.loadAudience : undefined,
+            initialRequiredPermissions: requiredPermissionsOf(create.activeView),
         }
         : undefined;
     // objectui#12528 — the view's description is shown once. It rides on the
@@ -354,9 +458,33 @@ export function useObjectViewTitleSwitcher({
         } as ViewTabItem;
     });
 
+    // objectstack#35974 — a saved view a read-only package ships: its
+    // definition is read-only in Manage views (`definitionReadonly`). The
+    // server refuses its delete and its panel save, so Delete is not offered
+    // and the panel opens read-only ("View config"); rename, pin and set as
+    // default stay, since `updateView` writes those into the package's
+    // customization pair. Judged by the package the row was served under and
+    // the session-held `writable` verdict objectstack#35933 reads. Unknown
+    // (unread, failed, unlisted) keeps the row as it was. Manage views only:
+    // the switcher's sections above still read `authored` from `isSystem`.
+    const refusingPackages = usePackagesRefusingSaves(canManageViews
+        ? savedViews.map((sv: any) => studioPackageId(sv)).filter((id: string | null): id is string => id !== null)
+        : []);
     // The reader's own views are switched to here but are no view the admin's
     // Manage views lists: they are each reader's data, not the object's views.
-    const viewTabItems = viewItems.filter((item) => !personalViewIds.has(item.id));
+    const viewTabItems = viewItems
+        .filter((item) => !personalViewIds.has(item.id))
+        .map((item) => {
+            if (item.readonly) return item;
+            const saved = savedViews.find((sv: any) => viewRowId(sv) === item.id);
+            const packageId = studioPackageId(saved);
+            if (packageId === null || !refusingPackages.has(packageId)) return item;
+            // objectstack#36011 — customized: the row is served with the
+            // override declaration naming that package (ADR-0146 D2), the one
+            // `updateView` writes into the package's customization.
+            const customized = saved?.overrides?.package === packageId;
+            return { ...item, definitionReadonly: true, ...(customized ? { customized: true } : {}) };
+        });
     const switcherViews: TitleSwitcherView[] = viewItems.map((item) => {
         const personal = personalViewIds.has(item.id);
         return {
@@ -401,8 +529,8 @@ export function useObjectViewTitleSwitcher({
             onPinnedViewChange={setPinnedViewId}
             recentViewIds={recentViewIds}
             favorites={favorites}
-            onAddView={isAdmin ? handleAddView : undefined}
-            onManageViews={isAdmin ? () => setManageViewsOpen(true) : undefined}
+            onAddView={canManageViews ? handleAddView : undefined}
+            onManageViews={canManageViews ? () => setManageViewsOpen(true) : undefined}
             create={createOptions}
             onRenamePersonalView={onRenamePersonalView}
             onDeletePersonalView={onDeletePersonalView}
@@ -410,5 +538,5 @@ export function useObjectViewTitleSwitcher({
         />
     ) : null;
 
-    return { viewTabItems, titleSwitcher, titleLabel };
+    return { viewTabItems, titleSwitcher, titleLabel, refusingPackages };
 }

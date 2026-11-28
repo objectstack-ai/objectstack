@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { ruObjects } from './ru.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Русский (ru) — Setup App Translations
  */
 export const ru: TranslationData = {
   objects: ruObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ru'),
   apps: {
     account: {
       label: 'Учётная запись',
@@ -40,7 +43,7 @@ export const ru: TranslationData = {
         group_overview: { label: 'Обзор' },
         group_apps: { label: 'Приложения' },
         nav_marketplace_browse: { label: 'Обзор Marketplace' },
-        nav_marketplace_installed: { label: 'Установленные приложения' },
+        nav_packages: { label: 'Пакеты' },
         nav_cloud_connection: { label: 'Подключение к облаку' },
         group_people_org: { label: 'Люди и организация' },
         group_access_control: { label: 'Управление доступом' },
@@ -77,6 +80,7 @@ export const ru: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Учётные данные SCIM' },
         nav_api_keys: { label: 'API-ключи' },
+        nav_access_directory: { label: 'Должности и разрешения' },
 
         // Центр согласований = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -97,6 +101,7 @@ export const ru: TranslationData = {
         nav_settings_localization: { label: 'Локализация' },
         nav_exchange_rates: { label: 'Курсы валют' },
         nav_units_of_measure: { label: 'Единицы измерения' },
+        nav_standard_unit_settings: { label: 'Настройки стандартных единиц' },
         nav_work_calendars: { label: 'Рабочие календари' },
         nav_work_calendar_exceptions: { label: 'Исключения календаря' },
         nav_settings_company: { label: 'Компания' },
@@ -110,6 +115,7 @@ export const ru: TranslationData = {
         nav_settings_knowledge: { label: 'Знания' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
+        nav_public_forms: { label: 'Публичные формы' },
         nav_notification_preferences: { label: 'Настройки уведомлений' },
         nav_notification_templates: { label: 'Шаблоны уведомлений' },
 
@@ -133,7 +139,7 @@ export const ru: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Мастерская метаданных для разработчиков, аналитиков и интеграторов',
       navigation: {
         group_overview: { label: 'Обзор' },

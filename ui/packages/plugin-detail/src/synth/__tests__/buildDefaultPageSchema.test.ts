@@ -277,7 +277,7 @@ describe('buildDefaultPageSchema', () => {
     it('embeds headerActions into page:header.actions instead of a separate quick_actions node', () => {
       const page = buildDefaultPageSchema(leadDef, {
         headerActions: [
-          { name: 'edit', label: 'Edit', locations: ['record_header'] },
+          { name: 'edit', label: 'Edit', locations: ['record_page'] },
         ],
       });
       const types = page.regions[0].components.map((c: any) => c.type);
@@ -543,7 +543,7 @@ describe('buildDefaultPageSchema', () => {
     it('buildDefaultActions returns a quick_actions node when actions are provided', () => {
       const node = buildDefaultActions(leadDef, [{ id: 'edit', label: 'Edit' }]);
       expect(node?.type).toBe('record:quick_actions');
-      expect(props(node).location).toBe('record_header');
+      expect(props(node).location).toBe('record_page');
       expect(props(node).actions).toHaveLength(1);
     });
 
@@ -674,6 +674,71 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).some((t: any) => t.value === 'approvals')).toBe(true);
       expect(tabItems(tabs)[0].children[0].id).toBe('custom-details');
+    });
+  });
+
+  // objectstack#36693 — the activity stream tab follows the object's switches
+  // for its three sources, as Attachments follows `enable.files`: with the
+  // discussion (`feeds`), the activity (`activities`) and the field changes
+  // (`trackHistory`) all off there is nothing to draw, so no tab.
+  describe('activity stream tab follows its sources (objectstack#36693)', () => {
+    const allOff = { feeds: false, activities: false };
+    const values = (page: any) =>
+      tabItems(page.regions[0].components.find((c: any) => c.type === 'page:tabs')).map((t: any) => t.value);
+    const nodePayload = {
+      approvals: { available: true, requests: [{ id: 'req_1' }], pendingRequest: null },
+      currentUserId: 'u_1',
+    };
+
+    it('all three sources off → no stream tab and no record:activity anywhere', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff });
+      expect(values(page)).toEqual(['details']);
+      expect(JSON.stringify(page)).not.toContain('record:activity');
+      // `trackHistory: false` written out reads the same as absent.
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, trackHistory: false } }))).toEqual(['details']);
+      const tabs = buildDefaultTabs({ ...leadDef, enable: allOff }, {
+        related: [{ objectName: 'task', relationshipField: 'lead_id' }],
+      });
+      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id']);
+    });
+
+    it('any one source on → the stream tab is drawn as before (control, one key each)', () => {
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, feeds: true } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, activities: true } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, trackHistory: true } }))).toEqual(['details', 'timeline']);
+      // `feeds` / `activities` are opt-out: absent is on.
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { feeds: false } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { activities: false } }))).toEqual(['details', 'timeline']);
+    });
+
+    it("a 'sys_activity' entry in relatedLists does not bring back an empty stream tab", () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff, relatedLists: ['sys_activity'] });
+      expect(values(page)).toEqual(['details']);
+      // CONTROL: with a source on, the same entry places the tab.
+      const live = buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, feeds: true }, relatedLists: ['sys_activity'] });
+      expect(values(live)).toEqual(['details', 'timeline']);
+    });
+
+    it('an authored discussion slot still draws, whatever the switches say', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff }, {
+        slots: { discussion: { type: 'div', id: 'custom-discussion' } },
+      });
+      const timeline = tabItems(page.regions[0].components.find((c: any) => c.type === 'page:tabs'))
+        .find((t: any) => t.value === 'timeline');
+      expect(timeline.children).toEqual([{ type: 'div', id: 'custom-discussion' }]);
+    });
+
+    it('CONTROL: Approvals is unchanged, drawn only when the record has requests', () => {
+      const def = { ...leadDef, enable: allOff };
+      expect(values(buildDefaultPageSchema(def))).toEqual(['details']);
+      expect(values(buildDefaultPageSchema(def, { approvals: { count: 1, node: nodePayload } }))).toEqual(['details', 'approvals']);
+    });
+
+    it('a details slot override keeps the gate', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff }, {
+        slots: { details: { type: 'div', id: 'custom-details' } },
+      });
+      expect(values(page)).toEqual(['details']);
     });
   });
 });
@@ -984,6 +1049,82 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
     });
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
       'details', 'related:lead.converted_contact', 'related:lead.duplicate_contact', 'timeline',
+    ]);
+  });
+});
+
+/**
+ * objectstack#35897 — a declared `relatedLists` arranges the tabs after the
+ * overview, the three built-in tabs placed by object name. The host's
+ * `related` is what exists (`deriveRelatedLists` drops unlisted side lists);
+ * this pins the arrangement. Each row's control differs by one entry.
+ */
+describe('declared relatedLists arranges the tabs (objectstack#35897)', () => {
+  const def = (relatedLists?: unknown[], files = true): ObjectDefLike => ({
+    name: 'account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' } },
+    ...(files ? { enable: { files: true } } : {}),
+    ...(relatedLists ? { relatedLists } : {}),
+  });
+  const related = [
+    { objectName: 'task', relationshipField: 'account_id' },
+    { objectName: 'contact', relationshipField: 'account_id' },
+  ];
+  const values = (d: ObjectDefLike, approvals = true) =>
+    tabItems(buildDefaultTabs(d, { related, ...(approvals ? { approvals: { count: 1 } } : {}) })).map((t: any) => t.value);
+
+  it('undeclared or empty: the lists, then attachments, approvals and the stream, as before (control)', () => {
+    const before = ['details', 'related:task.account_id', 'related:contact.account_id', 'attachments', 'approvals', 'timeline'];
+    expect(values(def())).toEqual(before);
+    expect(values(def([]))).toEqual(before);
+  });
+
+  it("['task', 'sys_attachment', 'contact']: task, attachments, contact, then the unlisted approvals and the stream last", () => {
+    expect(values(def(['task', 'sys_attachment', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'attachments', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("leaving 'sys_attachment' out removes the attachments tab", () => {
+    expect(values(def(['task', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("'sys_attachment' listed on an object without files draws no attachments tab", () => {
+    expect(values(def(['sys_attachment', 'task', 'contact'], false))).not.toContain('attachments');
+  });
+
+  it('places the approvals and stream tabs where they are listed; approvals still need requests', () => {
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'approvals', 'related:task.account_id',
+    ]);
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']), false)).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id',
+    ]);
+  });
+
+  it('reads the object form by its list, object.field by its one FK, and the attachments tab stays the file-rows node', () => {
+    const tabs = buildDefaultTabs(def([{ list: 'contact.account_id', label: 'People' }, 'sys_attachment', 'task']), { related });
+    expect(tabItems(tabs).map((t: any) => t.value)).toEqual([
+      'details', 'related:contact.account_id', 'attachments', 'related:task.account_id', 'timeline',
+    ]);
+    expect(tabItems(tabs).find((t: any) => t.value === 'attachments').children).toEqual([{ type: 'record:attachments' }]);
+  });
+
+  it('a related tab the host passed but no entry names follows the listed tabs, in the order passed', () => {
+    expect(values(def(['contact']))).toEqual(['details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline']);
+  });
+
+  // objectstack#35901 — an unplaced list another package brings sits at the end of the tabs.
+  it('…and before a trailing run of listed approvals / stream tabs, which close the strip', () => {
+    expect(values(def(['contact', 'sys_approval_request', 'sys_activity']))).toEqual([
+      'details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline',
+    ]);
+    // Control: a stream listed before a related entry is no trailing run.
+    expect(values(def(['sys_activity', 'contact']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id', 'approvals',
     ]);
   });
 });

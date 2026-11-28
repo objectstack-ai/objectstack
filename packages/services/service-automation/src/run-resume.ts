@@ -16,11 +16,12 @@
  */
 
 import { withFlowRunSlot } from './flow-slots.js';
+import { deriveRunLinks, isRunLinkStamped, RECORD_RUN_CONTEXT_KEY, ROOT_RUN_CONTEXT_KEY, type RunLinkDerivation } from './root-run.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runDecidedSegmentCaller, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
@@ -243,6 +244,43 @@ export async function seedRunGrants(
         // (`resolveRunDataContext`'s system arm), where it narrows nothing.
         if (runContext.runAs !== 'system') delete (runContext as SeededRunContext).principalKind;
         delete (runContext as SeededRunContext).permissionSetAddresses;
+    }
+    // [ADR-0095 D1 · ADR-0093 D8.1, as amended] A `runAs:'system'` run that
+    // names a user reads no grants — elevation lifts them — but the
+    // organization wall it meets is that user's (plugin-security's app
+    // automation wall), and the engine projects that wall from the run's own
+    // facts. So the trigger user's membership set and posture rung are seeded
+    // once here, as for a user-mode run, and every data operation of the run
+    // is judged on them with no resolution of its own: under `group` its reads
+    // span the union of the user's memberships, as the user's request does.
+    // A run that names no user gains nothing; a decided segment keeps the
+    // facts of the run it belongs to (the wall judges it by that run's caller).
+    // A run whose user is not its caller (a decided segment, a run that began
+    // for no caller, and a child run of either) takes nothing of that user:
+    // no set, no rung (`runDecidedSegmentCaller`).
+    if (runContext.runAs === 'system' && whose === 'triggering' && runContext.userId && runDecidedSegmentCaller(runContext) === undefined && this.userGrantsResolver) {
+        const needsRung = (runContext as SeededRunContext).posture === undefined;
+        if (needsMembership || needsRung) {
+            try {
+                const grants = await this.userGrantsResolver(runContext.userId, runContext.tenantId);
+                if (needsMembership && Array.isArray(grants?.accessible_org_ids)) {
+                    (runContext as SeededRunContext).accessible_org_ids = grants.accessible_org_ids;
+                }
+                if (needsRung && grants?.posture) (runContext as SeededRunContext).posture = grants.posture;
+            } catch (err) {
+                // Narrower, never wider: a membership run setup could not read
+                // is not a current membership, so the wall judges the run as it
+                // judges a person who holds none.
+                if (needsMembership) (runContext as SeededRunContext).accessible_org_ids = [];
+                this.logger.warn(
+                    `[runAs] flow '${flowName}' could not resolve the memberships of the user '${runContext.userId}' ` +
+                    `its system run runs for — the organization wall judges its data ops as for a person who ` +
+                    `holds none. The resolver's failure is in this record's meta.`,
+                    describeThrownForLog(err),
+                );
+            }
+        }
+        return;
     }
     if (
         runContext.runAs !== 'system' &&
@@ -1757,7 +1795,59 @@ export async function resumeInternal(
         // suspension is consumed and leave it consumed with no continuation;
         // the persisted `run.context` is left as it was, and the repair
         // journal therefore still snapshots the pause exactly as it parked.
-        const segmentContext = await this.resolveDecisionSegmentContext(run, signal);
+        let segmentContext = await this.resolveDecisionSegmentContext(run, signal);
+
+        // [ADR-0162 Execution item 7] A run parked before the engine stamped
+        // root runs carries no stamp: it gets its root run and its record run
+        // here, derived in one walk of its links to its parents, so every node
+        // of this segment and every child it starts reads them (an approval
+        // step that opens here records them). BEFORE the claim, for the reason
+        // the segment context above is: a parent the store cannot read refuses
+        // this resume without consuming anything, and the identical resume can
+        // be retried. A chain that cannot be read whole (a parent that is no
+        // longer parked) is not a reason to stop the run: it continues stamped
+        // `null` (so it is not walked again), said once here, and each reader
+        // decides what a run with none means (an approval step opens its
+        // request with none recorded).
+        if (!isRunLinkStamped(segmentContext)) {
+            let derivation: RunLinkDerivation;
+            try {
+                derivation = await deriveRunLinks(run, (parentId) => this.loadSuspendedRunStrict(parentId));
+            } catch (err) {
+                const message = (err as Error).message;
+                // The same durability reading, the same envelope, as the
+                // strict load of the run itself at the top of this function.
+                this.logger.error(
+                    `[automation] durable suspended-run store unreachable while reading the parent runs of '${runId}' ` +
+                        `to derive its root run — the suspension was NOT consumed, so the run stays parked and this ` +
+                        `resume can be retried verbatim once the store is reachable; the caller was told the same via ` +
+                        `the STORE_UNAVAILABLE result. The store's own failure is in this record's meta.`,
+                    undefined,
+                    describeThrownForLog(err),
+                );
+                return {
+                    success: false,
+                    code: 'STORE_UNAVAILABLE',
+                    error: `Durable suspended-run store unreachable for a parent of run '${runId}' — retry once the store is available: ${message}`,
+                };
+            }
+            if (derivation.kind === 'derived') {
+                segmentContext = {
+                    ...segmentContext,
+                    [ROOT_RUN_CONTEXT_KEY]: derivation.rootRun,
+                    [RECORD_RUN_CONTEXT_KEY]: derivation.recordRun,
+                } as AutomationContext;
+            } else {
+                segmentContext = { ...segmentContext, [ROOT_RUN_CONTEXT_KEY]: null, [RECORD_RUN_CONTEXT_KEY]: null } as AutomationContext;
+                // FUNCTIONAL, so `warn`: nothing the run claims to persist is
+                // lost, and the reader that needs a root run says so itself.
+                this.logger.warn(
+                    `[automation] run '${runId}' was parked before runs recorded their root run, and its root run ` +
+                        `could not be derived because ${derivation.reason}; it continues with no root run, and a request ` +
+                        `an approval step of it opens records none.`,
+                );
+            }
+        }
 
         // Consume the suspension *before* running downstream work — a run
         // resumes exactly once per pause, and a duplicate resume after a

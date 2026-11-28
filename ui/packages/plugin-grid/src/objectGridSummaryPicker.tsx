@@ -4,7 +4,9 @@
  * figure in the normal one (「Sum ¥1,234,500」). For a reader who may change
  * the view it is also the control: a click opens one menu of the calculations
  * the column's field type allows, the current one ticked and 「None」 last; an
- * empty cell shows 「Calculate」 on hover. Without `onPick` it only draws.
+ * empty cell always shows a faint 「+ Add calculation」, so a reader who has
+ * never hovered the footer still sees the control (objectstack#36048). Without
+ * `onPick` it only draws, and an empty cell draws nothing.
  */
 
 import React from 'react';
@@ -16,7 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@object-ui/components';
-import { Check } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import type { ColumnSummaryType, SummaryTranslate } from './useColumnSummary';
 import { summaryMenuLabel } from './useColumnSummary';
 
@@ -77,9 +79,10 @@ export function SummaryCellPicker({ field, figure, current, offered, temporal, a
           ) : (
             <span
               data-testid={`summary-picker-hint-${field}`}
-              className="text-muted-foreground opacity-0 transition-opacity group-hover/summary:opacity-100 group-focus-visible/summary:opacity-100"
+              className="inline-flex min-w-0 items-center gap-1 truncate font-normal text-muted-foreground/70 transition-colors group-hover/summary:text-foreground group-focus-visible/summary:text-foreground"
             >
-              {t('grid.summary.calculate')}
+              <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">{t('grid.summary.calculate')}</span>
             </span>
           )}
         </button>

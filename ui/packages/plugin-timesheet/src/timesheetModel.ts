@@ -337,10 +337,23 @@ export interface CellWriteGrants {
  * Whether a cell offers an input: an empty cell when the caller may create, a
  * one-record cell when they may update or clear it, and a cell holding
  * several records never.
+ *
+ * `lockedByHand` answers whether the value field is read-only by hand over a
+ * stored record (the field hand lock — `uiReadonly`, or `uiReadonlyWhen` TRUE
+ * over the record — and the server lock, `fieldReadOnlyByHand` in
+ * `@object-ui/core`, objectstack#37448): typing into or clearing a one-record
+ * cell is an edit by hand of that record, so a locked record's cell draws no
+ * input. An empty cell's create is judged by the static half only, as the
+ * create dialog judges it — the view folds that into `grants.create`.
  */
-export function cellEditable(cell: TimesheetCell, grants: CellWriteGrants): boolean {
+export function cellEditable(
+  cell: TimesheetCell,
+  grants: CellWriteGrants,
+  lockedByHand: (record: Record<string, unknown>) => boolean = () => false,
+): boolean {
   if (cell.records.length > 1) return false;
   if (cell.records.length === 0) return grants.create;
+  if (lockedByHand(cell.records[0])) return false;
   return grants.update || grants.delete;
 }
 

@@ -238,7 +238,7 @@ project: Field.masterDetail('project', {
 order: Field.masterDetail('order', {
   label: 'Order',
   required: true,
-  inlineEdit: true,
+  inlineEdit: 'grid',
   inlineTitle: 'Lines',
   inlineAmountField: 'line_total',
 }),
@@ -250,7 +250,7 @@ order: Field.masterDetail('order', {
 | `lookupFilters` | `{ field, operator, value, orEmpty? }[]` | Base filters restricting which records are selectable (structured, picker-honored). `value` is a literal or a `{ $record }` reference — see below |
 | `dependsOn` | `(string \| { field, param? })[]` | Sibling fields that scope the candidates by equality; the picker is gated until they are set |
 | `deleteBehavior` | `enum` | `'set_null'`, `'cascade'`, `'restrict'` |
-| `inlineEdit` | `boolean \| 'grid' \| 'form'` | Form factor of the child rows on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`). The form inlines the child only where a field group of the parent names it (`fieldGroups[].relatedList`); `inlineEdit` alone inlines nothing |
+| `inlineEdit` | `'grid' \| 'form'` | Form factor of the child rows on the parent create/edit form: `'grid'` or `'form'`; left out, it is picked from the child's shape (a boolean is refused at parse). The form inlines the child only where a field group of the parent names it (`fieldGroups[].relatedList`); `inlineEdit` alone inlines nothing |
 | `inlineColumns` | `array` | Optional explicit columns for the inline grid |
 | `inlineAmountField` | `string` | Optional numeric child field for the inline running total |
 | `lookupAutofill` | `{ target, source, overwrite? }[]` | Fields of this object a pick fills from the picked record (single-value `lookup` / `master_detail` only) — see below |
@@ -296,6 +296,13 @@ product's `list_price`.
 - **Overwrite rule.** By default a pick never replaces a value somebody wrote: the
   target is filled only while it is empty or still holds the value an earlier pick
   filled in. A pair with `overwrite: true` replaces the target on every pick.
+- **Currency rule.** An amount of money (a `currency` field, or a `formula` returning
+  `currency`) is copied only into a target in the same currency: both in the home
+  currency, or both naming the same code (a `fixed` code, or the code the record or
+  its `master_detail` parent holds). Otherwise the target is left as it is and the
+  form says why, naming both currencies and the picked amount so the price can be
+  entered by hand. Nothing is converted. A `number` carries no currency and copies
+  as before. The grid's same-named copy follows the same rule.
 - **Client-side only.** The fill edits the form, and the filled value is saved as an
   ordinary write. Nothing on the write path reads the key: an import or an API
   write that sets the lookup fills nothing.
@@ -409,10 +416,21 @@ person who submitted it is not shown the drop. A record created with its value
 dropped starts as if no value had been sent: `0`
 for `count` and `sum`, empty for `min`, `max` and `avg`, and the next child write
 replaces it with the computed value. Under `strictReadonlyWrites` the whole write
-is refused. Server code that runs with `isSystem: true` can still write the
-column, as it can any read-only column: seed data, package installs and a
-historical import (`treatAsHistorical: true`, which only the system principal may
-send) keep a pre-computed total, on create and on update. Undoing an ordinary
+is refused. Seed data never stores a summary value, and that includes the seed
+data a package install loads, since it goes through the same seed loader: a value a
+seed record supplies for a summary field is not written, on create or on
+update, and the rest of the record is. The summary is computed from the seeded
+child records, so a parent seeded with a total and no children shows the
+empty-set value (`0` for `count` and `sum`, empty for `min`, `max` and `avg`),
+and re-seeding a parent leaves its computed value in place. The load logs one
+warning per dataset that names the object, the fields and how many values it
+did not write. One degraded path does not go through the seed loader: when the
+runtime has no metadata service, or the seed loader throws, it falls back to a
+basic insert of the seed records, and that fallback still stores a supplied
+summary value. To show a total, seed the child records it sums. Server code that runs with `isSystem: true` can still write the column,
+as it can any read-only column: a historical import (`treatAsHistorical: true`,
+which only the system principal may send) keeps a pre-computed total, on create
+and on update. Undoing an ordinary
 import restores the rows through an ordinary update, so a summary value that an
 import committed before this rule overwrote is not put back by the undo; it stays
 until the next child write recomputes it.
@@ -607,7 +625,8 @@ Database indexes are declared at the object level in the object's `indexes[]` ar
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `requiredPermissions` | `string[]` | — | Capabilities required to read/edit this field — masked on read, denied on write unless the caller holds all of them (ADR-0066 D3) |
-| `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Opt a media or JSON field into old → new values on the record activity timeline; other fields show them already, and `false` does not hide them |
+| `fieldHistory` | `boolean` | — | This field's old → new values on the record activity timeline: absent shows them, `false` turns them off |
 
 For values that must be encrypted at rest (API keys, tokens, DB passwords), use the
 `secret` field type — see the [Field Type Gallery](/docs/data-modeling/field-types#secret).

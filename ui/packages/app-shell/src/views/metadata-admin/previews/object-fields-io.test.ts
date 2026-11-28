@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectExtensionSchema, ObjectSchema } from '@objectstack/spec/data';
 import {
   newField,
   readFields,
@@ -20,9 +20,14 @@ import {
   groupEntries,
   currentGroupLayout,
   writeGroupLayout,
+  groupListLayout,
+  groupArrangement,
+  groupMembership,
   diffFields,
+  readsReference,
   type FieldsView,
 } from './object-fields-io';
+import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 
 /* ─────────────── readGroups ─────────────── */
 
@@ -507,5 +512,121 @@ describe('groupEntries reads a group\'s own fields list (objectstack#35900)', ()
       ['basic', ['account', 'name', 'terms']],
       [null, ['other']],
     ]);
+  });
+});
+
+describe('groupListLayout — an object in the older per-field `group` spelling converts, membership unchanged (objectstack#36505)', () => {
+  // `basic` holds name and account by the older `group`; `money` lists
+  // valid_until and also picks up `fee` by its `group`; terms is ungrouped;
+  // `orphan` names no declared group.
+  const view: FieldsView = readFields({
+    name: { type: 'text', group: 'basic' },
+    account: { type: 'text', group: 'basic' },
+    valid_until: { type: 'date' },
+    fee: { type: 'currency', group: 'money' },
+    terms: { type: 'textarea' },
+    orphan: { type: 'text', group: 'gone' },
+  });
+  const groups = readGroups([
+    { key: 'basic', label: 'Basic' },
+    { key: 'money', label: 'Money', fields: ['valid_until'] },
+    { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+  ]);
+
+  it('lists every group\'s members in display order and drops each `group` a list now holds', () => {
+    const out = groupListLayout(view, groups);
+    expect(out.changed).toBe(true);
+    expect(out.groups).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name', 'account'] },
+      { key: 'money', label: 'Money', fields: ['valid_until', 'fee'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const fields = writeFields(out.view) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(fields)).toEqual(['name', 'account', 'valid_until', 'fee', 'terms', 'orphan']);
+    expect(['name', 'account', 'fee'].map((n) => fields[n].group)).toEqual([undefined, undefined, undefined]);
+    // A `group` naming no declared group says nothing and is kept.
+    expect(fields.orphan.group).toBe('gone');
+  });
+
+  it('the converted object places every field exactly where the old spelling did', () => {
+    const before = groupMembership(view, groups);
+    const out = groupListLayout(view, groups);
+    const after = groupMembership(out.view, out.groups);
+    expect([...after.members]).toEqual([...before.members]);
+    expect(Object.fromEntries(after.groupOf)).toEqual(Object.fromEntries(before.groupOf));
+    const parsed = ObjectSchema.safeParse({ name: 'quote', label: 'Quote', fields: writeFields(out.view), fieldGroups: out.groups });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('an object already in the list spelling is answered as it is', () => {
+    const out = groupListLayout(view, groups);
+    const again = groupListLayout(out.view, out.groups);
+    expect(again.changed).toBe(false);
+    expect(again.view).toBe(out.view);
+    expect(again.groups).toBe(out.groups);
+  });
+});
+
+describe('groupArrangement — the whole arrangement an installed object\'s .custom extension writes (objectstack#36505)', () => {
+  it('lists every group\'s members, the older spelling included, and keeps a related-table group as it is', () => {
+    const view = readFields({
+      name: { type: 'text', group: 'basic' },
+      region__c: { type: 'text' },
+      account: { type: 'text' },
+      terms: { type: 'textarea' },
+    });
+    const groups = readGroups([
+      { key: 'basic', label: 'Basic' },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const arrangement = groupArrangement(view, groups);
+    expect(arrangement).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name'] },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const parsed = ObjectExtensionSchema.safeParse({ extend: 'quote', fieldGroups: arrangement });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+});
+
+describe('readFields — a reference on a type that reads none is stripped at the read door', () => {
+  // A shipped inspector kept `reference` on a retype, and the designer shows
+  // no control for it on such a type, while the publish gate refuses it
+  // (`field/reference-on-non-reference-type`). Stripped on read, the next
+  // edit-and-save writes the field without it.
+  it('drops it from a text / number / select field, in both draft shapes', () => {
+    const record = readFields({
+      vendor_name: { type: 'text', label: 'Vendor', reference: 'vendor' },
+      vendor_no: { type: 'number', label: 'No', reference: 'vendor' },
+      tier: { type: 'select', label: 'Tier', reference: 'vendor', options: [{ value: 'a', label: 'A' }] },
+    });
+    for (const e of record.entries) expect(e.def, e.name).not.toHaveProperty('reference');
+    const array = readFields([{ name: 'vendor_name', type: 'text', label: 'Vendor', reference: 'vendor' }]);
+    expect(array.entries[0].def).toEqual({ type: 'text', label: 'Vendor' });
+    expect(writeFields(record)).toMatchObject({ vendor_name: { type: 'text', label: 'Vendor' } });
+  });
+
+  it('keeps it on the types that read it: lookup, master_detail, tree, user and summary', () => {
+    const view = readFields({
+      a: { type: 'lookup', label: 'A', reference: 'vendor' },
+      b: { type: 'master_detail', label: 'B', reference: 'vendor' },
+      c: { type: 'tree', label: 'C', reference: 'po' },
+      d: { type: 'user', label: 'D', reference: 'sys_user' },
+      e: { type: 'summary', label: 'E', reference: 'po_line', summaryOperations: { object: 'po_line', function: 'count' } },
+    });
+    for (const e of view.entries) expect(e.def, e.name).toHaveProperty('reference');
+  });
+
+  it('CONTROL — leaves a type the spec does not declare as it is', () => {
+    const view = readFields({ legacy: { type: 'not_a_spec_type', label: 'L', reference: 'vendor' } });
+    expect(view.entries[0].def).toHaveProperty('reference', 'vendor');
+  });
+
+  it('readsReference is the spec\'s REFERENCE_VALUE_TYPES plus summary', () => {
+    for (const t of REFERENCE_VALUE_TYPES) expect(readsReference(t), t).toBe(true);
+    expect(readsReference('summary')).toBe(true);
+    for (const t of ['text', 'number', 'select', 'formula', 'date', undefined]) expect(readsReference(t), String(t)).toBe(false);
   });
 });

@@ -1,5 +1,460 @@
 # @objectstack/driver-turso
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/driver-sql@19.0.0-next.2
+  - @objectstack/observability@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [7e638ba]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/observability@19.0.0-next.1
+  - @objectstack/driver-sql@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- 65b67be: feat(mcp): `aggregate_records` orders, cuts and counts its groups in the database
+  
+  Clause-②: yes (widening: `orderBy` and `limit` arguments on `aggregate_records`)
+  Metadata-protocol: none
+  
+  A ranking question ("the top five customers by revenue") over more groups than the tool's row cap used to come back as every group, or the first page of them, in no stated order, and the client ranked what it happened to get. `aggregate_records` now takes `orderBy` — a list of `{ field, order }` naming an aggregation alias or a group key (its alias when it has one) — and `limit` (at most the row cap). The database orders the groups, cuts them, and counts how many groups it formed before the cut, in one statement; the result carries the groups, `totalGroups` (the key the tool already answers, now the database's count of the groups before the cut), and `truncated: true` when more groups existed than came back.
+  
+  - An order key that names no column of the aggregated row is refused `INVALID_SORT` / 400, naming the columns the query projects.
+  - Only a driver that runs the cut in its own SQL statement serves it: `driver-sql` (every dialect it speaks; the window `count(*) over ()` needs MySQL 8 or later), the WASM SQLite driver, and the Turso driver's local and replica faces. Every other driver (the in-memory driver, MongoDB, OData, Turso's remote face), an aggregate the engine computes in memory (a date bucket, a reference timezone or a measure filter the driver does not run), and an aggregate with `having` are refused `INVALID_QUERY` / 400 before anything is read. Groups are never ordered or cut in the application.
+  - On an order key without a `rank`, a NULL ranks last in either direction, except a `sum` or a count with no value, which ranks as the `0` it is served as. Group keys the order does not name, and a group key it names only by a `rank`, break ties, ascending, NULL last, so two runs of one call answer the same groups in the same order.
+  - An order key may carry a `rank`, a list of the column's values: the statement ranks each listed value by its position and every other value (a NULL among them) on one rank past them, before the cut, so the unlisted values come after the listed ones ascending and before them descending; among themselves they follow the column's own ascending order, NULL last. It is the tool's own, never an `aggregate_records` argument.
+  - A `limit` with no `orderBy` keeps the declared option order the uncut answer already follows: groups keyed by a leading select or radio field come back in the order the field declares its options, a value no option declares last, and the database takes that order before the cut, so the cut keeps the first declared groups. An `orderBy` the caller sends overrides it.
+  - The cut answer carries what the uncut one does: a fixed-currency amount's currency in `currencies`, and `KEY__label` beside each lookup or master-detail group key, the record's name read with the caller's own permissions.
+  - An amount whose records each carry their own currency is ranked by its bare numbers across currencies: the tool description says to rank it inside one currency by filtering `where` on its currency code field.
+  - Without `orderBy` and `limit` the tool answers as before.
+  
+  `@objectstack/objectql` exports `AGGREGATE_ORDER_CUT`, the engine-internal read option of `aggregate` that carries the request (a symbol, so no wire request can set it), with the `AggregateOrderCutRequest`, `AggregateOrderKey` and `AggregateOrderCutOutcome` types. `McpDataBridge` gains the optional member `aggregateGroups`; a bridge without it refuses `orderBy` / `limit` with `NOT_IMPLEMENTED` / 501 and keeps serving the rest of the tool. Nothing that was accepted before is refused.
+- 1caee8c: feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
+  
+  Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
+  Metadata-protocol: none
+  
+  `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
+  
+  - The row is chosen among the rows the caller may read and the `where` admits: a group whose newest row is hidden from the caller answers its newest readable row, never the hidden one and never nothing. The organization wall holds inside the choice. Field masking still applies to the returned rows.
+  - A partition or order field the caller may not read is refused as it is in `orderBy`; a computed, JSON or multi-value field, or a dotted path, is refused as a partition or order field.
+  - `limit` counts groups, capped at the tool's `maxLimit` like any list. The answer is `{ object, records, hasMore }` and never a `total`; when more groups exist than came back it carries `truncated: true`.
+  - Served by the SQL driver (Postgres, MySQL, SQLite) and by `driver-sqlite-wasm` and the Turso driver on a local or embedded-replica database: the driver compiles a `ROW_NUMBER()` window over the read's own scoped selection. Every other driver (in-memory, Turso's remote connection, MongoDB), an object with an `afterFind` hook and an object with object-scoped read middleware refuse with `INVALID_QUERY` / 400 before anything is read. The Turso driver's remote face refuses the directive itself too.
+  - New exports: `LATEST_PER`, `LATEST_PER_MAX_KEYS` and the `LatestPerRequest` / `LatestPerOrder` / `LatestPerOutcome` types from `@objectstack/objectql`; `LATEST_PER_DIRECTIVE`, `latestPerDirectiveOf` and the `LatestPerDirective` / `LatestPerDirectiveOrder` types from `@objectstack/driver-sql`; `McpLatestPer` from `@objectstack/mcp`. The request rides an in-process read option, never a wire or query key; `@objectstack/spec` is unchanged.
+  
+  Without `latestPer`, `query_records` and every read are unchanged.
+- 643fe3b: feat(driver-sql, driver-turso): the SQL drivers compile the `SharedRecordIds` fixed-read leaf to a subquery (ADR-0155, step 3 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **The compile** (`@objectstack/driver-sql`). A `SharedRecordIds` leaf in a field's `$in` compiles to one subquery in the list's own position: `id IN (SELECT record_id FROM sys_record_share WHERE object_name = ? AND recipient_type = 'user' AND recipient_id = ? AND record_id IS NOT NULL AND record_id <> '')`. The write form adds `AND access_level IN (…)` inside the subquery. Every value is bound. The subquery carries no tenant scope (ADR-0155 ① ruled A), and the outer statement's tenant wall is unchanged. It compiles on every read verb and on `updateMany`, for SQLite, PostgreSQL, MySQL, SQL Server and Oracle. SQLite and PostgreSQL were run live for this release. MySQL, SQL Server and Oracle are pinned at compile shape, and MySQL also runs live in CI's Temporal Conformance job. On PostgreSQL, an object whose `id` column is not text (an integer- or uuid-keyed federated table) fails the compiled subquery with `DATABASE_ERROR` (42883) instead of answering its rows. That case is open on #35906 (ADR-0155 D-0) and is settled before the sharing plugin writes the leaf. On Oracle the `<> ''` half is left out, because Oracle stores `''` as NULL. `SqliteWasmDriver` and Turso's local mode inherit the compile.
+  - **The remote transport** (`@objectstack/driver-turso`). Turso's remote mode compiles the same subquery with its own compiler, from the same predicates.
+  - **The declaration.** `SqlDriver.supports.fixedReadLeaves` is `['SharedRecordIds']`, and `TursoDriver` inherits it in every mode. The engine's seam now hands the leaf to these drivers instead of refusing it.
+  - **The refusal.** A leaf anywhere other than a field's `$in` comparand is refused before any statement runs, with `INTERNAL_ERROR` / 500, and logged at `error` once per driver.
+  - **New exports** (`@objectstack/driver-sql`). `findMisplacedFixedReadLeaf`, `fixedInnerReadPredicates` and `misplacedFixedReadLeafMessage` are the walk, the predicates and the refusal text the two compilers share.
+  - **The shared case-set** (`@objectstack/spec`). `SHARED_RECORD_IDS_CASE_SET` gains a note (`n5`) on a doc whose only grant is stamped in another organization, and a nested case read under a tenant. Together they witness, in the nested position, that the inner read carries no tenant scope.
+- 9a82465: fix(analytics)!: the native dataset face and the draft preview refuse `=` / `$in` / `$ne` on a single-value `image` or `file` column the driver stores as JSON, as the data door does
+  
+  Clause-②: yes (narrowing) — widened: `SqlDriver.jsonColumnFieldClass` (`@objectstack/driver-sql`) is now public, and so on every class that extends it (`TursoDriver`, `SqliteWasmDriver`), and the exported `AnalyticsServiceConfig` (`@objectstack/service-analytics` root) gains the optional key `jsonColumnFieldClass`; narrowed: the native dataset face and the draft preview newly answer `400 INVALID_FILTER` for a scalar comparison on a single-value media column the driver stores as JSON, which they answered `200` with a wrong count before
+  Metadata-protocol: none
+  Skills-docs: none — no published skill documents the dataset door's filter vocabulary per storage class; the refusal text itself carries the prescription (the media-column move), and the operator contract `skills/` describes (`$contains` for membership on a JSON column) is unchanged
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no stored row, registry key or authored value changes. What moves is the answer the native dataset face and the draft preview give a scalar comparison on a single-value media column, so no stored row, registry key or authored value changes and there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a caller of the dataset query door whose filter compares a single-value `file` / `image` / `avatar` / `video` / `audio` field with `=` (explicit or implicit), `$in`, `$ne`, `$nin`, an ordering comparison, `$between` or the non-membership text family, on a deployment still inside the ADR-0104 dual-encoding window (its media columns not yet moved, which is every deployment that has not run the move).
+  
+  - FROM: the native dataset face compiled the comparison against the stored JSON string (`"file_1"`) and answered `200` with the wrong count — `{ pic: 'file_1' }` and `{ pic: { $in: ['file_1'] } }` counted `0`, `{ pic: { $ne: 'file_1' } }` counted every row — and the draft preview answered `200` with its own counts, matching the bare id a drafted row holds. `POST /api/v1/data/:object/query` and this door's ObjectQL strategy already refused the same filter `400` `INVALID_FILTER`.
+  - TO: all four faces refuse it `400` `INVALID_FILTER`, in `@objectstack/core`'s one refusal text for this column class — the media-column move, not the `$contains` membership repair, which finds no member in a single JSON string.
+  
+  **Widened, alongside.** `SqlDriver.jsonColumnFieldClass(table, field)` is now a public, read-only member: it answers `'single-value-media'`, `'multi-value-or-json'` or `undefined` for a column on this deployment, the same answer the data door's refusal reads. A subclass that redeclares it as `protected` must widen it to `public`. `AnalyticsServiceConfig.jsonColumnFieldClass` is the optional hook the analytics host reads it through; `AnalyticsServicePlugin` wires it from the driver that stores the object, and a host that wires nothing keeps its earlier behaviour. `TursoDriver` answers it on the remote face from the same registry its remote transport already reads.
+  
+  **Not moved.** `$contains` / `$notContains` and the null predicates (`$null`, `$exists`, `$empty`) on such a column, every operator on a scalar column, the multi-value and structured-JSON class (unchanged since it was refused on these faces), and a deployment whose media columns have moved — the column is not JSON there, and the comparison is answered.
+  
+  The fix for a caller: filter on the record the attachment belongs to, ask presence with `$null` / `$empty`, or finish the deployment's media-column move (the column step of `objectstack migrate files-to-references --apply`, which the refusal text prescribes) so the column is comparable.
+- b572420: Clause-②: no
+  Metadata-protocol: none
+  
+  A column's literal DEFAULT now follows the field's declaration on a table an earlier release created, not only on a fresh database. When a field drops its literal `defaultValue`, schema drift reports the column's leftover DEFAULT (`drop_column_default`); when the declared literal changes, it reports the old one (`set_column_default`). Both are `safe`: dev auto-reconcile, a publish of the object, the artifact-pinned boot and `os migrate apply` apply them, in place on PostgreSQL and MySQL and by the table rebuild on SQLite. Before, the table kept the old DEFAULT, every insert that left the field unset stored the old value where a new database stored the declared one (or nothing), and `os migrate plan` showed nothing. Stored rows are never rewritten, and a DEFAULT that is an expression (a `NOW()` default, a sequence) is left alone. A plain production boot still alters no existing column: it logs the entry, and `os migrate apply` applies it.
+- 49c8e0f: fix(driver-turso): remote aggregate group keys over a boolean answer true/false, as local mode does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the remote face of `TursoDriver` (a `libsql://`, `https://` or `http://` database, as hosted environments use), `aggregate()` returned group-key columns exactly as the libSQL client hands them back. A group over a declared boolean field came back as `1` / `0` (and `null`), where the local and replica faces answer `true` / `false` / `null`. Reports, charts and `aggregate_records` grouped by a field such as "done" showed `0` / `1` on a hosted environment.
+  
+  Group-key columns now take the same read presentation `find()` applies to the column, keyed by the output column (`alias ?? field`), exactly as the local face does. Other declared kinds the shared presenter covers (date, time, datetime, audit timestamps, numbers) are presented the same way. Measures are unchanged: counts and totals are numbers as before, and `min` / `max` over a boolean still answer `0` / `1`.
+- 49ad529: fix(driver-turso): on a Turso remote database, a `storage.notNull` field added to an object whose table already holds rows no longer fails that object's schema sync
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The remote transport's additive schema sync (`syncSchema` and `syncSchemasBatch`) emitted `ALTER TABLE … ADD COLUMN … NOT NULL` with no DEFAULT. Every existing row would hold NULL in the new column, so libSQL refused it (`Cannot add a NOT NULL column with default value NULL`), the object's whole sync failed, and the object became unwritable on upgrade. The local face has added such a column nullable since the `@objectstack/driver-sql` fix for the same case.
+  
+  The remote face now gives the same answer. When the table already holds a row and the field declares no literal or `NOW()` default, the column is added nullable and the drift report names it as `tighten_not_null`, which is the path the `storage.notNull` description promises ("a destructive migration gated by the schema-drift ceremony"). This transport still cannot apply a tightening itself: `os migrate apply --allow-destructive` names it as not applied, because it needs the SQLite table rebuild the remote face does not run. A column added to an empty table, or created with the table, is still added `NOT NULL`. So is a field that declares a literal or `NOW()` default, which this face still refuses on a populated table, because it emits no declared column DEFAULT. `required` is unaffected: the engine still refuses a write that omits the field. The sync sends one extra read per sync, and only when an existing table is about to gain a `storage.notNull` column.
+- 7291c6f: fix(driver-turso): the remote face gives a declared field's column the DEFAULT the local face gives it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none (no key or value an author can write changes, and `defaultValue` means what it meant: the remote face now writes the column DEFAULT the local face already writes for the same declaration)
+  
+  - **A `storage.notNull` field with a literal `defaultValue`, added to a table that already holds rows, now syncs on a hosted Turso/libSQL environment.** The remote face emitted no column DEFAULT for any field, so SQLite refused `ADD COLUMN … NOT NULL` there (`Cannot add a NOT NULL column with default value NULL`), and that object's whole sync failed through `syncSchema` and `syncSchemasBatch`; the local face accepted the same declaration. Both faces now add the column NOT NULL with the DEFAULT, and the existing rows take it.
+  - **A fresh remote table carries the same column DEFAULTs as a fresh local one**, on `CREATE TABLE` and on `ADD COLUMN`, for every field that declares a literal or `NOW()` default, nullable fields included. A multi-value column, a runtime token other than `NOW()` (such as `current_user`) and an object default get none, as on the local face. The shared drift differ reads a remote column as no drift.
+  - **A nullable field with a literal `defaultValue`, added to a remote table that already holds rows, now fills those rows with the default**, as on the local face; before, they read NULL.
+  - **Known limit: the remote face cannot change a column DEFAULT once it has written one.** If an author later edits or removes a literal `defaultValue`, the drift differ reports it (`set_column_default` / `drop_column_default`), but on the remote face both need a table rebuild, which the remote transport does not run. The column keeps the old DEFAULT, so an insert that omits the field stores the old value, and the finding stays reported. Tracked in #37430.
+  - **Not changed: a `NOW()` default on a column added to a table that already holds rows.** SQLite refuses a non-constant DEFAULT on that statement, so the remote face leaves it out and keeps its earlier answer: a nullable field is added with no DEFAULT, and a `storage.notNull` field is still refused. The local face currently refuses both; that defect is tracked separately.
+  - New `@objectstack/driver-sql` exports for drivers that write SQLite DDL as text: `emitsDeclaredColumnDefault` (which fields get a column DEFAULT), `sqliteDeclaredColumnDefaultSql` (that DEFAULT's SQLite text, or `null`) and `sqliteNowColumnDefaultSql` (the SQLite `NOW()` expression for a column type, the one the knex path uses).
+- e0b0471: fix(driver-sql,driver-turso): a `NOW()`-defaulted field added to a SQLite table that already holds rows no longer fails the object's schema sync
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  SQLite refuses a non-constant DEFAULT on `ALTER TABLE … ADD COLUMN` once the table holds a row. So adding a field that declares `defaultValue: 'NOW()'` (`datetime`, `date`, `time` or any scalar type) to a populated table used to fail the whole sync with `Cannot add a column with non-constant default`. Both the local face and the Turso remote face now give the same answer:
+  
+  - The column is added nullable and with no DEFAULT.
+  - In the same transaction, one statement fills the existing rows that hold NULL with the sync instant, the value the DEFAULT would have given. This holds on every door: the managed table, a rotation shard, and the remote `syncSchema` and `syncSchemasBatch`.
+  - The drift report then lists what is still owed: `set_column_default`, plus `tighten_not_null` when the field declares `storage.notNull`.
+  
+  The drift report now lists `set_column_default` for **any** SQLite column whose field declares `NOW()` but which has no DEFAULT. That includes columns created before this release. On a local SQLite database the entry is `safe`, so it is applied unattended by a full table rebuild:
+  
+  - at dev boot under `autoMigrate: 'safe'`;
+  - when the object is published;
+  - at an artifact-pinned boot.
+  
+  The rebuild rewrites no stored value.
+  
+  `tighten_not_null` is `destructive`, and two consequences follow:
+  
+  - Plain `os migrate apply` does not apply it; `os migrate apply --allow-destructive` does.
+  - While that entry stands, an artifact-pinned boot of a local SQLite database is refused, even though the sync has filled every row.
+  
+  On the Turso remote face, neither entry is applied by `os migrate apply` or by any boot: both need a table rebuild, which that face does not run yet. They stay listed by `os migrate plan`.
+  
+  New `@objectstack/driver-sql` exports, so both faces share one source:
+  
+  - `declaresSqliteNowColumnDefault(field)`: whether a field's SQLite column DEFAULT is the `NOW()` expression.
+  - `sqliteNowBackfillSql(table, added)`: the NULL-only fill statement.
+  - `quoteSqliteIdentifier(name)`: the SQLite identifier spelling that both faces write.
+- 702b0cf: fix(driver-sql)!: a boolean field is stored as a boolean whatever spelling the caller sends
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the write door of the SQLite-family drivers (SqlDriver on SQLite, both faces of TursoDriver, SqliteWasmDriver) for a direct caller: a value on a declared boolean or toggle field that spells no boolean is refused instead of stored, and the spellings it accepts are stored as the boolean they spell. The engine's own door already refuses those values with invalid_boolean, so no authored metadata, seed or stored row is rewritten and nothing needs a tombstone. -->
+  
+  **BREAKING** for a caller that writes through a SQLite-family driver directly (`create`, `update`, `upsert`, `bulkCreate`, `bulkUpdate`, `updateMany`) and sends a declared `boolean` / `toggle` field a value that spells no boolean, such as `'yes'`, `'TRUE'`, `''`, `2` or an array: it used to be stored as written and is now refused with `VALIDATION_ERROR` / 400 before anything is written. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): no metadata author writes a driver call, so `Metadata-protocol` is `none`, and the engine's door already refuses those values.
+  
+  A declared scalar `Field.boolean` / `Field.toggle` is now stored as a boolean on SQLite whatever spelling the write sends. `true` / `false`, the numbers `1` / `0` and the text `'1'` / `'0'`, `'true'` / `'false'` and `'1.0'` / `'0.0'` are bound as the boolean they spell, so a column the driver created holds the INTEGER `1` / `0` and a `text` column retyped to `boolean` holds the text `'1'` / `'0'`. These are the spellings the local boot convergence already rewrites, read from the same table. Before, a string reached the column as text, on the local and the remote face of `TursoDriver` alike, so filters, sorts and groups did not read the row as the boolean it was written as. That includes a `beforeInsert` / `beforeUpdate` hook that assigns a string to such a field: the engine's own rewrite runs before the hooks, so the assignment now lands as a boolean too. On the remote face, a number written to a `toggle` field is stored as `'1'` / `'0'` instead of `'1.0'` / `'0.0'`.
+  
+  A remote `TursoDriver.bulkCreate` checks every row before it writes the first one, so a refused row refuses the batch with nothing written, as the local face's single INSERT already did. `null` still writes NULL. Rows stored before this change keep their stored form.
+  
+  To keep a direct write working, send `true` or `false` (or one of the spellings above) for a boolean or toggle field.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [24cc61f]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [65b67be]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [c0484c8]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [850bcec]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [907b378]
+- Updated dependencies [521b4f6]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [9a82465]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [b572420]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [89ce4fb]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [e845656]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [c3c04a2]
+- Updated dependencies [7291c6f]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [e0b0471]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [702b0cf]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [db9e34a]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/driver-sql@19.0.0-next.0
+  - @objectstack/observability@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

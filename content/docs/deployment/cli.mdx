@@ -27,7 +27,7 @@ npm create objectstack@latest my-app
 cd my-app
 ```
 
-This scaffolds a working project with `objectstack.config.ts`, a sample object, and all dependencies installed — plus the AI skills bundle and an `AGENTS.md` for coding agents. (`os init` is the CLI's own scaffolder for metadata-package skeletons and bare configs — see [below](#os-init).)
+This scaffolds a working project with `objectstack.config.ts`, the starter's companies and contacts, and all dependencies installed — plus the AI skills bundle and an `AGENTS.md` for coding agents. (`os init` is the CLI's own scaffolder for metadata-package skeletons and bare configs — see [below](#os-init).)
 
 ### Add more metadata
 
@@ -933,22 +933,24 @@ os compile --json                    # JSON output for CI pipelines
 ────────────────────────────────────────
   → Loading configuration...
   Config: objectstack.config.ts
-  Load time: 57ms
+  Load time: 62ms
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (74)...
+  → Running author-time rules (88)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
 
-  ✓ Build complete (74ms)
+  ✓ Build complete (158ms)
 
-  Data: 2 Objects  6 Fields
-  UI: 1 Views  1 Actions
-  Runtime: 3 plugins
+  Data: 3 Objects  18 Fields
+  UI: 1 Apps  3 Views  1 Actions
+  Logic: 0 Flows
+  Security: 0 Positions  0 Permissions
+  Runtime: 0 plugins
 
-  Artifact: dist/objectstack.json (7.6 KB)
+  Artifact: dist/objectstack.json (19.6 KB)
 ```
 
 Those counts are from a sample project, named in full under [`os info`](#os-info)
@@ -1079,19 +1081,25 @@ os info --json         # JSON output for tooling
 ────────────────────────────────────────
 
   My App v0.1.0
-  my-app
+  com.example.my-app
     Namespace: my_app
     Type: app
 
-  Data: 2 Objects  6 Fields
-  UI: 1 Views  1 Actions
-  Runtime: 3 plugins
+  Data: 3 Objects  18 Fields
+  UI: 1 Apps  3 Views  1 Actions
+  Logic: 0 Flows
+  Security: 0 Positions  0 Permissions
+  Runtime: 0 plugins
 
   Objects:
-    my_app_note (2 fields, user) — Note
+    my_app_company (7 fields, user) — Company
+    my_app_contact (7 fields, user) — Contact
     my_app_ticket (4 fields, user) — Ticket
 
-  Loaded in 59ms
+  Apps:
+    my_app_main_app — Main
+
+  Loaded in 57ms
 ```
 
 <Callout type="info">
@@ -1099,16 +1107,20 @@ os info --json         # JSON output for tooling
 run against one fixture, so the numbers can be rebuilt and checked rather than taken on
 trust: the project this page scaffolds in
 [Your First App in 2 Minutes](#your-first-app-in-2-minutes) —
-`npm create objectstack@latest my-app`, whose `blank` starter supplies the two-field
-`my_app_note` object and the three connector plugins — plus the four-field ticket object,
-the view and the action listed under
+`npm create objectstack@latest my-app`, whose `blank` starter supplies the seven-field
+`my_app_company` and `my_app_contact` objects, a list view of each and the `main` app, and
+no plugins — plus the four-field ticket object, the view and the action listed under
 [Build with Claude Code](/docs/getting-started/build-with-claude-code#3-what-claude-code-writes),
 renamed out of that page's `support_desk_` namespace into `my_app_`. That page's `support`
-app is **not** added, and a zero count is never printed, which is why the `UI:` row reads
-`1 Views  1 Actions` with no `Apps`. The walkthrough's `os generate` commands are **not**
-part of the fixture — run those as well and the summary gains `my_app_customer`, a second
-action and a `Logic:` row. Timings are machine identity, and the rule count and artifact size track the
-CLI version; everything else is fixture identity and reproduces.
+app is **not** added, which is why the `UI:` row reads `1 Apps`: the starter's own. A
+section with nothing in it still prints its zero row (`Logic: 0 Flows`). The ticket view
+declares an internal create and edit form, so a real compile also prints one
+`form-view-internal-not-loaded` warning after the rules step and a
+`⚠ 1 author-time warning(s)` line under `Build complete`; the `os compile` transcript
+leaves both out. The walkthrough's `os generate` commands are **not** part of the fixture — run those
+as well and the summary gains `my_app_customer`, a second action and `Logic: 1 Flows`.
+Timings are machine identity, and the rule count and artifact size track the CLI version;
+everything else is fixture identity and reproduces.
 </Callout>
 
 ### Schema migrations
@@ -1539,6 +1551,7 @@ where the data lives.
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
 | `os migrate text-scalars` | Rewrite numbers and booleans still stored raw on text fields (rows written before text fields stored the string) to that string, so filters, reads and unique keys see one value. SQLite `"N.0"` text it cannot decide is listed, never rewritten. No flag; idempotent. See [below](#os-migrate-text-scalars) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
+| `os migrate unit-codes` | Rewrite the free text a unit code field stored before it was declared one (`kg`, `公斤`) into unit codes, from a mapping file you give. Nothing is derived. Dry run by default, listing every stored value with its row count; `--apply` is refused while a value has no mapping entry. No flag; idempotent. See [below](#os-migrate-unit-codes) |
 | `os migrate recompute-home-amounts` | Recompute the home-currency amounts a record-mode currency field stores, at the exchange rates in force now, after a rate is corrected or added. Reports the rows that change and lists, without writing, the rows it cannot convert. No flag; idempotent. See [below](#os-migrate-recompute-home-amounts) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
@@ -1546,6 +1559,7 @@ where the data lives.
 | `os migrate audit-mail-bodies` | Mask the mail bodies (`body_text`, `body_html`) that `sys_audit_log` and `sys_activity` copies of `sys_email` / `sys_identity_email` rows still hold in clear, written before the audit writer masked them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-mail-bodies) |
 | `os migrate audit-key-material` | Remove the encrypted key-material columns from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. Reports counts only. No flag; idempotent. See [below](#os-migrate-audit-key-material) |
 | `os migrate audit-side-copies` | Remove the side-copy columns (another record's field values, such as an approval request's `payload_json`) from the `sys_audit_log` and `sys_activity` copies written before the audit writer omitted them. Covers the `archive` datasource `sys_audit_log` archives to as well. `--object` narrows it to one copy table. Reports counts only, per table and store. No flag; idempotent. See [below](#os-migrate-audit-side-copies) |
+| `os migrate list-preferences` | Delete the per-reader list preference rows an earlier Console stored in `sys_user_preference` under `ui.list.<object>`, which the Console no longer reads. Dry run by default (counts per key, writes no row); `--apply` deletes, only with an owner-only `--export` written and read back first. Run it once after upgrading. See [below](#os-migrate-list-preferences) |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -1954,6 +1968,101 @@ otherwise; the code, field and object refusals are the command's. It is mounted 
 the other maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
 There is no Setup button for it yet: that is separate UI work.
 
+#### `os migrate unit-codes`
+
+A `text` field holds whatever its writers typed: `kg`, `KG`, `公斤`. Once the field
+becomes a unit code field, because a quantity names it as its
+`unitConfig.unitField` or because it declares `unitConfig: { unitMode: 'code' }`
+itself, every write of it must hold a unit code, and editing a quantity beside a
+value there that is free text or blank is refused. The rows already stored keep
+their text. The save that makes the declaration answers 409 `destructive_change`
+naming this command (finding `unit_code_field_declared` on the code field, or
+`unit_mode_to_record` on a stored quantity switched to `unitMode: 'record'`;
+[Units](/docs/data-modeling/units#converting-a-field-that-already-holds-rows)
+covers the switch). This command rewrites the stored text, in place, into unit codes.
+
+```bash
+os migrate unit-codes --object material --field uom                                              # Dry run: lists every stored value, writes none
+os migrate unit-codes --object material --field uom --map-file units.json                        # Dry run: what the mapping does with each value
+os migrate unit-codes --object material --field uom --map-file units.json --org org_emea --apply # Write one organization's rows (prompts)
+os migrate unit-codes --object material --field uom --map-file units.json --all-organizations --apply   # Every organization, one mapping
+os migrate unit-codes --object material --field uom --map-file units.json --apply --yes --json   # CI / scripts
+```
+
+**The mapping is yours, never derived.** `--object` and `--field` are required, and
+`--field` names the unit code field itself (the `text` field), not the quantity: a
+quantity is refused with `INVALID_FIELD`, naming the field its unit is stored in.
+`--map-file` is a JSON object of stored text, exactly as written, to a unit code:
+
+```json
+{ "kg": "KGM", "KG": "KGM", "公斤": "KGM", "pcs": "H87", "": "H87" }
+```
+
+Matching is exact: `kg`, `KG` and `kg ` are three keys. Nothing guesses that `公斤`
+is `KGM`. The entry `""` is the one spelling for a **blank unit beside a quantity**:
+such a row is written only from that entry, and without it the row is counted and
+left blank. A blank unit with no quantity beside it is owed nothing and left alone.
+A key of white space only, or an entry that maps to no code, is refused with
+`VALIDATION_ERROR` / 400 before the database is opened, as is a file that does not
+read as JSON. Each target must be a unit code the field admits: a standard code, or
+one of the organization's own units, and of the field's `unitDimension` when it
+declares one. A target that is not is refused with `INVALID_FIELD` before any row
+is written.
+
+**Run it without `--map-file` first.** The dry run (the default) lists every
+distinct stored value with its row count and what the mapping does with it, and
+writes nothing, so a first run with no mapping is how you see the spellings to map.
+`--apply` counts first, read-only, and is refused (`VALIDATION_ERROR` / 400, exit 1)
+before any write while a non-blank value that is no unit code has no mapping entry,
+naming each one (under `--json`, in its `unmatched` array). So one apply run
+converts the whole field or nothing.
+
+**A unit code is never rewritten.** A row already holding a unit code is left as
+stored, even when the mapping has an entry for it (the report names such an entry
+as unused). That includes two codes the field does not admit, each listed and
+counted apart: a retired unit of the row's organization, and a unit code of
+another dimension than the field's `unitDimension`. Rewriting them from a mapping
+would change what the stored quantity means. A run that leaves any of these, or a
+blank beside a quantity with no `""` entry, ends with what is left instead of a
+success line.
+
+**One organization at a time, or all of them explicitly.** As on
+[`os migrate record-currency-codes`](#os-migrate-record-currency-codes):
+`--org <id>` converts only that organization's rows, and `--all-organizations`
+uses the one mapping for every organization's rows, counting each apart. When the
+object's rows belong to more than one organization and you give neither, the run
+(a dry run as well as `--apply`) is refused with `VALIDATION_ERROR` / 400 and exit 1
+before any write, listing each organization's counts (under `--json`, its
+`organizations` array). `--org` and `--all-organizations` together are a usage error.
+
+Each row is written through the engine like any other update, so the unit write
+check judges every code, and it is audited. Idempotent: a converted row holds a
+unit code and is never rewritten, so re-running until the report shows nothing to
+convert is the verification, which is why this command records no flag. A walk
+that reaches `--max-records` stops there and says the walk is incomplete; re-run
+without the cap to finish.
+
+**Without shell access, use the route.** An organization admin on a hosted
+deployment runs the same backfill over HTTP, for the rows of **the caller's current
+organization only**:
+
+```http
+POST /api/v1/meta/_migrate-unit-codes
+Content-Type: application/json
+
+{ "object": "material", "field": "uom", "mapping": { "kg": "KGM", "": "H87" }, "apply": true }
+```
+
+It answers `{ "success": true, "data": … }` with, as `data`, the report this command
+prints under `--json` (its `report` member), and is a **preview unless `apply` is
+literally `true`**; with no `mapping` the preview lists every stored value. The body
+takes `object`, `field`, `mapping` and `apply` and nothing else: `organizationId`,
+`allOrganizations` or any other key is refused with `VALIDATION_ERROR` / 400. A
+request with no current organization is refused `403`. It requires the `setup.write`
+capability in that organization and answers `403` otherwise; the field, mapping and
+unmatched-value refusals are the command's. It is mounted with the other
+maintenance routes, so `metadata.endpoints.maintenance: false` takes it away.
+
 #### `os migrate recompute-home-amounts`
 
 A record-mode amount that declares a home amount is converted into the organization's home
@@ -2281,6 +2390,16 @@ crypto provider `os serve` seals with is available.
 ten minutes after it ends, and it can seal a row between the command's decision
 and its write; that row then reads `modified`.
 
+**The audit seal lock.** An `--apply` run holds the audit seal lock from before
+its first write to after its last, archive runs included, on the database of
+each object it covers that declares `lifecycle.seal`. `sys_audit_log` declares
+it, so this is every run that covers the audit log. On Postgres and MySQL the
+run waits up to ten minutes for a sealer pass in flight, then refuses having
+changed nothing: run it again once that pass has finished. On SQLite and Turso,
+which offer no session lock, the run stops before writing and names
+`--sealer-stopped`: stop every server that seals the database, then run it again
+with the flag. A dry run takes no lock and needs no flag.
+
 #### `os migrate organization-ownership`
 
 The v18 ownership ceremony (ADR-0131 D10), and the upgrade path of a database
@@ -2389,6 +2508,50 @@ and re-running is how an interrupted run is finished. The columns arrive with
 the upgraded deployment's schema sync, which an `--apply` run performs itself:
 a dry run against a database no upgraded process has opened cannot read them,
 reports the failed read and exits `1`. A failed read or write exits `1`.
+
+#### `os migrate list-preferences`
+
+An earlier Console remembered each reader's list state on the server: one
+`sys_user_preference` row per reader and object, keyed `ui.list.<object>`. It
+held the column widths, the row height and the view tabs' order, and before
+that the reader's sorts, filters and columns too. The Console no longer reads
+or writes those rows: a change on a list is an unsaved draft until the reader
+saves it into a view, and the widths, row height and tab order are kept in the
+reader's own browser. The stored rows are not carried anywhere; every reader's
+lists open as their views declare them. This command deletes the rows.
+
+```bash
+os migrate list-preferences                          # Dry run: counts per key, writes no rows
+os migrate list-preferences --json                   # the same report, machine-readable
+os migrate list-preferences --apply --export ./list-preferences-backup.json
+os migrate list-preferences --apply --export ./list-preferences-backup.json --yes --json
+```
+
+The report counts the rows, the readers and the organizations, and per key
+(`ui.list.account`, …) the rows and the readers holding it. It never prints a
+value. It reads every organization's rows. A row belongs to the family only when
+its key starts with `ui.list.`, compared exactly, dot and case included:
+`ui.record.<object>` (the record page's "show empty fields" choice, still read),
+`ui.recent` and every other preference key are never touched.
+
+**Options:**
+- `--apply` — delete the listed rows (default off: a read-only dry run)
+- `--export <path>` — **mandatory with `--apply`**: every row the run deletes, as stored, written
+  owner-only (`0600`) and read back before the first delete; refuses to overwrite an existing file
+- `-y, --yes` — skip the confirmation prompt; without it, a run whose stdin is not a terminal (or `--json`) reads
+  nothing, deletes nothing and exits `1`
+- `--force` — apply even when another process is using the SQLite file
+- `--database-url <url>`, `--json`
+
+Each delete is the engine's by-id delete in the system context. After the
+deletes the family is read again, and the run exits `1` when any row is still
+there: one whose delete was refused, or one a Console that still writes the
+family stored after the export. **Re-runnable**: a second run finds nothing,
+writes no export and exits `0`. It is never run for you; nothing on any boot,
+upgrade, migrate or lifecycle path invokes it. Run it once after the upgraded
+Console is serving (an older Console would write the rows again), and keep the
+export until you are certain the sweep was right: it is the only copy, and
+nothing reads it back into the platform.
 
 #### A database created by this version needs no migration
 
@@ -3067,13 +3230,16 @@ os verify --flow notify_on_new_case --flow-record '{"subject":"Printer jam"}'   
    on purpose. A write the app itself makes there, its seed or a hook or flow
    that a stage's write fires, goes where the app sends it, as under `os dev`.
    A declared managed datasource (`schemaMode: 'managed'`, or none declared) is
-   not connected to the database it names: verify runs it on a fresh in-memory
-   store, as it runs its own default one, so every write to its objects stays
-   in memory and they are still exercised. One whose engine has no in-memory
-   stand-in (`mongodb`, or a driver a plugin supplies) keeps its real driver,
-   and its objects are `skipped` as `managed datasource "NAME" (driver
-   "DRIVER"): not exercised`. Only verify's own writes are withheld: the app's
-   seed, hooks and flows still write to that real database. With `--rls`, a second fresh boot proves the
+   not connected to the database it names, on any engine the platform ships
+   (`mongodb` included): verify runs it on a fresh in-memory store, as it runs
+   its own default one, so every write to its objects, the app's seed, hooks
+   and flows included, stays in memory and they are exercised by every stage.
+   A managed datasource on a driver id the platform does not ship (a
+   plugin's, or a misspelling) cannot be stood in, so `os verify` refuses to
+   boot while one is declared: it names the datasource and the driver id and
+   exits 1. It refuses the same way when a plugin registers a driver of its
+   own under a managed datasource's name, whatever driver id the datasource
+   declares. There is no flag around either refusal. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
    probe persona and for one persona per declared position, and a hole fails
    the run. With `--reference-shapes`, another fresh boot proves that every
@@ -3436,7 +3602,13 @@ os register --url https://api.example.com
 
 In an interactive terminal, login uses a browser-based device flow by default:
 the CLI prints a one-time verification URL, opens the browser, and polls until
-you approve access in your browser.
+you approve access in your browser. The browser is opened only for an `http` or
+`https` URL written in plain URL characters, and without a shell; any other
+verification URL is printed but not opened, with a line saying so. Open it
+yourself only if you recognise it. Text the server supplies (the verification
+URL, the user code, an error) is printed as one line of printable characters,
+with control characters shown escaped and the length capped; `--json` records
+carry the server's fields as they are.
 
 ```bash
 os login
@@ -3535,7 +3707,10 @@ os cloud login --email me@acme.com --password secret   # CI
 ```
 
 Like `os login`, in an interactive terminal it uses the browser-based device
-flow: it prints a one-time verification URL and polls until you approve. If
+flow: it prints a one-time verification URL, opens it in the browser under the
+same rule as `os login` (only an `http` or `https` URL in plain URL characters,
+without a shell), prints the server's text as one line as `os login` does, and
+polls until you approve. If
 cloud credentials already exist it exits successfully with "Already logged in";
 pass `--force` to re-authenticate. Re-authenticating to the same control plane
 as the same account keeps the active environment recorded in `cloud.json`; a
@@ -3804,15 +3979,36 @@ environments can be registered side by side. `--url` skips ObjectOS Cloud: it
 takes the base URL of a self-hosted or local server (the command adds
 `/api/v1/mcp` itself and refuses a URL that already ends in it) and registers it
 as `objectstack`, the name `os dev`'s banner gives it. `--name` overrides either
-name.
+name. On both paths the URL must be an `http` or `https` URL with no user name
+or password, made only of letters, digits, `-`, `.`, `_`, `~`, `:`, `/`, `[` and
+`]` (an IPv6 host's brackets, and in a `--url` path prefix), so the printed line
+is safe to paste into a shell; the line double-quotes an address that holds a
+bracket, which sh-family shells read as a pattern. An address from the control
+plane must also be a bare host, with an optional scheme and port. Any other
+address is refused with exit 1, and nothing is registered or printed; the
+refusal names the characters accepted and a way on (for `--url`, run
+`claude mcp add --transport http NAME URL` yourself).
+
+Every string the control plane supplies that the command prints (the
+environment's name and id, an error text) is printed as one line of printable
+characters, with control characters shown escaped and the length capped. After
+the Endpoint, Name and Connect lines, nothing from the control plane is printed
+but those lines' own name and address.
 
 For Claude Code — the only `--client` value, and the default — the command runs
 `claude mcp add --transport http NAME URL`. `--print` prints the endpoint and that
 line and runs nothing, which is also how to connect any other client: add the
 endpoint as a remote HTTP MCP server in its settings. Then, in Claude Code, run
-`/mcp` and authenticate the server. If `claude` is not on your `PATH`, or
-`claude mcp add` fails (for a name already registered, `claude mcp remove NAME` or
-pick another `--name`), the command exits non-zero.
+`/mcp` and authenticate the server. `claude` is started without a shell. On
+Windows the command runs the `claude.exe` (or `claude.com`) that the first
+matching fully qualified `PATH` entry holds (rooted at a drive letter, or a UNC
+share); the current directory, relative entries and entries rooted at the
+current drive are not searched. If that entry holds a batch-file shim instead
+(`claude.cmd`, which an npm global install writes), the command does not run it
+and exits 1: run the printed `claude mcp add` line yourself, or install Claude
+Code's native Windows build and run `os mcp connect` again. If `claude` is not on
+your `PATH`, or `claude mcp add` fails (for a name already registered,
+`claude mcp remove NAME` or pick another `--name`), the command exits non-zero.
 
 **No token is stored.** The command hands the client the URL alone and writes no
 token into a client config. `-t, --token` (or the `os cloud login` session) is
@@ -3828,6 +4024,85 @@ the grant, use the environment's console: **Account → Connect an AI Assistant*
 | `--print` | — | Print the endpoint and the command that registers it; run nothing |
 | `-s, --server <url>` | `OS_CLOUD_URL` | Control-plane URL. Default `https://cloud.objectos.ai`, or the URL recorded by `os cloud login` |
 | `-t, --token <key>` | `OS_CLOUD_API_KEY` | Bearer token, used only to find the environment; `$OS_TOKEN` and `~/.objectstack/cloud.json` are the fallbacks |
+
+### Knowledge
+
+The administrator's view of the server's [knowledge sources](/docs/ai/knowledge-rag#the-first-build-and-rebuilding-a-source):
+what each source's index holds, and one complete rebuild of a source. Both
+commands call the `knowledge` settings actions (`POST /api/settings/knowledge/rebuild`
+and `/index_status`), which answer only an account with
+`manage_platform_settings`; any other caller is refused with `403` and is told
+nothing about the sources.
+
+| Command | Description |
+|---------|-------------|
+| `os knowledge status` | Each source's index state (built, never built, due a rebuild) and the last build the answering node ran, or that it holds none |
+| `os knowledge rebuild` | Start one complete build of a source on the server and follow its progress |
+
+#### `os knowledge status`
+
+```bash
+os knowledge status                    # every source
+os knowledge status support_articles   # one source
+```
+
+Prints, per source, its adapter and kind, its index state against what the
+server expects (and whether a build is due), and the last build the node that
+answered ran: its progress while it runs, its counts once it ended. A build's
+record lives in memory on the node that ran it, so behind a load balancer the
+node that answers may not be the one building, and a restarted node remembers
+none. When the answering node holds no record, the command says so: a build
+run on another node, or before a restart, is not shown. The index state is read
+from the store, and is the same on every node when the adapter's store is
+shared between nodes (`pgvector`); the `memory` adapter keeps its index in each
+process, so there each node answers for its own. Exits `1` with the server's
+refusal text when the action is refused.
+
+#### `os knowledge rebuild`
+
+```bash
+os knowledge rebuild support_articles            # start and follow to the end
+os knowledge rebuild support_articles --no-wait  # start, and return at once
+```
+
+**A build costs money:** every row the source's `where` matches is read, and the
+content fields of each one the index does not already hold unchanged are sent to
+the embedding provider, which bills for them. The build runs on the server in
+the background; the command reads the index state once before it starts the
+build, then reads `index_status` every `--interval` seconds and prints the
+build's progress until it ends.
+
+Behind a load balancer a progress read can land on a node that is not running
+the build and holds no record of it. That read is not a failure: the command
+falls back to the index state, which the store reports and which is the same on
+every node when the adapter's store is shared between nodes. When a build was
+due before the rebuild (never built, a new fingerprint, a changed recipe), the
+index turning `current` means a complete build recorded itself, and the command
+exits `0` without the build's counts. When no build was due (the index already
+`current`, or unreadable), the state cannot show when the build ends, and the
+command keeps polling until a read reaches the node running the build. On the
+`memory` adapter, whose index lives in each process, the index state is never
+read as the build's end: only the building node's record answers.
+
+It exits `0` when the build finished (its record says done, or the index turned
+`current`), and `1` when the server refused the rebuild (an unknown or `file`
+source, a build already running on that node), when the build's record says it
+did not run or did not finish, or when `--timeout` seconds of reads (counted as
+reads times `--interval`) reached no record of the build and did not see the
+index turn `current`; it then says the build may still be running and points
+at `os knowledge status`. A read that reaches the build's record starts the
+timeout again. `--no-wait` exits `0` once the build has
+started and reports no outcome: the build can still end without running
+(another node holds the source's lock) or fail, which only `os knowledge status`
+then shows.
+
+| Flag | Commands | Env equivalent | Purpose |
+|---|---|---|---|
+| `-u, --url <url>` | both | `OS_CLOUD_URL` | Server URL (default `http://localhost:3000`) |
+| `-t, --token <token>` | both | `OS_TOKEN` | Bearer token of an administrator |
+| `--no-wait` | `rebuild` | — | Return once the build has started; its outcome is not reported |
+| `--interval <s>` | `rebuild` | — | Seconds between two progress reads (default `2`) |
+| `--timeout <s>` | `rebuild` | — | Seconds of reads that reach no record of the build before it stops following and exits `1` (default `600`) |
 
 ### Skills
 
@@ -4228,7 +4503,7 @@ export default defineStack({
     name: 'My App',
     description: 'My ObjectStack application',
     // Protocol major this app is authored against (ADR-0087 load-time check).
-    engines: { protocol: '^18' },
+    engines: { protocol: '^19' },
   },
 
   objects: Object.values(objects),

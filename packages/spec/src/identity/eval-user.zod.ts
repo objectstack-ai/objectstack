@@ -121,6 +121,15 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
       allowDelete: true,
       viewAllRecords: true,
       modifyAllRecords: true,
+      // [Field-axis split, ruling of record 6912661484, letter A] The
+      // read-only "every field" vote. From protocol 19 the two record bits
+      // above widen records only and cast no field vote, so this bit is what
+      // keeps the platform administrator reading every field, one another set
+      // hides included. It votes read, never edit: a field another set locks
+      // stays locked for a holder of both. A field vote only: the
+      // PLATFORM_ADMIN posture (ADR-0095 D3) still derives from the two record
+      // bits, never from this one.
+      viewAllFields: true,
       // [#3544] Export is an OPT-IN grant and is deliberately NOT implied by
       // the super-user bits — "may see all data" and "may take a bulk copy of
       // it" are separable on purpose (SAP S_GUI 61 / segregation of duties).
@@ -169,6 +178,11 @@ export const ADMIN_FULL_ACCESS_CAPABILITIES: Pick<PermissionSet, 'objects' | 'sy
     // administrators (ruling B, record 6545223261); every other position only
     // by explicit grant.
     'manage_connector_connections',
+    // [ADR-0161 K4, ruling Q2 = B on #37304] The knowledge source capability:
+    // asked beside `manage_metadata` to create, change or remove a
+    // `knowledge_source`. Platform administrators hold it by default; every
+    // other position, organization administrators included, only by grant.
+    'manage_knowledge_sources',
   ],
 };
 

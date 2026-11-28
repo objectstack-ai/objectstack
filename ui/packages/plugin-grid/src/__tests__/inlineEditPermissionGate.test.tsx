@@ -153,7 +153,6 @@ function renderGrid(c: Case) {
     ...(c.noObjectName || c.objectViaDataConfig ? {} : { objectName: OBJECT }),
     ...(c.objectViaDataConfig ? { data: { provider: 'object', object: OBJECT } } : {}),
     ...(c.editable != null ? { editable: c.editable } : {}),
-    singleClickEdit: true,
     columns: [{ field: 'name', label: 'Name', type: 'text' }],
     pagination: { pageSize: 50 },
     ...(c.noObjectName ? { data: { provider: 'value', items: INLINE_ROWS } } : {}),
@@ -202,14 +201,6 @@ async function kebabOffersEdit(c: Case): Promise<boolean> {
   return screen.queryAllByTestId('row-action-builtin-edit').length > 0;
 }
 
-/** Header cell count — the observable for the save/cancel `rowActions` column. */
-async function headerCellCount(c: Case): Promise<number> {
-  const { container } = renderGrid(c);
-  await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
-  await waitFor(() => expect(screen.getByText('Row Two')).toBeInTheDocument());
-  return container.querySelectorAll('thead th').length;
-}
-
 beforeEach(() => {
   state.permUpdate = true;
   state.effectiveOps = undefined;
@@ -248,23 +239,6 @@ describe("ObjectGrid `editable` vs can(object, 'update') (#5143)", () => {
     expect(await kebabOffersEdit({ editable: true, permUpdate: true })).toBe(true);
     cleanup();
     expect(await entersEditState({ editable: true, permUpdate: true })).toBe(true);
-  });
-
-  it('e — the save/cancel column follows the same verdict, so the gated grid IS the non-editable grid', async () => {
-    // `rowActions` exists only to carry inline-edit save/cancel. Left on the
-    // raw schema key it would render a permanently empty trailing column for a
-    // read-only principal — a shape no grid has today. The gated grid must be
-    // column-for-column identical to one that never asked to be editable.
-    const editableWithGrant = await headerCellCount({ editable: true, permUpdate: true });
-    cleanup();
-    const editableNoGrant = await headerCellCount({ editable: true, permUpdate: false });
-    cleanup();
-    const neverEditable = await headerCellCount({ permUpdate: true });
-
-    expect(editableNoGrant).toBe(neverEditable);
-    // Control: the column really is observable, so the equality above is not a
-    // probe that cannot tell the two shapes apart.
-    expect(editableWithGrant).toBe(neverEditable + 1);
   });
 });
 

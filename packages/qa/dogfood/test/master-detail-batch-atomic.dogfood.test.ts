@@ -76,7 +76,7 @@ describe('records-forms.master-detail-atomic-save — the atomic batch and the s
     const name = uniq('mda-ok');
     const res = await call('POST', '/batch', {
       operations: [
-        { object: INVOICE, action: 'create', data: { name, account: accountId, status: 'draft' } },
+        { object: INVOICE, action: 'create', data: { name, account: accountId, status: 'draft', currency_code: 'USD' } },
         { object: LINE, action: 'create', data: { invoice: { $ref: 0 }, product: widget.id, description: widget.description, quantity: 2, unit_price: widget.unit_price, amount: 1 } },
         { object: LINE, action: 'create', data: { invoice: { $ref: 0 }, product: service.id, description: service.description, quantity: 3, unit_price: service.unit_price } },
       ],
@@ -108,7 +108,7 @@ describe('records-forms.master-detail-atomic-save — the atomic batch and the s
     const marker = uniq('mda-sibling');
     const res = await call('POST', '/batch', {
       operations: [
-        { object: INVOICE, action: 'create', data: { name, account: accountId, status: 'draft' } },
+        { object: INVOICE, action: 'create', data: { name, account: accountId, status: 'draft', currency_code: 'USD' } },
         { object: LINE, action: 'create', data: { invoice: { $ref: 0 }, product: widget.id, description: marker, quantity: 1, unit_price: 5 } },
         // The failing child: product is required.
         { object: LINE, action: 'create', data: { invoice: { $ref: 0 }, description: `${marker}-bad`, quantity: 1, unit_price: 5 } },

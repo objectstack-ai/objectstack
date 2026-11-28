@@ -176,7 +176,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "حظر المستخدم",
-        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر.",
+        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر. يؤدي الحظر أيضًا إلى تعليق حسابات خدمة الذكاء الاصطناعي التي يكون مسؤولًا عنها، وتعطيل تطبيقات OAuth التي سجّلها، وإلغاء بيانات اعتماد SCIM التي أصدرها؛ ولا يعيد رفع الحظر أيًا من ذلك.",
         successMessage: "تم حظر المستخدم",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             helpText: "المستخدم الذي يتبع له هذا الشخص. يرفض الخادم مديرًا من خارج مؤسسته، وتعيين الشخص مديرًا لنفسه، وأي ربط من شأنه أن يُغلق سلسلة التبعية الإدارية في حلقة أو يزيد عمقها عن الحد."
           }
         }
+      },
+      remove_user_manager: {
+        label: "إزالة المدير",
+        confirmText: "هل تريد إزالة مدير هذا المستخدم؟ لن يتبع أحدًا حتى يُعيَّن مدير من جديد، ويتبع توجيه الموافقات ونطاق السجلات own_and_reports هذا التغيير.",
+        successMessage: "تمت إزالة المدير"
       },
       list_platform_admins: {
         label: "مسؤولو المنصة",
@@ -491,6 +496,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "سبب الإلغاء",
         help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، ip_not_allowed، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
+      },
+      sso_provider_id: {
+        label: "مزوّد SSO",
+        help: "مزوّد SSO الذي سُجّل الدخول من خلاله في هذه الجلسة، إن وُجد. حذف ذلك المزوّد يُنهي الجلسة. يُدار من قِبل النظام."
       },
       active_organization_id: {
         label: "المؤسسة النشطة"
@@ -4496,6 +4505,42 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "تقويم العمل",
     pluralLabel: "تقويمات العمل",
@@ -4616,6 +4661,91 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           title: "لا توجد استثناءات تقويم بعد",
           message: "أضف صفًا لكل عطلة أو يوم عمل تعويضي، أو استورد سنة كاملة منها من ملف."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "مهمة",
+    pluralLabel: "المهام",
+    description: "أمور يجب إنجازها، مع مسؤول وموعد استحقاق.",
+    fields: {
+      title: {
+        label: "العنوان"
+      },
+      description: {
+        label: "الوصف"
+      },
+      status: {
+        label: "الحالة",
+        options: {
+          todo: "قيد الانتظار",
+          in_progress: "قيد التنفيذ",
+          done: "مكتملة"
+        }
+      },
+      due_at: {
+        label: "موعد الاستحقاق"
+      },
+      assignee_id: {
+        label: "المسؤول"
+      },
+      completed_at: {
+        label: "وقت الإكمال",
+        help: "تكتبه المنصة عندما تصبح الحالة مكتملة، وتمسحه عندما تتغير عنها."
+      },
+      owner_id: {
+        label: "المالك"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "المسندة إليّ",
+        emptyState: {
+          title: "لا توجد مهام مسندة إليك",
+          message: "تظهر هنا المهام المفتوحة المسندة إليك."
+        }
+      },
+      created_by_me: {
+        label: "التي أنشأتُها",
+        emptyState: {
+          title: "لا توجد مهام بعد",
+          message: "تظهر هنا المهام التي تنشئها."
+        }
+      },
+      all: {
+        label: "كل المهام"
+      }
+    }
+  },
+  sys_note: {
+    label: "ملاحظة",
+    pluralLabel: "الملاحظات",
+    description: "ملاحظات: عنوان ونص منسّق.",
+    fields: {
+      title: {
+        label: "العنوان"
+      },
+      body: {
+        label: "النص"
+      },
+      heading: {
+        label: "العنوان المعروض",
+        help: "العنوان، أو السطر الأول من النص عندما يكون العنوان فارغًا. تحافظ عليه المنصة."
+      },
+      owner_id: {
+        label: "المالك"
+      }
+    },
+    _views: {
+      mine: {
+        label: "ملاحظاتي",
+        emptyState: {
+          title: "لا توجد ملاحظات بعد",
+          message: "تظهر هنا الملاحظات التي تكتبها."
+        }
+      },
+      all: {
+        label: "كل الملاحظات"
       }
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/example-showcase",
-  "version": "0.3.28",
+  "version": "0.3.29-next.2",
   "description": "Kitchen-sink showcase workspace — exercises every metadata type, every view type, every chart type, and the major end-to-end capability chains (security, automation, analytics). Built for demonstration, debugging, and coverage-driven verification.",
   "license": "Apache-2.0",
   "private": true,
@@ -30,11 +30,14 @@
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/connector-slack": "workspace:*",
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/knowledge-memory": "workspace:*",
     "@objectstack/organizations": "workspace:*",
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-print": "workspace:*",
+    "@objectstack/service-record-context": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

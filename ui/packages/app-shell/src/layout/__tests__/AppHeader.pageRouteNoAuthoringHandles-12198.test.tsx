@@ -244,7 +244,7 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
   );
   // The pill and its menu content rendered — so an absent row is a reading.
   expect(screen.getByTestId('app-switcher-trigger')).toBeInTheDocument();
-  expect(screen.getByTestId('app-switcher-all-apps')).toBeInTheDocument();
+  expect(screen.getByTestId('app-switcher-home')).toBeInTheDocument();
   // objectui#12615 — the bar's entries wait on the package list's verdict; one
   // macrotask lets every read the stub answers settle before they are read.
   await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -254,7 +254,10 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
 
   // The page under the app the top bar resolved — the same app document, as
   // the console mounts it — so the two halves read the same inputs
-  // (objectui#12540).
+  // (objectui#12540). At a phone's width: the floating pencil is the phone's
+  // face since objectstack#36111 (from the phone breakpoint up the page's
+  // header carries the shell's 「Edit app」, `ShellPageActions-36111`).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   const page = render(
     <MePermissionsProvider initialPermissions={perms}>
       <ExpressionProvider user={EXPRESSION_USER} app={CLOUD_APP}>
@@ -271,6 +274,7 @@ async function studioEntriesOnPageRoute(perms: MePermissionsResponse): Promise<S
   if (pencilEl) fireEvent.click(pencilEl);
   const pencil = pencilEl ? String(navigateSpy.mock.calls.at(-1)?.[0] ?? '') : null;
   page.unmount();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
 
   return {
     'page-edit-in-studio-button': pencil,
@@ -301,7 +305,7 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () =>
         String(url).endsWith('/api/v1/packages')
@@ -335,7 +339,7 @@ describe('a page offers no Studio entry to a caller without `manage_metadata` (o
 
   it('CONTROL — a workspace admin holding `manage_metadata` sees all three, all three to one target', async () => {
     const seen = await studioEntriesOnPageRoute(AUTHOR);
-    expect(seen['app-design-in-studio-button']).toBe('/studio/com.objectstack.cloud/interfaces?surface=page:welcome');
+    expect(seen['app-design-in-studio-button']).toBe('/studio/com.objectstack.cloud/metadata/page/welcome');
     // The page's pencil opened the metadata-admin page until objectui#12540.
     expect(seen['page-edit-in-studio-button']).toBe(seen['app-design-in-studio-button']);
     expect(seen['app-switcher-edit-in-studio']).toBe(seen['app-design-in-studio-button']);

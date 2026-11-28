@@ -32,7 +32,7 @@ import { omitSideCopyFromCopy } from './side-copy-columns.js';
 // `nameField` — the same argument the SECRET_MASK import above makes.
 // [#22738] `canServeApiOperation` is the spec's one exposure decision (ADR-0049),
 // asked of a referenced object before its title is read into a summary.
-import { canServeApiOperation, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
+import { canServeApiOperation, resolveFieldHistory, referenceTargetOf, resolveDisplayField } from '@objectstack/spec/data';
 // [#22510] The acting user's object, named by the registry constant rather
 // than a literal — `sys_activity.actor_name` is resolved from its title.
 import { SystemObjectName } from '@objectstack/spec/system';
@@ -97,7 +97,9 @@ import type { MentionGateInput } from './mention-recipient-gate.js';
 import {
   MENTION_EMAIL_CHANNEL,
   MENTION_TOPIC,
+  REPLY_TOPIC,
   mentionEmailDedupKey,
+  replyEmailDedupKey,
   type MentionBuiltinTemplate,
 } from './mention-email.js';
 // [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
@@ -114,6 +116,8 @@ import {
   ACTIVITY_SUMMARY_MESSAGE_KEY,
   composeStoredSummary,
   englishBooleanWord,
+  milestoneTokenNames,
+  milestoneTokenRe,
   withEnglishMessages,
   type ActivitySummaryFieldChange,
   type ActivitySummaryLocale,
@@ -927,10 +931,11 @@ function displayFieldValue(
   optionLabelFor?: (optionValue: string) => string | undefined,
 ): string {
   const shown = summaryValueOf(field, value, titlesFor);
-  // A milestone's sentence is the author's, in the author's language, and is
-  // never re-composed per reader (#7290): an English yes/no word interpolated
-  // into it would be the very mixed-language sentence the field-change wording
-  // removes, so a boolean token keeps rendering its stored value here.
+  // A milestone's sentence is composed in the author's language at write time;
+  // a reader's translation, when its locale carries one, is re-rendered from the
+  // `_milestones` key on the feed (`activity-summary-message.ts`). An English
+  // yes/no word interpolated here would be the very mixed-language sentence the
+  // field-change wording removes, so a boolean token keeps its stored value.
   if (shown.boolean !== undefined) return String(value);
   return shown.option !== undefined ? (optionLabelFor?.(shown.option) ?? shown.text) : shown.text;
 }
@@ -985,12 +990,13 @@ function planTrackedLookupReads(
   fields: Record<string, any> | undefined | null,
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
+  showsValues: ChangeValuesShown,
 ): Map<string, Set<string>> {
   const byObject = new Map<string, Set<string>>();
   if (!fields || !newVals) return byObject;
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     if (typeof field.type !== 'string' || !REFERENCE_FIELD_TYPES.has(field.type)) continue;
     const reference = referenceTargetForSummary(field);
     if (!reference) continue;
@@ -1027,8 +1033,10 @@ function planLabelLookupRead(
 }
 
 /**
- * ADR-0052 §5b — declarative activity. For fields declared `trackHistory: true`,
- * render the diff the writer already captured as a human-readable timeline
+ * ADR-0052 §5b — declarative activity. For every changed field whose values
+ * are shown ({@link changeValuesShownFor}: on unless the object or the field
+ * turns them off, #36290), render the diff the writer already captured as a
+ * human-readable timeline
  * summary ("Stage: Proposal → Closed Won"; multiple changes joined by "; "),
  * using the field label, select option labels and referenced record titles.
  * Returns null when no tracked field changed, so the caller falls back to the
@@ -1069,24 +1077,109 @@ function renderTrackedChangeSummary(
   oldVals: Record<string, any> | null,
   newVals: Record<string, any> | null,
   locale: ActivitySummaryLocale,
+  showsValues: ChangeValuesShown,
   lookupTitles?: Map<string, Map<string, string>>,
+  maxLength?: number,
 ): { text: string; fields: string[]; message: ActivitySummaryMessage } | null {
   if (!fields || !newVals) return null;
   const changes: ActivitySummaryFieldChange[] = [];
   for (const key of Object.keys(newVals)) {
     const field = fields[key];
-    if (!field || field.trackHistory !== true) continue;
+    if (!field || !showsValues(key, field)) continue;
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
     changes.push({
       field: key,
-      from: summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor),
-      to: summaryValueOf(field, newVals[key], titlesFor),
+      from: boundedChangeValue(summaryValueOf(field, oldVals ? oldVals[key] : undefined, titlesFor), MAX_CHANGE_VALUE_TEXT),
+      to: boundedChangeValue(summaryValueOf(field, newVals[key], titlesFor), MAX_CHANGE_VALUE_TEXT),
     });
   }
   if (changes.length === 0) return null;
   const message: ActivitySummaryMessage = { key: 'fieldChanges', object: objectName, changes };
-  return { text: composeStoredSummary(message, locale), fields: changes.map((c) => c.field), message };
+  return { text: fitStoredChangeSummary(message, locale, maxLength), fields: changes.map((c) => c.field), message };
+}
+
+/**
+ * [#36290] Whether a changed field's old → new VALUES are rendered: the
+ * predicate {@link changeValuesShownFor} builds for one object.
+ */
+type ChangeValuesShown = (key: string, field: any) => boolean;
+
+/**
+ * [#36290, ruling 7076513167] ADR-0052 §5b.1 with its default reversed: a
+ * changed field's old → new values render on the record's activity stream
+ * unless the object turns it off (`enable.fieldHistory: false`) or the field
+ * does (its own `fieldHistory: false`). An absent flag is on. Neither
+ * `trackHistory` turns values off: the object's keeps its own meaning (the
+ * ledger view and the `history` verb) and a parsed body materializes it as
+ * `false` on every object with an `enable` block; the field's `false` was
+ * written by the field designer on every save while it meant nothing, so a
+ * stored one cannot be told from a choice and reads like an absent key. A
+ * field's `trackHistory: true` still forces a no-line type on. A credential
+ * field never renders values, and a no-line type only when it opts in.
+ *
+ * [#36482] The rule itself is `resolveFieldHistory` in
+ * `@objectstack/spec/data`, beside the no-line type list: the metadata form
+ * asks the same predicate what an unset `fieldHistory` resolves to, so the
+ * default it shows cannot drift from what this writer keeps.
+ *
+ * Who may READ the values is not decided here: the row is redacted per reader,
+ * field by field (`activity-field-redaction.ts`).
+ */
+function changeValuesShownFor(objectDef: any): ChangeValuesShown {
+  return (_key, field) => resolveFieldHistory(field, objectDef);
+}
+
+/**
+ * [#36290] The longest text one side of a field change keeps in the stored
+ * code. The code is what a reader's record page draws each change from, so a
+ * long text keeps enough to read; bounded so one edit of a long text field
+ * cannot grow the row without limit.
+ */
+const MAX_CHANGE_VALUE_TEXT = 1000;
+
+/**
+ * [#36290] How long one side of a change may be inside the STORED one-line
+ * summary when the full sentence does not fit `sys_activity.summary`'s
+ * `maxLength`.
+ */
+const FITTED_CHANGE_VALUE_TEXT = 60;
+
+/** `value` with its text cut to `max` characters (an ellipsis marks the cut). */
+function boundedChangeValue(value: ActivitySummaryValue, max: number): ActivitySummaryValue {
+  if (value.text.length <= max) return value;
+  return { ...value, text: `${value.text.slice(0, Math.max(0, max - 1))}…` };
+}
+
+/**
+ * [#36290] The stored sentence for a field-change code, fitted to
+ * `sys_activity.summary`'s `maxLength` (the SQL driver sizes the column
+ * `varchar(n)` from it, so an over-long text fails the whole activity insert).
+ * With values on by default one save can change many fields, or one long
+ * text, so the tracked branch is fitted as the changed-fields branch is: first
+ * each side is cut to {@link FITTED_CHANGE_VALUE_TEXT} characters, then
+ * trailing changes are left out, then the sentence itself is cut. The code
+ * keeps every change, so a reader's language re-composes the whole of it.
+ */
+function fitStoredChangeSummary(
+  message: Extract<ActivitySummaryMessage, { key: 'fieldChanges' }>,
+  locale: ActivitySummaryLocale,
+  maxLength: number | undefined,
+): string {
+  const full = composeStoredSummary(message, locale);
+  if (maxLength === undefined || full.length <= maxLength) return full;
+  const cut = message.changes.map((c) => ({
+    field: c.field,
+    from: boundedChangeValue(c.from, FITTED_CHANGE_VALUE_TEXT),
+    to: boundedChangeValue(c.to, FITTED_CHANGE_VALUE_TEXT),
+  }));
+  for (let shown = cut.length; shown >= 1; shown -= 1) {
+    const text = composeStoredSummary({ ...message, changes: cut.slice(0, shown) }, locale);
+    const tail = shown < cut.length ? '; …' : '';
+    if (text.length + tail.length <= maxLength) return `${text}${tail}`;
+  }
+  const one = composeStoredSummary({ ...message, changes: cut.slice(0, 1) }, locale);
+  return `${one.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 /**
@@ -1101,8 +1194,9 @@ const MAX_NAMED_CHANGED_FIELDS = 5;
  * changed: before this, the row said only `Updated <object> "<label>"`, so a
  * record a rollup or flow bumps repeatedly showed a wall of identical entries
  * nobody could read. `trackHistory` still governs what it always did — whether
- * a field's old → new VALUES are rendered (ADR-0052 §5b.1); an untracked
- * field's value never reaches the text, only its label does.
+ * a field's old → new VALUES are rendered (ADR-0052 §5b.1, on unless turned off
+ * since #36290); a field whose values are off never reaches the text with its
+ * value, only its label does.
  *
  * Names fields in declaration order (keys the definition does not carry come
  * after, by key), at most {@link MAX_NAMED_CHANGED_FIELDS}, then counts the
@@ -1151,17 +1245,6 @@ function renderChangedFieldsSummary(
 }
 
 /**
- * [#7290] The `{token}` pattern of an `activityMilestones` summary template.
- *
- * A FRESH instance per call, deliberately: a module-level `/g` regex carries
- * `lastIndex` between callers, and this one is read twice per fired milestone
- * (once to plan the reads, once to render). One definition, no shared cursor.
- */
-function milestoneTokenRe(): RegExp {
-  return /\{(\w+)\}/g;
-}
-
-/**
  * ADR-0052 §5b.2 — declarative semantic milestones. If a watched field
  * transitioned INTO a configured `value` on this update (before ≠ value, after =
  * value), return the matched summary TEMPLATE (and optional activity type).
@@ -1192,7 +1275,7 @@ function matchMilestone(
   objectDef: any,
   before: Record<string, any> | null,
   after: Record<string, any> | null,
-): { template: string; type?: string; watched: string[] } | null {
+): { template: string; field: string; value: string; type?: string; watched: string[] } | null {
   const milestones =
     objectDef && Array.isArray(objectDef.activityMilestones) ? objectDef.activityMilestones : null;
   if (!milestones || !after || !before) return null;
@@ -1202,6 +1285,10 @@ function matchMilestone(
     if (after[m.field] === m.value && before[m.field] !== m.value) {
       return {
         template: m.summary,
+        // [#37524] The pair the milestone is addressed by in the translation
+        // bundle (`objects.<o>._milestones.<field>.<value>.summary`).
+        field: m.field,
+        value: String(m.value),
         type: typeof m.type === 'string' ? m.type : undefined,
         // [ADR-0139 E6] The same list the read rule keys the CURRENT
         // declaration by, from the same function.
@@ -1283,9 +1370,9 @@ function planMilestoneTokenReads(
  * is locale-INDEPENDENT: `usr_1` → `张伟` is the record's own datum, the same
  * string in every locale, so it could be added to an untranslated sentence
  * without giving that sentence a locale. An option label is locale-DEPENDENT
- * rendering, and a milestone template is an author-written sentence with NO
- * bundle key of its own — #7290 ruled translating templates a contract decision
- * and left it. So the author's own option label is the only rendering
+ * rendering, and the stored row is the author's template in the author's
+ * language (a reader's translation, when one exists, is rendered on the feed from
+ * `_milestones`, not here). So the author's own option label is the only rendering
  * guaranteed to agree with the sentence around it: template and option label are
  * both authored metadata, in one language, by one author. Reading the bundle
  * here would GUARANTEE a split sentence (`Deal moved to 已赢单`) in exactly the
@@ -1307,19 +1394,29 @@ function renderMilestoneSummary(
   fields: Record<string, any> | undefined | null,
   after: Record<string, any> | null,
   lookupTitles?: Map<string, Map<string, string>>,
-): { text: string; fields: string[] } {
+): { text: string; fields: string[]; tokens: Record<string, ActivitySummaryValue> } {
   const interpolated = new Set<string>();
+  // [#37524] Each interpolated token's value, as a field change stores one:
+  // the text rendered here and the option it matched, so a reader's
+  // composition names the option in the reader's language.
+  const tokens: Record<string, ActivitySummaryValue> = {};
   const text = template.replace(milestoneTokenRe(), (_match: string, key: string) => {
     const v = after ? after[key] : undefined;
     if (v === null || v === undefined || v === '') return '';
     interpolated.add(key);
     const field = fields ? fields[key] : undefined;
-    if (!field) return String(v);
+    if (!field) {
+      tokens[key] = { text: String(v) };
+      return String(v);
+    }
     const reference = referenceTargetForSummary(field);
     const titlesFor = reference ? lookupTitles?.get(reference) : undefined;
-    return displayFieldValue(field, v, titlesFor);
+    const shown = displayFieldValue(field, v, titlesFor);
+    const value = summaryValueOf(field, v, titlesFor);
+    tokens[key] = value.option !== undefined ? { text: shown, option: value.option } : { text: shown };
+    return shown;
   });
-  return { text, fields: [...interpolated] };
+  return { text, fields: [...interpolated], tokens };
 }
 
 /**
@@ -2541,8 +2638,9 @@ export function installAuditWriters(
     // and the read side composes it in the READER's language
     // (`activity-summary-message.ts`). The stored `summary` is the English
     // sentence, the fallback text for every reader that composition does not
-    // reach, so no write asks for a locale. A fired milestone's author-written
-    // template has no code and stays as written.
+    // reach, so no write asks for a locale. A fired milestone's stored text is
+    // its author-written template rendered as written; [#37524] its code names
+    // the milestone, so a reader's language may translate the template.
     const writeLocale = storedSummaryLocale;
     let summary: string;
     let summaryMessage: ActivitySummaryMessage | undefined;
@@ -2589,6 +2687,19 @@ export function installAuditWriters(
         const rendered = renderMilestoneSummary(milestone.template, summaryFields, afterView, lookupTitles);
         summary = rendered.text;
         summarySources = rendered.fields;
+        // [#37524] The row's code: which milestone fired and its token values.
+        // The stored `summary` stays the authored sentence; a reader whose
+        // language translates this milestone reads it composed in that language.
+        summaryMessage = {
+          key: 'activityMilestone',
+          object: ctx.object,
+          field: milestone.field,
+          value: milestone.value,
+          tokens: rendered.tokens,
+          // [#37635] Every token the fired template held, so a reader can tell
+          // an empty one from one the template gains later.
+          names: milestoneTokenNames(milestone.template),
+        };
         if (milestone.type) activityType = milestone.type;
         // [#22771] `type` stays what the declaration names; the row says it is
         // a milestone in `metadata.kind`, so a "Case resolved" milestone of
@@ -2600,9 +2711,11 @@ export function installAuditWriters(
         // that changes no tracked reference field issues no read at all. The
         // titles are read as the WRITER (see `resolveLookupTitles`): each side
         // of a change names a title the writer may read, else the stored id.
+        // [#36290] Values render unless the object or the field turns them off.
+        const showsValues = changeValuesShownFor(getObjectDef(ctx.object));
         const lookupTitles = await resolveLookupTitles(
           api,
-          planTrackedLookupReads(summaryFields, oldValue, newValue),
+          planTrackedLookupReads(summaryFields, oldValue, newValue, showsValues),
         );
         const tracked = renderTrackedChangeSummary(
           ctx.object,
@@ -2610,7 +2723,9 @@ export function installAuditWriters(
           oldValue,
           newValue,
           writeLocale,
+          showsValues,
           lookupTitles,
+          activitySummaryMaxLength(),
         );
         if (tracked) {
           summary = tracked.text;
@@ -2888,6 +3003,21 @@ export function installAuditWriters(
    * the capability opt-in this card restores.
    */
 
+  /**
+   * A comment notice's Console page under the deployment's address
+   * (`mention-email.ts`): the inbox notice's own link (`commentRecordPath`),
+   * absolute through `getConsoleUrl` when it answers. No record, no link —
+   * and no e-mail.
+   */
+  const consoleCommentUrl = (recordPath: string | null): string | null => {
+    if (!recordPath) return null;
+    try {
+      return opts.getConsoleUrl?.(recordPath) || recordPath;
+    } catch {
+      return recordPath;
+    }
+  };
+
   /** Said once: a writer composed without the mention gate emits no mention notification. */
   let warnedNoMentionGate = false;
   /**
@@ -2906,20 +3036,24 @@ export function installAuditWriters(
    * `ctx.input.options`, the caller's bag), which the data protocol answers to
    * the author as `withheldMentions`; nothing is stored on the comment.
    */
-  const writeCommentMentions = async (ctx: HookContext) => {
-    if (ctx.object !== 'sys_comment') return;
-    if (ctx.event !== 'afterInsert' && ctx.event !== 'afterUpdate') return;
+  const writeCommentMentions = async (ctx: HookContext): Promise<ReadonlySet<string>> => {
+    // [#36074] Every user this write's mentions name, as entered and as the
+    // gate resolved them: the reply notice skips each (they get this notice).
+    const named = new Set<string>();
+    if (ctx.object !== 'sys_comment') return named;
+    if (ctx.event !== 'afterInsert' && ctx.event !== 'afterUpdate') return named;
     const messaging = getMessaging();
-    if (!messaging) return; // no pipeline installed → no mention notifications
+    if (!messaging) return named; // no pipeline installed → no mention notifications
     const row: any = ctx.result;
-    if (!row || typeof row !== 'object') return;
+    if (!row || typeof row !== 'object') return named;
 
     let mentioned = parseCommentMentions(row.mentions);
     if (ctx.event === 'afterUpdate') {
       const before = new Set(parseCommentMentions((ctx as any).previous?.mentions));
       mentioned = mentioned.filter((m) => !before.has(m));
     }
-    if (mentioned.length === 0) return;
+    for (const m of mentioned) named.add(m);
+    if (mentioned.length === 0) return named;
 
     const [source_object, source_id] = String(row.thread_id ?? '').split(':');
     const sess: any = (ctx as any).session ?? {};
@@ -2937,21 +3071,27 @@ export function installAuditWriters(
       actorName = api?.sudo ? (await resolveActorSnapshot(api, editorId)).name : null;
     }
     const bodyPreview = String(row.body ?? '').slice(0, 240);
-    // The mention e-mail's link (`mention-email.ts`): the record the comment
-    // is on — the inbox notice's own `/{object}/{id}` link — as a Console page
-    // under the deployment's address. No record, no e-mail: a mail with no
-    // way back to the thread is not worth the daily mail budget.
-    const recordPath = source_object && source_id ? `/${source_object}/${source_id}` : null;
-    let mentionUrl: string | null = null;
-    if (recordPath) {
-      try {
-        mentionUrl = opts.getConsoleUrl?.(recordPath) || recordPath;
-      } catch {
-        mentionUrl = recordPath;
-      }
-    }
     const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
     const commentId = row.id != null ? String(row.id) : null;
+    // [#36410] The notice opens the record with its comment panel at this
+    // comment's thread: a top-level comment is its own thread; a mention in a
+    // reply walks up to the reply's top-level comment. A walk that fails or
+    // finds no root links the record alone, as before.
+    const parentId = row.parent_id != null && String(row.parent_id) ? String(row.parent_id) : null;
+    let rootId: string | null = parentId ? null : commentId;
+    if (parentId) {
+      try {
+        rootId = await readThreadRootId(engine, parentId, String(row.thread_id ?? ''));
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('Mention thread root read failed; the notice links the record alone', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      }
+    }
+    const mentionPath = commentRecordPath(source_object, source_id, rootId, commentId);
+    // The mention e-mail's link (`mention-email.ts`): the inbox notice's own
+    // link as a Console page under the deployment's address. No record, no
+    // e-mail: a mail with no way back to the thread is not worth the daily
+    // mail budget.
+    const mentionUrl = consoleCommentUrl(mentionPath);
 
     // The notification is a copy of the comment (its preview) and a link to
     // the record, so it reaches only a mentioned user who can READ both the
@@ -2967,7 +3107,7 @@ export function installAuditWriters(
           );
         } catch {}
       }
-      return;
+      return named;
     }
     const withheld: string[] = [];
     let userIds: string[];
@@ -2982,8 +3122,9 @@ export function installAuditWriters(
       });
     } catch (err) {
       try { (engine as any).logger?.warn?.('Mention recipient gate failed; no mention notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
-      return;
+      return named;
     }
+    for (const uid of [...userIds, ...withheld]) named.add(uid);
     // [#27703] The gate's own verdict, to the write that asked for it: the
     // author learns which of the users they named will not be notified. Ids
     // only — the reason stays in the log line the gate already wrote.
@@ -3019,6 +3160,10 @@ export function installAuditWriters(
             title,
             body: bodyPreview,
             actorName,
+            // [#36410] The inbox row's link (its `action_url`): the record
+            // with the comment panel at this comment. Absent with no record,
+            // where messaging derives none either.
+            ...(mentionPath ? { url: mentionPath } : {}),
           },
         });
         // The e-mail (`mention-email.ts`): a second emit through the same
@@ -3052,12 +3197,144 @@ export function installAuditWriters(
         try { (engine as any).logger?.warn?.('Mention notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
       }
     }
+    return named;
   };
+
+  /** Said once: a writer composed without the recipient gate emits no reply notice. */
+  let warnedNoReplyGate = false;
+  /**
+   * [#36074] A reply notifies the thread's starter and everyone who replied in
+   * it before: the same inbox notice and e-mail as a mention, under
+   * `collab.reply` (`mention-email.ts`), to the people
+   *
+   *  - the thread names: the author of each comment up the reply's `parent_id`
+   *    chain — its top-level comment's author is the starter — and every
+   *    distinct author of a reply to that top-level comment, read as ONE
+   *    grouped query (`author_id … WHERE parent_id = ? GROUP BY author_id`,
+   *    on the `parent_id` index), never the thread's rows into memory;
+   *  - minus the reply's author, and minus everyone this reply's mentions name
+   *    (`mentioned`): they get the mention notice, not two;
+   *  - judged by the mention recipient gate (`admitMentionRecipients`), so
+   *    each reaches only a person who can READ the record and this reply,
+   *    judged in their own envelope.
+   *
+   * Only a NEW reply notifies: an edit of a reply (`afterUpdate`) or a
+   * top-level comment notifies no participant. The author is never told who
+   * was withheld — that answer is the mention's (`onMentionsWithheld`), whose
+   * author named the people.
+   */
+  const writeCommentReplyNotices = async (ctx: HookContext, mentioned: ReadonlySet<string>): Promise<void> => {
+    if (ctx.object !== 'sys_comment' || ctx.event !== 'afterInsert') return;
+    const row: any = ctx.result;
+    if (!row || typeof row !== 'object') return;
+    const parentId = row.parent_id != null && String(row.parent_id) ? String(row.parent_id) : null;
+    if (!parentId) return;
+    const messaging = getMessaging();
+    if (!messaging) return;
+    if (!opts.admitMentionRecipients) {
+      if (!warnedNoReplyGate) {
+        warnedNoReplyGate = true;
+        try {
+          (engine as any).logger?.warn?.(
+            '[audit] no comment recipient gate is composed — reply notifications are not emitted. '
+              + 'AuditPlugin wires one; a host calling installAuditWriters directly passes `admitMentionRecipients`.',
+          );
+        } catch {}
+      }
+      return;
+    }
+    const commentId = row.id != null ? String(row.id) : null;
+    const actorId: string | null = row.author_id != null ? String(row.author_id) : null;
+    const actorName: string | null = row.author_name ?? null;
+
+    let thread: CommentThreadParticipants | null;
+    try {
+      thread = await readThreadParticipants(engine, parentId, String(row.thread_id ?? ''));
+    } catch (err) {
+      try { (engine as any).logger?.warn?.('Reply participants read failed; no reply notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      return;
+    }
+    if (!thread) return;
+    const candidates = thread.participants.filter((uid) => uid !== actorId && !mentioned.has(uid));
+    if (candidates.length === 0) return;
+
+    const sess: any = (ctx as any).session ?? {};
+    const tenantId: string | null = sess.organizationId ?? row.organization_id ?? null;
+    let userIds: string[];
+    try {
+      userIds = await opts.admitMentionRecipients({
+        mentions: candidates,
+        threadId: row.thread_id,
+        actorId,
+        organizationId: row.organization_id ?? tenantId,
+        commentId,
+        notice: 'reply',
+      });
+    } catch (err) {
+      try { (engine as any).logger?.warn?.('Reply recipient gate failed; no reply notifications emitted', { commentId, err: String((err as any)?.message ?? err) }); } catch {}
+      return;
+    }
+
+    const [source_object, source_id] = String(row.thread_id ?? '').split(':');
+    // [#36410] The notice opens the record with its comment panel at the
+    // thread's top-level comment, scrolled to this reply.
+    const replyPath = commentRecordPath(source_object, source_id, thread.rootId, commentId);
+    const replyUrl = consoleCommentUrl(replyPath);
+    const bodyPreview = String(row.body ?? '').slice(0, 240);
+    for (const uid of userIds) {
+      try {
+        const tr = translateWith(await resolveWriteLocale(tenantId ?? undefined, uid));
+        const title = !actorName
+          ? (tr('messages.repliedAnonymous') ?? 'Someone replied to a comment')
+          : uid === thread.starterId
+            ? (tr('messages.repliedToYourComment', { actor: actorName }) ?? `${actorName} replied to your comment`)
+            : (tr('messages.repliedInYourThread', { actor: actorName }) ?? `${actorName} replied in a comment thread you are in`);
+        await messaging.emit({
+          topic: REPLY_TOPIC,
+          audience: [uid],
+          severity: 'info',
+          source: source_object ? { object: source_object, id: source_id ?? '' } : undefined,
+          actorId: actorId ?? undefined,
+          organizationId: tenantId ?? undefined,
+          dedupKey: commentId ? `${REPLY_TOPIC}:${commentId}:${uid}` : undefined,
+          payload: { title, body: bodyPreview, actorName, ...(replyPath ? { url: replyPath } : {}) },
+        });
+        // The e-mail: the mention e-mail's second emit, under the reply topic
+        // and its own 10-minute window (`replyEmailDedupKey`).
+        if (replyUrl) {
+          try {
+            await messaging.emit({
+              topic: REPLY_TOPIC,
+              audience: [uid],
+              severity: 'info',
+              source: { object: source_object, id: source_id },
+              actorId: actorId ?? undefined,
+              organizationId: tenantId ?? undefined,
+              channels: [MENTION_EMAIL_CHANNEL],
+              dedupKey: replyEmailDedupKey(tenantId, uid, Date.now()),
+              payload: { title, body: bodyPreview, actorName, mentionUrl: replyUrl },
+            });
+          } catch (err) {
+            try { (engine as any).logger?.warn?.('Reply e-mail emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+          }
+        }
+      } catch (err) {
+        try { (engine as any).logger?.warn?.('Reply notification emit failed', { uid, err: String((err as any)?.message ?? err) }); } catch {}
+      }
+    }
+  };
+
+  /** The comment's insert: its mentions first, then the reply notice, which skips whoever those mentions name. */
+  const writeCommentNotices = async (ctx: HookContext): Promise<void> => {
+    const mentioned = await writeCommentMentions(ctx);
+    await writeCommentReplyNotices(ctx, mentioned);
+  };
+
   // [#5860] A CLOSED single-name allow list — the handler's first line already
   // refused every other object, and unlike the skip list above that knowledge
   // was always expressible. Saying it here is behaviour-conserving and takes
   // this registration out of every other object's `afterInsert` demand.
-  engine.registerHook('afterInsert', writeCommentMentions, { object: 'sys_comment', packageId });
+  engine.registerHook('afterInsert', writeCommentNotices, { object: 'sys_comment', packageId });
   // [#27703] And on `afterUpdate`, so a mention added by editing a comment is
   // judged and notified like one written with it. The registration is what
   // has the engine bind `previous` on this object's update.
@@ -3068,12 +3345,133 @@ export function installAuditWriters(
   return { resolveActorSnapshot };
 }
 
+/** [#36074] Who a comment thread names: its starter and everyone in it, starter first. */
+interface CommentThreadParticipants {
+  /** [#36410] The thread's top-level comment — where its notices open the comment panel. */
+  rootId: string;
+  /** The author of the thread's top-level comment. */
+  starterId: string | null;
+  /** Each distinct author in the thread, the starter first. */
+  participants: string[];
+}
+
+/** How far up `parent_id` a reply's thread is followed — the Console writes one level. */
+const MAX_REPLY_ANCESTRY = 16;
+const THREAD_READ_CONTEXT = { isSystem: true } as const;
+
+/**
+ * [#36074] The participants of the thread `parentId` belongs to: up the
+ * `parent_id` chain to the top-level comment (bounded, cycle-safe; the
+ * Console replies to a top-level comment only, so this is one read), each
+ * comment's author on the way, then every distinct author of a reply to the
+ * top-level comment in ONE grouped read. Every read is held to the reply's
+ * own `threadId` (its record): a parent, or a sibling reply, on another
+ * record's thread is not this thread. System context: these are the
+ * candidates, and each is judged by the recipient gate after. `null` when the
+ * parent cannot be found on this thread — no thread, no notice.
+ */
+async function readThreadParticipants(engine: any, parentId: string, threadId: string): Promise<CommentThreadParticipants | null> {
+  const walk = await walkToThreadRoot(engine, parentId, threadId);
+  if (!walk) return null;
+  const { rootId, ancestors } = walk;
+  const replyAuthors: any[] = await engine.aggregate(
+    'sys_comment',
+    {
+      where: { parent_id: rootId, thread_id: threadId },
+      groupBy: ['author_id'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'replies' }],
+    },
+    { context: THREAD_READ_CONTEXT },
+  );
+  const participants: string[] = [];
+  const add = (uid: unknown) => {
+    if (uid == null) return;
+    const id = String(uid);
+    if (id && !participants.includes(id)) participants.push(id);
+  };
+  for (const uid of ancestors) add(uid);
+  for (const r of replyAuthors ?? []) add(r?.author_id);
+  return { rootId, starterId: ancestors[0] ?? null, participants };
+}
+
+/**
+ * Up the `parent_id` chain from `parentId` to the thread's top-level comment
+ * (bounded, cycle-safe, held to `threadId`): its id and each comment's author
+ * on the way, the top-level comment's first. `null` when the parent is not on
+ * this thread.
+ */
+async function walkToThreadRoot(
+  engine: any,
+  parentId: string,
+  threadId: string,
+): Promise<{ rootId: string; ancestors: string[] } | null> {
+  if (!threadId) return null;
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let rootId: string | null = null;
+  let cursor: string | null = parentId;
+  while (cursor && !seen.has(cursor) && seen.size < MAX_REPLY_ANCESTRY) {
+    seen.add(cursor);
+    const rows: any[] = await engine.find('sys_comment', {
+      where: { id: cursor },
+      fields: ['id', 'thread_id', 'author_id', 'parent_id'],
+      limit: 1,
+      context: THREAD_READ_CONTEXT,
+    });
+    const comment = Array.isArray(rows) ? rows[0] : undefined;
+    // A parent on another record's thread is not this thread: the walk stops
+    // there, so a `parent_id` written across records draws no candidate from
+    // the other thread.
+    if (!comment || String(comment.thread_id ?? '') !== threadId) break;
+    rootId = String(comment.id);
+    if (comment.author_id != null && String(comment.author_id)) ancestors.unshift(String(comment.author_id));
+    cursor = comment.parent_id != null && String(comment.parent_id) ? String(comment.parent_id) : null;
+  }
+  return rootId ? { rootId, ancestors } : null;
+}
+
+/** [#36410] The top-level comment of the thread `parentId` is on; `null` when it is not on `threadId`. */
+async function readThreadRootId(engine: any, parentId: string, threadId: string): Promise<string | null> {
+  return (await walkToThreadRoot(engine, parentId, threadId))?.rootId ?? null;
+}
+
+/**
+ * The Console's comment URL parameters (`ui/packages/app-shell/src/urlParams.ts`
+ * holds the reader's half): `comments` names the thread by its top-level
+ * comment's id, `comment` the comment in it to scroll to. Literal here, as the
+ * `/{object}/{id}` route is: plugin-audit takes no dependency on the Console.
+ */
+const COMMENTS_URL_PARAM = 'comments';
+const COMMENT_URL_PARAM = 'comment';
+
+/**
+ * [#36410] A comment notice's Console link, app-relative: the record the
+ * comment is on (`/{object}/{id}`, the link messaging would derive from the
+ * notice's `source`), with the comment panel open at its thread
+ * (`?comments={rootId}`) and, for a reply, the reply to scroll to
+ * (`&comment={commentId}`; a top-level comment IS the thread, so it adds
+ * none). No thread root ⇒ the record alone. No record ⇒ `null`.
+ */
+function commentRecordPath(
+  object: string | undefined,
+  id: string | undefined,
+  rootId: string | null,
+  commentId: string | null,
+): string | null {
+  if (!object || !id) return null;
+  const recordPath = `/${object}/${id}`;
+  if (!rootId) return recordPath;
+  const query = new URLSearchParams({ [COMMENTS_URL_PARAM]: rootId });
+  if (commentId && commentId !== rootId) query.set(COMMENT_URL_PARAM, commentId);
+  return `${recordPath}?${query.toString()}`;
+}
+
 /**
  * The entries of a comment's `mentions` field. It is a JSON-string textarea
  * on sys_comment holding either a raw array of user ids `["u1","u2"]` or an
  * array of objects `[{ id: "u1" }, ...]`; a parse failure reads as no mention.
  */
-function parseCommentMentions(value: unknown): string[] {
+export function parseCommentMentions(value: unknown): string[] {
   let mentions: any = value;
   if (typeof mentions === 'string') {
     try { mentions = JSON.parse(mentions); } catch { mentions = null; }

@@ -16,13 +16,19 @@
  * (still the English source) is left out: the overlay then returns the spec's
  * own English for it, as it does for every type it does not name. The one
  * exception is a leaf a curated inspector SHOWS that the platform has no zh
- * for; it is hand-worded here and marked so at its row.
+ * for; it is hand-worded here and marked so at its row. The second is the
+ * `report` form's wording leaves (objectstack#36373, marked ⟨36373⟩): the
+ * report panel speaks business wording — 数据来源 / 分组 / 指标 — and this
+ * overlay is the only source of its residual rows' words.
  *
  * ## Two depths, by who renders the form
  *
  *  - `view`, `page`, `report` — the curated inspectors render these forms
  *    from the bundled spec, so every section and field string is here: label,
- *    description, help text, placeholder. (`dashboard` is the fourth such
+ *    description, help text, placeholder, and a select's option names
+ *    (`options: { <value>: … }`, objectstack#37607 — each map copied from the
+ *    platform pack and pinned byte-equal to it by
+ *    `./metadata-form-option-names.test.ts`). (`dashboard` is the fourth such
  *    form; its hand-worded entries live in `./metadata-form-i18n.ts`.)
  *  - every other `METADATA_FORM_REGISTRY` type — its inspector renders the
  *    form the server served, already localized. The one reader of these forms
@@ -52,7 +58,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       imageField: { label: '记录图片字段' },
       isSystem: { label: '系统内置' },
       highlightFields: { label: '重点字段' },
-      relatedLists: { label: '相关列表顺序' },
+      relatedLists: { label: '记录页页签' },
       searchableFields: { label: '可搜索字段' },
       fieldGroups: { label: '字段分组' },
       'fieldGroups.key': { label: '键' },
@@ -283,6 +289,9 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'refusals.reasons': { label: '原因' },
       'refusals.reasons.message': { label: '提示语' },
       'refusals.params': { label: '参数' },
+      texts: { label: '文本' },
+      'texts.message': { label: '句子' },
+      'texts.params': { label: '参数' },
       handler: { label: '处理器' },
       async: { label: '异步' },
       onError: { label: '错误处理' },
@@ -295,44 +304,73 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
     },
   },
   report: {
+    // objectstack#36373 — the report panel speaks business wording: 数据来源 /
+    // 分组 / 指标, never 数据集 / 维度 / 度量 (and no `rows`/`values` tokens).
+    // The leaves marked ⟨36373⟩ are hand-worded here and depart from the
+    // platform's zh-CN copy, which the generic server-rendered form still reads.
     label: '报表',
     sections: {
       basics: { label: '基础信息', description: '标识与报表类型' },
-      dataset_binding: { label: '数据集绑定', description: '本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度' },
-      joined_blocks: { label: 'joined 报表分块', description: '叠加进同一张报表的其他数据集分块（仅 joined 报表）' },
+      // ⟨36373⟩ The curated fields above the form draw this section's data source,
+      // groups and metrics; what the form shows under it is the order and the drill.
+      dataset_binding: { label: '排序与下钻', description: '汇总结果怎么排，点开一行时看到哪些记录' },
+      // ⟨36373⟩
+      joined_blocks: { label: '联合报表的分块', description: '叠加进同一张报表的其他分块，各有自己的数据来源（仅联合报表）' },
       filter_and_chart: { label: '筛选与图表', description: '条件与图表展示' },
       period_and_export: { label: '时间段与导出', description: '报表的默认时间段，以及其表格可下载的格式' },
     },
     fields: {
       name: { label: '名称', helpText: 'snake_case 唯一标识符' },
       label: { label: '显示名称' },
-      description: { label: '描述' },
-      type: { label: '类型', helpText: '报表类型：tabular / summary / matrix / joined' },
-      dataset: { label: '数据集', helpText: '要绑定的数据集（度量/维度来自其语义层）' },
-      values: { label: '度量', helpText: '要展示的度量名（来自该数据集）' },
-      rows: { label: '行', helpText: '用于分组行的维度名（来自该数据集）' },
-      columns: { label: '列', helpText: '横向展开的维度名（仅 matrix 报表）' },
-      order: { label: '排序', helpText: '排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。' },
+      // ⟨36373⟩ the spec's own text here is the I18nLabel shape, not a hint for the reader.
+      description: { label: '描述', helpText: '一句话说明这张报表看什么，显示在名称下方' },
+      // ⟨36373⟩ type · dataset · values · rows · columns · order
+      type: { label: '类型', helpText: '报表类型：明细表、汇总表、矩阵表或联合报表' },
+      dataset: { label: '数据来源', helpText: '报表从这里取数；每个人只能看到自己有权限的记录' },
+      values: { label: '指标', helpText: '要统计的指标（来自数据来源）' },
+      rows: { label: '分组', helpText: '按哪些字段分组（来自数据来源）' },
+      columns: { label: '列分组', helpText: '横向展开的分组（仅矩阵报表）' },
+      order: { label: '排序', helpText: '排序依据，最重要的在前（某个分组或指标）。时间分组默认按时间先后排列。' },
       'order.by': { label: '排序依据' },
       'order.direction': { label: '排序方向' },
-      drilldown: { label: '下钻', helpText: '点击聚合后的行/单元格，打开其底层记录' },
-      blocks: { label: '分块', helpText: '绑定数据集的子报表（仅 joined 报表）' },
+      drilldown: { label: '下钻', helpText: '点击汇总后的行或单元格，打开其中的记录' },
+      // ⟨36373⟩ blocks.*
+      blocks: { label: '分块', helpText: '各有数据来源的子报表（仅联合报表）' },
       'blocks.name': { label: '名称' },
       'blocks.label': { label: '显示名称' },
       'blocks.description': { label: '描述' },
       'blocks.type': { label: '分块类型' },
-      'blocks.dataset': { label: '数据集' },
-      'blocks.rows': { label: '行' },
-      'blocks.columns': { label: '列' },
-      'blocks.values': { label: '度量' },
+      'blocks.dataset': { label: '数据来源' },
+      'blocks.rows': { label: '分组' },
+      'blocks.columns': { label: '列分组' },
+      'blocks.values': { label: '指标' },
       'blocks.runtimeFilter': { label: '运行时筛选' },
       'blocks.order': { label: '排序' },
-      runtimeFilter: { label: '运行时筛选', helpText: '渲染时的范围筛选，在查询时以 AND 方式并入' },
+      // ⟨36373⟩ follows the English (objectstack#36838); the platform's zh-CN row is
+      // the ledger-pinned rendering of the older render-time / AND sentence.
+      runtimeFilter: { label: '运行时筛选', helpText: '每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上' },
       chart: { label: '图表', helpText: '图表类型与配置' },
-      dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空' },
-      exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定' },
+      // ⟨36373⟩ dateRange · exportOptions
+      // The date-grouping sentence lives on the `dateRange.dimension` child below (objectstack#36838).
+      dateRange: { label: '日期范围', helpText: '打开报表时显示的时间段，以及使用者能否自己选择范围' },
+      exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
+      // The children `report.metadata-form.ts` declares for both composites (objectstack#36447),
+      // copied from the platform zh-CN bundle like every unmarked row here.
+      'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
+      'dateRange.defaultRange': {
+        label: '默认时间段',
+        helpText: '打开报表时显示的时间段',
+        // Option names: the platform pack's map, pinned byte-equal by
+        // `metadata-form-option-names.test.ts`.
+        options: { today: '今天', yesterday: '昨天', this_week: '本周', last_week: '上周', this_month: '本月', last_month: '上月', next_month: '下月', this_quarter: '本季度', last_quarter: '上季度', next_quarter: '下季度', this_year: '今年', last_year: '去年', last_7_days: '近 7 天', last_30_days: '近 30 天', last_90_days: '近 90 天', next_30_days: '未来 30 天', custom: '自定义…' },
+      },
+      'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },
+      'exportOptions.formats': { label: '格式', helpText: '可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载' },
+      'exportOptions.includeHeaders': { label: '包含表头', helpText: '在下载文件的第一行写入列名' },
+      'exportOptions.fileNamePrefix': { label: '文件名', helpText: '下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称' },
     },
   },
+
   dataset: {
     label: '数据集',
     fields: {
@@ -411,7 +449,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'sort.order': { label: '排序方向' },
       searchableFields: { label: '可搜索字段', helpText: '可用于快速搜索的字段名' },
       resizable: { label: '可调整大小', helpText: '允许调整列宽' },
-      compactToolbar: { label: '紧凑工具栏', helpText: '将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框' },
+      compactToolbar: { label: '紧凑工具栏', helpText: '将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。' },
       rowHeight: { label: '行高', helpText: '行高 / 密度设置' },
       selection: { label: '选择', helpText: '行选择配置' },
       'selection.type': { label: '类型', helpText: '选择模式' },
@@ -426,7 +464,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       chart: { label: '图表' },
       userFilters: { label: '用户筛选器', helpText: '快速筛选栏：控件样式（dropdown / tabs / toggle）+ 暴露的字段或标签页预设' },
       // #30267: every composite below now declares its children in
-      // `view.form.ts`, so each child row is named here (all of them, per
+      // `view.metadata-form.ts`, so each child row is named here (all of them, per
       // the ⛔ composite rule at the top of this file).
       'userFilters.element': { label: '控件样式', helpText: '对象视图上的筛选控件样式："dropdown"（按字段取值的筛选标签）。"toggle" 已弃用。"tabs" 仅用于页面——命名预设请使用 `listViews`。' },
       'userFilters.fields': { label: '筛选字段', helpText: '作为快速筛选暴露的字段（dropdown / toggle 控件）' },
@@ -459,10 +497,11 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'navigation.mode': { label: '模式', helpText: '[已弃用] 在对象列表（列表视图、对象的 `listViews`）上不再决定记录如何打开：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。这里 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，请省略此键；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。带 `navigation` 的页面区块（列表区块、时间线、嵌入视图）仍按所有取值生效。' },
       'navigation.preventNavigation': { label: '禁止导航', helpText: '完全禁用标准导航' },
       'navigation.openNewTab': { label: '在新标签页打开', helpText: '点击记录时在新的浏览器标签页中打开其整页；设为不打开的行保持不打开，手机上仍在当前页打开' },
-      'navigation.size': { label: '尺寸', helpText: '抽屉详情的浮层尺寸档位：\'auto\'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。' },
+      'navigation.size': { label: '尺寸', helpText: '记录抽屉的宽度档位：\'auto\'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。' },
       'navigation.width': { label: '宽度', helpText: '[已弃用 → size] 抽屉的像素 / 百分比宽度（如 "600px"）。编写时无法预知客户端视口，因此选不出合适的像素宽度——请使用 `size` 档位。' },
       sharing: { label: '共享', helpText: '视图共享配置：谁锁定了视图配置' },
       'sharing.lockedBy': { label: '锁定者', helpText: '锁定该视图配置的用户' },
+      requiredPermissions: { label: '所需权限', helpText: '谁能看此视图：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有能看到该列表的人都能看到此视图。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此视图，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你在列表中也将看不到此视图。' },
     },
   },
   app: {
@@ -516,6 +555,15 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'body.capabilities': { label: '能力' },
       'body.timeoutMs': { label: '超时（毫秒）' },
       'body.memoryMb': { label: '内存（MB）' },
+      refusals: { label: '拒绝目录' },
+      'refusals.message': { label: '提示语' },
+      'refusals.status': { label: '状态码' },
+      'refusals.reasons': { label: '原因' },
+      'refusals.reasons.message': { label: '提示语' },
+      'refusals.params': { label: '参数' },
+      texts: { label: '文本' },
+      'texts.message': { label: '句子' },
+      'texts.params': { label: '参数' },
       params: { label: '参数' },
       'params.name': { label: '名称' },
       'params.field': { label: '字段' },
@@ -581,7 +629,12 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       name: { label: '名称', helpText: 'snake_case 唯一标识符' },
       label: { label: '显示名称', helpText: '展示给用户的页面标题' },
       icon: { label: '图标', helpText: '导航菜单中显示的图标' },
-      type: { label: '类型', helpText: '页面种类。"List / Interface" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。' },
+      type: {
+        label: '类型',
+        helpText: '页面种类。"List / Interface" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。',
+        // Pinned byte-equal to the platform pack, as above.
+        options: { list: '列表 / 界面页', record: '记录页', home: '首页', app: '应用页', utility: '工具面板' },
+      },
       template: { label: '模板', helpText: '布局模板（如 "header-sidebar-main"）' },
       description: { label: '描述', helpText: '用于导航的页面描述' },
       source: { label: '页面源码', helpText: '页面源码文本。kind 为 \'html\' 时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 \'react\' 时，它是真正的 React，由受信任运行时在渲染时执行。' },
@@ -611,7 +664,12 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'interfaceConfig.addRecord.position': { label: '位置' },
       'interfaceConfig.emptyState': { label: '空状态', helpText: '列表没有记录时页面显示的内容：标题、说明、图标和一个链接。在此设置后，它将替换源视图的空状态。' },
       'interfaceConfig.buttons': { label: '按钮', helpText: '工具栏按钮——从该对象的操作中选择' },
-      'interfaceConfig.recordAction': { label: '记录操作', helpText: '点击记录时如何打开其详情' },
+      'interfaceConfig.recordAction': {
+        label: '记录操作',
+        helpText: '点击记录时如何打开其详情',
+        // Pinned byte-equal to the platform pack, as above.
+        options: { drawer: '抽屉（右侧预览）', page: '整页', none: '不可点击' },
+      },
       'interfaceConfig.showRecordCount': { label: '显示记录数', helpText: '显示记录数栏' },
       'interfaceConfig.allowPrinting': { label: '允许打印', helpText: '允许用户打印此页面' },
       isDefault: { label: '默认', helpText: '打开该对象的记录时使用此记录页。每个对象只能有一个默认记录页：第二个会被拒绝。' },
@@ -664,6 +722,18 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'triggerConditions.field': { label: '上下文字段' },
       'triggerConditions.operator': { label: '运算符' },
       'triggerConditions.value': { label: '值' },
+    },
+  },
+  ai_context: {
+    label: 'AI 上下文包',
+    fields: {
+      name: { label: '名称' },
+      label: { label: '显示名称' },
+      object: { label: '根对象' },
+      fields: { label: '字段' },
+      related: { label: '关联列表' },
+      body: { label: '正文' },
+      'body.field': { label: '正文字段' },
     },
   },
   flow: {

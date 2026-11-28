@@ -26,6 +26,9 @@
  * decision to route them through the one conversion stops being justified.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -75,7 +78,7 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
   useAgents: () => ({
-    agents: [{ name: 'metadata_assistant', label: 'Build', capabilities: ['build'] }],
+    agents: [{ name: 'ask', label: 'Ask' }],
     loading: false,
     error: undefined,
     refetch: vi.fn(),
@@ -99,7 +102,7 @@ vi.mock('../ConversationsSidebar', () => ({
 }));
 
 
-import { AiChatPage, deriveBoundPackageId } from '../AiChatPage';
+import { AiChatPage } from '../AiChatPage';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -119,17 +122,16 @@ const CACHE_KEY = 'objectstack:ai-chat-messages:conv-seam';
  * folds: a `'tool'`-role message, and a legacy `'result'` tool state on it.
  */
 const TOOL_ROLE_THREAD: ObjectChatMessage[] = [
-  { id: 'u1', role: 'user', content: 'build me a CRM' },
+  { id: 'u1', role: 'user', content: 'how many opportunities?' },
   {
     id: 'tool-turn',
     role: 'tool',
-    content: 'apply_blueprint finished',
+    content: 'aggregate_data finished',
     toolInvocations: [
       {
         toolCallId: 't1',
-        toolName: 'apply_blueprint',
+        toolName: 'aggregate_data',
         state: 'result',
-        draftReview: { items: [{ type: 'object', name: 'lead' }], packageId: 'app.crm' },
         pendingActionId: 'pa-1',
       },
     ],
@@ -160,7 +162,7 @@ function installFetch(): void {
 
 async function renderPage(): Promise<void> {
   render(
-    <MemoryRouter initialEntries={['/ai/build/conv-seam']}>
+    <MemoryRouter initialEntries={['/ai/ask/conv-seam']}>
       <Routes>
         <Route path="/ai/:agent/:conversationId" element={<AiChatPage />} />
         <Route path="/ai/:agent" element={<AiChatPage />} />
@@ -199,10 +201,6 @@ describe("AiChatPage routes the hook's messages through toRuntimeMessages (#4437
 
     // The pass-through is what keeps the render-only keys alive across the
     // conversion — the affordances would silently vanish if it rebuilt.
-    expect(tools[0]?.draftReview).toEqual({
-      items: [{ type: 'object', name: 'lead' }],
-      packageId: 'app.crm',
-    });
     expect(tools[0]?.pendingActionId).toBe('pa-1');
   });
 
@@ -234,15 +232,13 @@ describe("AiChatPage routes the hook's messages through toRuntimeMessages (#4437
 
     // `sanitizeChatMessagesForCache` gates tool serialization on
     // `role === 'assistant'`, so pre-fold this turn cached its text and nothing
-    // else: the re-serialized draft envelope behind "Review N changes /
-    // Publish" never made it into the cache at all.
-    const toolPart = toolTurn?.parts.find((p) => p.type === 'tool-apply_blueprint');
+    // else: the re-serialized approval envelope never made it into the cache.
+    const toolPart = toolTurn?.parts.find((p) => p.type === 'tool-aggregate_data');
     expect(toolPart).toBeDefined();
     expect(toolPart?.state).toBe('output-available');
     expect(toolPart?.output).toMatchObject({
-      status: 'drafted',
-      packageId: 'app.crm',
-      drafted: [{ type: 'object', name: 'lead' }],
+      status: 'pending_approval',
+      pendingActionId: 'pa-1',
     });
   });
 });
@@ -279,13 +275,6 @@ describe('#4437 fold-sensitivity: the two insensitive compute sites stay insensi
     expect(isConversationZh(toRuntimeMessages(zhOnlyOnToolTurn))).toBe(false);
   });
 
-  it('deriveBoundPackageId: same package before and after the fold', () => {
-    // Newest-wins, and the packageId here rides the message whose role the fold
-    // rewrites — so a role-dependence would show up as it appearing or
-    // disappearing from the answer.
-    expect(deriveBoundPackageId(TOOL_ROLE_THREAD, undefined)).toBe('app.crm');
-    expect(deriveBoundPackageId(toRuntimeMessages(TOOL_ROLE_THREAD), undefined)).toBe('app.crm');
-  });
 });
 
 /**
@@ -294,11 +283,11 @@ describe('#4437 fold-sensitivity: the two insensitive compute sites stay insensi
  *
  * Of the five cast sites, only two are observable: the `<ChatbotEnhanced>` prop
  * and the cache write both change what they produce when the fold is skipped,
- * so restoring their cast reds a test above. The other three cannot red by
- * construction — `isConversationZh` and `deriveBoundPackageId` are
- * fold-INSENSITIVE (that is the measurement, pinned just above), and
- * `useHitlInChat` reads a key the pass-through preserves either way. A cast
- * coming back at any of those three is invisible to every runtime assertion in
+ * so restoring their cast reds a test above. The others cannot red by
+ * construction — `isConversationZh` is fold-INSENSITIVE (that is the
+ * measurement, pinned just above), and `useHitlInChat` reads a key the
+ * pass-through preserves either way. A cast coming back at either of those is
+ * invisible to every runtime assertion in
  * this file AND to `tsc`, because a cast is precisely the instruction to stop
  * checking. This net is what makes them non-silent.
  *
@@ -309,7 +298,10 @@ describe('#4437 fold-sensitivity: the two insensitive compute sites stay insensi
  */
 describe('#4437 source net: the five casts do not come back', () => {
   const PAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'AiChatPage.tsx');
-  const source = readFileSync(PAGE, 'utf8');
+  // objectstack#37730 — `ChatPane` was split out of the page move-only, so the
+  // guarded text is the page plus that module, read as one.
+  const PANE = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'ChatPane.tsx');
+  const source = [PAGE, PANE].map((file) => readFileSync(file, 'utf8')).join('\n');
   const codeOnly = source
     .split('\n')
     .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))

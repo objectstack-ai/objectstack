@@ -13,22 +13,25 @@ import {
   aiProviderState,
   browserRegion,
   checklistCompletion,
-  checklistDoneCount,
   dismissRecordKey,
   drawsOneLine,
   hasInvitedColleagues,
   isKeySet,
   isMailConfigured,
   isMailDelivering,
+  isOptionalRow,
   isOrganizationNamed,
   localeOffer,
-  localizationRows,
+  organizationBasics,
   markDismissed,
   wasDismissed,
+  NOT_SHOWN_RECORD_TTL_MS,
+  markAnsweredNotShown,
+  notShownRecordKey,
+  wasAnsweredNotShown,
   type ChecklistStorage,
 } from '../firstRunChecklistLogic';
 import type { ResolvedSettingValue, SettingsManifest, Specifier } from '../types';
-import { MANAGED_PROFILE, isProfileOptionalRow } from '../firstRunChecklistProfile';
 
 const LOCALE_SPEC: Specifier = {
   type: 'select',
@@ -111,17 +114,17 @@ describe('the browser offer: one language decides language, country and currency
   });
 
   it('pre-fills only what the write door would take, and only for unset keys', () => {
-    const rows = localizationRows(manifest(), FRESH, { language: 'zh-CN', zone: 'Asia/Shanghai' });
-    expect(rows.map((row) => row.id)).toEqual(['language_country', 'timezone', 'currency']);
-    const offers = Object.fromEntries(rows.flatMap((row) => row.fields.map((f) => [f.key, f.offer])));
+    const basics = organizationBasics(manifest(), FRESH, { language: 'zh-CN', zone: 'Asia/Shanghai' }, 'Acme');
+    expect(basics.fields.map((f) => f.key)).toEqual(['locale', 'default_country', 'timezone', 'currency']);
+    const offers = Object.fromEntries(basics.fields.map((f) => [f.key, f.offer]));
     expect(offers).toEqual({ locale: 'zh-CN', default_country: 'CN', timezone: 'Asia/Shanghai', currency: 'CNY' });
 
-    const unknownZone = localizationRows(manifest(), FRESH, { language: 'zh-CN', zone: 'Etc/Unknown' });
-    expect(unknownZone.find((row) => row.id === 'timezone')?.fields[0].offer).toBeUndefined();
+    const unknownZone = organizationBasics(manifest(), FRESH, { language: 'zh-CN', zone: 'Etc/Unknown' }, 'Acme');
+    expect(unknownZone.fields.find((f) => f.key === 'timezone')?.offer).toBeUndefined();
 
-    const set = localizationRows(manifest(), { ...FRESH, timezone: fromTenant('Europe/Berlin') }, { zone: 'Asia/Shanghai' });
-    expect(set.find((row) => row.id === 'timezone')?.fields[0]).toMatchObject({ set: true });
-    expect(set.find((row) => row.id === 'timezone')?.fields[0].offer).toBeUndefined();
+    const set = organizationBasics(manifest(), { ...FRESH, timezone: fromTenant('Europe/Berlin') }, { zone: 'Asia/Shanghai' }, 'Acme');
+    expect(set.fields.find((f) => f.key === 'timezone')).toMatchObject({ set: true });
+    expect(set.fields.find((f) => f.key === 'timezone')?.offer).toBeUndefined();
   });
 });
 
@@ -139,14 +142,30 @@ describe('done is read from the resolved value', () => {
     expect(isKeySet('currency', fromTenant('CNY'))).toBe(true);
   });
 
-  it('a row is done when every key it edits is set, and leaves no row for a key the manifest retired', () => {
-    const rows = localizationRows(manifest(), { ...FRESH, locale: fromTenant('zh-CN') }, {});
-    expect(rows.find((row) => row.id === 'language_country')?.done).toBe(false);
-    const both = localizationRows(manifest(), { ...FRESH, locale: fromTenant('zh-CN'), default_country: fromTenant('CN') }, {});
-    expect(both.find((row) => row.id === 'language_country')?.done).toBe(true);
+  it('the basics are done once the organization has a name of its own and every key is set (objectstack#36739)', () => {
+    const allSet = {
+      locale: fromTenant('zh-CN'),
+      default_country: fromTenant('CN'),
+      timezone: fromTenant('Asia/Shanghai'),
+      currency: fromTenant('CNY'),
+    };
+    expect(organizationBasics(manifest(), allSet, {}, 'Acme')).toMatchObject({ named: true, done: true });
+    // One key left unset keeps the one row open.
+    expect(organizationBasics(manifest(), { ...allSet, currency: fromDefault(null) }, {}, 'Acme').done).toBe(false);
+    // CONTROL: every key set, the name the platform gave it: not done.
+    expect(organizationBasics(manifest(), allSet, {}, DEFAULT_ORGANIZATION_NAME)).toMatchObject({ named: false, done: false });
+    expect(organizationBasics(manifest(), allSet, {}, '  ').done).toBe(false);
+  });
 
-    const noCountry = localizationRows(manifest([LOCALE_SPEC, TIMEZONE_SPEC, CURRENCY_SPEC]), FRESH, {});
-    expect(noCountry.map((row) => row.id)).toEqual(['timezone', 'currency']);
+  it('a key the manifest retired is no field of the form, and does not hold the row open', () => {
+    const noCountry = organizationBasics(
+      manifest([LOCALE_SPEC, TIMEZONE_SPEC, CURRENCY_SPEC]),
+      { ...FRESH, locale: fromTenant('zh-CN'), timezone: fromTenant('UTC'), currency: fromTenant('CNY') },
+      {},
+      'Acme',
+    );
+    expect(noCountry.fields.map((f) => f.key)).toEqual(['locale', 'timezone', 'currency']);
+    expect(noCountry.done).toBe(true);
   });
 
   it('mail is done only when a delivering provider has a From address, and SMTP a host', () => {
@@ -221,30 +240,92 @@ describe('hiding the checklist is a per-device record, per workspace and user', 
   });
 });
 
-describe('completion counts the required rows; email delivery is optional (objectstack#32643)', () => {
-  const required = ['organization_name', 'language_country', 'timezone', 'currency', 'invite'].map((id) => ({ id, done: true }));
+describe('"not shown" is a per-device answer, per workspace, user and capability set, for a day (objectstack#37182)', () => {
+  function memory(): ChecklistStorage & { data: Map<string, string> } {
+    const data = new Map<string, string>();
+    return { data, getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
+  }
+  const HELD = 'setup.access\nsetup.write';
+  const T0 = Date.UTC(2026, 10, 25, 2, 0, 0);
 
-  it('every required row done and mail not: complete, and mail is in neither count', () => {
-    expect(checklistCompletion([...required, { id: 'mail', done: false }])).toEqual({ done: 5, total: 5, complete: true });
+  it('keys the record on both ids, apart from the dismiss record, and reads it back for the same capability set', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    expect(key).toBe('os:first-run-checklist-not-shown:org_1:u_owner');
+    expect(key).not.toBe(dismissRecordKey('org_1', 'u_owner'));
+    expect(wasAnsweredNotShown(storage, key, HELD, T0)).toBe(false);
+    expect(markAnsweredNotShown(storage, key, HELD, T0)).toBe(true);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + 1000)).toBe(true);
+    expect(wasAnsweredNotShown(storage, notShownRecordKey('org_2', 'u_owner'), HELD, T0 + 1000)).toBe(false);
   });
 
-  it('mail done moves neither count', () => {
-    expect(checklistCompletion([...required, { id: 'mail', done: true }])).toEqual({ done: 5, total: 5, complete: true });
+  it('a changed capability set reads again', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    markAnsweredNotShown(storage, key, HELD, T0);
+    expect(wasAnsweredNotShown(storage, key, `${HELD}\nmanage_platform_settings`, T0 + 1000)).toBe(false);
+    expect(wasAnsweredNotShown(storage, key, 'setup.access', T0 + 1000)).toBe(false);
   });
 
-  it('CONTROL: a required row not done keeps it open, mail done or not', () => {
-    const open = required.map((r) => (r.id === 'invite' ? { ...r, done: false } : r));
-    expect(checklistCompletion([...open, { id: 'mail', done: true }])).toEqual({ done: 4, total: 5, complete: false });
-    expect(checklistCompletion([...open, { id: 'mail', done: false }]).complete).toBe(false);
+  it('stands for a day, then reads again; a record dated in the future reads again', () => {
+    const storage = memory();
+    const key = notShownRecordKey('org_1', 'u_owner');
+    markAnsweredNotShown(storage, key, HELD, T0);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + NOT_SHOWN_RECORD_TTL_MS - 1)).toBe(true);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 + NOT_SHOWN_RECORD_TTL_MS)).toBe(false);
+    expect(wasAnsweredNotShown(storage, key, HELD, T0 - 1)).toBe(false);
   });
 
-  it('the rows outside the localization set count as required too (the AI rows)', () => {
-    expect(checklistCompletion([{ id: 'ai_provider', done: false }, { id: 'mail', done: false }])).toEqual({
-      done: 0,
-      total: 1,
-      complete: false,
-    });
-    expect(checklistCompletion([{ id: 'connect_assistant', done: false }]).complete).toBe(false);
+  it('storage that cannot be read, or a record that does not parse, reads again', () => {
+    const broken: ChecklistStorage = {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+    };
+    expect(wasAnsweredNotShown(broken, 'k', HELD, T0)).toBe(false);
+    expect(wasAnsweredNotShown(undefined, 'k', HELD, T0)).toBe(false);
+    expect(markAnsweredNotShown(broken, 'k', HELD, T0)).toBe(false);
+    const storage = memory();
+    for (const raw of ['not json', 'null', '2026-11-25T00:00:00.000Z', JSON.stringify({ held: HELD }), JSON.stringify({ held: HELD, at: 'x' })]) {
+      storage.data.set('k', raw);
+      expect(wasAnsweredNotShown(storage, 'k', HELD, T0)).toBe(false);
+    }
+  });
+});
+
+describe('completion: the basics are required; mail, invite and both AI rows are optional (objectstack#32643, objectstack#36739)', () => {
+  it('only the basics done, every optional row not: complete, and the progress counts every row', () => {
+    const rows = [
+      { id: 'organization_basics', done: true },
+      { id: 'mail', done: false },
+      { id: 'invite', done: false },
+      { id: 'ai_provider', done: false },
+      { id: 'connect_assistant', done: false },
+    ];
+    expect(checklistCompletion(rows)).toEqual({ done: 1, total: 5, complete: true });
+  });
+
+  it('CONTROL: the basics not done keep it open, whatever the optional rows say', () => {
+    const rows = [
+      { id: 'organization_basics', done: false },
+      { id: 'mail', done: true },
+      { id: 'invite', done: true },
+      { id: 'ai_provider', done: true },
+      { id: 'connect_assistant', done: true },
+    ];
+    expect(checklistCompletion(rows)).toEqual({ done: 4, total: 5, complete: false });
+  });
+
+  it('exactly the four rows the rulings name are optional on the platform', () => {
+    for (const id of ['mail', 'invite', 'ai_provider', 'connect_assistant']) expect(isOptionalRow(id)).toBe(true);
+    for (const id of ['organization_basics', 'first_app', 'first_record']) expect(isOptionalRow(id)).toBe(false);
+  });
+
+  it('no row drawn: complete, nothing to count', () => {
+    expect(checklistCompletion([])).toEqual({ done: 0, total: 0, complete: true });
   });
 });
 
@@ -302,32 +383,6 @@ describe('in use is read from the stated source, never from a null value (object
       source: 'environment',
       optionLabel: 'OpenAI',
     });
-  });
-});
-
-describe('the done count names the required and optional rows apart, as the progress line counts them', () => {
-  const managedOptional = (id: string) => isProfileOptionalRow(MANAGED_PROFILE, id);
-  // A managed environment: seven required rows, six done; mail (drawn only
-  // once done) and the first record, both optional, done.
-  const managed = [
-    ...['organization_name', 'language_country', 'timezone', 'invite', 'first_app', 'ai_provider'].map((id) => ({
-      id,
-      done: true,
-    })),
-    { id: 'currency', done: false },
-    { id: 'mail', done: true },
-    { id: 'first_record', done: true },
-  ];
-
-  it('managed, six of seven required done and two optional done: progress 6 of 7, the done count 6 and 2', () => {
-    expect(checklistCompletion(managed, managedOptional)).toEqual({ done: 6, total: 7, complete: false });
-    expect(checklistDoneCount(managed, managedOptional)).toEqual({ required: 6, optional: 2 });
-  });
-
-  it('CONTROL: no optional row done, the required count is every done row', () => {
-    const rows = managed.map((r) => (r.id === 'mail' || r.id === 'first_record' ? { ...r, done: false } : r));
-    expect(checklistDoneCount(rows, managedOptional)).toEqual({ required: 6, optional: 0 });
-    expect(checklistDoneCount(rows, managedOptional).required).toBe(checklistCompletion(rows, managedOptional).done);
   });
 });
 

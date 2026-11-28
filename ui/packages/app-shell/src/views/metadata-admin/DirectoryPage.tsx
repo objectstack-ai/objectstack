@@ -13,6 +13,18 @@
  * Item counts are lazy — we only fetch when the user lands on a
  * domain that has it. For MVP we just show "—" until the user clicks
  * into a type. Pre-fetching all 27 counts on page load is wasteful.
+ *
+ * ## 全部类型 All types (ADR-0084, amended 2026-11-25; objectstack#37360)
+ *
+ * Under Studio's area on a package this page is what the 高级 fold's last row
+ * opens. It lists the types the package holds — the one rule it shares with
+ * the menu (`scopeDirectoryEntries`), drawn as before — and, after them in
+ * each group, every other type of the menu's six groups, each marked as one
+ * the package holds none of yet, with the state word that says what can be
+ * done there. A tile opens the type's list, whose New makes the first item.
+ * The types that cannot be made in Studio are listed too, read-only, so a
+ * builder learns they exist and come from code; "Hide read-only" drops them.
+ * The cross-package leg and Setup list as before.
  */
 
 import * as React from 'react';
@@ -39,11 +51,32 @@ import {
 } from './i18n.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
-import { ENVIRONMENT_AREA_TYPES, SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { HIDDEN_DIRECTORY_TYPES, scopeDirectoryEntries } from './directoryScope.js';
 import { WritabilityBadge, typeStateWord } from './PageShell.js';
 import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
 import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
 import { customizationCountsByType, customizationTotal } from '../studio-design/customizationMarks.js';
+import { STUDIO_MENU_GROUPS } from '../studio-design/studioMenuModel.js';
+import { StudioTitleRowEnd } from '../studio-design/studioTitleRow.js';
+
+/**
+ * objectstack#37360 — on a package under Studio's area, the types this page
+ * lists besides the ones the package holds: every other served type of the
+ * menu's six groups, in served order. Empty in any other scope.
+ */
+export function directoryNotHeldEntries<T extends { type: string; domain?: string }>(
+  entries: readonly T[],
+  held: readonly T[],
+  onPackage: boolean,
+): T[] {
+  if (!onPackage) return [];
+  const heldTypes = new Set(held.map((e) => e.type));
+  const groups: ReadonlySet<string> = new Set(STUDIO_MENU_GROUPS);
+  return entries.filter(
+    (e) => !heldTypes.has(e.type) && !HIDDEN_DIRECTORY_TYPES.has(e.type) && groups.has(e.domain ?? ''),
+  );
+}
 
 /**
  * The "View all issues" link's look per sweep tone (objectui#12768). The
@@ -81,19 +114,6 @@ const DOMAIN_ORDER = [
   'platform',
   'other',
 ];
-
-/**
- * Types intentionally hidden from the directory + list views.
- *
- * `field` is managed in-context via the parent object's edit form
- * (master-detail widget). A flat global list of every field across
- * every object is rarely useful and clutters the admin surface.
- *
- * `package` is the Studio scope container itself. It has a dedicated
- * management surface for create/publish/import/export flows, so exposing it
- * as scoped metadata would mean "view packages inside a package".
- */
-const HIDDEN_TYPES = new Set(['field', 'package']);
 
 export function MetadataDirectoryPage() {
   const client = useMetadataClient();
@@ -169,6 +189,7 @@ export function MetadataDirectoryPage() {
     lockedByType,
     packagesByType,
     loading: diagLoading,
+    error: diagError,
   } = useGlobalDiagnostics(client, 'warning', activePackage ?? undefined);
   const diagTone = diagnosticsHeaderTone(diagSummary.entries);
 
@@ -184,35 +205,43 @@ export function MetadataDirectoryPage() {
   // Base set: visible (non-hidden) metadata types contributed by the active
   // project package. Fail closed — show nothing until a concrete project
   // package is active, so system-only types never surface.
+  // The area's cross-package leg lists the environment catalog, every package's.
   const scopedEntries = React.useMemo(
     () =>
-      entries.filter((e) => {
-        if (HIDDEN_TYPES.has(e.type)) return false;
-        // The area's cross-package leg: the environment catalog, every package's.
-        if (host && host.packageId === null) return ENVIRONMENT_AREA_TYPES.includes(e.type);
-        if (!activePackage) return false;
-        return (packagesByType[e.type] ?? []).includes(activePackage);
+      scopeDirectoryEntries(entries, {
+        environment: !!host && host.packageId === null,
+        packageId: activePackage,
+        packagesByType,
       }),
     [host, entries, activePackage, packagesByType],
   );
+  // objectstack#37360 — on a package under the area, every other type of the
+  // six groups follows the held ones, each marked as held by none yet. A sweep
+  // that failed said nothing of what the package holds: nothing is marked.
+  const notHeldEntries = React.useMemo(
+    () => directoryNotHeldEntries(entries, scopedEntries, !!host && host.packageId !== null && !diagError),
+    [host, entries, scopedEntries, diagError],
+  );
+  const notHeldTypes = React.useMemo(() => new Set(notHeldEntries.map((e) => e.type)), [notHeldEntries]);
+  const listedEntries = React.useMemo(() => [...scopedEntries, ...notHeldEntries], [scopedEntries, notHeldEntries]);
 
   // Counts per domain for the filter chip bar.
   const domainCounts = React.useMemo(() => {
-    const c: Record<string, number> = { all: scopedEntries.length };
-    for (const e of scopedEntries) {
+    const c: Record<string, number> = { all: listedEntries.length };
+    for (const e of listedEntries) {
       const d = e.domain ?? 'other';
       c[d] = (c[d] ?? 0) + 1;
     }
     return c;
-  }, [scopedEntries]);
+  }, [listedEntries]);
 
   // objectstack#29705 — a tile's word answers "what can I do here" in the
   // package's context: a read-only package's overlay type can be customized,
   // never "writable". The filter hides the types that word marks read-only.
   const packageReadOnly = !!host?.readOnly;
-  const actionableCount = scopedEntries.filter((e) => typeStateWord(e, packageReadOnly) !== 'readOnly').length;
+  const actionableCount = listedEntries.filter((e) => typeStateWord(e, packageReadOnly) !== 'readOnly').length;
 
-  const filtered = scopedEntries.filter((e) => {
+  const filtered = listedEntries.filter((e) => {
     if (hideReadOnly && typeStateWord(e, packageReadOnly) === 'readOnly') return false;
     if (domainFilter !== 'all' && (e.domain ?? 'other') !== domainFilter) return false;
     if (query) {
@@ -252,7 +281,13 @@ export function MetadataDirectoryPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-6 pt-5 pb-4 border-b bg-background">
-        <h1 className="text-xl font-semibold">{t('engine.directory.title', locale)}</h1>
+        {/* objectstack#37455 — under Studio, the page's Save and the AI assistant end the title row. */}
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold">{t('engine.directory.title', locale)}</h1>
+          <span className="ml-auto flex items-center gap-2">
+            <StudioTitleRowEnd divider={false} />
+          </span>
+        </div>
         <p className="text-sm text-muted-foreground mt-1 max-w-3xl" data-testid="directory-description">
           {t('engine.directory.description', locale)}
         </p>
@@ -370,6 +405,7 @@ export function MetadataDirectoryPage() {
                       warnCount={warnByType[e.type] ?? 0}
                       lockedCount={lockedByType[e.type] ?? 0}
                       itemCount={totalCount}
+                      notHeld={notHeldTypes.has(e.type)}
                       customizedCount={customizedByType?.[e.type]}
                       packageReadOnly={packageReadOnly}
                       packageFilter={activePackage ?? undefined}
@@ -435,6 +471,7 @@ function TypeTile({
   href: hrefOverride,
   customizedCount,
   packageReadOnly = false,
+  notHeld = false,
 }: {
   entry: RichMetadataTypeEntry;
   locale?: string;
@@ -453,6 +490,8 @@ function TypeTile({
   href?: string;
   /** The type's served customization count (ADR-0146 D3); absent while unread, failed, or none. */
   customizedCount?: number;
+  /** The package holds no item of this type yet (objectstack#37360): marked so, with no count. */
+  notHeld?: boolean;
 }) {
   // Prefer the locale-table translation; fall back to server's `label` (typically English).
   const label = translateMetadataType(entry.type, locale, entry.label);
@@ -465,8 +504,11 @@ function TypeTile({
   return (
     <Link
       to={href}
+      data-testid={`directory-tile-${entry.type}`}
+      data-held={notHeld ? 'false' : undefined}
       className={
         'block p-4 border rounded-lg hover:bg-accent transition-colors ' +
+        (notHeld ? 'border-dashed ' : '') +
         (invalidCount > 0
           ? 'border-destructive/40 hover:border-destructive'
           : 'hover:border-primary')
@@ -490,13 +532,29 @@ function TypeTile({
           </code>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Badge
-            variant="secondary"
-            className="text-[10px] tabular-nums"
-            title={tFormat('engine.directory.itemCountTooltip', locale ?? 'en', { count: itemCount })}
-          >
-            {itemCount}
-          </Badge>
+          {notHeld ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] text-muted-foreground"
+              title={t(
+                typeStateWord(entry, packageReadOnly) === 'readOnly'
+                  ? 'engine.directory.notHeldReadOnlyTitle'
+                  : 'engine.directory.notHeldTitle',
+                locale ?? 'en',
+              )}
+              data-testid={`directory-tile-not-held-${entry.type}`}
+            >
+              {t('engine.directory.notHeld', locale ?? 'en')}
+            </Badge>
+          ) : (
+            <Badge
+              variant="secondary"
+              className="text-[10px] tabular-nums"
+              title={tFormat('engine.directory.itemCountTooltip', locale ?? 'en', { count: itemCount })}
+            >
+              {itemCount}
+            </Badge>
+          )}
           {customizedCount !== undefined && customizedCount > 0 && (
             <Badge
               variant="outline"

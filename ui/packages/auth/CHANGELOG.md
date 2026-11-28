@@ -1,5 +1,392 @@
 # @object-ui/auth
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 5b32625: fix(auth): a cloud-managed runtime's password refusal is shown in the session's language and points at the identity provider's button
+  
+  Clause-②: yes (widening) — `@object-ui/auth` `ForgotPasswordFormProps` gains the optional `errorMessages`; `@object-ui/i18n` gains `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset` in every locale
+  Metadata-protocol: none
+  
+  A cloud-managed runtime refuses the password doors (sign-in, forgot password, reset password, set password) with 409 `RESOURCE_CONFLICT`. Its code never reached the pages. The hosted relay and the set-password route answer in the platform's error envelope, `{ success: false, error: { code, message } }`, which the auth client did not read. Forgot and reset dropped the code where the client threw. So each of those pages showed the server's English sentence or `Auth request failed with status 409`, whatever the language.
+  
+  - **`@object-ui/auth`.** The client's error builder reads `code`, `message`, `details` and `userMessage` from the envelope's `error` when the flat body has none; a better-auth refusal answers exactly as before. `forgotPassword`, `resetPassword` and `setInitialPassword` now keep the refusal's code and status too. `ForgotPasswordForm` gains an `errorMessages` prop, the same code-to-text map `LoginForm` takes; without it the server's message is shown as before.
+  - **`@object-ui/app-shell`.** `signInRefusalMessages` maps `RESOURCE_CONFLICT` to a sentence that says the deployment signs people in through its identity provider and points at its button above the form. The new `passwordDoorRefusalMessages` carries the matching sentence for the forgot, reset and set-password doors, and the package's forgot-password page passes it.
+  - **`@object-ui/i18n`.** Two keys, `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset`, in every locale.
+  - **`@object-ui/console`.** The forgot-password, reset-password and set-password pages show the same sentence.
+  
+  On the sign-in door only a cloud-managed runtime answers this code, so a self-hosted sign-in is unchanged. On the reset and set-password doors a self-hosted deployment answers the same 409 `RESOURCE_CONFLICT` in two cases: an account its identity provider provisions while SSO-only mode is on, and a pending SSO person not yet signed in. Those pages now show the same localized sentence in place of the server's English one; it is true for that reader too. Nothing to migrate.
+- cb3f8b9: fix(console): the profile page's password card shows a password refusal in the session's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The profile page's password card (set a local password, change password) now maps a refusal's `code` through `passwordDoorRefusalMessages`, as the set-password and reset-password pages do: a 409 `RESOURCE_CONFLICT` (a cloud-managed runtime, an SSO-only account, a pending SSO person) shows the localized sentence instead of the server's English one. Any other code keeps the server's message.
+  
+  `@object-ui/auth`: `sendVerificationEmail`, `signOut` and `signInWithProvider` now reject through the same error builder as the other doors, so the thrown error carries the refusal's `code` and HTTP `status`, read from better-auth's flat body or from the ADR-0112 envelope. The `message` is unchanged.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- ca4ec2a: fix(auth): a "Sign in with SSO" request that never answers gives the sign-in page back after 20 seconds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the login page, when the request behind "Sign in with SSO" got no answer, the button kept spinning and the email field stayed locked until the page was reloaded. The request now runs under the same 20-second limit as the identity-provider buttons: once it passes, the request is cancelled, the page says the sign-in timed out, and the email field and the button can be used again to retry. An answering request still sends the browser to the identity provider as before.
+- 7bd5d28: feat(auth): `directSignIn.afterSignOut` lets an explicit sign-out return through the identity provider's sign-in page
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A deployment with direct sign-in on can now choose where an explicit sign-out returns once the identity provider has ended its own session. The default keeps today's behaviour, so nothing changes until a deployment sets the new value.
+  
+  - The auth plugin's `directSignIn` option takes `afterSignOut: 'hold' | 'identity-provider'`, and the environment variable `OS_AUTH_DIRECT_SIGN_IN_AFTER_SIGN_OUT` wins over it, like the other direct sign-in settings. `hold` is the default. Any other value refuses to boot, naming the variable and both values.
+  - `GET /api/v1/auth/config` serves `features.afterSignOut` while the direct sign-in setting is on, on the same terms as `features.localSignIn`, and leaves it out otherwise. `AuthFeaturesConfigSchema` in `@objectstack/spec` gains the optional `afterSignOut` enum, and `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS` gains `'afterSignOut'`.
+  - `hold`: the Console's sign-out sends the sign-in page as the provider's return address, and the page holds with a button to sign in again, as before.
+  - `identity-provider`: while `features.directSignIn` reads `true`, the Console's sign-out sends `{basePath}/sign-in/direct` instead, so after the provider's logout the browser goes through the direct sign-in door to the provider's own sign-in page. The door starts a fresh sign-in without the browser's cookies, and the provider has just ended its session, so it asks for credentials; it does not loop. Register the door's absolute address as a post-logout redirect URI at the provider.
+  - `@object-ui/auth`: `AuthPublicConfig.features` gains the optional `afterSignOut`. When the tab holds no auth config at sign-out, the client reads it once (3 seconds at most) and keeps the sign-in page if it cannot.
+  - Module exports on the `@objectstack/plugin-auth` entry: the type `DirectSignInAfterSignOut`. In `direct-sign-in.ts` (not on the package entry): `DIRECT_SIGN_IN_AFTER_SIGN_OUT`, and `DIRECT_SIGN_IN_ENV.afterSignOut`.
+- e25ca63: fix(console, auth): a cold console load sends `me/localization` once, and asks for the cookie session at parse time
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a device's first visit the console sent `GET /api/v1/auth/me/localization` twice. The language seed asked before the app mounted. The localization provider asked again after its own mount, because the seed's request had already settled and requests are shared only while they are in flight. The provider's boot read now takes the seed's answer to the same request once, but only when it was an authenticated answer about the browser's current owner. A re-read after a write to the user's own row still asks the server, and so does any later mount.
+  
+  With no stored Bearer (a cookie session), `get-session` was asked by `AuthProvider` only after React mounted. That mount waits on the seed's bounded race, so the session check waited for the language read. `index.html`'s parse-time session check now asks the cookie session's question too, without an `Authorization` header. `preflightAuth()` hands the answer to `AuthProvider` through the existing slot with a null token. A signed-out answer is handed on as well: a body naming no user, or the server's 401 `UNAUTHENTICATED`. A signed-out visitor therefore still sends one `get-session`. `AuthProvider` takes a null-token answer only while no token is stored. A protected route still waits for the session answer, and the seed's race and the language applied before first paint are unchanged.
+- 370e14d: fix(auth): signing out keeps the list layout for the same person; a change of user still clears it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Column widths, row height and tab order are kept only in the browser, so the sign-out purge (`purgeSignedOutUserClientState`, run by `AuthProvider` on `signOut()` and on every session read that answers "no session", including a session that ended on its own) reset every list at every sign-out. It now keeps the list layout: `localStorage` keys starting `list-layout:` (written by `@object-ui/app-shell`) and `grid-columns-` (the grid's own copy of column widths and order, also used by a record page's related tab). An entry is kept only while it holds that layout and nothing else: view ids, field names, widths and a row height. An entry holding anything more, such as a filter, a search term or record data, is removed like any other key. These keys are kept only in `localStorage`; the same keys in `sessionStorage` are still removed.
+  
+  A different person signing in on that browser still clears everything (`purgePreviousUserClientState` keeps none of these keys), so their lists open at each view's defaults. Nothing changes for an app that writes no keys under these prefixes.
+- f2ef7d8: fix(ui): the kanban card owner, history timeline, user menu and presence stack draw letters-only initials
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A person whose display name carries punctuation, such as `Alice (Sales)`, now shows `AS` on the kanban card owner's avatar, the history timeline, the user menu and the presence stack, where those four faces drew `A(`. They now use the same rule as the people cell and the avatar widget: initials are made of letters only, a single-word name gives its first two letters (`Admin` → `AD`), a name of three or more words gives its first and last words' first letters (`John Michael Doe` → `JD`), a single CJK word gives its last one or two characters, and a name with no letter gives `?`. The user menu still falls back to the email's first character when there is no name.
+  
+  The rule, `getPersonInitials`, is now exported by `@object-ui/types`, the lowest package all of these faces can reach; `@object-ui/fields` re-exports the same function, so its `getPersonInitials` export is unchanged. `@object-ui/auth` now depends on `@object-ui/types`.
+- 4d4ec16: feat(console): from 768 px up a sign-in lands in the last-used app, and the platform home page retires
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  From 768 px up there is no platform home page any more. A sign-in, the SSO round trip and the old `/home` address all land the person in an app their permission sets show, in this order: the app they last had open, while it is still there for them; else the app the product declares `isDefault`; else the first app somebody put into the environment (never Setup or Studio).
+  
+  - A person with no such app at all stays on `/home`, which now draws only the no-apps empty state: 「No applications yet」, and for a viewer who may add an app the same doors the sidebar's 「Add app」 offers (build with AI, start from a template, the app marketplace). An administrator's first-run checklist stays above it.
+  - An administrator's first-run checklist, while it has open items, moves to the top of the Setup app's first page (the page Setup opens on). It is drawn from 768 px up only, and a phone is unchanged.
+  - `@object-ui/app-shell` exports `SetupFirstPageSlotProvider`, through which a host puts its element above the Setup app's first page.
+  - The console's Home affordances (⌘⇧H, the way back from a missing app, Studio's way out) go where the landing goes. Where the chrome cannot yet tell which apps a permission set hides (Studio, the AI pages, or before that answer arrives) they point at `/home`, which resolves the landing itself.
+  - The SSO sign-in's callback is the console root instead of `/home`, so it lands the same way.
+  - A phone is unchanged: it still lands in the last app first, and `/home` is still its app list.
+  - `@object-ui/app-shell` exports `resolveDesktopHomePath(apps, lastApp)`, the desktop's Home.
+  - `RedirectWithSplash` takes an optional `state`, so the hops from `/` and `/home` into the landing app keep what the visit carried (an old `/ai` address's Builder handoff).
+  - Every console locale gains `home.noAppsAddDescription`.
+- 79a355b: fix(auth): "Sign in with SSO" brings a signed-out person back to the link they opened
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A person who opened a record link while signed out is sent to the sign-in page, which remembers the link. Password and provider-button sign-in took them to it afterwards; signing in with SSO by work email took them to their last app instead. The SSO sign-in now comes back to the sign-in page with that link, the same way the provider buttons do, and the page then takes the person to it. Only a link inside this site is kept: a full web address or one pointing at another host is dropped, and the person lands where any sign-in does. With no link, nothing changes.
+- 58e1a3b: fix(auth, console): saving your name on the profile page keeps the page on screen and shows "Profile updated successfully."; a language save that changes the interface language still confirms
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `useAuth().updateUser` (`@object-ui/auth`) installed the answer of better-auth's `POST /update-user` as the session user. That endpoint answers `{ status: true }`, not the user, so for a moment the signed-in user had no `id`, `name` or `email`: the header showed "?" and "User", and every consumer keyed on the identity dropped its children and mounted them again. In the console the page went blank, its data was read again, and the profile card's success alert, which is local state, was lost. `updateUser` now keeps the same user and applies the fields it wrote to it, the way better-auth builds the stored row. The page is not remounted, and the alert stays. The avatar upload and remove, which call `updateUser` too, no longer blank the page either.
+  
+  The profile page's Language card (`@object-ui/console`) also confirms a save with a toast. A save that changes the interface language remounts the page under the console shell's language key, by design, and that remount took the card's inline alert with it. The console's toaster sits above that key, so the toast stays. A save that does not change the interface language shows the inline alert as before, and the toast beside it.
+  
+  Nothing to migrate.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [e01b8be]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [0585797]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [9f6f306]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [f3d0a9f]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [4ab2c82]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [bbc7e03]
+- Updated dependencies [543585d]
+- Updated dependencies [7e89bc6]
+- Updated dependencies [70194ff]
+- Updated dependencies [f2ef7d8]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [4ed453d]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [57445a6]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [1f3e9f6]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [2d18ba8]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [c385d3b]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @object-ui/types@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

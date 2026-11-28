@@ -606,8 +606,8 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
  * `placedActions: true` beside an authored `actions` list: two answers to the
  * one question of which of the bound object's actions a `page:header` draws.
  * The list is the whole set (#11592's meaning, kept by ruling record
- * 6624172200, letter A); the switch is every action placed at `record_header` /
- * `record_more`, read live. Neither can be read as narrowing the other without
+ * 6624172200, letter A); the switch is every action placed on the record page
+ * (`record` / `record_page`), read live. Neither can be read as narrowing the other without
  * inventing a rule nobody authored, so the pair is refused at authoring and the
  * author keeps one. `placedActions: false` beside a list says nothing new and
  * is not the pair.
@@ -624,7 +624,7 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
 const PAGE_HEADER_PLACED_ACTIONS_BESIDE_LIST = {
   message:
     'A `page:header` that sets `placedActions: true` draws every action of the bound object placed at '
-    + '`record_header` or `record_more`, read live, so an `actions` list beside it is a second, different '
+    + '`record` or `record_page`, read live, so an `actions` list beside it is a second, different '
     + 'answer to which actions the header draws. Keep one: `actions` for a curated list that is the whole '
     + 'set the header draws, or `placedActions: true` for every placed action, and delete the other key.',
   path: ['placedActions'],
@@ -713,17 +713,17 @@ export const PageHeaderProps = strictObject({
    * declare a header placement. objectui's `PageHeaderRenderer`
    * (`resolvedHeaderActions` then `headerActionPlan`; read points recorded in
    * `liveness/page.json`, row `regions`) resolves each id against the actions declared on the bound object, keeps
-   * those whose `locations` include `record_header` or `record_more`, and draws
+   * those whose `locations` include `record` or `record_page`, and draws
    * no other action of the object:
    *
-   * - an action that declares `record_header` and is NOT named here is not
+   * - an action that declares `record_page` and is NOT named here is not
    *   drawn in this header. Declaring the placement does not add it, so the
    *   list is the author's curation of the header, and a new header action is
    *   added to the list as well as to the object;
    * - with the key omitted, an authored `page:header` draws none of the
    *   object's own actions (the list resolves to empty), unless it sets
    *   `placedActions: true` below: the other, explicit way to say which
-   *   actions, namely every `record_header` / `record_more` action of the
+   *   actions, namely every `record` / `record_page` action of the
    *   object, read live. That is the set the platform's synthesized default
    *   record page, used when no page is assigned, builds its header from;
    * - a named id whose action declares neither location renders nowhere;
@@ -737,11 +737,11 @@ export const PageHeaderProps = strictObject({
    * here and added the switch beside it.
    */
   actions: z.array(z.string()).optional().describe(
-    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and a header with neither this key nor `placedActions: true` draws none of the object\'s actions. `placedActions: true` is the other way to say which actions the header draws (every one placed at `record_header` / `record_more`, read live), and the two are refused together. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record` or `record_page` in its `locations` but is not named here is not drawn, and a header with neither this key nor `placedActions: true` draws none of the object\'s actions. `placedActions: true` is the other way to say which actions the header draws (every one placed at `record` / `record_page`, read live), and the two are refused together. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
   ),
   /**
    * The explicit opt-in to draw EVERY action of the bound object whose
-   * `locations` include `record_header` or `record_more`, read live from the
+   * `locations` include `record` or `record_page`, read live from the
    * object's metadata, in place of an authored `actions` id list (ruling
    * record 6624172200, letter A). An action another package places on the
    * object is drawn without editing this page, which is what a platform record
@@ -772,15 +772,15 @@ export const PageHeaderProps = strictObject({
    * container).
    */
   placedActions: z.boolean().optional().describe(
-    'Draw every action of the page\'s object whose `locations` include `record_header` or `record_more`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
+    'Draw every action of the page\'s object whose `locations` include `record` or `record_page`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
   ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).
    *
    * ON (the default) the header carries the **record chrome**: the title
    * renders as a record chip with the copy-record-id button beside it (the
-   * follow star draws there only where a host wires a favorites toggle; the
-   * reference console's favorites entry is the header's ⋯ menu). OFF it falls back to a bare heading — one title line and
+   * follow star draws there only where a host wires a favorites toggle, as the
+   * reference console does on its record pages). OFF it falls back to a bare heading — one title line and
    * nothing record-shaped — which is what a dashboard or a landing page wants,
    * since there is no record for the chip to describe.
    *
@@ -801,11 +801,12 @@ export const PageHeaderProps = strictObject({
    * the way `breadcrumb` above left this row; ruling record 6203775759,
    * letter A).
    *
-   * A switch for a star the reference console no longer draws. Since
-   * objectui#12427 the record chip draws the follow star only where the HOST
-   * wires a favorites toggle into the record context (`onToggleFavorite`),
-   * and no reference host does: the record's favorites entry is the header's
-   * ⋯ overflow menu. So `showStar: true` (the default) drew nothing and
+   * A switch metadata never had a say in. Since objectui#12427 the record chip
+   * draws the follow star only where the HOST wires a favorites toggle into
+   * the record context (`onToggleFavorite`); when the key was retired no
+   * reference host did, and since #36246 the reference console wires it on
+   * its record pages, beside the record's name. Either way the star follows
+   * the host's toggle, so `showStar: true` (the default) drew nothing and
    * `showStar: false` hid nothing. No example app, skill or doc authored it.
    *
    * The host hook stays: objectui's `RecordContextValue.onToggleFavorite` is a
@@ -817,9 +818,8 @@ export const PageHeaderProps = strictObject({
    */
   showStar: retiredKey(
     '`page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
-    + 'the reference console draws no star beside the record title, so the key switched nothing: '
-    + 'the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it. '
-    + 'Delete the key, whether it was `true` or `false`; the ⋯ menu\'s favorites entry is unchanged. '
+    + 'the console draws the record\'s star from the host\'s favorites toggle, never from metadata, so the key switched nothing. '
+    + 'Delete the key, whether it was `true` or `false`; the page draws the same star without it. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
@@ -856,7 +856,7 @@ export const PageHeaderProps = strictObject({
     'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header. In a record page\'s header bar the number, authored or not, is an upper bound: actions that do not fit the bar\'s width fold as well, so a narrow drawer shows fewer.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, where the host\'s Edit counts as one, 1 on any other header.',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header. The phone bar holds the page\'s own actions: the record\'s Edit is not one of them, it is in the overflow menu at the top bar\'s right end.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -1421,8 +1421,13 @@ export const RecordDetailsProps = strictObject({
      * case: a partly-filled section's empty rows follow the renderer's own
      * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
      * section's empty fields" no longer told the two values apart.
+     *
+     * The hide holds only while the reader hides empty fields (#36593, a seat
+     * route): showing them reveals the section, authored `true` or default,
+     * and the record page's field list counts its fields in its one toggle.
+     * The accept set is unchanged; only the read-mode meaning moved.
      */
-    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). It is hidden while the reader hides empty fields: its empty fields are counted by the empty-fields toggle that ends the record page\'s field list, and showing empty fields there, or a remembered per-object choice to show them elsewhere, draws the section in its place (outside the field list with no remembered choice it stays hidden), the same for an authored `true` and the default; a print page keeps it hidden. Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
@@ -2493,7 +2498,7 @@ export const RecordQuickActionsProps = strictObject({
 }, {
   actionNames: z.array(z.string()).optional().describe('Names of actions declared on this object (`actions[]`), in display order. The engine still location-filters named actions. Measured: when omitted (and the host supplies nothing) the bar resolves NO actions and renders its empty placeholder — it does not fall back to "every action at this location", whatever the registration\'s input list claims.'),
   requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
-  location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_header`).'),
+  location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_page`). At `record_page` it draws the record page\'s actions that are not folded into its ⋯ menu (`component: \'action:menu\'`); an action placed at `record` is drawn at `record_page` and at `record_row`.'),
   align: z.enum(['start', 'center', 'end']).optional().describe('Horizontal alignment of the button row (renderer default: `end`).'),
   inline: z.boolean().optional().describe('Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot.'),
   variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).optional().describe('Button variant for every action — the Button primitive\'s own vocabulary; a per-action `variant` on the resolved def wins (renderer default: `default`).'),
@@ -2582,7 +2587,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * field's `inlineColumns`, a form view's `subforms[].columns` and an
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
- * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
+ * `GridColumn` declares exactly that schema's twenty-one keys and IS the spec's
  * type by reference). The column also means here what it means on those
  * carriers (#24140, route B), because the column schema's own `label` describe
  * — "defaults to the child field's label via hydration" — governs every
@@ -3886,7 +3891,7 @@ const rowPatchRetired = (owner: string) => retiredKey(
 );
 
 /**
- * The console runner's built-in executors: `ActionType`'s six, the members its
+ * The console runner's built-in executors: `ActionType`'s members, which its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
  * (read points recorded in `liveness/page.json`, row `regions`). Every other name is a handler a
@@ -3989,7 +3994,7 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
  *   {@link actionContainerMemberParamsFitType}. Whether the named action
  *   exists, is an `operation: 'update'` action and declares those params is a
  *   cross-reference this row cannot see;
- * - beside it, a `list_toolbar` location — refused at `locations.N`.
+ * - beside it, a `list` location — refused at `locations.N`.
  *
  * Applied first on each row, as the runner reads `operation` first: the row's
  * url-target, executor-alias and `onSuccess`-executor judgments stand down
@@ -4117,7 +4122,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list` is not a location'),
   patch: rowPatchRetired("An `action:button`'s"),
   confirmText: actionRowCopy('confirmText').optional()
     .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
@@ -4226,7 +4231,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list` is not a location'),
   patch: rowPatchRetired("An `action:icon`'s"),
   confirmText: actionRowCopy('confirmText').optional()
     .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
@@ -4384,7 +4389,7 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+    operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list` is not a location'),
     patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
     confirmText: actionRowCopy('confirmText').optional()
       .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside a \`type: 'api'\` member's object \`params\` (its request payload, no param dialog)`),
@@ -5006,7 +5011,7 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `searchableFields`/`showSearch`, `rowHeight`, `grouping`/`aggregations`,
  * `rowColor`, `conditionalFormatting`, `selection`/`selectable`,
  * `rowActions`, `batchActions`/`bulkActions`, `bulkActionDefs`, `navigation`,
- * `editable`/`singleClickEdit`, `resizable`/`resizableColumns`,
+ * `editable` (`singleClickEdit` RETIRED #36270, tombstoned below), `resizable`/`resizableColumns`,
  * `reorderableColumns`, `frozenColumns`, `showColumnTypeIcons`,
  * `exportOptions`/`operations`, `label`/`title`, `data`/`staticData`.
  *
@@ -5445,7 +5450,28 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   navigation: NavigationConfigSchema.optional()
     .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
-  singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
+  /**
+   * REMOVED (#36270, ADR-0049 enforce-or-remove; the maintainer's ruling A,
+   * one editing model). A grid that renders editable — `editable` set and the
+   * viewer allowed to edit — now selects a cell first: a click selects it,
+   * and double-click, Enter, F2 or typing opens its editor. That model has no
+   * single-click entry, so neither value of this key could be honoured any
+   * longer: `true` (the renderer's default) would open the editor on the
+   * selecting click, and `false` named the double-click entry the model
+   * already has. A grid that renders read-only edits nothing, so the key
+   * never had an effect there.
+   *
+   * The live mechanism is `editable` (with the viewer's write verdict). The
+   * protocol-18 conversion `object-grid-single-click-edit-removed` deletes the
+   * key from authored grids.
+   */
+  singleClickEdit: retiredKey(
+    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 19.0.0 (ADR-0049) — '
+    + 'a grid that renders editable now selects a cell on a click and opens its editor on double-click, '
+    + 'Enter, F2 or typing, so a single-click entry no longer exists for this key to switch. '
+    + 'Delete the key; `editable` (with the viewer\'s write verdict) decides whether the grid edits. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+  ),
   /**
    * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
    * to BUILD arrow-key cell navigation for the grid, and this row is the spec
@@ -5463,9 +5489,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * objectui `154075ab1`, objectui#11068): the grid hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict
-   * — so an absent key follows whether the grid RENDERS editable, `true` turns
-   * the navigation on for a read-only grid, and `false` turns it off on an
-   * editable one. The data table (`keyboardNavigation = false` by default)
+   * — so an absent key follows whether the grid RENDERS editable and `true`
+   * turns the navigation on for a read-only grid. Since #36270 a grid that
+   * renders editable selects a cell first, and that model moves its selection
+   * with these keys, so the data table forces the navigation on there and
+   * `false` is no longer honoured on an editable grid (ruling A narrowed the
+   * describe to what is enforced). The data table (`keyboardNavigation = false` by default)
    * then gives the table `role="grid"` and makes the data cells one roving
    * Tab stop (`tabIndex` 0 on one cell and -1 on the rest) that the arrow
    * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`;
@@ -5473,7 +5502,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * every data cell is its own Tab stop, as before.
    */
   keyboardNavigation: z.boolean().optional()
-    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid'),
+    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Always on when the grid renders editable — `editable` set and the viewer allowed to edit — because that grid selects a cell first and moves the selection with these keys; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`'),
   resizable: z.boolean().optional().describe('Allow column resize (the renderer default is on)'),
   /**
    * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,

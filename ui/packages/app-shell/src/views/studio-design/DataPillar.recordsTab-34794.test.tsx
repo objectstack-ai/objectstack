@@ -53,6 +53,7 @@ const mockClient = {
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async () => ({ effective: SERVED, code: AUTHORED })),
   getDraft: vi.fn(async () => null),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
 };
 
@@ -91,7 +92,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 // The source under test reaches a dynamic import of `@objectstack/lint`: its first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -124,9 +127,9 @@ afterEach(() => {
 
 async function renderGrid(props: { readOnly?: boolean } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
-    </MemoryRouter>,
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <DataPillar objectName={OBJECT} packageId="com.example.showcase" readOnly={props.readOnly} />
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(document.querySelector('thead th[data-column-key="title"]')).not.toBeNull(), {
     timeout: 8000,
@@ -159,6 +162,7 @@ describe('Data pillar Records tab (objectstack#34794)', () => {
     expect(screen.getByTestId('grid-add-column')).toBeInTheDocument();
     await userEvent.click(toolbarAdd);
     await completeAddFieldPopover({ label: 'Agenda' });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 8000 });
     const calls = mockClient.save.mock.calls as unknown as Array<[string, string, { fields: Record<string, unknown> }]>;
     expect(Object.keys(calls.at(-1)![2].fields)).toContain('agenda');
@@ -192,10 +196,12 @@ describe('Data pillar Records tab (objectstack#34794)', () => {
     expect(screen.queryByTestId('field-label-input')).not.toBeInTheDocument();
   });
 
-  it("the object's machine name is the title's tooltip, not a chip beside it", async () => {
+  // objectstack#36904 — the full-screen item header (objectstack#36892) reads
+  // the label, then the machine name beside it, as every item page does.
+  it("the header reads the object's label, then its machine name", async () => {
     await renderGrid();
     const head = screen.getByTestId('data-object-header');
-    expect(within(head).getByRole('heading', { level: 1 })).toHaveAttribute('title', OBJECT);
-    expect(within(head).queryByTestId('studio-item-api-name')).not.toBeInTheDocument();
+    expect(within(head).getByTestId('studio-detail-title')).toHaveTextContent('Meeting');
+    expect(within(head).getByTestId('studio-item-api-name')).toHaveTextContent(OBJECT);
   });
 });

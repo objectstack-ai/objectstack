@@ -37,7 +37,7 @@
  *     read for stored documents.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor, within, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -150,7 +150,7 @@ describe('action:group — the published inputs (objectui#11168)', () => {
     expect(inputs.has('visible')).toBe(true);
     expect(inputs.has('name')).toBe(false);
     // The two published keys are keys the spec row accepts, `name` is not.
-    expect(specRow('action:group').safeParse({ location: 'list_toolbar', visible: true }).success).toBe(true);
+    expect(specRow('action:group').safeParse({ location: 'list', visible: true }).success).toBe(true);
   });
 
   it('`name` is RETIRED: the spec refuses it, and nothing the group renders reads it', () => {
@@ -199,10 +199,10 @@ describe('action:group — the published inputs (objectui#11168)', () => {
 describe('action:group — each published key is honoured through `SchemaRenderer`', () => {
   it('`location` renders only the members whose `locations` include it', () => {
     const actions = [
-      member('here', { locations: ['list_toolbar'] }),
-      member('there', { locations: ['record_header'] }),
+      member('here', { locations: ['list'] }),
+      member('there', { locations: ['record_page'] }),
     ];
-    mount({ type: 'action:group', location: 'list_toolbar', actions });
+    mount({ type: 'action:group', location: 'list', actions });
     expect(screen.getByRole('button', { name: 'HERE' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'THERE' })).toBeNull();
     cleanup();
@@ -387,5 +387,170 @@ describe('action:menu — the member shape of `actions` (the MEMBER-PIN directio
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'GO' }));
     await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
     expect(run.mock.calls[0][0]).toMatchObject({ type: 'run', name: 'go', target: 'member-target', objectName: 'account' });
+  });
+});
+
+// ── objectstack#37266 — the shared label guard ──────────────────────────────
+//
+// `action:menu` and `action:group` read every label, their own and each
+// member's, through `renderableLabel` (`../renderable-label.ts`), the guard
+// `action:button` reads through (ruling A on objectstack#36717). A locale map
+// reaches a renderer only from metadata that skipped `validateComponentProps`;
+// it renders no label text, prints no `[object Object]`, is not translated,
+// and the menu no longer throws. Text and accessible names only: both
+// renderers spread undeclared node keys onto the DOM as attributes.
+
+describe('action:group — a non-string label renders no text and never throws (objectstack#37266)', () => {
+  // Scoped to this describe: the label pins read every `console.warn`, and the
+  // file's own `beforeEach` spies only on `console.error`.
+  const LOCALE_MAP = { en: 'Approve', 'zh-CN': '批准' };
+  let warn: MockInstance<(...args: unknown[]) => void>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+  const labelWarnings = () => warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
+  const assertNothingLeaked = () => {
+    // Text and accessible names only: the host's undeclared-prop spread writes every
+    // node key onto the DOM as an attribute (`actions="[object Object]"` on main for
+    // any group), which is not a label read and is out of this guard's reach.
+    expect(document.body.textContent).not.toContain('[object Object]');
+    for (const el of document.querySelectorAll('[aria-label]')) {
+      expect(el.getAttribute('aria-label')).not.toContain('[object Object]');
+    }
+    expect(document.body.textContent).not.toContain('批准');
+    expect(document.body.textContent).not.toContain('Approve');
+  };
+
+  it('inline: a locale-map member label renders a button with no text, which still runs with no label', async () => {
+    mount({
+      type: 'action:group',
+      id: 'group_label_inline',
+      actions: [{ name: 'approve', label: LOCALE_MAP, type: 'run' }],
+    });
+    const button = screen.getByRole('button');
+    expect(button.textContent).toBe('');
+    assertNothingLeaked();
+
+    fireEvent.click(button);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
+
+    const warned = labelWarnings().map((args) => String(args[0]));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('action:group "approve"');
+  });
+
+  it('dropdown: a locale-map label on the group and on a member falls back to the defaults', async () => {
+    mount({
+      type: 'action:group',
+      id: 'group_label_dropdown',
+      display: 'dropdown',
+      label: LOCALE_MAP,
+      actions: [{ name: 'approve', label: LOCALE_MAP, type: 'run' }],
+    });
+    // The trigger's unlabelled default, and the member's `name`.
+    const trigger = screen.getByRole('button');
+    expect(trigger).toHaveTextContent('Actions');
+    await openMenu(trigger);
+    expect(screen.getByRole('menuitem')).toHaveTextContent('approve');
+    assertNothingLeaked();
+
+    const warned = labelWarnings().map((args) => String(args[0]));
+    expect(warned.some((m) => m.includes('action:group "group_label_dropdown"'))).toBe(true);
+  });
+
+  it('CONTROL: string labels render as written in both display modes', async () => {
+    mount({
+      type: 'action:group',
+      id: 'group_label_string',
+      actions: [{ name: 'approve', label: 'Approve', type: 'run' }],
+    });
+    expect(screen.getByRole('button')).toHaveTextContent('Approve');
+    cleanup();
+
+    mount({
+      type: 'action:group',
+      id: 'group_label_string_dd',
+      display: 'dropdown',
+      label: 'Row',
+      actions: [{ name: 'approve', label: 'Approve', type: 'run' }],
+    });
+    const trigger = screen.getByRole('button');
+    expect(trigger).toHaveTextContent('Row');
+    await openMenu(trigger);
+    expect(screen.getByRole('menuitem')).toHaveTextContent('Approve');
+    expect(labelWarnings()).toHaveLength(0);
+  });
+});
+
+describe('action:menu — a non-string label renders no text and never throws (objectstack#37266)', () => {
+  // Scoped to this describe: the label pins read every `console.warn`, and the
+  // file's own `beforeEach` spies only on `console.error`.
+  const LOCALE_MAP = { en: 'Approve', 'zh-CN': '批准' };
+  let warn: MockInstance<(...args: unknown[]) => void>;
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+  const labelWarnings = () => warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
+
+  it('a locale-map label on the menu and on a member: no throw, no `[object Object]`, nothing translated', async () => {
+    mount({
+      type: 'action:menu',
+      id: 'menu_label_guard',
+      label: LOCALE_MAP,
+      actions: [{ name: 'approve', label: LOCALE_MAP, type: 'run' }],
+    });
+
+    // The trigger falls back to its default accessible name, with no label text.
+    const trigger = screen.getByRole('button', { name: 'More actions' });
+    expect(trigger.textContent).toBe('');
+
+    // The member falls back to its `name`, as an unlabelled member always has.
+    const menu = await openMenu(trigger);
+    const item = screen.getByRole('menuitem');
+    expect(item).toHaveTextContent('approve');
+    expect(menu.textContent).not.toContain('[object Object]');
+    // Text and accessible names only: the host's undeclared-prop spread writes every
+    // node key onto the DOM as an attribute (`actions="[object Object]"` on main for
+    // any menu), which is not a label read and is out of this guard's reach.
+    expect(document.body.textContent).not.toContain('[object Object]');
+    expect(trigger.getAttribute('aria-label')).toBe('More actions');
+    expect(document.body.textContent).not.toContain('批准');
+    expect(document.body.textContent).not.toContain('Approve');
+
+    // The member still runs, and the runner is handed no label.
+    fireEvent.click(item);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
+
+    // One development warning per component: the menu, and its member.
+    const warned = labelWarnings().map((args) => String(args[0]));
+    expect(warned).toHaveLength(2);
+    expect(warned.some((m) => m.includes('action:menu "menu_label_guard"'))).toBe(true);
+    expect(warned.some((m) => m.includes('action:menu "approve"'))).toBe(true);
+  });
+
+  it('CONTROL: string labels render as written, and the runner is handed the member label', async () => {
+    mount({
+      type: 'action:menu',
+      id: 'menu_label_string',
+      label: 'Row',
+      actions: [{ name: 'approve', label: 'Approve', type: 'run' }],
+    });
+    const trigger = screen.getByRole('button', { name: 'Row' });
+    expect(trigger).toHaveTextContent('Row');
+    await openMenu(trigger);
+    const item = screen.getByRole('menuitem');
+    expect(item).toHaveTextContent('Approve');
+    fireEvent.click(item);
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBe('Approve');
+    expect(labelWarnings()).toHaveLength(0);
   });
 });

@@ -10,6 +10,7 @@ import {
   undeclaredActionRefusalCodeAtSave,
   undeclaredActionRefusalReasonAtRun,
   undeclaredActionRefusalReasonAtSave,
+  unreadableActionRefusalListAtRun,
   undeclaredHookRefusalAtRun,
   undeclaredHookRefusalCodeAtSave,
 } from '../data/hook-refusal-codes';
@@ -264,5 +265,117 @@ describe('the translation address — beside the action\'s other copy', () => {
     const r = TranslationDataSchema.safeParse({ globalActions: { export_all: { refusal: {} } } });
     expect(r.success).toBe(false);
     expect(issuesOf(r).find((i) => /unrecognized|rename|→/.test(i.message))?.message).toContain('`refusal` → `refusals`');
+  });
+});
+
+// #36877 (ruling 7178348458 letter A): an action refusing a whole selection
+// names an ordered list of declared reasons in one throw.
+describe('Action.refusals — a listed reason is refused at save where the body names it literally (#36877)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Nothing changed.', reasons: { closed: { message: 'Closed.' }, won: { message: 'Won.' } } },
+  };
+
+  it('CONTROL: accepts a list of declared reasons', () => {
+    expect(ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'STAGE_LOCKED', reasons: [{ reason: 'closed' }, { reason: 'won' }] };"),
+      refusals,
+    }).success).toBe(true);
+  });
+
+  it('refuses an undeclared listed reason at `body.source`', () => {
+    const r = ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'STAGE_LOCKED', reasons: [{ reason: 'closed' }, { reason: 'lost' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('STAGE_LOCKED', 'lost', ['closed', 'won']));
+  });
+
+  it('refuses a listed reason under a code that declares no reasons', () => {
+    const r = ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'NOT_DRAFT', reasons: [{ reason: 'closed' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('NOT_DRAFT', 'closed', []));
+  });
+
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    expect(ActionSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'NOT_DRAFT', params: { reasons: [{ reason: 'closed' }] } };"),
+      refusals,
+    }).success).toBe(true);
+  });
+
+  it('the run-time list fault names the action', () => {
+    expect(unreadableActionRefusalListAtRun('submit_signoff', 'STAGE_LOCKED', 'empty')).toContain(
+      "action 'submit_signoff' threw code 'STAGE_LOCKED' with a `reasons` list that names no reason",
+    );
+  });
+});
+
+// The hook door's reading, at the action door: a code or reason is literal only
+// when its quoted value closes the value (a property's by `,` or `}`, an
+// assignment's by `;`, `,`, `}`, `)`, the source's end or a line end that does
+// not continue the expression); one built from a literal is computed, the
+// run-time refusal's.
+describe('Action.refusals — a literal code or reason closes its value; one built from a literal is computed', () => {
+  const refusals = {
+    OVER_LIMIT: { message: 'Over the limit.', reasons: { too_high: { message: 'The amount is too high.' } } },
+  };
+  const DECLARED = ['OVER_LIMIT'];
+
+  const LITERAL_CODE = [
+    ['a property closed by `}`', "throw { code: 'OVER' };"],
+    ['a property closed by `,`', "throw { code: 'OVER', reason: 'too_high' };"],
+    ['a property in Object.assign', "throw Object.assign(new Error('x'), { code: 'OVER' });"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER'\nthrow e"],
+  ] as const;
+
+  it.each(LITERAL_CODE)('lit: refuses an undeclared literal code written as %s, at body.source', (_shape, source) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(source), refusals });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalCodeAtSave('OVER', DECLARED));
+  });
+
+  const COMPUTED_CODE = [
+    ['a property concatenation', "throw { code: 'OVER' + suffix };"],
+    ['a property member access', "throw { code: 'OVER'.concat(suffix) };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  + suffix\nthrow e;"],
+  ] as const;
+
+  it.each(COMPUTED_CODE)('dark: passes the save for a code built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(ActionSchema.safeParse({ ...base, body: body(`const suffix = '_LIMIT';\n${source}`), refusals }).success).toBe(true);
+  });
+
+  const LITERAL_REASON = [
+    ['a property closed by `}`', "throw { code: 'OVER_LIMIT', reason: 'too' };"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too'; throw e;"],
+  ] as const;
+
+  it.each(LITERAL_REASON)('lit: refuses an undeclared literal reason written as %s, at body.source', (_shape, source) => {
+    const r = ActionSchema.safeParse({ ...base, body: body(source), refusals });
+    expect(r.success).toBe(false);
+    const issue = issuesOf(r).find((i) => i.path.join('.') === 'body.source');
+    expect(issue?.message).toBe(undeclaredActionRefusalReasonAtSave('OVER_LIMIT', 'too', ['too_high']));
+  });
+
+  const COMPUTED_REASON = [
+    ['a property concatenation', "throw { code: 'OVER_LIMIT', reason: 'too' + suffix };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too' + suffix; throw e;"],
+  ] as const;
+
+  it.each(COMPUTED_REASON)('dark: passes the save for a reason built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(ActionSchema.safeParse({ ...base, body: body(`const suffix = '_high';\n${source}`), refusals }).success).toBe(true);
   });
 });

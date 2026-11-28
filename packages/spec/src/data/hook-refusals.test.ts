@@ -7,14 +7,16 @@ import {
   hookRefusalsWithoutSandboxedBody,
   HOOK_REFUSAL_REASON_PATTERN,
   hookRefusalReasonsThrownIn,
+  isUndeclaredThrownReason,
   undeclaredHookRefusalAtRun,
+  unreadableHookRefusalListAtRun,
   undeclaredHookRefusalCodeAtSave,
   undeclaredHookRefusalReasonAtRun,
   undeclaredHookRefusalReasonAtSave,
 } from './hook-refusal-codes';
 import { hookRefusalMessageKey } from '../system/i18n-resolver';
 import { TranslationDataSchema } from '../system/translation.zod';
-import { hookForm } from './hook.form';
+import { hookForm } from './hook.metadata-form';
 
 // #26170 (maintainer ruling 6431311681, letter A): a hook declares its refusal
 // catalogue, `refusals: { <CODE>: { message, status? } }`, and its body refuses
@@ -472,5 +474,221 @@ describe('hookForm refusals row — help names every hook kind that may declare 
 
   it('the handler it names is a row the same form offers', () => {
     expect(help('handler')).not.toBe('');
+  });
+});
+
+// #36877 (ruling 7178348458 letter A): one throw names an ordered list of
+// declared reasons, `{ code, reasons: [{ reason, params? }, …] }`.
+describe('hookRefusalReasonsThrownIn — the reasons of a thrown list (#36877)', () => {
+  it.each([
+    [
+      "throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'on_report', params: { name } }, { reason: 'approved' }] };",
+      [{ code: 'SUBMIT_REFUSED', reason: 'on_report', listed: true }, { code: 'SUBMIT_REFUSED', reason: 'approved', listed: true }],
+    ],
+    [
+      "const e = new Error('x'); e.code = 'SUBMIT_REFUSED'; e.reasons = [{ reason: 'approved' }]; throw e;",
+      [{ code: 'SUBMIT_REFUSED', reason: 'approved', listed: true }],
+    ],
+    [
+      // a single reason beside a list: each read as what it is
+      "throw { code: 'C', reason: 'r', reasons: [{ reason: 'l' }] };",
+      [{ code: 'C', reason: 'r' }, { code: 'C', reason: 'l', listed: true }],
+    ],
+    [
+      // the list as a direct member of the object Object.assign stamps
+      "throw Object.assign(new Error('x'), { code: 'C', reasons: [{ reason: 'l' }] });",
+      [{ code: 'C', reason: 'l', listed: true }],
+    ],
+    [
+      // CONTROL: a `reasons` key nested under `params` is not the thrown list
+      // (the run reads `e.reasons` only), so its reason is read as main reads
+      // any `reason: 'x'` in the statement: a single, unlisted pair
+      "throw { code: 'C', params: { reasons: [{ reason: 'late' }] } };",
+      [{ code: 'C', reason: 'late' }],
+    ],
+  ])('reads %j', (source, pairs) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual(pairs);
+  });
+
+  it.each([
+    // a list built in a variable is the run-time refusal's
+    "const lines = [{ reason: 'r' }]; throw { code: 'C', reasons: lines };",
+    // a list on a name nobody throws
+    "const e = {}; e.code = 'C'; e.reasons = [{ reason: 'r' }]; return e;",
+    // inside a string or a comment
+    "// throw { code: 'C', reasons: [{ reason: 'r' }] }\nreturn;",
+  ])('reads nothing in %j', (source) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual([]);
+  });
+
+  it('isUndeclaredThrownReason: a listed reason is judged under every code, a single one only under a code with reasons', () => {
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r', listed: true }, undefined)).toBe(true);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r' }, undefined)).toBe(false);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'r', listed: true }, { r: {} })).toBe(false);
+    expect(isUndeclaredThrownReason({ code: 'C', reason: 'x', listed: true }, { r: {} })).toBe(true);
+  });
+
+  it('the run-time list fault names the hook, the code and what is wrong', () => {
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'both')).toContain(
+      "hook 'expense_gate' threw code 'SUBMIT_REFUSED' with both a `reason` and a `reasons` list",
+    );
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'empty')).toContain('names no reason');
+    expect(unreadableHookRefusalListAtRun('expense_gate', 'SUBMIT_REFUSED', 'malformed')).toContain('not a list of');
+  });
+});
+
+describe('Hook.refusals — a listed reason is refused at save where the body names it literally (#36877)', () => {
+  const refusals = {
+    SUBMIT_REFUSED: {
+      message: 'Nothing was submitted.',
+      reasons: { on_report: { message: 'Already on a report.' }, approved: { message: 'Already approved.' } },
+    },
+    PLAIN: { message: 'Refused.' },
+  };
+
+  it('accepts a list of declared reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'on_report' }, { reason: 'approved' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('refuses an undeclared listed reason at body.source, one issue, naming the declared reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'SUBMIT_REFUSED', reasons: [{ reason: 'approved' }, { reason: 'missing' }] };"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    const issues = r.error!.issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.path).toEqual(['body', 'source']);
+    expect(issues[0]!.message).toBe(undeclaredHookRefusalReasonAtSave('SUBMIT_REFUSED', 'missing', ['on_report', 'approved'], 'body.source'));
+  });
+
+  it('refuses a listed reason under a code that declares no reasons (declared: none)', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("const e = new Error('x'); e.code = 'PLAIN'; e.reasons = [{ reason: 'approved' }]; throw e;"),
+      refusals,
+    });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toContain('(declared: none)');
+  });
+
+  it('CONTROL: a `reasons` list nested under `params` is not a thrown list, so it saves under a code with no reasons', () => {
+    const r = HookSchema.safeParse({
+      ...base,
+      body: body("throw { code: 'PLAIN', params: { reasons: [{ reason: 'late' }] } };"),
+      refusals,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('CONTROL: a single reason under a code that declares no reasons still saves, as before', () => {
+    const r = HookSchema.safeParse({ ...base, body: body("throw { code: 'PLAIN', reason: 'anything' };"), refusals });
+    expect(r.success).toBe(true);
+  });
+});
+
+// A code or reason is literal only when its quoted value closes the value: a
+// property's quote is followed by `,` or `}`; an assignment's by `;`, `,`, `}`,
+// `)`, the source's end, or a line end whose next line does not continue the
+// expression. A value built from a literal (`'OVER' + suffix`, a member access,
+// a template hole) is computed, and the run-time refusal decides it, as the
+// `hookRefusalCodesThrownIn` docblock says.
+describe('Hook.refusals — a literal code or reason closes its value; one built from a literal is computed', () => {
+  const refusals = {
+    OVER_LIMIT: { message: 'Over the limit.', reasons: { too_high: { message: 'The amount is too high.' } } },
+  };
+  const codeSuffix = "const suffix = '_LIMIT';\n";
+  const reasonSuffix = "const suffix = '_high';\n";
+
+  const LITERAL_CODE = [
+    ['a property closed by `}`', "throw { code: 'OVER' };"],
+    ['a property closed by `,`', "throw { code: 'OVER', reason: 'too_high' };"],
+    ['a property with a line break before the close', "throw {\n  code: 'OVER'\n};"],
+    ['a property with a comment before the close', "throw { code: 'OVER' /* the cap */ };"],
+    ['a property in a backtick with no hole', 'throw { code: `OVER` };'],
+    ['a property in Object.assign', "throw Object.assign(new Error('x'), { code: 'OVER' });"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER'\nthrow e"],
+    ['an assignment closed by a comment and a line end', "const e = new Error('x');\ne.code = 'OVER' // the cap\nthrow e;"],
+    ['an assignment closed by `,`', "const e = new Error('x'); e.code = 'OVER', e.reason = 'too_high'; throw e;"],
+    ['an assignment closed by `}`', "const e = new Error('x'); if (ctx.input.x) { e.code = 'OVER' } throw e;"],
+    ['an assignment closed by `)`', "const e = new Error('x'); (e.code = 'OVER'); throw e;"],
+    ['an assignment at the source end', "const e = new Error('x'); if (ctx.input.x) throw e; e.code = 'OVER'"],
+  ] as const;
+
+  it.each(LITERAL_CODE)('lit: refuses an undeclared literal code written as %s, at body.source', (_shape, source) => {
+    expect(hookRefusalCodesThrownIn(source)).toEqual(['OVER']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookRefusalCodeAtSave('OVER', ['OVER_LIMIT']));
+  });
+
+  const COMPUTED_CODE = [
+    ['a property concatenation', "throw { code: 'OVER' + suffix };"],
+    ['a property concatenation on the next line', "throw { code: 'OVER'\n  + suffix };"],
+    ['a property backtick concatenation', 'throw { code: `OVER` + suffix };'],
+    ['a property member access', "throw { code: 'OVER'.concat(suffix) };"],
+    ['a property template hole', 'throw { code: `OVER${suffix}` };'],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  + suffix\nthrow e;"],
+    ['an assignment member access on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  .concat(suffix)\nthrow e;"],
+    ['an assignment backtick concatenation', "const e = new Error('x'); e.code = `OVER` + suffix; throw e;"],
+  ] as const;
+
+  it.each(COMPUTED_CODE)('dark: passes the save for a code built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookRefusalCodesThrownIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, refusals, body: body(codeSuffix + source) }).success).toBe(true);
+  });
+
+  const LITERAL_REASON = [
+    ['a property closed by `}`', "throw { code: 'OVER_LIMIT', reason: 'too' };"],
+    ['a property closed by `,`', "throw { code: 'OVER_LIMIT', reason: 'too', params: {} };"],
+    ['a property in a listed reason', "throw { code: 'OVER_LIMIT', reasons: [{ reason: 'too' }] };"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER_LIMIT'\ne.reason = 'too'\nthrow e"],
+  ] as const;
+
+  it.each(LITERAL_REASON)('lit: refuses an undeclared literal reason written as %s, at body.source', (_shape, source) => {
+    expect(hookRefusalReasonsThrownIn(source).map((p) => p.reason)).toEqual(['too']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookRefusalReasonAtSave('OVER_LIMIT', 'too', ['too_high'], 'body.source'));
+  });
+
+  const COMPUTED_REASON = [
+    ['a property concatenation', "throw { code: 'OVER_LIMIT', reason: 'too' + suffix };"],
+    ['a property member access', "throw { code: 'OVER_LIMIT', reason: 'too'.concat(suffix) };"],
+    ['a listed property concatenation', "throw { code: 'OVER_LIMIT', reasons: [{ reason: 'too' + suffix }] };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER_LIMIT';\ne.reason = 'too'\n  + suffix\nthrow e;"],
+  ] as const;
+
+  it.each(COMPUTED_REASON)('dark: passes the save for a reason built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, refusals, body: body(reasonSuffix + source) }).success).toBe(true);
+  });
+
+  it('dark: an inline handler building its code by concatenation passes the save, at handler', () => {
+    const handler = async () => {
+      const suffix = '_LIMIT';
+      throw Object.assign(new Error('x'), { code: 'OVER' + suffix });
+    };
+    expect(HookSchema.safeParse({ ...base, handler, refusals }).success).toBe(true);
+  });
+
+  it('CONTROL: a literal code beside a computed one in the same body is still refused, once', () => {
+    const source = `${codeSuffix}if (ctx.input.x) throw { code: 'OVER' + suffix };\nthrow { code: 'OVER' };`;
+    expect(hookRefusalCodesThrownIn(source)).toEqual(['OVER']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.filter((i) => i.path.join('.') === 'body.source')).toHaveLength(1);
   });
 });

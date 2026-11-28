@@ -79,6 +79,16 @@ export default defineConfig({
       { find: /^@objectstack\/objectql\/core$/, replacement: path.resolve(__dirname, '../objectql/src/core.ts') },
       { find: /^@objectstack\/rest$/, replacement: path.resolve(__dirname, '../rest/src/index.ts') },
       { find: /^@objectstack\/service-analytics$/, replacement: path.resolve(__dirname, '../services/service-analytics/src/index.ts') },
+      // [ADR-0160 D4] The protocol, so `get_record_context`'s pack
+      // listing is read off the real `ObjectStackProtocolImplementation` in the
+      // checkout, decorations included, never a build of it.
+      { find: /^@objectstack\/metadata-protocol$/, replacement: path.resolve(__dirname, '../metadata-protocol/src/index.ts') },
+      // …over a real store: an in-memory SQLite `SqlDriver` backs the `sys_metadata` read the protocol's listing makes.
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../drivers/driver-sql/src/index.ts') },
+      // [ADR-0160] The record-context executor, so `get_record_context`'s transport parity runs the real one.
+      { find: /^@objectstack\/service-record-context$/, replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts') },
+      // [ADR-0161 K9] The knowledge tool's one definition and executor, so `search_knowledge`'s transport parity runs the real ones.
+      { find: /^@objectstack\/service-knowledge$/, replacement: path.resolve(__dirname, '../services/service-knowledge/src/index.ts') },
     ],
   },
 });

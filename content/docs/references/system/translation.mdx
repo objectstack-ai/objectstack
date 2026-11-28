@@ -98,7 +98,9 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `ObjectTranslationData.fields[string]`
 
@@ -156,11 +158,23 @@ Translation data for a single field
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated tab label |
 
+### Nested Shape: `ObjectTranslationData._relatedLists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated related list title (overlays the relatedLists entry's own `label`) |
+
 ### Nested Shape: `ObjectTranslationData._validations[string]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **message** | `string` | optional | Translated rejection message — overlays the rule's authored `message` on every rejected write |
+
+### Nested Shape: `ObjectTranslationData._milestones[string][string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **summary** | `string` | optional | Translated milestone summary template — the same `{field}` tokens as the milestone's authored `summary` |
 
 
 ---
@@ -191,12 +205,14 @@ Platform translation data — the per-app groups plus the platform-only `setting
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -215,7 +231,9 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `PlatformTranslationData.picklists[string]`
 
@@ -287,6 +305,16 @@ Translation data for a single object
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
+### Nested Shape: `PlatformTranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
+
 ### Nested Shape: `PlatformTranslationData.flows[string]`
 
 | Property | Type | Required | Description |
@@ -297,6 +325,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -335,6 +364,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `PlatformTranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `PlatformTranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -342,7 +378,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `PlatformTranslationData.settingsCommon`
 
@@ -381,12 +417,14 @@ Served translation data — the platform groups the browser reads, without the s
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
 
@@ -404,7 +442,9 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `ServedTranslationData.picklists[string]`
 
@@ -476,6 +516,16 @@ Translation data for a single object
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
+### Nested Shape: `ServedTranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
+
 ### Nested Shape: `ServedTranslationData.flows[string]`
 
 | Property | Type | Required | Description |
@@ -486,6 +536,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -523,6 +574,13 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
+
+### Nested Shape: `ServedTranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
 
 ### Nested Shape: `ServedTranslationData.settingsCommon`
 
@@ -633,12 +691,14 @@ Per-app translation data for objects, apps, and UI messages
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 
@@ -656,7 +716,9 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `TranslationData.picklists[string]`
 
@@ -728,6 +790,16 @@ Translation data for a single object
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
+### Nested Shape: `TranslationData.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
+
 ### Nested Shape: `TranslationData.flows[string]`
 
 | Property | Type | Required | Description |
@@ -738,6 +810,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -776,6 +849,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `TranslationData.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `TranslationData.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -783,7 +863,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `TranslationData.settingsCommon`
 
@@ -843,12 +923,14 @@ One locale of translations — the `translation` metadata type
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **reports** | `Record<string, { label?: string; description?: string; blocks?: Record<string, object> }>` | optional | Report translations keyed by report name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
+| **forms** | `Record<string, { label?: string; description?: string; title?: string; submitBehavior?: object; … }>` | optional | Form translations keyed by form name (ADR-0159 D8) |
 | **flows** | `Record<string, { label?: string; successMessage?: string; errorMessage?: string; screens?: Record<string, object>; … }>` | optional | Screen-flow translations keyed by flow name |
 | **hooks** | `Record<string, { refusals?: Record<string, object>; texts?: Record<string, object> }>` | optional | Hook translations keyed by hook name |
 | **positions** | `Record<string, { label?: string; description?: string }>` | optional | Position translations keyed by position name |
 | **permissions** | `Record<string, { label?: string; description?: string }>` | optional | Permission-set translations keyed by permission-set name |
 | **books** | `Record<string, { label?: string; description?: string; groups?: Record<string, object> }>` | optional | Doc-book translations keyed by book name |
 | **mappings** | `Record<string, { label?: string }>` | optional | Import-mapping translations keyed by mapping name |
+| **packages** | `Record<string, { name?: string; description?: string }>` | optional | Package translations keyed by manifest id |
 | **metadataForms** | `Record<string, { label?: string; description?: string; sections?: Record<string, object>; fields?: Record<string, object> }>` | optional | Translations for metadata-type configuration forms keyed by metadata type |
 | **settingsCommon** | `{ sourceLabels?: object }` | optional | Cross-namespace Settings UI strings |
 | **locale** | `string` | ✅ | BCP-47 locale this item translates (e.g. "zh-CN") |
@@ -857,7 +939,7 @@ One locale of translations — the `translation` metadata type
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -877,7 +959,9 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
+| **_milestones** | `Record<string, Record<string, { summary?: string }>>` | optional | Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on |
 
 ### Nested Shape: `TranslationItem.picklists[string]`
 
@@ -949,6 +1033,16 @@ Translation data for a single object
 | **subtitle** | `string` | optional | Translated `page:header` subtitle |
 | **components** | `Record<string, { title?: string; description?: string; label?: string; placeholder?: string; … }>` | optional | Per-component copy keyed by component id (`PageComponentSchema.id`) |
 
+### Nested Shape: `TranslationItem.forms[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated form label |
+| **description** | `string` | optional | Translated form description |
+| **title** | `string` | optional | Translated form heading (overlays the form's `title`) |
+| **submitBehavior** | `{ title?: string; message?: string }` | optional | Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'` |
+| **sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION` |
+
 ### Nested Shape: `TranslationItem.flows[string]`
 
 | Property | Type | Required | Description |
@@ -959,6 +1053,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -997,6 +1092,13 @@ Translation data for a single object
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated import mapping label — overlays the mapping's own `label` |
 
+### Nested Shape: `TranslationItem.packages[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Translated package display name — overlays the manifest's own `name` |
+| **description** | `string` | optional | Translated package description — overlays the manifest's own `description` |
+
 ### Nested Shape: `TranslationItem.metadataForms[string]`
 
 | Property | Type | Required | Description |
@@ -1004,7 +1106,7 @@ Translation data for a single object
 | **label** | `string` | optional | Translated metadata-type display label (overrides registry label) |
 | **description** | `string` | optional | Translated metadata-type description |
 | **sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section.name |
-| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
+| **fields** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field translations keyed by field path (dot-notation for nested fields) |
 
 ### Nested Shape: `TranslationItem.settingsCommon`
 

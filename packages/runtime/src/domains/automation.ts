@@ -58,7 +58,8 @@ import {
 } from '../validation-failure.js';
 import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
 import { nearestName } from '@objectstack/formula';
-import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { ListRunsRequestSchema, RecordUpdateStartsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { recordNotFoundError } from '@objectstack/metadata-protocol';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -119,6 +120,7 @@ import { carryForwardRedactedValues, redactMetadataItem } from '@objectstack/met
 // [#20679] Only the verdict's SIGNATURE — the locked-base refusal is asked of
 // the `protocol` service at request time, never re-derived here.
 import type { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * Translate a trigger request body into the canonical `AutomationContext` the
@@ -890,10 +892,11 @@ async function refuseWalledConnectorCredentialAccess(
     };
 }
 
-/** [#27237] The verbs the mounted service must implement, named in the door's 501. */
-const CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE = (member: string): string =>
-    'Connector credentials are not supported by the automation service this deployment mounts — it does not '
-    + `implement \`${member}\`, an optional member of \`IAutomationService\`. Nothing was read or changed.`;
+/**
+ * [#27237] The verbs the mounted service must implement, named in the door's 501. [#37811] The catalog
+ * sentence names the missing member (`{{member}}`), in the request's language.
+ */
+const CONNECTOR_CREDENTIAL_UNSUPPORTED_KEY = 'automation_connector_credentials_unsupported';
 
 /**
  * [#27237] The service's own refusals — `400` / `403` / `404` / `409` / `503`,
@@ -936,7 +939,7 @@ async function respondToConnectorCredentialDoor(
     try {
         if (method === 'GET') {
             if (typeof svc.listConnectorCredentialRefs !== 'function') {
-                return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('listConnectorCredentialRefs'), 501) };
+                return catalogNotImplemented(deps, context, CONNECTOR_CREDENTIAL_UNSUPPORTED_KEY, { member: 'listConnectorCredentialRefs' });
             }
             const credentialRefs = await svc.listConnectorCredentialRefs();
             return { handled: true, response: deps.success({ credentialRefs, total: credentialRefs.length }) };
@@ -952,7 +955,7 @@ async function respondToConnectorCredentialDoor(
         }
         if (method === 'DELETE') {
             if (typeof svc.clearConnectorCredential !== 'function') {
-                return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('clearConnectorCredential'), 501) };
+                return catalogNotImplemented(deps, context, CONNECTOR_CREDENTIAL_UNSUPPORTED_KEY, { member: 'clearConnectorCredential' });
             }
             const entry = await svc.clearConnectorCredential({ ref, context: executionContext });
             return { handled: true, response: deps.success(entry) };
@@ -975,7 +978,7 @@ async function respondToConnectorCredentialDoor(
             };
         }
         if (typeof svc.setConnectorCredential !== 'function') {
-            return { handled: true, response: deps.error(CONNECTOR_CREDENTIAL_UNSUPPORTED_MESSAGE('setConnectorCredential'), 501) };
+            return catalogNotImplemented(deps, context, CONNECTOR_CREDENTIAL_UNSUPPORTED_KEY, { member: 'setConnectorCredential' });
         }
         const entry = await svc.setConnectorCredential({
             ref,
@@ -1149,9 +1152,8 @@ function refuseUngrantedConnectorConnectionAccess(
     };
 }
 
-const CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE = (member: string): string =>
-    'Connector connections are not supported by the automation service this deployment mounts — it does not '
-    + `implement \`${member}\`, an optional member of \`IAutomationService\`. Nothing was read or changed.`;
+/** [#37811] As {@link CONNECTOR_CREDENTIAL_UNSUPPORTED_KEY}, for the connection doors. */
+const CONNECTOR_CONNECTION_UNSUPPORTED_KEY = 'automation_connector_connections_unsupported';
 
 /** The callback's parameters, each one value: a repeated one is refused naming it, never read as either. */
 function callbackQueryOf(query: unknown): { query: Record<string, string> } | { refusal: string } {
@@ -1201,7 +1203,7 @@ async function respondToConnectorConnectionDoor(
             const read = callbackQueryOf(query);
             if ('refusal' in read) return { handled: true, response: deps.error(read.refusal, 400, { code: 'VALIDATION_ERROR' }) };
             if (typeof svc.completeConnectorConnection !== 'function') {
-                return { handled: true, response: deps.error(CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE('completeConnectorConnection'), 501) };
+                return catalogNotImplemented(deps, context, CONNECTOR_CONNECTION_UNSUPPORTED_KEY, { member: 'completeConnectorConnection' });
             }
             const state = await svc.completeConnectorConnection({ query: read.query, context: executionContext });
             return { handled: true, response: deps.success(state) };
@@ -1218,7 +1220,7 @@ async function respondToConnectorConnectionDoor(
         const member = method === 'GET' ? 'getConnectorConnection' : method === 'POST' ? 'beginConnectorConnection' : 'revokeConnectorConnection';
         const call = svc[member] as ((request: ConnectorConnectionRequest) => Promise<unknown>) | undefined;
         if (typeof call !== 'function') {
-            return { handled: true, response: deps.error(CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE(member), 501) };
+            return catalogNotImplemented(deps, context, CONNECTOR_CONNECTION_UNSUPPORTED_KEY, { member });
         }
         // Only the begin leg reads a body (the installer's OAuth client); the
         // read and revoke legs read none, as before.
@@ -1734,16 +1736,9 @@ const RESTORE_REFUSAL_UNKNOWN_STATUS = 500;
  * the condition — and it would be indistinguishable, on the wire, from a real
  * engine answering about a run it could not find.
  */
-const RUN_CANCEL_UNSUPPORTED_MESSAGE =
-    'Cancelling a run is not supported by the automation service this deployment mounts — it does not implement '
-    + '`cancelRun`, an optional member of `IAutomationService`. No run was cancelled.';
-const RUNS_LIST_UNSUPPORTED_MESSAGE =
-    'Listing the runs of a flow is not supported by the automation service this deployment mounts — it does not '
-    + 'implement `listRunsPage`, an optional member of `IAutomationService`. No runs were listed.';
-const RUN_RESTORE_UNSUPPORTED_MESSAGE =
-    'Restoring a consumed suspension is not supported by the automation service this deployment mounts — it does '
-    + 'not implement `restoreConsumedSuspension`, an optional member of `IAutomationService`. No suspension was '
-    + 'restored.';
+const RUN_CANCEL_UNSUPPORTED_KEY = 'automation_run_cancel_unsupported';
+const RUNS_LIST_UNSUPPORTED_KEY = 'automation_runs_list_unsupported';
+const RUN_RESTORE_UNSUPPORTED_KEY = 'automation_run_restore_unsupported';
 
 /**
  * [#13953] The message for a refusal this door could not classify — no
@@ -2948,16 +2943,7 @@ async function resolveCloneTarget(
     if (typeof protocol?.ensureCustomizationPackage !== 'function'
         || typeof protocol.packagedArtifactOwner !== 'function'
         || typeof protocol.saveMetaItem !== 'function') {
-        return {
-            refused: {
-                handled: true,
-                response: deps.error(
-                    'Flow clone not supported: a copy lands in a package, and this deployment has no metadata '
-                    + 'protocol that can ensure a customization package and save a flow into it.',
-                    501,
-                ),
-            },
-        };
+        return { refused: catalogNotImplemented(deps, context, 'automation_flow_clone_unsupported') };
     }
     const subject = `flow '${sourceName}'`;
     const owner = protocol.packagedArtifactOwner({ type: FLOW_METADATA_TYPE, name: sourceName });
@@ -3699,7 +3685,20 @@ export async function classifyResumeResult(
     const row = code !== undefined ? RESUME_REFUSAL_ROWS.get(code) : undefined;
     // [#21724] The engine's code travels with its status: a row carries the
     // code it matched, so the builder promotes it and never derives one.
-    if (code !== undefined && row) return { message: result.error ?? row.fallback, status: row.status, details: { code } };
+    if (code !== undefined && row) {
+        // [#37526] A screen refusal's field-addressed findings ride in
+        // `details.fields`, the slot `VALIDATION_FAILED` serves the same
+        // entries in, so a runner places each at its field instead of
+        // showing the sentence (which names the screen's declared fields).
+        const fields = code === 'INVALID_SCREEN_INPUT' && Array.isArray(result.fields) && result.fields.length > 0
+            ? result.fields
+            : undefined;
+        return {
+            message: result.error ?? row.fallback,
+            status: row.status,
+            details: fields ? { code, fields } : { code },
+        };
+    }
     const verdict = await resumeFailureDetails(deps, automationService, runId, result);
     // [#24914, ruling B′] The run's artefacts through the shared builder
     // (`FlowFailureDetailsSchema`: `errorMessage` / `summary` / `innerRefusal`),
@@ -3717,6 +3716,111 @@ export async function classifyResumeResult(
         },
         ...(extra !== undefined ? { extra } : {}),
     };
+}
+
+/** [#35928] The record-update preview's literal segment (`NAMESPACE_POSITION_LITERALS.automation`). */
+const RECORD_UPDATE_STARTS_SEGMENT = '_record-starts';
+
+/** [#35928] The preview's closed query set: it reads none, so any parameter is refused. */
+const RECORD_UPDATE_STARTS_QUERY_PARAMS: readonly string[] = [];
+
+/**
+ * [#35928] `POST /automation/_record-starts` — which flows a proposed update of
+ * one record would start, for the stage-change confirms (ruling record
+ * 7073655354: a caller who can read the record sees the flows' labels; hooks
+ * are never listed; no new capability).
+ *
+ * Order: the closed query set, the body (`RecordUpdateStartsRequestSchema`,
+ * `400 VALIDATION_FAILED` located on the member), then the record, read AS
+ * THE CALLER through the `/data` door's own read (`callData` `get`): an object
+ * the caller may not address, or a record they cannot read, answers that
+ * read's refusal (`404 RECORD_NOT_FOUND` for an unreadable or absent record),
+ * so this door tells a caller nothing the record read would not. A read that
+ * answers no record is refused the same `404`, never previewed over an empty
+ * row. Then every `changes` key must be a declared field of `object` (its own
+ * key in the registry's `fields`); any other key is refused
+ * `400 VALIDATION_FAILED`, located on the key, and the engine is not asked.
+ * Only then the engine, handed the record as read (`previous`) and with the
+ * proposed fields applied (`record`), and the caller as the writer. An engine
+ * without the optional member answers 501, never a guess.
+ */
+/**
+ * [#35928] The `changes` keys of a record-update preview that are not declared
+ * fields of `object`: an own key of the registry object's `fields` map is
+ * declared, anything else is not. With no registry, or no object under the
+ * name, nothing is declared and every key is answered back, so the door
+ * refuses rather than previews.
+ */
+async function undeclaredChangeKeys(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    object: string,
+    changes: Record<string, unknown>,
+): Promise<string[]> {
+    let fields: unknown;
+    try {
+        const ql: any = typeof deps.getObjectQL === 'function' ? await deps.getObjectQL(context) : undefined;
+        fields = ql?.registry?.getObject?.(object)?.fields;
+    } catch {
+        fields = undefined;
+    }
+    const declared = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : undefined;
+    return Object.keys(changes).filter((key) => !(declared && Object.prototype.hasOwnProperty.call(declared, key)));
+}
+
+async function respondToRecordUpdateStarts(
+    deps: DomainHandlerDeps,
+    automationService: unknown,
+    body: unknown,
+    query: unknown,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const queryRefusal = unknownQueryParamRefusalMessage(query, RECORD_UPDATE_STARTS_QUERY_PARAMS);
+    if (queryRefusal !== undefined) {
+        return { handled: true, response: deps.error(queryRefusal, 400, { code: 'VALIDATION_ERROR' }) };
+    }
+    const parsed = RecordUpdateStartsRequestSchema.safeParse(body);
+    if (!parsed.success) {
+        const fields = fieldsFromZodIssues(parsed.error.issues, body);
+        const message = `Invalid record-update preview request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
+    }
+    const { object, recordId, changes } = parsed.data;
+    const svc = automationService as Pick<IAutomationService, 'listRecordUpdateStarts'>;
+    if (typeof svc.listRecordUpdateStarts !== 'function') return capabilityUnavailable(deps, 'automation');
+    let stored: Record<string, unknown>;
+    try {
+        const read = await callData(
+            deps, context, 'get', { object, id: recordId },
+            context?.dataDriver, context?.environmentId, context?.executionContext,
+        );
+        const row = (read as { record?: unknown } | null | undefined)?.record;
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+            return { handled: true, response: deps.errorFromThrown(recordNotFoundError(object, recordId), 404) };
+        }
+        stored = row as Record<string, unknown>;
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    const undeclared = await undeclaredChangeKeys(deps, context, object, changes);
+    if (undeclared.length > 0) {
+        const fields = undeclared.map((key) => ({
+            field: `changes.${key}`,
+            code: 'unknown_field',
+            message: `not a field of \`${object}\``,
+        }));
+        const message = `Invalid record-update preview request: ${undeclared.map((key) => `\`${key}\``).join(', ')} ${undeclared.length > 1 ? 'are not fields' : 'is not a field'} of \`${object}\``;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
+    }
+    const ec: any = (context as any)?.executionContext;
+    const flows = svc.listRecordUpdateStarts({
+        object,
+        previous: stored,
+        record: { ...stored, ...changes },
+        ...(typeof ec?.userId === 'string' ? { userId: ec.userId } : {}),
+        ...(typeof ec?.tenantId === 'string' ? { tenantId: ec.tenantId } : {}),
+    });
+    return { handled: true, response: deps.success({ flows }) };
 }
 
 /**
@@ -4346,6 +4450,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         return { handled: true, response: deps.success({ flows: [], total: 0 }) };
     }
 
+    // [#35928] POST /_record-starts → which flows a proposed update of one
+    // record would start (`listRecordUpdateStarts`). Underscore-prefixed so no
+    // flow name can shadow it; ahead of the `/:name` arms for that reason.
+    if (parts[0] === RECORD_UPDATE_STARTS_SEGMENT && parts.length === 1 && m === 'POST') {
+        return respondToRecordUpdateStarts(deps, automationService, body, query, context);
+    }
+
     // Routes with :name
     if (parts.length >= 1) {
         const name = parts[0];
@@ -4927,7 +5038,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
                 return { handled: true, response: deps.success(result) };
             }
-            return { handled: true, response: deps.error('Resume not supported', 501) };
+            return catalogNotImplemented(deps, context, 'automation_resume_unsupported');
         }
 
         // POST /:name/runs/:runId/cancel → cancel a suspended run (ADR-0044).
@@ -4983,7 +5094,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // while hiding the condition.
         if (isRunLifecycleWrite(parts, m) && parts[3] === RUN_CANCEL_SEGMENT) {
             if (typeof automationService.cancelRun !== 'function') {
-                return { handled: true, response: deps.error(RUN_CANCEL_UNSUPPORTED_MESSAGE, 501) };
+                return catalogNotImplemented(deps, context, RUN_CANCEL_UNSUPPORTED_KEY);
             }
             const bodyRefusal = refuseInvalidRunLifecycleBody(deps, body, 'cancel');
             if (bodyRefusal) return bodyRefusal;
@@ -5043,7 +5154,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // unregistered members at a call site.
         if (isRunLifecycleWrite(parts, m) && parts[3] === RUN_RESTORE_SEGMENT) {
             if (typeof automationService.restoreConsumedSuspension !== 'function') {
-                return { handled: true, response: deps.error(RUN_RESTORE_UNSUPPORTED_MESSAGE, 501) };
+                return catalogNotImplemented(deps, context, RUN_RESTORE_UNSUPPORTED_KEY);
             }
             const bodyRefusal = refuseInvalidRunLifecycleBody(deps, body, 'restore-suspension');
             if (bodyRefusal) return bodyRefusal;
@@ -5121,7 +5232,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 if (refusal) return refusal;
                 return { handled: true, response: deps.success({ runId: parts[2], screen }) };
             }
-            return { handled: true, response: deps.error('Screen lookup not supported', 501) };
+            return catalogNotImplemented(deps, context, 'automation_screen_lookup_unsupported');
         }
 
         // GET /:name/runs/:runId → getRun
@@ -5279,7 +5390,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             // above runs first and is unaffected — its own note says a
             // 501-vs-403 must not be what tells an ungranted caller whether
             // automation is mounted here.
-            return { handled: true, response: deps.error(RUNS_LIST_UNSUPPORTED_MESSAGE, 501) };
+            return catalogNotImplemented(deps, context, RUNS_LIST_UNSUPPORTED_KEY);
         }
 
         // GET /:name → getFlow (no sub-path)

@@ -96,6 +96,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -152,14 +155,14 @@ const settle = () =>
     for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 0));
   });
 
-async function openPreview() {
+async function openPreview(objectName: string) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} />
+      <DataPillar packageId={PKG} objectName={objectName} />
     </MemoryRouter>,
   );
   await settle();
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await settle();
   // The Records grid (the landing tab) reads the published definition through
   // the adapter; only what the Preview asks is counted.
@@ -175,7 +178,7 @@ describe('DataPillar Form Preview renders the draft definition (objectui#12515)'
   it('a draft-only object with three draft fields shows the three fields', async () => {
     server.drafts.set('st_ticket', ticket);
     server.draftHeaders = ['st_ticket'];
-    await openPreview();
+    await openPreview('st_ticket');
 
     expect(await screen.findByText('Subject')).toBeInTheDocument();
     expect(screen.getByText('Priority')).toBeInTheDocument();
@@ -192,7 +195,7 @@ describe('DataPillar Form Preview renders the draft definition (objectui#12515)'
     server.published = [asset];
     server.drafts.set('st_asset', assetDraft);
     server.draftHeaders = ['st_asset'];
-    await openPreview();
+    await openPreview('st_asset');
 
     expect(await screen.findByText('Warranty Ends')).toBeInTheDocument();
     expect(screen.queryByText('Serial Number')).toBeNull();
@@ -216,7 +219,7 @@ describe('DataPillar Form Preview renders the draft definition (objectui#12515)'
 
   it('CONTROL: a published object with no pending change has neither chip nor toggle', async () => {
     server.published = [asset];
-    await openPreview();
+    await openPreview('st_asset');
 
     expect(await screen.findByText('Serial Number')).toBeInTheDocument();
     expect(toolbar().queryByText(DRAFT_CHIP)).toBeNull();
@@ -227,7 +230,7 @@ describe('DataPillar Form Preview renders the draft definition (objectui#12515)'
   it('Preview never saves: a submitted preview form writes nothing', async () => {
     server.drafts.set('st_ticket', ticket);
     server.draftHeaders = ['st_ticket'];
-    await openPreview();
+    await openPreview('st_ticket');
 
     const subject = (await screen.findByText('Subject')).closest('[data-field]')?.querySelector('input');
     expect(subject, 'the Subject input never rendered: the harness is dead').toBeTruthy();

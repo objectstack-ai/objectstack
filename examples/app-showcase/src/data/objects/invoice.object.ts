@@ -5,10 +5,13 @@ import { cel, P } from '@objectstack/spec';
 
 /**
  * Product — a small price-book / catalog. The invoice line's `product` lookup
- * points here; selecting a product auto-fills the line's `description` and
- * `unit_price` (the line-item grid copies matching field names from the chosen
- * record — the catalog typeahead every invoicing tool has: QuickBooks
- * "Product/Service", Stripe price catalog, NetSuite item column).
+ * points here; selecting a product auto-fills the line's `description` and,
+ * when the currencies match, its `unit_price` (the line-item grid copies
+ * matching field names from the chosen record — the catalog typeahead every
+ * invoicing tool has: QuickBooks "Product/Service", Stripe price catalog,
+ * NetSuite item column). The catalog price is in the home currency; on an
+ * invoice in another currency the line's price stays empty and the grid says
+ * why, since nothing converts it.
  */
 export const Product = ObjectSchema.create({
   name: 'showcase_product',
@@ -17,6 +20,7 @@ export const Product = ObjectSchema.create({
   label: 'Product',
   pluralLabel: 'Products',
   icon: 'package',
+  color: 'green',
   description: 'A sellable product with a catalog price.',
 
   fields: {
@@ -53,6 +57,7 @@ export const Invoice = ObjectSchema.create({
   label: 'Invoice',
   pluralLabel: 'Invoices',
   icon: 'receipt',
+  color: 'green',
   description: 'A customer invoice entered together with its line items.',
 
   // Files on an invoice: its printed PDF is archived as an attachment of the
@@ -190,6 +195,7 @@ export const Invoice = ObjectSchema.create({
       group: 'invoice',
       label: 'Subtotal',
       summaryOperations: { object: 'showcase_invoice_line', field: 'amount', function: 'sum' },
+      currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
     }),
 
     // ── Multi-currency (ADR-0144) ─────────────────────────────────────────
@@ -216,10 +222,14 @@ export const Invoice = ObjectSchema.create({
     // Consolidated reporting sums `amount_home`, never `amount`: the Revenue
     // Pulse dataset does.
     //
-    // What does NOT follow the invoice's currency: the line items and the
-    // `total` Subtotal above. A line cannot name its invoice's code field as its
-    // own currency, and a roll-up of amounts in different currencies is refused,
-    // so the lines stay plain amounts and display in the home currency's format.
+    // The line items follow the invoice's currency (ADR-0144 D2, amended): a
+    // line's `unit_price` and `amount` name `invoice.currency_code`, so a EUR
+    // invoice's lines are euros and draw `€` in the grid, the totals stack and
+    // the document's line table (objectstack#36005). The `total` Subtotal is
+    // their roll-up through that same `master_detail`, so it is in the
+    // invoice's currency too (D6, amended). Once an invoice has a line, its
+    // `currency_code` locks: a change is refused until no line follows it (the
+    // lock under D2). A line with an amount needs its invoice to have a code.
 
     // The record currency. A `text` field declaring the ISO 4217 value domain,
     // so a write can store only a real code. Optional: an invoice without a
@@ -301,12 +311,20 @@ export const Invoice = ObjectSchema.create({
   ],
 });
 
+/**
+ * A line's money is in its invoice's currency (ADR-0144 D2, amended): the
+ * two-segment `currencyField` reads the code off the `invoice` master. The
+ * line stores no code of its own (objectstack#36005).
+ */
+const LINE_CURRENCY = { currencyMode: 'record', currencyField: 'invoice.currency_code' } as const;
+
 /** Invoice line item — owned by its invoice, entered inline in the grid. */
 export const InvoiceLine = ObjectSchema.create({
   name: 'showcase_invoice_line',
   label: 'Invoice Line',
   pluralLabel: 'Invoice Lines',
   icon: 'list',
+  color: 'green',
   description: 'A single billable line on an invoice.',
 
   // ADR-0055: a line's access is CONTROLLED BY ITS PARENT invoice — a user sees
@@ -362,8 +380,10 @@ export const InvoiceLine = ObjectSchema.create({
         { name: 'amount' },
       ],
     }),
-    // Catalog lookup. Picking a product auto-fills `description` + `unit_price`
-    // (the grid copies same-named fields from the selected product record).
+    // Catalog lookup. Picking a product auto-fills `description`, and
+    // `unit_price` when the currencies match (the grid copies same-named
+    // fields from the selected product record; a home-currency price is not
+    // copied onto a line in another currency).
     // Line sort position — stamped by the grid on drag-reorder so the order
     // persists. Excluded from the editable columns (it's not hand-entered).
     position: Field.number({ label: 'Position', defaultValue: 0 }),
@@ -426,6 +446,7 @@ export const InvoiceLine = ObjectSchema.create({
       label: 'Unit Price',
       min: 0,
       readonlyWhen: P`parent.status == 'paid'`,
+      currencyConfig: LINE_CURRENCY,
     }),
     // Per-line attachment (objectui#2360): the inline line-item grid renders a
     // real upload cell for `file` fields — the "attach the receipt to each
@@ -445,6 +466,7 @@ export const InvoiceLine = ObjectSchema.create({
       label: 'Amount',
       min: 0,
       expression: cel`record.quantity * record.unit_price`,
+      currencyConfig: LINE_CURRENCY,
     }),
   },
 });

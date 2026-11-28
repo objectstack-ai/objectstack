@@ -105,8 +105,8 @@ describe('ListView sort picker — relational fields (objectui#3096)', () => {
    * objectui#4294 — the remedy the hint names has to be one the server will
    * actually sort by. It used to say "add a formula field holding it", and a
    * formula field is precisely the type the server refuses to order by
-   * (objectstack `UNMATERIALIZED_SORT_TYPES`, a hard 400 since
-   * objectstack#6994): an author who followed the hint landed on a refusal —
+   * (objectstack's sort doors judge it by `isVirtualSearchField` from
+   * `@objectstack/spec/data`, a hard 400 since objectstack#6994): an author who followed the hint landed on a refusal —
    * and, since #4243 withheld formula fields from the picker, on a field this
    * very panel does not offer. The wording now tracks the server's own
    * refusal-door hint (a STORED, denormalised field, written when the source

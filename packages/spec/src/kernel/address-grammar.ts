@@ -36,6 +36,40 @@
 export const NAMESPACE_PATTERN = /^[a-z][a-z0-9_]{1,19}$/;
 
 /**
+ * The reverse-domain identifier rule, declared ONCE.
+ *
+ * Two surfaces name the same identity — `ManifestSchema.id` in `./manifest.zod.ts`
+ * (what an author writes) and `PackageSchema.manifestId` in
+ * `../marketplace/package.zod.ts` (what the registry stores and addresses the
+ * package by, `manifest_id`). They were two independent declarations and drifted:
+ * the registry enforced the shape and the authoring surface accepted any string,
+ * so a package that scaffolded, validated and booted was refused at publish.
+ * Both sites now reference this constant, which is what makes a future drift a
+ * one-line edit rather than a silent divergence.
+ *
+ * It lives here, beside the namespace grammar, rather than in `./manifest.zod.ts`
+ * (which re-exports it): this module imports nothing, so the translation
+ * bundle's `packages` group (`../system/translation.zod.ts`) keys by it without
+ * the manifest module's import graph, which reaches the translation module
+ * back.
+ *
+ * Reads as: two or more lowercase dot-separated segments of letters, digits and
+ * inner hyphens. A segment may open with a letter or a digit (`com.163.crm`,
+ * `com.example.2app`), never with a hyphen. ⛔ Underscores are NOT admitted —
+ * `manifest.namespace` allows them and this key does not, so a namespace is
+ * never a legal id by itself.
+ *
+ * A digit may open a segment because nothing downstream needs it not to: the id
+ * is a registry key (`manifest_id`), a runtime package-map key and a
+ * grant-source key — never a table name, a JS identifier, a filesystem path or
+ * a hostname — and DNS labels themselves may open with a digit. The physical
+ * prefix is `manifest.namespace`, which keeps its own leading-letter rule for
+ * the SQL-identifier reason; `deriveNamespaceFromPackageId` strips a leading
+ * digit run when it derives one from an id.
+ */
+export const MANIFEST_ID_PATTERN = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/;
+
+/**
  * The reserved segment that addresses an environment-authored item, which has
  * no namespace (ADR-0150 D2, D5): `/automation/_env/:name`,
  * `/actions/_env/:object/:action`, and so on. A `_`-led segment is never a
@@ -139,7 +173,7 @@ export interface NamespacePosition {
 export const NAMESPACE_POSITION_LITERALS: Readonly<Record<AddressDoor, NamespacePosition>> = Object.freeze({
   automation: Object.freeze({
     prefix: '/automation',
-    literals: Object.freeze(['_status', 'actions', 'connectors', 'hooks', 'trigger']),
+    literals: Object.freeze(['_record-starts', '_status', 'actions', 'connectors', 'hooks', 'trigger']),
   }),
   automationTrigger: Object.freeze({ prefix: '/automation/trigger', literals: Object.freeze([]) }),
   inboundHook: Object.freeze({ prefix: '/automation/hooks', literals: Object.freeze(['runs']) }),

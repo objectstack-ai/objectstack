@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
 import { TEMPLATES } from './template-registry.js';
@@ -25,7 +26,6 @@ import {
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(pkgRoot, '..', '..');
 const ownPkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf8'));
-const ownMajor = Number(ownPkg.version.split('.')[0]);
 
 // The catalog is imported, not text-parsed: it lives in template-registry.ts
 // precisely so tests can read it directly (importing index.ts would run the
@@ -263,7 +263,14 @@ describe('bundled template declared version surfaces', () => {
     // `objectstack.manifest.json` — the two were conflated in this suite's own
     // naming and in the sync script's log strings, and that conflation is part
     // of how the sibling key below went unwatched for eleven majors.
-    it("objectstack.config.ts stamps engines.protocol at the scaffolder's major (ADR-0087 D1)", () => {
+    //
+    // The range is held to `PROTOCOL_MAJOR` — the export `os init` stamps from
+    // (`packages/cli/src/commands/init.ts`) and the runtime's handshake checks
+    // against — never to this package's own major. The two agree on every
+    // published line; in Changesets pre mode the constant may lead the package
+    // major (ruling record 6049734955), and a template held to the package
+    // major then declared a protocol the runtime in the same commit refused.
+    it('objectstack.config.ts stamps engines.protocol at PROTOCOL_MAJOR (ADR-0087 D1)', () => {
       const config = readTemplateFile('objectstack.config.ts');
       const match = /engines:\s*\{\s*protocol:\s*'\^(\d+)'\s*\}/.exec(config);
       expect(
@@ -272,9 +279,10 @@ describe('bundled template declared version surfaces', () => {
       ).not.toBeNull();
       expect(
         Number(match![1]),
-        `${template} stamps engines.protocol '^${match![1]}' but create-objectstack is v${ownMajor} — ` +
-          'scripts/sync-template-versions.mjs re-stamps this at version time; keep them in lockstep',
-      ).toBe(ownMajor);
+        `${template} stamps engines.protocol '^${match![1]}' but the runtime implements protocol ` +
+          `${PROTOCOL_MAJOR} (PROTOCOL_MAJOR, @objectstack/spec/kernel) — run ` +
+          'node scripts/sync-template-versions.mjs, which stamps it from that constant',
+      ).toBe(PROTOCOL_MAJOR);
     });
 
     // The key #9264 was about, retired under ADR-0049 (#31035): nothing read

@@ -40,9 +40,10 @@ import { RuntimeDraftBar } from './RuntimeDraftBar.js';
 import { isFormFamilyKey } from './metadata-admin/view-variant-model.js';
 import { useMetadataLocale, t as tStudio, tFormat } from './metadata-admin/i18n.js';
 import { authoredBuffer, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
-import { readRuntimeDraft } from './runtime-metadata-persistence.js';
+import { unwrapDraftBody } from './runtime-metadata-persistence.js';
+import { draftPinOf, useDraftSaveGuard, type DraftPin, type DraftVersionGuard } from './metadata-admin/DraftConflictDialog.js';
 import { isSameOptionsValue } from './objectViewOptions.js';
-import type { ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
+import { declaredFieldOptions, type ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
 import {
     runtimeViewToInspectorDraft,
     inspectorDraftToRuntimeView,
@@ -98,8 +99,15 @@ export interface ViewConfigPanelProps {
      * prop admitted (an `async` host that returns nothing, one resolving to a
      * record, a sync non-void return). The contract review of objectui#11583
      * measured that; `ViewConfigPanel.onSaveHosts-11583.test.ts` pins it.
+     *
+     * objectstack#36137 — `saveDraft` is this panel's draft-version guard,
+     * holding the pin of the draft the panel loaded (`If-Match`, or
+     * `If-None-Match: *` over no draft): a host that writes through it gets a
+     * refused save asked about in the panel (reload the saved version,
+     * overwrite it, or keep editing) instead of overwriting a draft saved
+     * since. It resolves `'reloaded'` when the author chose the saved version.
      */
-    onSave?: (draft: Record<string, any>) => unknown;
+    onSave?: (draft: Record<string, any>, saveDraft?: DraftVersionGuard['save']) => unknown;
     /** Called when create-mode view is created */
     onCreate?: (config: Record<string, any>) => void;
     /**
@@ -116,6 +124,13 @@ export interface ViewConfigPanelProps {
     dataSource?: any;
     /** Called after a publish / discard so the host can refresh its read. */
     onAfterChange?: () => void;
+    /**
+     * objectstack#35974 — the view is one the server refuses to save (a view
+     * a read-only package ships): the panel shows its configuration with
+     * every control disabled, relays no edit to the host, and offers no Save
+     * and no draft publish or discard, only Close.
+     */
+    readOnly?: boolean;
 }
 
 /**
@@ -125,29 +140,38 @@ export interface ViewConfigPanelProps {
  */
 type AuthoredSeed =
     | { for: string; state: 'loading' }
-    | { for: string; state: 'ready'; view: RuntimeView }
+    | { for: string; state: 'ready'; view: RuntimeView; pin: DraftPin | null }
     | { for: string; state: 'refused'; message: string };
 
 /**
  * Map an Object definition's `fields` record into the inspector's flat field
  * catalog so it can render field-reference pickers (columns, groupByField, …)
  * without a network fetch.
+ *
+ * @internal exported for tests
  */
-function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFieldInfo[] {
+export function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): ObjectFieldInfo[] {
     const fields = objectDef.fields;
     if (!fields || typeof fields !== 'object') return [];
     return Object.entries(fields).map(([name, def]) => {
         const f = (def ?? {}) as Record<string, any>;
+        const options = declaredFieldOptions(f);
         return {
             name,
             label: typeof f.label === 'string' && f.label ? f.label : name,
             type: typeof f.type === 'string' ? f.type : 'text',
             hidden: f.hidden === true,
+            // The filter builder offers a list-valued column membership and
+            // the empty checks only (`operatorsForField`).
+            ...(f.multiple === true ? { multiple: true } : {}),
+            // The filter builder draws a picklist column's value as a picker
+            // over its declared choices and stores the option's `value`.
+            ...(options ? { options } : {}),
         };
     });
 }
 
-export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange }: ViewConfigPanelProps) {
+export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, objectDef, onViewUpdate, onSave, onCreate, metadataClient, dataSource, onAfterChange, readOnly = false }: ViewConfigPanelProps) {
     const { t } = useObjectTranslation();
     const panelRef = useRef<HTMLDivElement>(null);
     const locale = useMetadataLocale();
@@ -174,6 +198,36 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     const readsAuthored = mode === 'edit' && !!metadataClient && !!activeView.id;
     const [seed, setSeed] = useState<AuthoredSeed | null>(null);
     const [authoredReads, setAuthoredReads] = useState(0);
+    // A publish or a discard from the draft bar changes what is stored, and so
+    // does a conflict the author resolves by taking the saved version: the
+    // buffer is read again (objectstack#35054), then the host refreshes.
+    const handleAfterChange = useCallback(() => {
+        setAuthoredReads((n) => n + 1);
+        onAfterChange?.();
+    }, [onAfterChange]);
+    // objectstack#37648 — a refused save resolved with "reload" re-reads the
+    // stored view into the buffer (`handleAfterChange`); the draft that read
+    // finds is the one the draft bar now shows, so the read hands the bar its
+    // version (`reloadedDraft`) and the bar's Publish is pinned to it.
+    const conflictReloadRef = useRef(false);
+    const [reloadedDraft, setReloadedDraft] = useState<{ signal: number; version?: string; hasDraft: boolean }>({
+        signal: 0,
+        hasDraft: false,
+    });
+    const handleConflictReload = useCallback(() => {
+        conflictReloadRef.current = true;
+        handleAfterChange();
+    }, [handleAfterChange]);
+    // objectstack#36137 — the draft-version guard of this panel's buffer
+    // (`useDraftSaveGuard`): the pin of the draft it was loaded from, then of
+    // each save it sent, and the conflict dialog a refused save opens.
+    const {
+        save: saveDraftVersioned,
+        recordRead: recordDraftRead,
+        forget: forgetDraftVersion,
+        heldDraftVersion,
+        dialog: draftConflictDialog,
+    } = useDraftSaveGuard(metadataClient, handleConflictReload);
     useEffect(() => {
         if (!open || !readsAuthored) return;
         const id = activeView.id;
@@ -181,11 +235,17 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         setSeed({ for: id, state: 'loading' });
         (async () => {
             let next: AuthoredSeed;
+            let foundDraft = false;
             try {
-                const [layers, servedDraft] = await Promise.all([
+                // objectstack#36137 — the served draft read is the envelope, so
+                // its `version` pins this buffer's saves (`draftPinOf`), at the
+                // address they write: no package, as the save names none.
+                const [layers, draftAnswer] = await Promise.all([
                     metadataClient.layered('view', id),
-                    readRuntimeDraft<Record<string, unknown>>('view', id, { metadataClient }),
+                    metadataClient.getDraft('view', id),
                 ]);
+                const servedDraft = unwrapDraftBody(draftAnswer);
+                foundDraft = servedDraft !== null;
                 const authored = authoredBuffer('view', layers as AuthoredLayers, servedDraft);
                 if (authored.kind === 'unserved') {
                     next = { for: id, state: 'refused', message: tStudio('engine.studio.refusal.draftUnreadable', locale) };
@@ -202,7 +262,12 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 } else {
                     // The stored body is a ViewItem envelope or a flat view;
                     // its identity is the view the panel was opened on.
-                    next = { for: id, state: 'ready', view: { ...storedViewToRuntimeView(authored.body), id } };
+                    next = {
+                        for: id,
+                        state: 'ready',
+                        view: { ...storedViewToRuntimeView(authored.body), id },
+                        pin: draftPinOf(draftAnswer),
+                    };
                 }
             } catch (err) {
                 next = {
@@ -211,7 +276,27 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     message: tFormat('engine.edit.loadFailed', locale, { type: 'view', name: id, message: formatMetadataError(err) }),
                 };
             }
-            if (!cancelled) setSeed(next);
+            if (cancelled) return;
+            // The buffer is installed from this read: its pin is the one the
+            // next save sends; a read that installs none leaves nothing held.
+            if (next.state === 'ready') recordDraftRead('view', id, null, next.pin);
+            else forgetDraftVersion();
+            // objectstack#37648 — this read answers a conflict's "reload": the
+            // draft bar takes the draft it found. A read that could not
+            // install a buffer hands the bar nothing, so its Publish stays
+            // pinned to the draft it showed and is refused, never unpinned.
+            if (conflictReloadRef.current) {
+                conflictReloadRef.current = false;
+                if (next.state === 'ready') {
+                    const pin = next.pin;
+                    setReloadedDraft((prev) => ({
+                        signal: prev.signal + 1,
+                        version: pin && 'ifMatch' in pin ? pin.ifMatch : undefined,
+                        hasDraft: foundDraft,
+                    }));
+                }
+            }
+            setSeed(next);
         })();
         return () => { cancelled = true; };
     }, [open, readsAuthored, activeView.id, metadataClient, authoredReads]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -248,6 +333,11 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // surfaces the "unpublished changes" indicator immediately (the save
     // wrote a draft). Never on a refused one (objectui#11583).
     const [savedSignal, setSavedSignal] = useState(0);
+    // objectstack#36350 — the version the landed save's receipt returned (the
+    // guard holds it as that save's `If-Match`): the draft bar's Publish after
+    // this save is pinned to it, so a draft another writer changed since is
+    // refused instead of published on their behalf.
+    const [savedDraftVersion, setSavedDraftVersion] = useState<string | undefined>(undefined);
     // An edit-mode save is in flight: Save is disabled until it settles.
     const [saving, setSaving] = useState(false);
     // Mirror the committed draft into a ref so `handlePatch` can compute the
@@ -293,6 +383,8 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // that declares none (objectui#10694 judges a draft's `columns` against
     // those). Relaying an untouched stored field would present it as an edit.
     const handlePatch = useCallback((patch: Record<string, unknown>) => {
+        // A read-only view takes no edit, whichever control would have sent one.
+        if (readOnly) return;
         const next: InspectorViewDraft = { ...draftRef.current, ...(patch as Partial<InspectorViewDraft>) };
         draftRef.current = next;
         setDraft(next);
@@ -307,7 +399,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 onViewUpdate(field, value);
             }
         }
-    }, [onViewUpdate]);
+    }, [onViewUpdate, readOnly]);
 
     const handleSave = useCallback(async () => {
         const flat = inspectorDraftToRuntimeView(draft);
@@ -324,16 +416,17 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
         setSaving(true);
         let landed: boolean;
         try {
-            landed = (await onSave?.(flat)) !== false;
+            landed = (await onSave?.(flat, saveDraftVersioned)) !== false;
         } catch {
             landed = false;
         } finally {
             setSaving(false);
         }
         if (!landed) return;
+        setSavedDraftVersion(heldDraftVersion('view', String(flat.id ?? activeView.id)));
         setSavedSignal((s) => s + 1);
         if (draftRef.current === savedDraft) setIsDirty(false);
-    }, [draft, onSave, onCreate, mode]);
+    }, [draft, onSave, onCreate, mode, saveDraftVersioned, heldDraftVersion, activeView.id]);
 
     // Discard = revert any unsaved edits AND close the panel, in both modes
     // (objectui#2320). Create mode has no committed view to preview against, so
@@ -342,31 +435,37 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     // reach the list only through `onViewUpdate` (see `handlePatch`), so we
     // replay the panel's opening values — and clear any keys the edits
     // introduced — through the same seam, then reset the local draft.
-    const handleDiscard = useCallback(() => {
-        if (mode === 'edit') {
-            if (onViewUpdate) {
-                const original = inspectorDraftToRuntimeView(openingDraft);
-                const edited = inspectorDraftToRuntimeView(draftRef.current);
-                const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
-                for (const field of fields) {
-                    if (field === 'id') continue;
-                    onViewUpdate(field, original[field]);
-                }
+    const revertEdits = useCallback(() => {
+        if (onViewUpdate) {
+            const original = inspectorDraftToRuntimeView(openingDraft);
+            const edited = inspectorDraftToRuntimeView(draftRef.current);
+            const fields = new Set([...Object.keys(edited), ...Object.keys(original)]);
+            for (const field of fields) {
+                if (field === 'id') continue;
+                onViewUpdate(field, original[field]);
             }
-            draftRef.current = initialDraft;
-            relayedRef.current = new Set();
-            setDraft(initialDraft);
-            setIsDirty(false);
         }
+        draftRef.current = initialDraft;
+        relayedRef.current = new Set();
+        setDraft(initialDraft);
+        setIsDirty(false);
+    }, [initialDraft, openingDraft, onViewUpdate]);
+    const handleDiscard = useCallback(() => {
+        if (mode === 'edit') revertEdits();
         onClose();
-    }, [initialDraft, openingDraft, mode, onClose, onViewUpdate]);
+    }, [mode, onClose, revertEdits]);
 
-    // A publish or a discard from the draft bar changes what is stored: the
-    // buffer is read again (objectstack#35054), then the host refreshes.
-    const handleAfterChange = useCallback(() => {
-        setAuthoredReads((n) => n + 1);
-        onAfterChange?.();
-    }, [onAfterChange]);
+    // objectstack#35974 — the host's read-only verdict can land after the
+    // panel opened editable (the package list was still being read) and after
+    // an edit. A read-only panel offers no Discard, so the edit would be
+    // stranded on the host's list and shown here in place of the stored view.
+    // It is discarded instead, the panel staying open.
+    const wasReadOnlyRef = useRef(readOnly);
+    useEffect(() => {
+        const turnedReadOnly = readOnly && !wasReadOnlyRef.current;
+        wasReadOnlyRef.current = readOnly;
+        if (turnedReadOnly && mode === 'edit' && (isDirty || relayedRef.current.size > 0)) revertEdits();
+    }, [readOnly, mode, isDirty, revertEdits]);
 
     const panelTitle = mode === 'create'
         ? t('console.objectView.createView')
@@ -375,7 +474,17 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
     if (!open) {
         // Keep the slide container (owned by ObjectView) able to collapse to
         // zero width without rendering inspector internals while hidden.
-        return <div ref={panelRef} tabIndex={-1} data-testid="view-config-panel" aria-hidden />;
+        //
+        // objectstack#36137 — the conflict dialog is rendered here too: a
+        // save still in flight when the panel closes (Discard, another view
+        // tab) can be refused after it closed, and the guard then waits on
+        // the author's choice. Without the dialog nothing would answer it,
+        // and Save would stay disabled. It portals out of this hidden div.
+        return (
+            <div ref={panelRef} tabIndex={-1} data-testid="view-config-panel" aria-hidden>
+                {draftConflictDialog}
+            </div>
+        );
     }
 
     return (
@@ -406,7 +515,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                     variantKey="config"
                     familyKey={familyKey}
                     isHome
-                    readOnly={false}
+                    readOnly={readOnly}
                     locale={locale}
                     objectFieldsOverride={objectFields}
                     onPatch={handlePatch}
@@ -417,7 +526,7 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                 data-testid="view-config-footer"
                 className="flex items-center justify-end gap-2 border-t px-4 py-2.5"
             >
-                {mode === 'edit' && (
+                {mode === 'edit' && !readOnly && (
                     <RuntimeDraftBar
                         type="view"
                         name={activeView.id}
@@ -426,26 +535,44 @@ export function ViewConfigPanel({ open, onClose, mode = 'edit', activeView, obje
                         objectName={objectDef.name}
                         dirty={isDirty}
                         savedSignal={savedSignal}
+                        savedDraftVersion={savedDraftVersion}
+                        reloadedSignal={reloadedDraft.signal}
+                        reloadedDraftVersion={reloadedDraft.version}
+                        reloadedHasDraft={reloadedDraft.hasDraft}
                         onAfterChange={handleAfterChange}
                     />
                 )}
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleDiscard}
-                    data-testid="view-config-discard"
-                >
-                    {t('console.objectView.discard')}
-                </Button>
-                <Button
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
-                    data-testid="view-config-save"
-                >
-                    {t('console.objectView.save')}
-                </Button>
+                {readOnly ? (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onClose}
+                        data-testid="view-config-close"
+                    >
+                        {t('common.close')}
+                    </Button>
+                ) : (
+                    <>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleDiscard}
+                            data-testid="view-config-discard"
+                        >
+                            {t('console.objectView.discard')}
+                        </Button>
+                        <Button
+                            size="sm"
+                            onClick={handleSave}
+                            disabled={saving || awaitingAuthored || (mode === 'edit' && !isDirty)}
+                            data-testid="view-config-save"
+                        >
+                            {t('console.objectView.save')}
+                        </Button>
+                    </>
+                )}
             </div>
+            {draftConflictDialog}
         </div>
     );
 }

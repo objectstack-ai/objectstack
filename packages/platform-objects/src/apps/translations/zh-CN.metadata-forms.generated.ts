@@ -77,8 +77,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列和相关列表列、卡片、子记录预览、记录悬停卡片和记录选择器。不是本对象字段的名称会在发布时被拒绝。"
       },
       relatedLists: {
-        label: "相关列表顺序",
-        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，保存或校验对象时会被拒绝。"
+        label: "记录页页签",
+        helpText: "记录页在概览之后显示的页签，按顺序排列。每一项是子对象名称（例如 task）；当该子对象与本对象有多个关系时写 object.field；也可以是内置页签（sys_attachment、sys_approval_request、sys_activity），或带自己标题和列的一项（在 Studio 的对象设置里设置）。一旦列出任何一项，没有列出的相关列表就不显示页签（其他包添加的列表也一样），直到本对象列出它；附件只有列出时才显示。为空时，所有列表按默认顺序显示。不对应任何指向本对象的关系的名称，在保存对象时会被拒绝。"
       },
       searchableFields: {
         label: "可搜索字段",
@@ -114,7 +114,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折叠",
-        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+        helpText: "该分区能否折叠。录入表单按设置执行；默认记录页上读者可以折叠每个有标题的分组，因此那里只决定初始状态：collapsed 先收起，其余先展开。未设置：none。",
+        options: {
+          none: "无 — 录入表单上始终展开，不可切换",
+          expanded: "展开 — 可折叠，初始展开",
+          collapsed: "收起 — 可折叠，初始收起"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "可见条件",
@@ -134,7 +139,56 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.type": {
         label: "类型",
-        helpText: "字段类型"
+        helpText: "字段类型",
+        options: {
+          text: "文本",
+          textarea: "多行文本",
+          email: "电子邮件",
+          url: "网址（URL）",
+          phone: "电话",
+          password: "密码",
+          markdown: "Markdown 文本",
+          html: "HTML 内容",
+          richtext: "富文本",
+          number: "数字",
+          currency: "货币",
+          percent: "百分比",
+          date: "日期",
+          datetime: "日期时间",
+          time: "时间",
+          boolean: "布尔值",
+          toggle: "开关",
+          select: "单选",
+          multiselect: "多选",
+          radio: "单选按钮",
+          checkboxes: "复选框组",
+          lookup: "查找（引用）",
+          master_detail: "主从",
+          tree: "树",
+          image: "图片",
+          file: "文件",
+          avatar: "头像",
+          video: "视频",
+          audio: "音频",
+          formula: "公式（计算）",
+          summary: "汇总（上卷）",
+          autonumber: "自动编号",
+          composite: "复合（嵌入）",
+          repeater: "重复项（嵌入数组）",
+          record: "记录（键值映射）",
+          location: "位置（GPS）",
+          address: "地址",
+          code: "代码",
+          json: "JSON 数据",
+          color: "颜色",
+          rating: "评分",
+          slider: "滑块",
+          signature: "签名",
+          qrcode: "二维码 / 条形码",
+          progress: "进度",
+          tags: "标签",
+          vector: "向量嵌入"
+        }
       },
       "fields.description": {
         label: "描述",
@@ -186,7 +240,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.valueDomain": {
         label: "值域",
-        helpText: "写入值必须归属的标准；写入非成员值将被拒绝"
+        helpText: "写入值必须归属的标准；写入非成员值将被拒绝",
+        options: {
+          iana_time_zone: "IANA 时区",
+          iso_4217_currency: "ISO 4217 币种代码",
+          iso_3166_alpha2: "ISO 3166-1 alpha-2 国家代码"
+        }
       },
       "fields.rows": {
         label: "行数",
@@ -226,7 +285,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.options.kind": {
         label: "类型",
-        helpText: "生命周期类别(仅限单值下拉 / 单选):进行中的一步、成功的终点或失败的终点。阶段字段的每个选项都必须声明。"
+        helpText: "生命周期类别(仅限单值下拉 / 单选):进行中的一步、成功的终点或失败的终点。阶段字段的每个选项都必须声明。",
+        options: {
+          open: "进行中",
+          won: "赢单",
+          lost: "输单"
+        }
       },
       "fields.reference": {
         label: "引用对象",
@@ -238,7 +302,20 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.deleteBehavior": {
         label: "删除行为",
-        helpText: "被引用记录删除时的处理方式"
+        helpText: "被引用记录删除时的处理方式",
+        options: {
+          set_null: "置空",
+          cascade: "级联（删除子记录）",
+          restrict: "限制（阻止删除）"
+        }
+      },
+      "fields.transferBehavior": {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录",
+        options: {
+          none: "无（保留在原所有者名下）",
+          cascade: "级联（提议随被引用记录一起转移）"
+        }
       },
       "fields.multiple": {
         label: "多选",
@@ -250,7 +327,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.returnType": {
         label: "返回类型",
-        helpText: "公式结果类型"
+        helpText: "公式结果类型",
+        options: {
+          text: "文本",
+          number: "数字",
+          boolean: "布尔值",
+          date: "日期",
+          currency: "货币",
+          percent: "百分比"
+        }
       },
       "fields.summaryOperations": {
         label: "汇总操作",
@@ -266,7 +351,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.summaryOperations.function": {
         label: "函数",
-        helpText: "聚合函数"
+        helpText: "聚合函数",
+        options: {
+          count: "计数",
+          sum: "求和",
+          avg: "平均值",
+          min: "最小值",
+          max: "最大值"
+        }
       },
       "fields.autonumberFormat": {
         label: "自动编号格式",
@@ -276,9 +368,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "语言",
         helpText: "编辑器语言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "在记录的活动时间线上概述该字段的变更"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       "fields.visibleWhen": {
         label: "可见条件",
@@ -298,6 +394,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "历史跟踪"
+      },
+      "enable.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。默认为开。关：整个对象都不显示值，无论字段如何设置。"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -363,15 +463,31 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "indexes.unique": {
         label: "唯一",
-        helpText: "唯一性范围（ADR-0120）。未设置：不唯一。已弃用的裸 true（等同于 global）不在选项中；带有它的索引会保留该值，直到你选择一个范围。"
+        helpText: "唯一性范围（ADR-0120）。未设置：不唯一。已弃用的裸 true（等同于 global）不在选项中；带有它的索引会保留该值，直到你选择一个范围。",
+        options: {
+          global: "全局 — 整个安装内仅一条，恰好按这些列",
+          organization: "组织 — 每个组织仅一条（驱动会在前面加上组织列）"
+        }
       },
       ownership: {
         label: "归属模型",
-        helpText: "记录归属模型。留空按 user 处理。"
+        helpText: "记录归属模型。留空按 user 处理。",
+        options: {
+          user: "用户 — 可改派的 owner_id 加 owning_business_unit_id",
+          business_unit: "业务单元 — 仅 owning_business_unit_id，无 owner_id",
+          org: "组织",
+          none: "无 — 无逐条记录所有者，两个锚点都没有"
+        }
       },
       sharingModel: {
         label: "共享模型",
-        helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。"
+        helpText: "面向内部用户的组织级默认记录可见性（OWD）。自定义对象若不声明，运行时按 private 处理（ADR-0090 D1）。",
+        options: {
+          private: "私有 — 仅所有者",
+          public_read: "公开只读 — 所有人可读，所有者可写",
+          public_read_write: "公开读写 — 所有人可读可写",
+          controlled_by_parent: "由父记录控制 — 继承自主记录"
+        }
       },
       sharing: {
         label: "共享",
@@ -395,7 +511,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "access.default": {
         label: "默认暴露级别",
-        helpText: "public：被 '*' 通配授权覆盖。private：需要显式的逐对象授权，并且不受通配行级安全策略约束。"
+        helpText: "public：被 '*' 通配授权覆盖。private：需要显式的逐对象授权，并且不受通配行级安全策略约束。",
+        options: {
+          public: "公开 — 受通配（*）授权覆盖",
+          private: "私有 — 需要显式的逐对象授权"
+        }
       },
       requiredPermissions: {
         label: "所需权限",
@@ -411,11 +531,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "publicSharing.allowedAudiences": {
         label: "允许的受众",
-        helpText: "新链接可以指定的受众；其他受众会被拒绝。未设置：仅限链接。每种受众都仍需要链接本身：signed in 还需要一位已登录的用户，email 还需要收件人地址在该链接的名单上。"
+        helpText: "新链接可以指定的受众；其他受众会被拒绝。未设置：仅限链接。每种受众都仍需要链接本身：signed in 还需要一位已登录的用户，email 还需要收件人地址在该链接的名单上。",
+        options: {
+          public: "公开",
+          link_only: "仅链接 — 持有链接的任何人",
+          signed_in: "已登录 — 持有链接的已登录用户",
+          email: "电子邮件 — 名单上持有链接的收件人"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "允许的权限",
-        helpText: "新链接可以授予的权限级别；其他级别会被拒绝。未设置：仅查看。"
+        helpText: "新链接可以授予的权限级别；其他级别会被拒绝。未设置：仅查看。",
+        options: {
+          view: "查看",
+          comment: "评论",
+          edit: "编辑"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "最长有效天数",
@@ -461,9 +592,25 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "更改负责人",
         helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读，外部对象上 owner_id 已声明或已映射）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
       },
+      actionLayout: {
+        label: "动作布局",
+        helpText: "本对象动作的顺序及哪些显示为按钮，按作用域分：pinned（最多 3 个按钮，按顺序）和 more（「更多」菜单的顺序；两者都没写的动作按默认顺序排在后面）。未设置时，各处仍按动作的排序选按钮。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表页工具栏，写作 {\"pinned\": [...], \"more\": [...]}：放在列表工具栏上的动作名称；$import / $export 只能放在 pinned。最多固定 3 个。未固定时，页面仍显示自己的导入 / 导出菜单。os validate 会拒绝不是本对象动作、或未放在列表工具栏上的名称；这样的名称什么也不显示。"
+      },
+      "actionLayout.record": {
+        label: "记录",
+        helpText: "记录页头（记录页、侧边预览、手机底栏），写作 {\"pinned\": [...], \"more\": [...]}：放在记录页头或其「更多」菜单中的动作名称。最多固定 3 个。os validate 会拒绝不是本对象动作、或未放在记录页上的名称；这样的名称什么也不显示。"
+      },
       editMode: {
         label: "编辑方式",
-        helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。"
+        helpText: "该对象记录的编辑交互意图。留空则由渲染端自行选择默认方式。这是跨渲染端的意图声明，不是样式。",
+        options: {
+          modal: "弹窗 — 在当前视图上以对话框打开编辑表单",
+          page: "页面 — 跳转到专用的整页编辑路由"
+        }
       },
       fileAccessDelegate: {
         label: "文件访问委托服务",
@@ -475,7 +622,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.class": {
         label: "生命周期类别",
-        helpText: "本对象数据的持久化契约"
+        helpText: "本对象数据的持久化契约",
+        options: {
+          record: "记录（业务事实 — 永久）",
+          audit: "审计（合规台账 — 保留 → 归档 → 删除）",
+          telemetry: "遥测（高频日志 — 短期保留）",
+          transient: "临时（短暂状态 — 按 TTL 过期）",
+          event: "事件（总线消息 — 极短 TTL）"
+        }
       },
       "lifecycle.retention": {
         label: "保留期",
@@ -503,7 +657,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.strategy": {
         label: "策略",
-        helpText: "存储策略"
+        helpText: "存储策略",
+        options: {
+          rotation: "轮转（按时间分片 + 丢弃最旧）"
+        }
       },
       "lifecycle.storage.shards": {
         label: "分片数",
@@ -511,7 +668,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "lifecycle.storage.unit": {
         label: "分片单位",
-        helpText: "单个分片的时间宽度"
+        helpText: "单个分片的时间宽度",
+        options: {
+          day: "天",
+          week: "周",
+          month: "月"
+        }
       },
       "lifecycle.archive": {
         label: "归档",
@@ -642,7 +804,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       percentDisplay: {
         label: "百分比显示",
-        helpText: "只读时的显示方式（列表单元格与记录页）。未设置：百分比旁显示进度条。条形：始终显示进度条，用于进度。纯数字：只显示百分比，用于比率或概率。"
+        helpText: "只读时的显示方式（列表单元格与记录页）。未设置：百分比旁显示进度条。条形：始终显示进度条，用于进度。纯数字：只显示百分比，用于比率或概率。",
+        options: {
+          bar: "进度条",
+          plain: "纯数字"
+        }
       },
       currencyConfig: {
         label: "货币配置",
@@ -650,7 +816,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "currencyConfig.currencyMode": {
         label: "货币模式",
-        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。record：每条记录有自己的货币，保存在 currencyField 指向的字段中。"
+        helpText: "dynamic（默认）：字段本身没有货币，金额以租户默认货币显示（localization.currency 设置）。fixed：字段只有一种货币，即 defaultCurrency。record：每条记录有自己的货币，保存在 currencyField 指向的字段中。",
+        options: {
+          dynamic: "动态 — 租户默认币种",
+          fixed: "固定 — 该字段使用一种币种",
+          record: "记录 — 每条记录指定自己的币种"
+        }
       },
       "currencyConfig.currencyField": {
         label: "币种字段",
@@ -747,7 +918,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       deleteBehavior: {
         label: "删除行为",
-        helpText: "被引用记录删除时的处理方式"
+        helpText: "被引用记录删除时的处理方式",
+        options: {
+          cascade: "级联（删除子记录）",
+          restrict: "限制（阻止删除）"
+        }
+      },
+      transferBehavior: {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录",
+        options: {
+          none: "无（保留在原所有者名下）",
+          cascade: "级联（提议随被引用记录一起转移）"
+        }
       },
       relatedListFilter: {
         label: "关联列表筛选",
@@ -789,6 +972,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "相关列表列",
         helpText: "父记录详情页上此关系的相关列表的列，写作本对象（即子对象）的字段名，例如 name、status。未设置：从子对象推导。只写名称——标签、单元格类型和格式都来自子对象的字段定义。"
       },
+      inlineEdit: {
+        label: "内嵌编辑方式",
+        helpText: "父对象的字段分组指向此子对象（fieldGroups[].relatedList）时，父对象表单编辑此子对象各行的方式。未设置：根据本对象的字段自动选择。",
+        options: {
+          grid: "表格（在表格中编辑各行）",
+          form: "表单（在完整表单中打开每行）"
+        }
+      },
       inlineTitle: {
         label: "内嵌表格标题",
         helpText: "父记录上内嵌主从表格的标题。"
@@ -823,7 +1014,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       returnType: {
         label: "公式返回类型",
-        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。货币：一笔金额，其货币由此字段的货币配置声明（未设置时为 dynamic）。"
+        helpText: "公式声明的值类型，按推断出的 CEL 类型写入。消费方直接读它，无需重新解析表达式。货币：一笔金额，其货币由此字段的货币配置声明（未设置时为 dynamic）。",
+        options: {
+          text: "文本",
+          number: "数字",
+          boolean: "布尔值",
+          date: "日期",
+          currency: "货币",
+          percent: "百分比"
+        }
       },
       summaryOperations: {
         label: "汇总操作",
@@ -835,7 +1034,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "summaryOperations.function": {
         label: "函数",
-        helpText: "聚合函数"
+        helpText: "聚合函数",
+        options: {
+          count: "计数",
+          sum: "求和",
+          min: "最小值",
+          max: "最大值",
+          avg: "平均值"
+        }
       },
       "summaryOperations.field": {
         label: "字段",
@@ -861,9 +1067,17 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "只读",
         helpText: "在表单中只读"
       },
+      uiReadonly: {
+        label: "界面只读",
+        helpText: "用户无法在控制台中编辑此字段（对话框、记录页、表格、看板、日历和甘特图拖动、工时表），而动作、导入、API 和流程仍可写入，每次写入都由对象的校验规则裁决。已开启“只读”时请保持关闭：只读已经阻止所有客户端写入。代表用户操作的应用内助手暂不遵循此设置。"
+      },
       hidden: {
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
+      },
+      showOnCreate: {
+        label: "新建时显示",
+        helpText: "新建记录时是否填写此字段。关闭后，新建弹窗、整页新建和动作打开的新建都不显示它；编辑、记录页和列表仍然显示。必填字段新建时总要填写，不能关闭。"
       },
       searchable: {
         label: "可搜索",
@@ -881,6 +1095,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "只读条件",
         helpText: "基于记录的 CEL 谓词（例如 record.status == 'paid'）——为 TRUE 时字段只读，并在服务器端强制执行：更新中对已锁定字段的修改会被丢弃，保留已存储的值。只读取记录自身的列；objectstack validate 会拒绝经由引用字段的读取。"
       },
+      uiReadonlyWhen: {
+        label: "界面只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status != 'draft'）——为 TRUE 时，用户无法在控制台中编辑已有记录的该字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。动作、导入、API 和流程仍可写入，并由对象的校验规则裁决。与“只读条件”一样读取记录自身的列。代表用户操作的应用内助手暂不遵循此设置。"
+      },
       requiredWhen: {
         label: "必填条件",
         helpText: "基于记录的 CEL 谓词——为 TRUE 时字段必填，并在服务器端作为状态转换门槛执行：若写入前记录合规，而写入后缺少该值，则拒绝写入；因此原本就缺少该值的行，其无关编辑仍可通过。若需要每次写入都必须满足的规则，请使用 validations 中的 script 规则。与 storage.notNull 同时声明会被拒绝。"
@@ -897,9 +1115,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "不对外返回",
         helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
       },
+      fieldHistory: {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       trackHistory: {
         label: "记录变更历史",
-        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       widget: {
         label: "控件覆盖",
@@ -959,7 +1181,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "语言",
-        helpText: "expression = 纯公式；js = 沙箱 JavaScript"
+        helpText: "expression = 纯公式；js = 沙箱 JavaScript",
+        options: {
+          expression: "表达式（L1）",
+          js: "JavaScript（L2 沙箱）"
+        }
       },
       "body.source": {
         label: "源码",
@@ -1022,7 +1248,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "后台运行，不阻塞当前事务"
       },
       onError: {
-        label: "错误处理"
+        label: "错误处理",
+        options: {
+          abort: "中止",
+          log: "记录日志"
+        }
       },
       timeoutMs: {
         label: "超时（毫秒）",
@@ -1030,7 +1260,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runAs: {
         label: "运行身份",
-        helpText: "ctx.api 数据操作的身份：inherit 继承触发写入的上下文（默认）、system 提权、user 钉到触发用户"
+        helpText: "ctx.api 数据操作的身份：inherit 继承触发写入的上下文（默认）、system 提权、user 钉到触发用户",
+        options: {
+          inherit: "继承（触发写入）",
+          system: "系统（提权）",
+          user: "用户（触发用户）"
+        }
       },
       condition: {
         label: "条件",
@@ -1052,15 +1287,54 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "种子数据",
-    description: "发布时应用的预置/初始化数据"
+    description: "发布时应用的预置/初始化数据",
+    fields: {
+      object: {
+        label: "对象"
+      },
+      mode: {
+        label: "模式"
+      }
+    }
   },
   picklist: {
     label: "共享选项集",
-    description: "选择字段按名称引用的共享选项列表"
+    description: "选择字段按名称引用的共享选项列表",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      options: {
+        label: "选项"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   mapping: {
     label: "导入映射",
-    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用"
+    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      targetObject: {
+        label: "目标对象"
+      },
+      mode: {
+        label: "模式"
+      },
+      sourceFormat: {
+        label: "源格式"
+      }
+    }
   },
   view: {
     label: "视图",
@@ -1203,7 +1477,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       compactToolbar: {
         label: "紧凑工具栏",
-        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框"
+        helpText: "将分组 / 颜色 / 密度 / 隐藏字段收进同一个“视图设置”弹出框。默认开启：省略或为 `true` 时，渲染器绘制这个紧凑工具栏；为 `false` 时绘制宽工具栏，每个控件一个按钮。紧凑工具栏不绘制刷新按钮，因此 `userActions.refresh` 只作用于宽工具栏；下拉刷新不受这两个键影响。"
       },
       rowHeight: {
         label: "行高",
@@ -1371,7 +1645,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",
@@ -1384,8 +1658,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "锁定者",
         helpText: "锁定该视图配置的用户"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "谁能看此视图：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有能看到该列表的人都能看到此视图。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此视图，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你在列表中也将看不到此视图。"
+      },
+      object: {
+        label: "对象"
       }
     }
+  },
+  form: {
+    label: "表单"
   },
   page: {
     label: "页面",
@@ -1426,7 +1710,14 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "类型",
-        helpText: "页面种类。\"List / Interface\" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。"
+        helpText: "页面种类。\"List / Interface\" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。",
+        options: {
+          list: "列表 / 界面页",
+          record: "记录页",
+          home: "首页",
+          app: "应用页",
+          utility: "工具面板"
+        }
       },
       template: {
         label: "模板",
@@ -1539,7 +1830,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "interfaceConfig.recordAction": {
         label: "记录操作",
-        helpText: "点击记录时如何打开其详情"
+        helpText: "点击记录时如何打开其详情",
+        options: {
+          drawer: "抽屉（右侧预览）",
+          page: "整页",
+          none: "不可点击"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "显示记录数",
@@ -1582,6 +1878,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "筛选",
         description: "应用到所有组件的默认筛选与全局筛选"
       },
+      access: {
+        label: "访问权限",
+        description: "谁可以查看此仪表盘。"
+      },
       advanced: {
         label: "高级设置",
         description: "性能与无障碍"
@@ -1590,30 +1890,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名称",
-        helpText: "snake_case 唯一标识符"
+        helpText: "仪表盘的唯一内部名称：使用小写字母、数字和下划线，以字母开头（例如 sales_overview）。"
       },
       label: {
         label: "显示名称",
-        helpText: "显示名"
+        helpText: "使用者看到的仪表盘标题。"
       },
       description: {
         label: "描述"
       },
       columns: {
         label: "列",
-        helpText: "栅格列数（默认 12）"
+        helpText: "组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。"
       },
       gap: {
         label: "间距",
-        helpText: "组件之间的间距，每级 0.25rem（4 = 1rem）"
+        helpText: "组件之间留出的空间。数值越大越松散；留空则使用标准间距。"
       },
       refreshIntervalSeconds: {
         label: "刷新间隔",
-        helpText: "自动刷新间隔（秒）"
+        helpText: "仪表盘重新加载数据的频率（秒）。留空或填 0 表示不自动刷新。"
       },
       header: {
         label: "页眉",
-        helpText: "仪表盘页眉配置（title、subtitle、actions）"
+        helpText: "仪表盘顶部显示的内容：标题、描述和操作按钮。"
       },
       "header.showTitle": {
         label: "显示标题",
@@ -1641,7 +1941,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "组件",
-        helpText: "包含位置和尺寸的仪表盘组件"
+        helpText: "仪表盘上的图表、数字和表格，以及每一项所在的位置。"
       },
       "widgets.id": {
         label: "组件 ID"
@@ -1696,11 +1996,42 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认日期范围选择器"
+        helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
+      },
+      "dateRange.field": {
+        label: "日期字段",
+        helpText: "时间段筛选所依据的日期字段。留空则按创建日期筛选。"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开仪表盘时显示的时间段。",
+        options: {
+          today: "今天",
+          yesterday: "昨天",
+          this_week: "本周",
+          last_week: "上周",
+          this_month: "本月",
+          last_month: "上月",
+          next_month: "下月",
+          this_quarter: "本季度",
+          last_quarter: "上季度",
+          next_quarter: "下季度",
+          this_year: "今年",
+          last_year: "去年",
+          last_7_days: "近 7 天",
+          last_30_days: "近 30 天",
+          last_90_days: "近 90 天",
+          next_30_days: "未来 30 天",
+          custom: "自定义…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许查看者自己选择开始和结束日期。"
       },
       globalFilters: {
         label: "全局筛选",
-        helpText: "应用到所有组件的筛选条件"
+        helpText: "查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。"
       },
       "globalFilters.name": {
         label: "名称"
@@ -1731,6 +2062,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "globalFilters.targetWidgets": {
         label: "目标组件"
+      },
+      requiredPermissions: {
+        label: "所需权限",
+        helpText: "谁能看此仪表盘：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有人都能看到此仪表盘。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此仪表盘，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你也将无法再打开此仪表盘。"
       }
     }
   },
@@ -1868,7 +2203,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       mode: {
         label: "语义模式",
-        helpText: "该动作的语义模式。目前只有 AI 人工确认（HITL）启发式会读它——没有任何渲染端按它分支。"
+        helpText: "该动作的语义模式。目前只有 AI 人工确认（HITL）启发式会读它——没有任何渲染端按它分支。",
+        options: {
+          create: "创建",
+          edit: "编辑",
+          delete: "删除",
+          custom: "自定义"
+        }
       },
       order: {
         label: "排序权重",
@@ -1888,7 +2229,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "body.language": {
         label: "语言",
-        helpText: "expression = 纯公式；js = 沙箱 JavaScript"
+        helpText: "expression = 纯公式；js = 沙箱 JavaScript",
+        options: {
+          expression: "表达式（L1）",
+          js: "JavaScript（L2 沙箱）"
+        }
       },
       "body.source": {
         label: "源码",
@@ -2005,7 +2350,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       operation: {
         label: "声明式写入",
-        helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。"
+        helpText: "对单条记录的声明式字段写入：'update' 会把 `patch`（合并在已收集的 `params` 之下）应用到当前记录，并且以调用方的身份执行——绝不提权，因此调用方的权限、对象的钩子与校验都会像用户手动编辑那样触发。",
+        options: {
+          update: "更新当前记录"
+        }
       },
       patch: {
         label: "静态字段值（patch）",
@@ -2137,12 +2485,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         description: "标识与报表类型"
       },
       dataset_binding: {
-        label: "数据集绑定",
-        description: "本报表渲染的语义层数据集。度量与行分别来自该数据集的度量与维度"
+        label: "数据来源绑定",
+        description: "报表的数字从哪里来、如何分组和排序，以及点击某一行时打开哪些记录"
       },
       joined_blocks: {
         label: "joined 报表分块",
-        description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
+        description: "叠加进同一张报表的其他分块，各有自己的数据来源（仅 joined 报表）"
       },
       filter_and_chart: {
         label: "筛选与图表",
@@ -2162,31 +2510,32 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "一句话说明这张报表看什么，显示在名称下方"
       },
       type: {
         label: "类型",
         helpText: "报表类型：tabular / summary / matrix / joined"
       },
       dataset: {
-        label: "数据集",
-        helpText: "要绑定的数据集（度量/维度来自其语义层）"
+        label: "数据来源",
+        helpText: "报表从这里取数；每个人只能看到自己有权限的记录"
       },
       values: {
-        label: "度量",
-        helpText: "要展示的度量名（来自该数据集）"
+        label: "指标",
+        helpText: "要展示的指标，例如合计、计数、平均值或比率（来自数据来源）"
       },
       rows: {
-        label: "行",
-        helpText: "用于分组行的维度名（来自该数据集）"
+        label: "分组",
+        helpText: "按哪些字段分组（来自数据来源）"
       },
       columns: {
-        label: "列",
-        helpText: "横向展开的维度名（仅 matrix 报表）"
+        label: "列分组",
+        helpText: "横向展开的分组（仅 matrix 报表）"
       },
       order: {
         label: "排序",
-        helpText: "排序键，最重要的在前（rows/columns 维度或 values 度量）。时间维度默认按时间顺序排列。"
+        helpText: "排序依据，最重要的在前（某个分组或指标）。时间分组默认按时间先后排列。"
       },
       "order.by": {
         label: "排序依据"
@@ -2196,11 +2545,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       drilldown: {
         label: "下钻",
-        helpText: "点击聚合后的行/单元格，打开其底层记录"
+        helpText: "点击汇总后的行或单元格，打开其中的记录"
       },
       blocks: {
         label: "分块",
-        helpText: "绑定数据集的子报表（仅 joined 报表）"
+        helpText: "子报表，各有自己的数据来源（仅 joined 报表）"
       },
       "blocks.name": {
         label: "名称"
@@ -2215,16 +2564,16 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "分块类型"
       },
       "blocks.dataset": {
-        label: "数据集"
+        label: "数据来源"
       },
       "blocks.rows": {
-        label: "行"
+        label: "分组"
       },
       "blocks.columns": {
-        label: "列"
+        label: "列分组"
       },
       "blocks.values": {
-        label: "度量"
+        label: "指标"
       },
       "blocks.runtimeFilter": {
         label: "运行时筛选"
@@ -2234,7 +2583,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       runtimeFilter: {
         label: "运行时筛选",
-        helpText: "渲染时的范围筛选，在查询时以 AND 方式并入"
+        helpText: "每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上"
       },
       chart: {
         label: "图表",
@@ -2242,11 +2591,54 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
+        helpText: "打开报表时显示的时间段，以及使用者能否自己选择范围"
+      },
+      "dateRange.dimension": {
+        label: "日期字段",
+        helpText: "时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开报表时显示的时间段",
+        options: {
+          today: "今天",
+          yesterday: "昨天",
+          this_week: "本周",
+          last_week: "上周",
+          this_month: "本月",
+          last_month: "上月",
+          next_month: "下月",
+          this_quarter: "本季度",
+          last_quarter: "上季度",
+          next_quarter: "下季度",
+          this_year: "今年",
+          last_year: "去年",
+          last_7_days: "近 7 天",
+          last_30_days: "近 30 天",
+          last_90_days: "近 90 天",
+          next_30_days: "未来 30 天",
+          custom: "自定义…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许使用者自己选择开始和结束日期"
       },
       exportOptions: {
         label: "导出选项",
-        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+        helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定"
+      },
+      "exportOptions.formats": {
+        label: "格式",
+        helpText: "可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载"
+      },
+      "exportOptions.includeHeaders": {
+        label: "包含表头",
+        helpText: "在下载文件的第一行写入列名"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "文件名",
+        helpText: "下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称"
       }
     }
   },
@@ -2515,7 +2907,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "后台作业"
+    label: "后台作业",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      schedule: {
+        label: "调度计划"
+      },
+      enabled: {
+        label: "已启用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   datasource: {
     label: "数据源"
@@ -2525,10 +2934,41 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      method: {
+        label: "方法"
+      },
+      path: {
+        label: "路径"
+      },
+      type: {
+        label: "类型"
+      },
+      "objectParams.object": {
+        label: "对象"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻译"
+    label: "翻译",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      locale: {
+        label: "语言区域"
+      }
+    }
   },
   email_template: {
     label: "邮件模板",
@@ -2605,11 +3045,45 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      group: {
+        label: "分组"
+      },
+      tags: {
+        label: "标签"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   book: {
     label: "文档手册",
-    description: "将帮助页面按顺序分节组织的目录"
+    description: "将帮助页面按顺序分节组织的目录",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      audience: {
+        label: "受众"
+      },
+      groups: {
+        label: "分组"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   permission: {
     label: "权限集",
@@ -2713,15 +3187,66 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "共享规则",
-    description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
+    description: "软件包声明的记录共享规则；组织在设置中编写自己的规则",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      object: {
+        label: "对象"
+      },
+      sharedWith: {
+        label: "共享给"
+      },
+      accessLevel: {
+        label: "访问级别"
+      }
+    }
   },
   queue: {
     label: "队列",
-    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列"
+    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      members: {
+        label: "成员"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   assignment_rule: {
     label: "分配规则",
-    description: "软件包声明的规则，把新记录分配到某个队列或某个人"
+    description: "软件包声明的规则，把新记录分配到某个队列或某个人",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      object: {
+        label: "对象"
+      },
+      entries: {
+        label: "条目"
+      },
+      active: {
+        label: "启用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   agent: {
     label: "AI 代理",
@@ -2766,7 +3291,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "绑定产品界面",
-        helpText: "该智能体绑定的产品界面（ADR-0063 §1）。只有自身界面与之相符、或声明为 'both' 的技能才会挂载，而该智能体的工具集就是这些技能工具的并集。默认 'ask'。"
+        helpText: "该智能体绑定的产品界面（ADR-0063 §1）。只有自身界面与之相符、或声明为 'both' 的技能才会挂载，而该智能体的工具集就是这些技能工具的并集。默认 'ask'。",
+        options: {
+          ask: "Ask（对话界面）",
+          build: "Build（创作界面）"
+        }
       },
       instructions: {
         label: "指令",
@@ -2774,11 +3303,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       model: {
         label: "模型",
-        helpText: "AI 模型配置（提供方、模型名、温度等）"
+        helpText: "AI 模型配置（模型名、温度等）"
       },
       planning: {
         label: "规划",
-        helpText: "自主推理配置：代理停止前的最大推理迭代次数（1–100，默认 10）。"
+        helpText: "自主推理配置：防止失控循环的保险丝，按模型调用次数计（一次模型调用加上它发起的一批工具调用），达到后代理停止（1–1000，默认 10）。"
       },
       memory: {
         label: "记忆",
@@ -2803,6 +3332,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "护栏",
         helpText: "安全规则与内容策略"
+      },
+      "model.model": {
+        label: "模型"
       }
     }
   },
@@ -2880,7 +3412,12 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       surface: {
         label: "绑定智能体界面",
-        helpText: "该技能绑定的智能体界面（ADR-0063 §3）。把它挂到界面不相符的智能体上会在解析时直接报错，而不是悄悄跳过。默认 'ask'。"
+        helpText: "该技能绑定的智能体界面（ADR-0063 §3）。把它挂到界面不相符的智能体上会在解析时直接报错，而不是悄悄跳过。默认 'ask'。",
+        options: {
+          ask: "Ask（对话界面）",
+          build: "Build（创作界面）",
+          both: "两者"
+        }
       },
       instructions: {
         label: "指令",
@@ -2889,6 +3426,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       tools: {
         label: "工具",
         helpText: "工具名（支持通配符：action_*）"
+      },
+      context: {
+        label: "上下文包",
+        helpText: "此技能使用的上下文包（填名称）。工具中须包含 get_record_context。通过 MCP 调用时，提示词可额外接收一个可选的记录 ID"
       },
       triggerConditions: {
         label: "触发条件",
@@ -2904,5 +3445,51 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "值"
       }
     }
+  },
+  ai_context: {
+    label: "AI 上下文包",
+    sections: {
+      basics: {
+        label: "基本信息",
+        description: "资料包的标识，以及它读取哪个对象的记录。"
+      },
+      material: {
+        label: "资料内容",
+        description: "把记录的哪些内容交给模型。每个选择器列出根对象的字段，或该关联列表自身对象的字段。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名称",
+        helpText: "唯一标识（snake_case）。技能的 context 键和 get_record_context 工具都按它指名资料包。"
+      },
+      label: {
+        label: "显示名称",
+        helpText: "显示名称，即工具回答的标题。资料包没有描述：用途写在这里。"
+      },
+      object: {
+        label: "根对象",
+        helpText: "根对象：资料包读取它的一条记录。"
+      },
+      fields: {
+        label: "字段",
+        helpText: "交给模型的根对象字段，按顺序（最多 30 个）。其中的查找字段以它指向的记录名称作答。"
+      },
+      related: {
+        label: "关联列表",
+        helpText: "指向这条记录的子列表，只读一层（最多 3 个）。每个列表指明子对象、指向根对象的引用字段，以及每行读取的列（最多 10 列）；不选列时每行只读取其名称。"
+      },
+      body: {
+        label: "正文",
+        helpText: "作为记录正文读取的那一个长文本字段。"
+      },
+      "body.field": {
+        label: "正文字段",
+        helpText: "根对象的一个长文本字段（textarea、markdown、html、richtext）。选其他字段会在保存时报告，资料包也就不带正文。"
+      }
+    }
+  },
+  knowledge_source: {
+    label: "知识源"
   }
 };

@@ -39,6 +39,7 @@ import {
   latestPerDirectiveOf,
   findMisplacedFixedReadLeaf,
   misplacedFixedReadLeafMessage,
+  quoteSqliteIdentifier,
   type DeclaredRenameCarry,
   type DeclaredRenamePlan,
   type DriftOp,
@@ -631,7 +632,9 @@ function refuseRemoteDeferredDdl(): never {
  * drift. A table this face's schema sync (`RemoteTransport`) created before
  * #23847 has no NOT NULL constraint for the fields that declare one: the sync
  * creates it now, but an additive sync never tightens a column that already
- * exists. So such a table reads as `tighten_not_null`
+ * exists. Nor does it impose one on a column it adds to a table that already
+ * holds rows, where every row holds NULL (#37281): that column is added
+ * nullable. So such a table reads as `tighten_not_null`
  * (destructive) against its own declaration. Nor does every destructive entry
  * have a remedy on this transport: `os migrate apply --allow-destructive` runs
  * here [#23848] and applies the column drops and index entries this face can
@@ -646,7 +649,8 @@ function refuseRemoteDeferredDdl(): never {
 /** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
 const REMOTE_DRIFT_REPORT_CAVEAT =
   'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL ' +
-  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column), so ' +
+  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column, and adds a ' +
+  'new column to a table that already holds rows without it), so ' +
   'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
   'remedy on this transport but a column drop or an index change (`os migrate apply --allow-destructive` applies ' +
   'those and names the rest as not applied). The report is for reading; nothing is ' +
@@ -680,7 +684,7 @@ export type RemoteDriftOpAnswer =
  * The `satisfies` clause is the pin, as for {@link REMOTE_FACE_ANSWERS}: an op
  * added to `DriftOp` fails this package's typecheck and build until its remote
  * answer is decided here. Of these, the SQLite differ emits `relax_not_null`,
- * `tighten_not_null`, `drop_column_default`, `drop_column` and the index ops;
+ * `tighten_not_null`, `drop_column_default`, `set_column_default`, `drop_column` and the index ops;
  * the two varchar widths and the two `manual_*` findings are PostgreSQL /
  * MySQL only, and answered here for completeness.
  */
@@ -700,6 +704,9 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
   drop_column_default: 'needs-table-rebuild',
+  // [#36245] A changed literal DEFAULT is restated by the same rebuild that
+  // drops one: SQLite cannot alter a column's DEFAULT in place.
+  set_column_default: 'needs-table-rebuild',
   // [#32590] Never emitted by the SQLite differ: a SQLite `date` column already
   // holds the canonical datetime text, so the widening is Postgres / MySQL
   // only. Answered as the varchar widths are, since a SQLite column's declared
@@ -737,8 +744,8 @@ function remoteIntrospectedColumn(row: Record<string, unknown>): IntrospectedCol
   } as IntrospectedColumn;
 }
 
-/** A SQLite identifier, quoted, with any embedded quote doubled. */
-const quoteRemoteIdentifier = (name: string): string => `"${String(name).replace(/"/g, '""')}"`;
+/** A SQLite identifier, quoted, with any embedded quote doubled — `driver-sql`'s one spelling of it. */
+const quoteRemoteIdentifier = quoteSqliteIdentifier;
 
 /** [#23816] The catalog statements the remote drift reads send, one spelling each. */
 const REMOTE_TABLE_INFO_SQL = 'SELECT cid, name, type, "notnull", dflt_value FROM pragma_table_info(?) ORDER BY cid';
@@ -1189,6 +1196,13 @@ export const REMOTE_FACE_ANSWERS = {
   // `queryDateGranularity` is empty), so the engine buckets in memory, on the
   // UTC calendar whose keys this expression answers.
   dateBucketSql: 'inherited',
+  // [#36190] The JSON-column class, read off the registries this face fills
+  // itself: it is what this driver already hands the remote transport's own
+  // refusal (`setJsonColumnResolver`), so both faces word one refusal. Remote
+  // mode never moves its media columns, so a single-value file-class field
+  // reads `'single-value-media'` here on every deployment, as it does locally
+  // inside the ADR-0104 window.
+  jsonColumnFieldClass: 'inherited',
 } as const satisfies Record<keyof SqlDriver, RemoteFaceAnswer>;
 
 // ── Remote operation timeout ─────────────────────────────────────────────────
@@ -3304,11 +3318,50 @@ export class TursoDriver extends SqlDriver {
       // [#21226] The rows are narrowed to the caller's tenant scope before they
       // are grouped, as `SqlDriver.aggregate` scopes its builder.
       const scope = this.remoteTenantScope(object, options);
-      return this.remoteReadExit(object, query, () =>
-        this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+      return this.presentRemoteGroupKeys(
+        object,
+        query,
+        await this.remoteReadExit(object, query, () =>
+          this.remoteTransport!.aggregate(object, this.toRemoteQuery(object, query, options), table, scope),
+        ),
       );
     }
     return super.aggregate(object, query, options);
+  }
+
+  /**
+   * [#37133] Present the group-key columns of a remote `aggregate()` answer
+   * with the presenter `find()` applies to the same column, so a group over a
+   * declared boolean answers `true` / `false`, never the stored `1` / `0`.
+   *
+   * The remote transport hands back raw libSQL columns, and the local face of
+   * this driver presents every group key through `SqlDriver.presentReadColumns`
+   * (keyed by the OUTPUT column, `alias ?? field`, with the kind
+   * `readPresentationKind` gives the FIELD). This applies those same two
+   * inherited members, so the faces cannot disagree on what a group key is.
+   * The presentation registries are keyed by object name on this face, as
+   * {@link formatRemoteRow} and `distinct()` read them.
+   *
+   * Measures are deliberately left as the transport answers them: a count or a
+   * total is already a number from libSQL, and `min` / `max` over a boolean are
+   * the ruled numeric domain (`SqlDriver.aggregate` [#11152]). A date-bucketed
+   * key never reaches here — the transport refuses it before anything is read.
+   */
+  private presentRemoteGroupKeys(
+    object: string,
+    query: DriverQuery,
+    rows: Record<string, unknown>[],
+  ): Record<string, unknown>[] {
+    const groupBy = Array.isArray(query?.groupBy) ? query.groupBy : [];
+    const columns = new Map(
+      groupBy.flatMap((g) => {
+        const field = typeof g === 'string' ? g : g?.field;
+        if (typeof field !== 'string') return [];
+        const kind = this.readPresentationKind(object, field);
+        return kind ? [[typeof g === 'string' ? g : (g.alias ?? field), kind] as const] : [];
+      }),
+    );
+    return this.presentReadColumns(rows, columns);
   }
 
   // ===================================

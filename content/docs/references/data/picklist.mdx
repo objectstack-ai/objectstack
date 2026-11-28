@@ -64,7 +64,7 @@ A shared option list that select fields reference by name instead of copying opt
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -74,7 +74,7 @@ A shared option list that select fields reference by name instead of copying opt
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
@@ -100,7 +100,7 @@ Options added to a picklist owned by another package (additive only — the `obj
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |
@@ -126,7 +126,7 @@ The served form of a picklist-bound field: `options` resolved, `picklist` kept
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **default** | `boolean` | optional | Is default option |

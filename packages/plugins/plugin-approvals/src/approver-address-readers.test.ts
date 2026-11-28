@@ -95,6 +95,7 @@ const READERS: ReadonlyArray<{ reader: string; method: string; reads: string }> 
   { reader: 'decision slot test — approve / reject', method: 'decideNode', reads: 'takenSlot' },
   { reader: 'decision slot test — send back', method: 'sendBack', reads: 'takenSlot' },
   { reader: 'decision slot test — reassign', method: 'reassign', reads: 'takenSlot' },
+  { reader: 'own-slot test — reassign moves only a slot the named actor holds', method: 'reassign', reads: 'actorAddresses' },
   { reader: 'decision slot test — request info', method: 'requestInfo', reads: 'takenSlot' },
   { reader: 'decision slot test — comment', method: 'comment', reads: 'takenSlot' },
 ];
@@ -124,7 +125,7 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
   },
   'approval-service.ts · reassign · pending.includes(from)': {
     role: 'slot-vs-slot',
-    why: '`from` names the slot being moved (the taken slot by default); the caller is judged by takenSlot',
+    why: '`from` names the slot being moved (the taken slot by default); outside the override it must also be one of actorAddresses(the named actor), the own-slot reader in READERS',
   },
   "approval-service.ts · remind · pending.filter(a => a && !a.includes(':'))": {
     role: 'slot-vs-slot',
@@ -191,11 +192,22 @@ const PERSON_SITES: Readonly<Record<string, { count: number; role: PersonRole; w
     role: 'display',
     why: 'resolves the person\'s display name for the action log',
   },
-  'approval-service.ts · localizeRoutingNotes · a.actor_id': {
+  'approval-activity-feed.ts · approvalActivityRow · action.actor_id': {
+    count: 1,
+    role: 'display',
+    why: 'the activity entry names the person who took the step as stored (its actor), no comparison',
+  },
+  'approval-activity-feed.ts · bindApprovalActivityFeed · action.actor_id': {
+    count: 1,
+    role: 'display',
+    why: 'resolves the step-taker\'s display name and avatar for the activity entry, no comparison',
+  },
+  'approval-service.ts · localizeActionRows · row.actor_id': {
     count: 2,
     role: 'display',
     why: 'a presence test, no identity: only a row no person wrote can be the administrators\' routing note '
-      + '(#25576) or the submitter exclusion note (#25573) this renders in the reader\'s language',
+      + '(#25576), the submitter exclusion note (#25573), the no-approver note or the record-deleted '
+      + 'cancellation (#37531) this renders in the reader\'s language',
   },
   'action-slot-backfill.ts · backfillActionSlots · actor_id: { $contains: \':\' }': {
     count: 1,

@@ -51,6 +51,8 @@ const COLLECTION: Record<NamespaceUniqueType, string> = {
   book: 'books',
   analytics_cube: 'analyticsCubes',
   tool: 'tools',
+  ai_context: 'aiContexts',
+  knowledge_source: 'knowledgeSources',
 };
 
 /** A package of namespace `ns` declaring `decl`'s items, each labelled with the package's last id segment. */
@@ -79,10 +81,12 @@ const install = (registry: SchemaRegistry, manifest: unknown, scope?: { packageI
 const fresh = (collisionPolicy: 'error' | 'warn' = 'error') => new SchemaRegistry({ multiTenant: false, collisionPolicy });
 
 describe('the vocabulary', () => {
-  it('the twelve types, in ADR-0150 child N\'s order', () => {
+  it('the twelve types, in ADR-0150 child N\'s order, then the context pack and the knowledge source (the two 2026-11-25 addenda)', () => {
     expect(NAMESPACE_UNIQUE_TYPES).toEqual([
       'sharing_rule', 'queue', 'assignment_rule', 'hook', 'job',
       'app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool',
+      'ai_context',
+      'knowledge_source',
     ]);
   });
 
@@ -115,6 +119,8 @@ describe('the vocabulary', () => {
       'sharing_rule/sharing_rule_one', 'queue/queue_one', 'assignment_rule/assignment_rule_one',
       'hook/hook_one', 'job/job_one', 'app/app_one', 'page/by_id', 'dashboard/dashboard_one',
       'report/report_one', 'book/book_one', 'analytics_cube/analytics_cube_one', 'tool/tool_one',
+      'ai_context/ai_context_one',
+      'knowledge_source/knowledge_source_one',
       'app/inner', 'tool/inner_tool',
     ]);
     expect(spelt).not.toContain('app/nested_apps_entry');

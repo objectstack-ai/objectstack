@@ -11,14 +11,18 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, SidebarFooterSlotProvider, holdsSetupAccess, setupMetadataStudioPath, useAdapter, type SidebarFooterSlotPlace } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
-import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
+import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest, usePermissions } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
+import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
+import { FirstRunChecklistPill } from './pages/settings/FirstRunChecklistPill';
+import { FirstRunChecklistProvider } from './pages/settings/firstRunChecklistState';
 import { InAppFormRoute } from './components/InternalFormRoute';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT, routeApprovalRecordReads } from './services/approvalRequestsDataSource';
+import { SETUP_PACKAGES_PATH } from '@object-ui/app-shell';
 
 const AppManagementPage = lazy(() => import('./pages/system/AppManagementPage').then(m => ({ default: m.AppManagementPage })));
 const ProfilePage = lazy(() => import('./pages/system/ProfilePage').then(m => ({ default: m.ProfilePage })));
@@ -64,7 +68,8 @@ function ObjectRedirect() {
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, the
   // page Setup's `…/metadata/object` route opens there.
   const target = setupMetadataStudioPath(objectName ? `object/${objectName}` : 'object', location.search, location.hash);
-  return <Navigate to={target ?? '/studio'} replace />;
+  // objectstack#36908 — a URL Studio has no page for lands on Setup → Packages.
+  return <Navigate to={target ?? SETUP_PACKAGES_PATH} replace />;
 }
 
 /**
@@ -98,8 +103,10 @@ function MetadataRedirect() {
       ? `${encodeURIComponent(metadataType)}/${itemName}`
       : encodeURIComponent(metadataType);
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, query
-  // kept; a datasource stays on Setup's own route.
-  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  // kept; a datasource stays on Setup's own route. objectstack#37565 — the
+  // environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash, setupAccess);
   return <Navigate to={target ?? `${prefix}/metadata/${rest}`} replace />;
 }
 
@@ -173,8 +180,10 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
  */
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
   // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
-  // area's cross-package leg.
-  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? '/studio'} replace />;
+  // area's cross-package leg; objectstack#37565 — Setup's directory page, for
+  // whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY, '', setupAccess) ?? SETUP_PACKAGES_PATH} replace />;
 }
 
 /**
@@ -418,6 +427,28 @@ export function ConsolePermissionsRequest(): null {
 }
 
 /**
+ * objectstack#36732 (item 5, option A) — an administrator's first-run
+ * checklist at the top of the Setup app's first page, now that the desktop's
+ * home page retired. Since objectstack#36739 this is the FULL list, done rows
+ * included, kept for looking back once it is finished. The checklist decides
+ * who sees it (a session that may write the settings it lists); this route
+ * sits under `ConsolePermissionsScope`, which answers that.
+ */
+function setupFirstPageChecklist() {
+  return <FirstRunChecklist placement="setupPage" />;
+}
+
+/**
+ * objectstack#36739 — the administrator's 「Get started n/m」 pill at the bottom
+ * of every app's sidebar (after the app's menu on a phone), opening the
+ * first-run checklist in place. It stands aside for a member and once the
+ * required rows are done.
+ */
+function sidebarFooterPill(where: SidebarFooterSlotPlace) {
+  return <FirstRunChecklistPill where={where} />;
+}
+
+/**
  * The console's ONE `/auth/me/permissions` source, shared by Home and every app
  * (objectui#12700).
  *
@@ -456,7 +487,10 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
       endpoint={endpoint}
       fetcher={authFetch}
       requestKey={requestKey}
-      loadingFallback={<LoadingScreen />}
+      // objectstack#35981 — the console's boot fallback: on an app route, the
+      // chrome's empty frame while the answer is out (it draws no navigation
+      // entry, which is what the answer decides); the splash on `/home`.
+      loadingFallback={<LoadingFallback />}
       // Without this, the provider's error state renders `loadingFallback` too —
       // an eternal spinner with a `retry` nobody can reach. The provider already
       // re-attempts a transient failure (a cold environment kernel answers 503 +
@@ -470,7 +504,12 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
           drops an app the user's permission sets hide. One read for Home and
           every app, so this common ancestor holds it, beside the answer above. */}
       <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
-        {children}
+        {/* objectstack#36739 — the first-run checklist's reads, made once for
+            every place it is drawn (the sidebar pill, Setup's first page,
+            Home), so moving between apps asks nothing again. */}
+        <FirstRunChecklistProvider>
+          <SidebarFooterSlotProvider value={sidebarFooterPill}>{children}</SidebarFooterSlotProvider>
+        </FirstRunChecklistProvider>
       </LauncherAppsProvider>
     </MePermissionsProvider>
   );
@@ -521,10 +560,12 @@ export function AppContent() {
     <>
       <LocalizationFetchProvider endpoint={localizationEndpoint}>
         <ApprovalRecordReads>
-          <DefaultAppContent
-            extraRoutes={appRoutes}
-            extraRoutesNoApp={systemRoutes}
-          />
+          <SetupFirstPageSlotProvider value={setupFirstPageChecklist}>
+            <DefaultAppContent
+              extraRoutes={appRoutes}
+              extraRoutesNoApp={systemRoutes}
+            />
+          </SetupFirstPageSlotProvider>
         </ApprovalRecordReads>
       </LocalizationFetchProvider>
     </>

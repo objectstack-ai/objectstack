@@ -35,6 +35,15 @@
  * - `contains` / `starts_with` / `ends_with` → `S != null && S.contains(V)`
  *   (a CEL string method faults on `null`); `not_contains` →
  *   `S == null || !S.contains(V)`.
+ * - On a multi-value column (a list: `multiselect` / `checkboxes` / `tags`, or
+ *   a `select` / `lookup` / `user` declared `multiple: true`) `contains` is
+ *   list membership and `not_contains` its complement, null-safe and spelled
+ *   per site: `has(S) && S != null && V in S` for a `record.` read,
+ *   `S != null && V in S` for a bare name (`cel-list-membership.ts`, which
+ *   takes it from the validator's own prescription). CEL has no `contains`
+ *   method on a list (it faults with "no matching overload"), and `S == V`
+ *   compares the whole list with one value, so it is false for every record.
+ *   The spelling is the one `ConditionBuilder` writes too.
  * - `in` / `not_in` → `S in [A, B]` / `!(S in [A, B])`.
  * - `is_empty` / `is_not_empty` → the spec's ruled 「is empty」 table
  *   (`expandEmptyOperator`), in the clauses `ConditionBuilder` writes:
@@ -52,17 +61,20 @@
  * Refused (the row stays on screen and says so; the formula holds it):
  * `icontains`; a datetime or time literal (the builder's `datetime-local`
  * value carries no zone, and a guessed one moves the instant); a relative
- * window (`this_week`) on `between`; any operator the builder does not offer
- * for the column's type; and every operator but the empty checks on a
- * multi-value column.
+ * window (`this_week`) on `between`; and any operator the builder does not
+ * offer for the column. What it offers is decided from the column's type AND
+ * `multiple` by `operatorsForField`, the shared builder's own answer, so a
+ * multi-value column is offered membership and the empty checks only
+ * (`jsonColumnFilterOperators`).
  *
  * Rows joined by OR or AND (one join, as the builder has one `logic`); a row
  * that writes more than one clause is parenthesised when it is joined.
  */
 
-import { operatorsForFieldType, isFilterValueComplete } from '@object-ui/components';
+import { operatorsForField, isFilterValueComplete } from '@object-ui/components';
 import { expandEmptyOperator, type EmptyOperatorArm } from '@objectstack/spec/data';
 import { FILTER_DATE_LIKE_TYPES, FILTER_LOOKUP_LIKE_TYPES, FILTER_NUMBER_LIKE_TYPES, FILTER_SELECT_LIKE_TYPES } from '@object-ui/types';
+import { listMembershipCel, listSubjectOperators, readListMembership } from './cel-list-membership.js';
 
 /** One column the rows may name: `value` is its CEL subject (`record.meeting_date`). */
 export interface EdgeConditionField {
@@ -165,8 +177,22 @@ function emptyArm(field: EdgeConditionField): EmptyOperatorArm {
   return expandEmptyOperator({ type: field.type || 'text', multiple: field.multiple === true }).arm;
 }
 
+/**
+ * Whether the builder offers `operator` on this column — read from the shared
+ * builder's own answer for the type and `multiple` (`operatorsForField`), so
+ * the rows refuse exactly what the dropdown never offers.
+ */
 function offered(field: EdgeConditionField, operator: string): boolean {
-  return operatorsForFieldType(field.type).some((o) => o.value === operator);
+  return operatorsForField({ type: field.type, multiple: field.multiple === true }).some((o) => o.value === operator);
+}
+
+/**
+ * Whether the column holds a list — the columns the shared builder offers
+ * membership on (`listSubjectOperators`, objectstack#36167). A structured-JSON
+ * column gets the empty checks only, so its `contains` never reaches the writer.
+ */
+function isListColumn(field: EdgeConditionField): boolean {
+  return listSubjectOperators(field) !== undefined;
 }
 
 const ORDERING: Readonly<Record<string, string>> = {
@@ -185,7 +211,12 @@ function rowCel(row: EdgeConditionRow, field: EdgeConditionField): { cel: string
   const op = row.operator;
   if (!offered(field, op)) return null;
   const kind = kindOf(field);
-  if (field.multiple === true && op !== 'is_empty' && op !== 'is_not_empty') return null;
+  if (isListColumn(field) && (op === 'contains' || op === 'not_contains')) {
+    // List membership: one member per row, as the builder's value control picks.
+    const v = typeof row.value === 'string' ? literalOf(row.value, kind) : undefined;
+    if (v === undefined) return null;
+    return { cel: listMembershipCel(s, v, op === 'contains'), compound: true };
+  }
   switch (op) {
     case 'is_empty':
     case 'is_not_empty': {
@@ -311,6 +342,14 @@ function listOf(list: string, kind: Kind): unknown[] {
 
 /** One term (no outer parentheses) as a row, or `null`. */
 function readTerm(text: string, byValue: ReadonlyMap<string, EdgeConditionField>): EdgeConditionRow | null {
+  // List membership reads back through the writer's own reader, so the
+  // per-site spelling is known in one place.
+  const membership = readListMembership(text);
+  if (membership && new RegExp(`^${STRING_LIT}$`).test(membership.member)) {
+    const field = byValue.get(membership.subject);
+    if (!field) return null;
+    return { field: field.value, operator: membership.contains ? 'contains' : 'not_contains', value: unquote(membership.member) };
+  }
   for (const pattern of TERM_PATTERNS) {
     const m = pattern.re.exec(text);
     if (!m) continue;

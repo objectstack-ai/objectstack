@@ -171,13 +171,13 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
   it('blocks a record-scoped action with zero selection (#2210) but lets object-level actions through', () => {
     const scoped = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_item', 'list_toolbar'] } as ActionDef,
+      { name: 'a', locations: ['record_row', 'list'] } as ActionDef,
       { selectedRecords: [] },
     );
     expect(scoped.error).toMatch(/select a row first/i);
 
     const objectLevel = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_toolbar'] } as ActionDef,
+      { name: 'a', locations: ['list'] } as ActionDef,
       { selectedRecords: [] },
     );
     expect(objectLevel).toEqual({ recordId: undefined });
@@ -185,7 +185,7 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
   it('an aggregate dispatch (_selectedIds, objectui#3139) bypasses the selection fallback and its guards', () => {
     const out = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_item', 'list_toolbar'], params: { _selectedIds: ['x', 'y'] } } as ActionDef,
+      { name: 'a', locations: ['record_row', 'list'], params: { _selectedIds: ['x', 'y'] } } as ActionDef,
       { selectedRecords: [{ id: 'x' }, { id: 'y' }] },
     );
     expect(out).toEqual({ recordId: undefined });
@@ -194,9 +194,9 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
 describe('isRecordScopedAction', () => {
   it('true for any record location, false for object-level-only or undeclared', () => {
-    expect(isRecordScopedAction({ locations: ['list_item'] } as ActionDef)).toBe(true);
-    expect(isRecordScopedAction({ locations: ['record_header'] } as ActionDef)).toBe(true);
-    expect(isRecordScopedAction({ locations: ['list_toolbar'] } as ActionDef)).toBe(false);
+    expect(isRecordScopedAction({ locations: ['record_row'] } as ActionDef)).toBe(true);
+    expect(isRecordScopedAction({ locations: ['record_page'] } as ActionDef)).toBe(true);
+    expect(isRecordScopedAction({ locations: ['list'] } as ActionDef)).toBe(false);
     expect(isRecordScopedAction({} as ActionDef)).toBe(false);
   });
 });
@@ -234,7 +234,7 @@ describe('createServerActionHandler — resolution wiring', () => {
 });
 
 describe('the row-count refusals carry their pack key, and are asked before input (objectui#13384)', () => {
-  const SCOPED = { name: 'a', locations: ['list_item', 'list_toolbar'] } as ActionDef;
+  const SCOPED = { name: 'a', locations: ['record_row', 'list'] } as ActionDef;
 
   it('each refusal names the locale-pack key its English text is the source of', () => {
     expect(resolveServerActionRecordId(SCOPED, { selectedRecords: [{ id: 'x' }, { id: 'y' }] })).toEqual({
@@ -462,5 +462,30 @@ describe('createServerActionHandler — userMessage relay (objectstack#34173)', 
       const res = await handler({ type: 'script', name: 'mass_update_stage' } as ActionDef);
       expect('userMessage' in res).toBe(false);
     }
+  });
+});
+
+/**
+ * The reasons of a refusal that names several (`error.details.refusals`,
+ * objectstack#36877) ride on `ActionResult.refusals`, beside `userMessage`,
+ * so the param dialog's refusal box can list them (objectstack#37403).
+ */
+describe('createServerActionHandler — refusal reasons relay (objectstack#37403)', () => {
+  it('relays error.details.refusals beside error and userMessage', async () => {
+    const refusals = [
+      { reason: 'on_report', message: 'Expense Taxi 12 is already on an expense report.' },
+      { reason: 'approved', message: 'Expense Hotel 7 is already approved.' },
+    ];
+    const text = `${refusals[0].message}\n${refusals[1].message}\nNothing was submitted.`;
+    const fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ success: false, error: { code: 'NOT_SUBMITTED', message: text, userMessage: text, details: { refusals } } }),
+    })) as unknown as ServerActionFetch;
+    const handler = createServerActionHandler({ fetch });
+
+    const res = await handler({ type: 'script', name: 'submit_expenses' } as ActionDef);
+
+    expect(res).toEqual({ success: false, error: text, userMessage: text, refusals });
   });
 });

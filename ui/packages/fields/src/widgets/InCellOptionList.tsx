@@ -22,10 +22,13 @@ export interface InCellOption {
  *   editor stays open and commits when the user moves on.
  * - `onAdd` (tags) — when the typed text matches no row, an "Add" row writes it.
  *
+ * - `initialQuery` — the search text it opens with: the line-item grid opens
+ *   the list on a typed letter, which becomes the first letter of the search.
+ *
  * Enter that picks is kept from the grid (`stopPropagation`): the grid's own
  * Enter would commit the value it held before the pick. With no active row,
- * Enter goes on to the grid, which commits and moves down. Escape always goes
- * on to the grid, which cancels.
+ * Enter goes on to the grid, which commits and stays on the cell. Escape
+ * always goes on to the grid, which cancels.
  */
 export function InCellOptionList({
   options,
@@ -36,6 +39,7 @@ export function InCellOptionList({
   placeholder,
   testId,
   inputProps,
+  initialQuery,
 }: {
   options: readonly InCellOption[];
   selected: readonly string[];
@@ -46,10 +50,12 @@ export function InCellOptionList({
   testId?: string;
   /** The host's DOM pass-through (id, aria-describedby, …), onto the search box. */
   inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
+  /** The search text the list opens with; absent opens it unfiltered. */
+  initialQuery?: string;
 }) {
   const { t } = useFieldTranslation();
   const listId = React.useId();
-  const [query, setQuery] = React.useState('');
+  const [query, setQuery] = React.useState(initialQuery ?? '');
   const needle = query.trim().toLocaleLowerCase();
   const shown = needle ? options.filter((o) => o.label.toLocaleLowerCase().includes(needle)) : options;
   const addText = onAdd && query.trim() !== '' && !options.some((o) => o.label === query.trim()) ? query.trim() : null;
@@ -63,7 +69,7 @@ export function InCellOptionList({
   // list, which is the list shown again when the search box is cleared (an
   // index into the filtered list would land on another option then).
   const initialActive = multiple ? -1 : options.findIndex((o) => selected.includes(o.value));
-  const [active, setActive] = React.useState(initialActive);
+  const [active, setActive] = React.useState(() => (query.trim() ? 0 : initialActive));
   const listRef = React.useRef<HTMLUListElement | null>(null);
 
   React.useEffect(() => {
@@ -117,7 +123,7 @@ export function InCellOptionList({
         }}
         onKeyDown={onKeyDown}
         className={cn(
-          'h-8 w-full rounded-sm border border-input bg-background px-2 text-[13px] outline-none',
+          'h-8 w-full rounded-sm border border-input bg-background px-2 text-sm outline-none',
           'focus-visible:ring-1 focus-visible:ring-ring',
         )}
       />
@@ -139,7 +145,7 @@ export function InCellOptionList({
             onClick={() => pickRow(0)}
             onPointerMove={() => setActive(0)}
             className={cn(
-              'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px]',
+              'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm',
               active === 0 && 'bg-accent text-accent-foreground',
             )}
           >
@@ -167,7 +173,7 @@ export function InCellOptionList({
               }}
               onPointerMove={() => setActive(i)}
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[13px]',
+                'flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-sm',
                 i === active && 'bg-accent text-accent-foreground',
               )}
             >
@@ -177,7 +183,7 @@ export function InCellOptionList({
           );
         })}
         {rowCount === 0 ? (
-          <li role="presentation" className="px-2 py-1 text-[13px] text-muted-foreground">
+          <li role="presentation" className="px-2 py-1 text-xs text-muted-foreground">
             {t('fields.options.noMatches')}
           </li>
         ) : null}

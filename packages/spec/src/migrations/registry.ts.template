@@ -1220,8 +1220,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     text:
       'It also retires `addRecord.mode` and `addRecord.formView` (ADR-0049 enforce-or-remove; '
       + 'ruling letter B′): no renderer read either key, and the Add button always opens the '
-      + 'object\'s create form, chosen by convention as `formViews.create` when the object\'s view '
-      + 'container declares one, else the default form. The D2 conversion '
+      + 'object\'s own create form, laid out by the object\'s `fieldGroups` and leaving out every '
+      + 'field marked `showOnCreate: false`. The D2 conversion '
       + '`add-record-mode-form-view-removed` strips both keys from every `addRecord` block as a '
       + 'lossless delete and is retired from the load path. The D3 record is the semantic entry '
       + '`add-record-mode-form-view-retired`.',
@@ -1893,6 +1893,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'rejections at publish from this major.',
   },
   {
+    id: 'field-inline-edit-boolean-retired',
+    order: 124,
+    text:
+      'It also retires the boolean arm of a relationship field\'s `inlineEdit` (ADR-0049 '
+      + 'enforce-or-remove; the maintainer\'s field-group ruling of objectstack#35889). A field group of '
+      + 'the parent (`fieldGroups[].relatedList`) now decides whether the parent\'s form inlines a child, '
+      + 'and `inlineEdit` only picks the form factor of a placed one; every reader of the key passes '
+      + 'anything but `\'grid\'` and `\'form\'` as absent, so `true` and `false` both read as no key. The '
+      + 'arm leaves the vocabulary, refused at the parse with the prescription. The D2 conversion '
+      + '`field-inline-edit-boolean-removed` deletes a boolean from `objects[]` and `objectExtensions[]` '
+      + 'field maps as a pure lossless delete, retired from the load path so authors are refused at parse; '
+      + 'its D3 record is the semantic entry `field-inline-edit-boolean-retired`.',
+  },
+  {
     id: 'field-reference-to-spelling-retired',
     order: 21,
     text:
@@ -2242,6 +2256,17 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'def\'s source and its RETIRED_KEYS_BY_MAJOR[18] entry stays as history.',
   },
   {
+    id: 'knowledge-chunk-metadata-retired',
+    order: 125,
+    text:
+      'It removes `metadata` from the knowledge chunk (ADR-0049 enforce-or-remove), as ADR-0161 '
+      + 'K8 item 5 asks of the splitter that gives the chunk its first producer: the service cuts '
+      + 'every passage and sets no per-passage metadata, no adapter read one, and a passage takes its '
+      + 'document\'s `metadata`. A chunk is a runtime contract shape, never stored in stack metadata, '
+      + 'so there is no D2 conversion; the schema tombstones the key, and its D3 record is the '
+      + 'semantic entry `knowledge-chunk-metadata-retired`.',
+  },
+  {
     id: 'list-view-filterable-fields-retired',
     order: 105,
     text:
@@ -2541,6 +2566,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`object-grid-resizable-columns-retired`.',
   },
   {
+    id: 'object-grid-single-click-edit-retired',
+    order: 123,
+    text:
+      'It also retires `object-grid`\'s `singleClickEdit` (ADR-0049 enforce-or-remove; the '
+      + 'maintainer\'s ruling A of objectstack#36270, one editing model). A grid that renders editable '
+      + 'now selects a cell first: a click selects it, and double-click, Enter, F2 or typing opens its '
+      + 'editor, with each committed cell saved on its own. That model has no single-click entry, so '
+      + 'neither value could be honoured: `true` (the renderer\'s default) would open the editor on the '
+      + 'selecting click, and `false` named the double-click entry the model already has. A retiredKey '
+      + 'tombstone on `ObjectGridPropsSchema` with one D2 conversion that deletes the key, whatever its '
+      + 'value. In the same change `keyboardNavigation`\'s describe narrows to what is enforced: on a '
+      + 'grid that renders editable the navigation is always on, and `false` is no longer honoured '
+      + 'there. Its D3 record is the semantic entry `object-grid-single-click-edit-retired`.',
+  },
+  {
     id: 'object-kanban-quick-add-retired',
     order: 28,
     text:
@@ -2665,10 +2705,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     order: 98,
     text:
       'It also retires the page header\'s `showStar` switch (ADR-0049 enforce-or-remove): the '
-      + 'reference console draws no star beside the record title — its record chip draws one only '
-      + 'where the host wires a favorites toggle, and the console\'s favorites entry is the '
-      + 'header\'s ⋯ menu — so the key switched nothing. The key is a retiredKey tombstone on '
-      + '`PageHeaderProps`, beside `icon` and `breadcrumb`, and the D2 conversion '
+      + 'console draws the record\'s star from the host\'s favorites toggle, never from metadata — '
+      + 'its record chip draws the star beside the record name wherever the host wires that toggle, '
+      + 'and the console wires it on its record pages — so the key switched nothing. The key is a '
+      + 'retiredKey tombstone on `PageHeaderProps`, beside `icon` and `breadcrumb`, and the D2 conversion '
       + '`page-header-show-star-removed` strips it from every `page:header`, `true` and `false` '
       + 'alike, retired from the load path. Its D3 record is the semantic entry '
       + '`page-header-show-star-retired`. The host hook is not part of it: a host that wires the '
@@ -3542,6 +3582,23 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-view-personal-declarations-retired`.',
   },
   {
+    id: 'view-column-state-retired',
+    order: 123,
+    text:
+      'It also retires `columnState` from the stored `view` row (ADR-0049; the spec half of the ruling '
+      + 'that put column widths in the reader\'s browser and retired the server-side per-user list '
+      + 'preference layer): the console grid\'s per-user column order and widths, declared on the view '
+      + 'item record and the flattened overlay, written onto a shared row and read back. No writer is '
+      + 'left — a column drag goes to the list\'s draft and is saved into the view itself — so the key is '
+      + 'a `retiredKey()` tombstone on both doors, and the D2 conversion `view-column-state-removed` '
+      + 'strips it in `views` and `viewItems`, so a stored row is served without it and its layout is no '
+      + 'longer applied: as ruled, a stored layout is not migrated and every reader sees the view\'s own '
+      + 'column order and widths. A row that held '
+      + 'other view keys is then valid again and re-saves; an overlay that held nothing but its identity '
+      + 'and the key is left identity-only, which the door refuses, and is deleted. Its D3 record is the '
+      + 'semantic entry `view-column-state-retired`.',
+  },
+  {
     id: 'view-data-api-provider-retired',
     order: 95,
     text:
@@ -3653,10 +3710,57 @@ const step18: MigrationStep = {
   ],
 };
 
+/**
+ * Protocol 19 step — accumulating, uncut.
+ *
+ * Opened by the protocol move itself (ruling record 7153441862, route A, item
+ * 2): `PROTOCOL_VERSION` reads `'19.0.0'` on the v19 prerelease line, so the
+ * load-time handshake (ADR-0087 D1) refuses a manifest whose range admits only
+ * 18. That refusal is this step's first semantic entry, and the one every
+ * upgrading author meets first. Later retirements on the v19 line add their
+ * entries as files; a major-19 conversion graduates here the way step 18's do
+ * (the first are `permission-view-all-fields-beside-record-bypass` and the
+ * knowledge source's, ADR-0161 K6).
+ */
+const step19: MigrationStep = {
+  toMajor: 19,
+  rationale:
+    'Protocol 19 moves the load-time handshake: a manifest whose `engines.protocol` range admits '
+    + 'protocol 18 and not 19 is refused before any of its metadata loads, so each manifest an app '
+    + 'or package declares moves its range to `^19`, together with its `@objectstack/*` versions. '
+    + 'An agent\'s `model.provider` leaves the shape: no runtime ever read it, and the provider that '
+    + 'serves an agent is the deployment\'s choice, so the key is deleted and the model name stays. '
+    + 'View All and Modify All stop casting a field vote: `viewAllFields: true` is written beside them '
+    + 'in every permission set entry of a source that predates the switch, so the migrated source keeps '
+    + 'the field reads those bits cast; the semantic entry names what it does not keep. '
+    + 'Action locations say what an action acts on: `list_toolbar` becomes `list`, `record_header` and '
+    + '`record_more` become `record_page`, `list_item` becomes `record_row`, and an action on both a row and '
+    + 'the record page becomes `record`; an action that sat in the record page\'s ⋯ menu only keeps that fold '
+    + 'with `component: \'action:menu\'`, so every action is drawn where it was. '
+    + 'It also admits the knowledge source as a metadata type (`knowledge_source`, ADR-0161 K4) and '
+    + 'settles its keys on the way in: `id` becomes `name` and `source.contentFields` becomes '
+    + '`source.content`, a list of field names in which `\'*\'` is refused, because each listed field '
+    + 'is sent to the embedding provider; `embedding`, `vectorStore`, `adapterConfig` and '
+    + '`refresh.cron`, which nothing read, are removed; and the `file` and `http` source kinds leave '
+    + 'with their four keys, so a source indexes the records of one object.',
+  // Derived, not listed, as step 18's are: every major-19 conversion graduates
+  // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
+  // conversion there, never here.
+  conversionIds: CONVERSIONS_BY_MAJOR[19]!.map((c) => c.id),
+  semantic: [
+    // One file per entry under `entries/semantic/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated semantic:19>
+    // </os-generated semantic:19>
+  ],
+};
+
 /** All migration steps, keyed by the major they migrate into. */
 export const MIGRATIONS_BY_MAJOR: Readonly<Record<number, MigrationStep>> = {
   17: step17,
   18: step18,
+  19: step19,
 };
 
 /** The majors that have a step, ascending. */
@@ -3811,6 +3915,17 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // <os-generated retired-key:18>
     // </os-generated retired-key:18>
   ],
+  // The v19 line: `PROTOCOL_VERSION` reads 19 (step19 above), and once the
+  // spec package itself moves to 19 every retirement `check:authorable-surface`
+  // prescribes is registered under major 19. Opened empty so that first entry
+  // has a region to land in.
+  19: [
+    // One file per entry under `entries/retired-keys/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-key:19>
+    // </os-generated retired-key:19>
+  ],
 };
 
 /**
@@ -3939,5 +4054,15 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
     // </os-generated retired-def:18>
+  ],
+  // The v19 line, for the same reason as RETIRED_KEYS_BY_MAJOR[19] above: the
+  // manifest deletion gate prescribes each removal under the spec package's
+  // own major. Opened empty so that first entry has a region to land in.
+  19: [
+    // One file per entry under `entries/retired-defs/`, concatenated here sorted by
+    // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
+    // FILE — never by editing between the markers, which is generated.
+    // <os-generated retired-def:19>
+    // </os-generated retired-def:19>
   ],
 };

@@ -386,3 +386,24 @@ describe('DeclaredActionsBar — the approver band names its menu entry (objects
     expect(trigger.querySelector('svg.lucide-chevron-down')).toBeTruthy();
   });
 });
+
+// objectstack#35415 — in the approver's band the approval is the strongest
+// button: Approve filled, Reject an outline button in the destructive text
+// colour (the header group's secondary face), never a second filled one.
+describe('DeclaredActionsBar — the approver band leads with a filled Approve, Reject outlined (objectstack#35415)', () => {
+  it('draws Approve filled and Reject as a destructive outline', async () => {
+    renderBar(APPROVER);
+    await waitFor(() => expect(screen.getByTestId('declared-actions-decision-menu')).toBeInTheDocument());
+    const approve = screen.getByTestId('declared-action-approval_approve');
+    const reject = screen.getByTestId('declared-action-approval_reject');
+    expect(approve.className).toContain('bg-primary');
+    expect(reject.className).not.toContain('bg-destructive');
+    expect(reject.className).toContain('border');
+    expect(reject.className).toContain('text-destructive');
+  });
+
+  it('CONTROL — a host that does not ask for the fold keeps the declared filled danger face', () => {
+    renderBar(APPROVER, { foldDecisions: false });
+    expect(screen.getByTestId('declared-action-approval_reject').className).toContain('bg-destructive');
+  });
+});

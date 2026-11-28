@@ -37,8 +37,11 @@ import {
   RECORD_OVERLAY_DEFAULT_WIDTH,
   RecordDetailPanel,
   deriveRecordPageHref,
+  useRecordCounts,
 } from '@object-ui/plugin-detail';
 import {
+  fieldReadOnlyByHand,
+  fieldStaticallyReadOnlyByHand,
   extractRecords,
   buildExpandFields,
   convertSortToQueryParams,
@@ -47,6 +50,7 @@ import {
   resolveNameField,
   resolveAffordance,
   isDeadlineSettled,
+  referencedRecordTitle,
   stateMachineNextValues,
   type SchemaLike,
 } from '@object-ui/core';
@@ -67,7 +71,9 @@ import { KANBAN_UNCOLUMNED_ID } from './index';
 import { KanbanBoardCore } from './KanbanBoardCore';
 import type { KanbanBoardProps, KanbanLaneRows } from './KanbanImpl';
 import { KanbanRecordsSettledContext } from './KanbanRecordsSettled';
-import { KanbanColumnSummaryContext, type KanbanColumnSummary } from './KanbanColumnSummary';
+import { KanbanColumnSummaryContext, type KanbanColumnSummary, type KanbanLaneStatisticType } from './KanbanColumnSummary';
+import { KanbanCardDisplayContext } from './KanbanCardDisplay';
+import { KanbanLaneMenuContext, type KanbanLaneMenu, type KanbanLaneMenuRequest } from './KanbanLaneMenu';
 import {
   KANBAN_LANE_PAGE_SIZE,
   KanbanLanePagingContext,
@@ -80,6 +86,16 @@ import {
 } from './KanbanLanePaging';
 import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
 import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
+import { lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
+import {
+  compileLaneReadQuery,
+  isLaneAggregate,
+  readLaneCounts,
+  readLaneKeys,
+  readLaneStatistic,
+  type KanbanLaneStatisticRequest,
+  type LaneFigure,
+} from './KanbanLaneStatistic';
 
 /**
  * English fallbacks for the record-detail drawer heading this board opens on
@@ -152,6 +168,21 @@ type KanbanCardMoveOutcome = Exclude<
   void
 >;
 const MOVED: KanbanCardMoveOutcome = { kind: 'moved' };
+
+/**
+ * objectstack#37327 — the fields a referenced record's title is read from
+ * (`referencedRecordTitle`): the lane field's `displayField`, then the target's
+ * name field. `null` when they cannot be named — no definition, or a legacy
+ * `titleFormat` template, whose fields are not declared — and the read then
+ * asks every field, as before.
+ */
+function referencedTitleFields(targetDef: any, displayField: string | undefined): string[] | null {
+  if (!targetDef || typeof targetDef !== 'object' || targetDef.titleFormat) return null;
+  const fields = [displayField, resolveNameField(targetDef)].filter(
+    (field): field is string => typeof field === 'string' && field !== '' && field !== 'id',
+  );
+  return fields.length > 0 ? [...new Set(fields)] : null;
+}
 
 function isUsableRowLimit(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
@@ -463,6 +494,19 @@ export interface ObjectKanbanComponentProps {
    */
   lanePaging?: KanbanLanePagingRequest;
   /**
+   * objectstack#36871 — the host hands this board its cards AND the query they
+   * came from, so the lane statistic (`summary`: `sum`, `avg`, `min`, `max`)
+   * is asked over every record of each lane, as on a board that queries its
+   * own cards, instead of being added up over the cards handed in. The node's
+   * `filter` is the host's effective filter; this carries its search pair and
+   * its refresh signal. `ListView` passes it to the board it hands one page of
+   * rows (lanes it does not know before the query). Ignored without handed
+   * cards. See `KanbanLaneStatistic.ts`.
+   *
+   * A HOST channel, never an authoring key.
+   */
+  laneStatisticQuery?: KanbanLaneStatisticRequest;
+  /**
    * The cards the board shows, lane by lane (objectstack#28461): every open
    * lane in board order, with its title and its cards in the order the board
    * draws them. `ListView` passes it so a record pane opened from a card steps
@@ -478,6 +522,16 @@ export interface ObjectKanbanComponentProps {
    * this board guesses no field name.
    */
   ownerField?: string;
+  /**
+   * objectstack#36370 — the lane header's 「+」 and 「⋯」 (collapse, hide), as
+   * the host that keeps the view's lanes and its create form asks for them
+   * (`ListView` passes it on its board). See `KanbanLaneMenu.ts`. Absent ⇒
+   * every lane header is drawn as before.
+   *
+   * A RUNTIME prop, never authored metadata: the host decides it, and no node
+   * key reaches it.
+   */
+  laneMenu?: KanbanLaneMenuRequest;
 }
 
 /**
@@ -511,6 +565,19 @@ type GateBoundKanbanSchema = ObjectKanbanSchema & {
   sort?: SortConfig[];
   /** The view's `KanbanConfig.summarizeField`, relayed by `ListView` (objectui#11629). */
   summarizeField?: string;
+  /**
+   * objectstack#36370 — the view's `KanbanConfig.summary` (the lane
+   * statistic at each lane's foot), `showFieldLabels` and `hideEmptyFields`,
+   * relayed by `ListView` the way `summarizeField` is.
+   */
+  summary?: { type?: string; field?: string };
+  showFieldLabels?: boolean;
+  hideEmptyFields?: boolean;
+  /**
+   * objectstack#36423 — the view's `KanbanConfig.cardFooter`: the counts each
+   * card shows at its foot, relayed by `ListView` the way the toggles above are.
+   */
+  cardFooter?: { comments?: boolean; attachments?: boolean };
 };
 
 export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
@@ -523,8 +590,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   onCardClick,
   rowOpensRecord,
   lanePaging,
+  laneStatisticQuery,
   ownerField,
   onRowGroupsChange,
+  laneMenu,
   ..._props
 }) => {
   void _props;
@@ -732,17 +801,21 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // host's own fetch sends it (`$search`, with `$searchFields` only beside a
   // term).
   const lanePagingAsked = lanePaging !== undefined;
+  // objectstack#36871 — or the host's query beside the cards it hands in
+  // (`laneStatisticQuery`), for the lane read alone. A host sends one or the
+  // other; paging wins should both arrive.
+  const hostQuery = lanePaging ?? (hasExternalData ? laneStatisticQuery : undefined);
   const hostSearchKey = JSON.stringify(
-    lanePaging?.search
+    hostQuery?.search
       ? {
-          $search: lanePaging.search,
-          ...(lanePaging.searchFields && lanePaging.searchFields.length > 0
-            ? { $searchFields: [...lanePaging.searchFields] }
+          $search: hostQuery.search,
+          ...(hostQuery.searchFields && hostQuery.searchFields.length > 0
+            ? { $searchFields: [...hostQuery.searchFields] }
             : {}),
         }
       : {},
   );
-  const hostReloadKey = lanePagingAsked ? String(lanePaging?.reloadKey ?? '') : '';
+  const hostReloadKey = hostQuery !== undefined ? String(hostQuery.reloadKey ?? '') : '';
 
   /**
    * The lanes this board pages, when it pages them (objectui#12619): known
@@ -1109,6 +1182,37 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   const ownerReference = ownerField ? objectDef?.fields?.[ownerField]?.reference : undefined;
   const ownerPersonObject = typeof ownerReference === 'string' && ownerReference ? ownerReference : 'sys_user';
 
+  /**
+   * objectstack#36430 — a lane field that names the object it references
+   * (`reference`): that object, read so each lane is titled by its declared
+   * name field (`referencedRecordTitle`), and the field's own `displayField`.
+   * A field that names none (a person field left on its default) is titled
+   * off the expanded record alone. No read when the lane field names no object.
+   */
+  const laneFieldDef = schema.groupBy ? objectDef?.fields?.[schema.groupBy] : undefined;
+  const laneTargetObject = typeof laneFieldDef?.reference === 'string' ? laneFieldDef.reference : '';
+  const laneDisplayField =
+    laneTargetObject && typeof laneFieldDef?.displayField === 'string' && laneFieldDef.displayField
+      ? (laneFieldDef.displayField as string)
+      : undefined;
+  const { def: laneTargetDef } = useSettledSchema<any>(laneTargetObject, dataSource);
+
+  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
+  const effectiveSwimlaneField = schema.swimlaneField
+    || (schema.grouping?.fields?.[0]?.field);
+
+  /**
+   * objectstack#36930 — the swimlane field's referenced object, read once per
+   * board, so a reference swimlane is titled by the target's declared
+   * `nameField` (ADR-0079: the one canonical primary-title pointer) exactly as
+   * a column lane over the same reference is (`laneTargetDef` above). Handed
+   * to the board as a PROP (`swimlaneTargetDef`), never a schema key. No read
+   * when the swimlane field names no object.
+   */
+  const swimlaneFieldDef = effectiveSwimlaneField ? objectDef?.fields?.[effectiveSwimlaneField] : undefined;
+  const swimlaneTargetObject = typeof swimlaneFieldDef?.reference === 'string' ? swimlaneFieldDef.reference : '';
+  const { def: swimlaneTargetDef } = useSettledSchema<any>(swimlaneTargetObject, dataSource);
+
   // Enhance data with title mapping and ensure IDs
   // The host predicate scope a card's declared deadline is judged in
   // (objectui#11815).
@@ -1332,7 +1436,20 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           // one step later. That guard STAYS: it also answers every non-array
           // value that resolves to nothing, which the floor says nothing about.
           // ⛔ Do NOT trim — `'   '` is deliberately a value on this surface.
-          if (isEmptyValue(raw)) continue;
+          //
+          // objectstack#36370 — unless the view keeps empty fields
+          // (`kanban.hideEmptyFields: false`): the field keeps its line with
+          // an empty value, so the cards of a lane line up.
+          if (isEmptyValue(raw)) {
+            if (schema.hideEmptyFields === false) {
+              cardFieldCells.push({
+                field: f,
+                label: fieldLabel(objectDef?.name || schema.objectName || '', f, def?.label || f),
+                node: <span className="text-muted-foreground/60" data-kanban-card-field-empty="">—</span>,
+              });
+            }
+            continue;
+          }
           const isPicklist =
             def?.type === 'picklist' ||
             def?.type === 'multipicklist' ||
@@ -1542,17 +1659,17 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         );
     }
 
-    // If no columns, but we have groupBy and data, generate from data
+    // If no columns, but we have groupBy and data, generate from data: one
+    // lane per distinct value. A reference value is expanded (the referenced
+    // record), so its lane is keyed by the foreign key and titled by the
+    // record's name (objectstack#36430); before, it was stringified to
+    // "[object Object]" for both.
     if (schema.groupBy && effectiveData.length > 0) {
-        const groups = new Set(effectiveData.map(item => item[schema.groupBy!]));
-        return Array.from(groups).map(g => ({
-            id: String(g),
-            title: String(g)
-        }));
+        return lanesFromRecords(effectiveData, schema.groupBy, laneTargetDef ?? undefined, laneDisplayField);
     }
 
     return [];
-  }, [schema.columns, schema.groupBy, schema.objectName, effectiveData, objectDef, translateOptions]);
+  }, [schema.columns, schema.groupBy, schema.objectName, effectiveData, objectDef, translateOptions, laneTargetDef, laneDisplayField]);
 
   /**
    * objectui#11629 — the lane total each column header paints, from the
@@ -1576,41 +1693,318 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     typeof schema.summarizeField === 'string' && schema.summarizeField !== ''
       ? schema.summarizeField
       : undefined;
+  // Whether the header draws the `summarizeField` total at all: the gate the
+  // `columnSummary` header branch below applies, named once so the lane read
+  // asks a total only where one is drawn (objectstack#37327).
+  const summarizeFieldDef = summarizeField ? objectDef?.fields?.[summarizeField] : undefined;
+  const summarizeTotalDrawable =
+    !!summarizeField &&
+    objectDefReady &&
+    !(objectDef?.fields && !summarizeFieldDef) &&
+    !(summarizeFieldDef && perms?.isLoaded && schema.objectName && !perms.checkField(schema.objectName, summarizeField, 'read'));
+  // objectstack#36370 — the view's lane statistic (`kanban.summary`), drawn at
+  // each lane's foot; it takes the place of the `summarizeField` total, and
+  // `{ type: 'none' }` draws neither. The spec publishes the closed set
+  // (`KanbanLaneSummarySchema`: none, count, sum, avg, min, max); a type outside
+  // it draws no statistic and keeps the `summarizeField` total. Read as
+  // primitives, so a host's new object of equal content builds nothing anew.
+  const statisticType = typeof schema.summary?.type === 'string' ? schema.summary.type : undefined;
+  const statisticField = typeof schema.summary?.field === 'string' && schema.summary.field !== '' ? schema.summary.field : undefined;
+  // objectstack#36520 — may the board draw an aggregate over `statisticField`?
+  // Not over a field the definition does not declare (`ListView`'s projection
+  // drops it) nor one the reader may not read: the server refuses that
+  // aggregate (`403`), and the board asks nothing it would refuse.
+  const statisticFieldDrawable =
+    isLaneAggregate(statisticType) &&
+    !!statisticField &&
+    objectDefReady &&
+    !(objectDef?.fields && !objectDef.fields[statisticField]) &&
+    !(objectDef?.fields?.[statisticField] && perms?.isLoaded && schema.objectName && !perms.checkField(schema.objectName, statisticField, 'read'));
+  /**
+   * objectstack#36520 — the lanes the server lane read folds its groups into,
+   * as a string: the paged lanes (matched exactly, as each lane's query
+   * matches), else the declared lanes or the lane field's options (matched
+   * without case, as `index.tsx` buckets the cards), else `null`, lanes from
+   * the data. See `KanbanLaneStatistic.ts`.
+   */
+  const statisticLanesKey = useMemo((): string => {
+    if (pagedLaneIdsKey !== null) return JSON.stringify({ ids: JSON.parse(pagedLaneIdsKey).map(String), foldCase: false });
+    const usable = (id: unknown) => id !== undefined && id !== null && id !== '';
+    const declared =
+      Array.isArray(schema.columns) && schema.columns.length > 0 && typeof schema.columns[0] === 'object'
+        ? (schema.columns as Array<{ id?: unknown }>).map((col) => col?.id).filter(usable)
+        : [];
+    const options = schema.groupBy ? objectDef?.fields?.[schema.groupBy]?.options : undefined;
+    const ids = declared.length > 0
+      ? declared
+      : Array.isArray(options)
+        ? options.map((opt: { value?: unknown }) => opt?.value).filter(usable)
+        : [];
+    return JSON.stringify({ ids: ids.length > 0 ? ids.map(String) : null, foldCase: true });
+  }, [pagedLaneIdsKey, schema.columns, schema.groupBy, objectDef]);
+  /**
+   * objectstack#36520 — the server lane read: ONE grouped aggregate over the
+   * board's own query, asked when the board queries its cards itself, or when
+   * its host hands it the query beside the cards (`laneStatisticQuery`,
+   * objectstack#36871). `''` asks nothing; the figures are then absent (cards
+   * handed in without their query) or `null`.
+   *
+   * objectstack#37327 — on the board its host hands one page of its query to,
+   * the same one read also asks each lane's record count and the `SUM` of the
+   * `summarizeField` the header totals, and is asked whether or not the view
+   * draws a statistic (`hostLaneRead`): a page cannot say how many records a
+   * lane holds, nor which lanes exist past it.
+   *
+   * objectstack#37326 — a board drawn in swimlanes asks the same one read,
+   * grouped by the lane field alone: its foot statistic and its column counts
+   * are a whole lane's, across every swimlane, as on the flat board. No read
+   * groups by the swimlane field, so a swimlane row's own count stays the
+   * page's (`KanbanImpl.tsx`, `swimlaneCountIsWhole`).
+   */
+  const boardQueriesItself = !hasExternalData && !boundData && !schema.data && !!schema.objectName && !!dataSource;
+  const hostHandsQuery = hasExternalData && laneStatisticQuery !== undefined && !lanePagingAsked && !!schema.objectName && !!dataSource;
+  const laneReadAsked = boardQueriesItself || hostHandsQuery;
+  const flatLanes = !!schema.groupBy && !schema.swimlaneField && !schema.grouping?.fields?.[0]?.field;
+  const hostLaneRead = hostHandsQuery && !!schema.groupBy;
+  // The header total is drawn when the view draws no lane statistic of the
+  // closed set (see `columnSummary` below).
+  const headerTotalField =
+    hostLaneRead && summarizeTotalDrawable && statisticType !== 'none' && statisticType !== 'count' && !isLaneAggregate(statisticType)
+      ? summarizeField
+      : undefined;
+  const laneStatisticQuestion = useMemo((): string => {
+    if (!laneReadAsked || !schema.groupBy) return '';
+    // Asked once the definition settles: what it asks (the statistic, the
+    // header total) is gated on the definition, and an earlier ask would be a
+    // second read the moment it settles.
+    if (!objectDefReady || typeof dataSource?.queryGroupHeaders !== 'function') return '';
+    const statistic = statisticFieldDrawable && isLaneAggregate(statisticType) && statisticField
+      ? { type: statisticType, field: statisticField }
+      : undefined;
+    const hostSearch = JSON.parse(hostSearchKey) as { $search?: string; $searchFields?: string[] };
+    const query = compileLaneReadQuery({
+      laneField: schema.groupBy,
+      statistic,
+      ...(hostLaneRead ? { laneCount: true, ...(headerTotalField ? { totalField: headerTotalField } : {}) } : {}),
+      filter: queryFilter,
+      search: hostSearch.$search,
+      searchFields: hostSearch.$searchFields,
+    });
+    return query ? JSON.stringify([schema.objectName, query]) : '';
+  }, [laneReadAsked, objectDefReady, hostLaneRead, headerTotalField, statisticFieldDrawable, statisticType, statisticField, schema.groupBy, schema.objectName, dataSource, hostSearchKey, queryFilter]);
+  type LaneReadAnswer = {
+    question: string;
+    figures: Record<string, LaneFigure> | null;
+    counts: Record<string, number> | null;
+    totals: Record<string, LaneFigure> | null;
+    keys: string[] | null;
+  };
+  const [laneStatistics, setLaneStatistics] = useState<LaneReadAnswer | null>(null);
+  useEffect(() => {
+    if (!laneStatisticQuestion || !dataSource?.queryGroupHeaders || !schema.groupBy) return;
+    let cancelled = false;
+    const [objectName, query] = JSON.parse(laneStatisticQuestion) as [string, Parameters<NonNullable<DataSource['queryGroupHeaders']>>[1]];
+    const lanes = JSON.parse(statisticLanesKey) as { ids: string[] | null; foldCase: boolean };
+    const laneField = schema.groupBy;
+    const base = { laneField, laneIds: lanes.ids, foldCase: lanes.foldCase, uncolumnedId: KANBAN_UNCOLUMNED_ID };
+    const question = laneStatisticQuestion + statisticLanesKey;
+    // Nothing is cleared before the answer lands: re-asking the question in
+    // hand (a refresh, a write) keeps its figures on screen until the new ones.
+    Promise.resolve().then(() => dataSource.queryGroupHeaders!(objectName, query)).then(
+      // A partial answer (the door cut the groups: `hasMore`) reads as no
+      // figure for any lane, as a refusal does (objectstack#36870).
+      (rows) => {
+        if (cancelled) return;
+        setLaneStatistics({
+          question,
+          figures: isLaneAggregate(statisticType) && statisticField
+            ? readLaneStatistic(rows, { ...base, type: statisticType, field: statisticField })
+            : null,
+          counts: hostLaneRead ? readLaneCounts(rows, base) : null,
+          totals: headerTotalField ? readLaneStatistic(rows, { ...base, type: 'sum', field: headerTotalField }) : null,
+          keys: hostLaneRead ? readLaneKeys(rows, laneField) : null,
+        });
+      },
+      () => {
+        // A refusal (a field the reader may not read: `403`) draws no figure.
+        if (!cancelled) setLaneStatistics({ question, figures: null, counts: null, totals: null, keys: null });
+      },
+    );
+    return () => { cancelled = true; };
+  }, [laneStatisticQuestion, statisticLanesKey, dataSource, statisticType, statisticField, hostLaneRead, headerTotalField, schema.groupBy, refreshKey, invalidationNonce, hostReloadKey]);
+  // Read in the render the question changes, never one render late.
+  const laneReadHeld =
+    laneStatistics && laneStatistics.question === laneStatisticQuestion + statisticLanesKey && laneStatisticQuestion !== ''
+      ? laneStatistics
+      : null;
+  const laneFigures: Readonly<Record<string, LaneFigure>> | null | undefined = !laneReadAsked
+    ? undefined
+    : laneReadHeld ? laneReadHeld.figures : null;
+  // objectstack#37327 — each lane's whole count and header total on the board
+  // handed one page; `null` (not answered, or no answer to give) marks the
+  // page's figures `+`. Absent on every other board.
+  const hostLaneCounts: Readonly<Record<string, number>> | null | undefined = hostLaneRead
+    ? laneReadHeld?.counts ?? null
+    : undefined;
+  const headerTotals: Readonly<Record<string, LaneFigure>> | null | undefined = headerTotalField
+    ? laneReadHeld?.totals ?? null
+    : undefined;
+  /**
+   * objectstack#37327 — the lanes past the page. A board whose lanes come from
+   * the data draws one lane per value the page holds; the lane read's group
+   * keys name every lane of the query, so a lane whose records all sit past
+   * the page is drawn too, after the page's lanes, titled by its referenced
+   * record (one read of those records on the lane field's target object) and
+   * by its key until then. The empty group is not one of them: the trailing
+   * "Uncategorized" lane is drawn by the cards it holds.
+   *
+   * Only over a lane field that names the object it references
+   * (`laneTargetObject`): a reference's group key is its foreign key, the
+   * value `laneKeyOf` keys a card by. Any other lane field without options (a
+   * text, number, boolean or date field) draws the page's lanes only, since
+   * the aggregate need not spell its key as a `find` row spells the value.
+   * A board drawn in swimlanes draws the page's lanes only (objectstack#37326):
+   * a lane past the page would be an empty column in every swimlane.
+   */
+  const lanesFromData = JSON.parse(statisticLanesKey).ids === null;
+  const extraLaneIds = useMemo((): string[] => {
+    const keys = laneReadHeld?.keys;
+    if (!hostLaneRead || !flatLanes || !lanesFromData || !keys || !laneTargetObject) return [];
+    const drawn = new Set((effectiveColumns as Array<{ id: unknown }>).map((col) => String(col.id)));
+    return keys.filter((key) => !drawn.has(key));
+  }, [hostLaneRead, flatLanes, lanesFromData, laneReadHeld, effectiveColumns, laneTargetObject]);
+  const extraLaneIdsKey = JSON.stringify(extraLaneIds);
+  const [extraLaneTitles, setExtraLaneTitles] = useState<{ key: string; titles: Record<string, string> } | null>(null);
+  useEffect(() => {
+    const ids = JSON.parse(extraLaneIdsKey) as string[];
+    if (ids.length === 0 || !laneTargetObject || typeof dataSource?.find !== 'function') return;
+    let cancelled = false;
+    const key = `${laneTargetObject}:${extraLaneIdsKey}`;
+    // An `id IN (…)` read of the referenced records, beside the grouped read
+    // rather than inside it: the public aggregate door refuses a dotted
+    // `groupBy`, so a group row carries the foreign key and never the title.
+    // The list is bounded: a cut answer names no lane past the page, so it is
+    // at most one page of groups, and the read runs only when such a lane
+    // exists. It projects the id and the fields a title is read from.
+    const titleFields = referencedTitleFields(laneTargetDef, laneDisplayField);
+    Promise.resolve()
+      .then(() => dataSource.find(laneTargetObject, {
+        $filter: { id: { $in: ids } },
+        $top: ids.length,
+        ...(titleFields ? { $select: ['id', ...titleFields] } : {}),
+      } as any))
+      .then(
+        (result) => {
+          const titles: Record<string, string> = Object.create(null);
+          for (const record of extractRecords(result) as Array<Record<string, unknown>>) {
+            const id = record?.id ?? record?._id;
+            if (id === undefined || id === null) continue;
+            const title = referencedRecordTitle(laneTargetDef ?? undefined, record, laneDisplayField);
+            if (title !== undefined) titles[String(id)] = title;
+          }
+          if (!cancelled) setExtraLaneTitles({ key, titles });
+        },
+        (err) => {
+          // The lanes are still drawn, titled by their keys.
+          console.warn(`[ObjectKanban] Failed to read the lane titles on '${laneTargetObject}':`, err);
+        },
+      );
+    return () => { cancelled = true; };
+  }, [extraLaneIdsKey, laneTargetObject, laneTargetDef, laneDisplayField, dataSource]);
+  const boardColumns = useMemo(() => {
+    if (extraLaneIds.length === 0) return effectiveColumns;
+    const titles = extraLaneTitles && extraLaneTitles.key === `${laneTargetObject}:${extraLaneIdsKey}` ? extraLaneTitles.titles : {};
+    return [...effectiveColumns, ...extraLaneIds.map((id) => ({ id, title: titles[id] ?? id }))];
+  }, [effectiveColumns, extraLaneIds, extraLaneIdsKey, extraLaneTitles, laneTargetObject]);
   const columnSummary = useMemo<KanbanColumnSummary | null>(() => {
+    const words: Record<KanbanLaneStatisticType, string> = {
+      count: tt('grid.summary.count', 'Count'),
+      sum: tt('grid.summary.sum', 'Sum'),
+      avg: tt('grid.summary.avg', 'Avg'),
+      min: tt('grid.summary.min', 'Min'),
+      max: tt('grid.summary.max', 'Max'),
+    };
+    if (statisticType === 'none') return null;
+    if (statisticType === 'count') {
+      return {
+        field: '',
+        label: words.count,
+        typeLabel: words.count,
+        type: 'count',
+        placement: 'foot',
+        renderTotal: (total: number | string) => <>{total}</>,
+      };
+    }
+    if (isLaneAggregate(statisticType)) {
+      if (!statisticFieldDrawable || !statisticField) return null;
+      const def = objectDef?.fields?.[statisticField];
+      const fieldType = resolveCellRendererType(def ?? { type: 'number' });
+      const CellRenderer = getCellRenderer(fieldType);
+      const fieldForCell = def ?? { name: statisticField, type: fieldType };
+      return {
+        field: statisticField,
+        label: fieldLabel(objectDef?.name || schema.objectName || '', statisticField, def?.label || statisticField),
+        typeLabel: words[statisticType],
+        type: statisticType,
+        placement: 'foot',
+        renderTotal: (total: number | string) => <CellRenderer value={total} field={fieldForCell} />,
+        ...(laneFigures !== undefined ? { figures: laneFigures } : {}),
+      };
+    }
     // Until the definition settles the board does not yet know how the cards
     // format the field, or whether the object has it; it paints no total
     // rather than one it would repaint (a currency total first read as a bare
     // number). A source with no schema read settles with nothing at once.
-    if (!summarizeField || !objectDefReady) return null;
-    const def = objectDef?.fields?.[summarizeField];
-    if (objectDef?.fields && !def) return null;
-    if (
-      def &&
-      perms?.isLoaded &&
-      schema.objectName &&
-      !perms.checkField(schema.objectName, summarizeField, 'read')
-    ) {
-      return null;
-    }
+    if (!summarizeField || !summarizeTotalDrawable) return null;
+    const def = summarizeFieldDef;
     const fieldType = resolveCellRendererType(def ?? { type: 'number' });
     const CellRenderer = getCellRenderer(fieldType);
     const fieldForCell = def ?? { name: summarizeField, type: fieldType };
     return {
       field: summarizeField,
       label: fieldLabel(objectDef?.name || schema.objectName || '', summarizeField, def?.label || summarizeField),
-      renderTotal: (total: number) => <CellRenderer value={total} field={fieldForCell} />,
+      renderTotal: (total: number | string) => <CellRenderer value={total} field={fieldForCell} />,
+      // objectstack#37327 — the whole lane's total on the board handed one page.
+      ...(headerTotals !== undefined ? { figures: headerTotals } : {}),
     };
-  }, [summarizeField, objectDefReady, objectDef, schema.objectName, perms, fieldLabel]);
+  }, [statisticType, statisticField, statisticFieldDrawable, laneFigures, summarizeField, summarizeTotalDrawable, summarizeFieldDef, headerTotals, objectDef, schema.objectName, fieldLabel, tt]);
+  // objectstack#36370 — how a card draws its fields (`kanban.showFieldLabels`).
+  const showFieldLabels = schema.showFieldLabels !== false;
+  // objectstack#36423 — the counts at each card's foot (`kanban.cardFooter`):
+  // ONE grouped read per counted object over the cards loaded, never one per
+  // card, and none for a count the view does not ask. Comments are asked on an
+  // object whose discussion is on (`enable.feeds`, opt-out, as the record
+  // page's comments icon); attachments only on one that takes files
+  // (`enable.files`, opt-in). Both wait for the definition to settle, so an
+  // object without the capability is never asked.
+  const footerComments = schema.cardFooter?.comments === true && objectDefReady && objectDef?.enable?.feeds !== false;
+  const footerAttachments = schema.cardFooter?.attachments === true && objectDefReady && objectDef?.enable?.files === true;
+  const footerRecordIds = useMemo(
+    () => (footerComments || footerAttachments ? effectiveData.map((card) => card.id) : []),
+    [footerComments, footerAttachments, effectiveData],
+  );
+  const footerRead = useRecordCounts({
+    dataSource,
+    objectName: schema.objectName,
+    recordIds: footerRecordIds,
+    comments: footerComments,
+    attachments: footerAttachments,
+    reloadKey: `${refreshKey}:${invalidationNonce}:${hostReloadKey}`,
+  });
+  const footerShown = footerComments || footerAttachments;
+  const cardDisplay = useMemo(
+    () => ({
+      showFieldLabels,
+      ...(footerShown ? { footerCounts: { comments: footerRead.comments, attachments: footerRead.attachments } } : {}),
+    }),
+    [showFieldLabels, footerShown, footerRead.comments, footerRead.attachments],
+  );
 
   // Clone schema to inject data and className
-  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
-  const effectiveSwimlaneField = schema.swimlaneField
-    || (schema.grouping?.fields?.[0]?.field);
-
   const effectiveSchema = {
       ...schema,
       data: effectiveData,
-      columns: effectiveColumns,
+      columns: boardColumns,
       className: className || schema.className,
       ...(effectiveSwimlaneField ? { swimlaneField: effectiveSwimlaneField } : {}),
       // ⛔ No Quick Add pair rides this schema to the board. objectui#8285
@@ -1732,6 +2126,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       const objectName = schema.objectName;
       if (!groupBy) return MOVED;
 
+      // objectstack#36430 — on a reference lane field the lane id is the
+      // foreign key, and that is what the write sends; the record held locally
+      // keeps the referenced record expanded, as a refetch would return it, so
+      // the card goes on naming it (and the rollback restores what it held).
+      const loaded: Array<Record<string, unknown>> = Array.isArray(rawData) ? rawData : [];
+      const priorValue = loaded.find((r) => String(r?.id ?? r?._id) === String(cardId))?.[groupBy];
+      const movedValue = laneValueOf(loaded, groupBy, toColumnId);
+
       // Optimistic local update so the card visibly stays in the new column.
       // Skipped when data is owned by a parent (ListView): `fetchedData` is not
       // what renders on that path (`rawData` prefers `externalData`, :219), and
@@ -1743,7 +2145,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         setFetchedData((prev) =>
           prev.map((r) =>
             String(r.id ?? r._id) === String(cardId)
-              ? { ...r, [groupBy]: toColumnId }
+              ? { ...r, [groupBy]: movedValue }
               : r,
           ),
         );
@@ -1817,14 +2219,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         setFetchedData((prev) =>
           prev.map((r) =>
             String(r.id ?? r._id) === String(cardId)
-              ? { ...r, [groupBy]: fromColumnId }
+              ? { ...r, [groupBy]: priorValue !== undefined && typeof priorValue === 'object' ? priorValue : fromColumnId }
               : r,
           ),
         );
         return { kind: 'refused', message: refusal };
       }
     },
-    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt],
+    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, rawData],
   );
 
   /**
@@ -1854,6 +2256,15 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     objectName: schema.objectName,
     perms,
   }).allowed;
+
+  // A drag writes the lane field, so the field's own lock closes it: the one
+  // hand-lock verdict of `@object-ui/core` (`readonly`, `uiReadonly`, and the
+  // conditional `readonlyWhen` / `uiReadonlyWhen`). The static half draws every
+  // card as not movable; the conditional half is judged per card at the drop,
+  // in `handleCardMove`. Before this the board read no field lock at all, so a
+  // `readonly` lane field took the drop and its write was silently stripped.
+  // `laneFieldDef` is the lane field's definition, read above for its lane titles.
+  const laneFieldLocked = fieldStaticallyReadOnlyByHand(laneFieldDef);
 
   // The board's drop gate (#25933): a lane is a value of `groupBy`, so when the
   // object's blocking `state_machine` rule governs that same field, a card may
@@ -1927,6 +2338,14 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       const record = (Array.isArray(rawData) ? rawData : []).find(
         (r) => String(r?.id ?? r?._id) === String(cardId),
       );
+      // The lane field's conditional lock over THIS record (`readonlyWhen`, the
+      // hand lock `uiReadonlyWhen`): no write, and the card goes back — a fresh
+      // array identity re-buckets the board from the unchanged rows.
+      const laneDef = (objectDef?.fields as Record<string, Record<string, unknown> | undefined> | undefined)?.[groupBy];
+      if (fieldReadOnlyByHand(laneDef, record, { fieldContext: `field '${groupBy}'`, scope: predicateScope })) {
+        setFetchedData((prev) => prev.map((r) => r));
+        return { kind: 'refused', message: tt('grid.readOnlyReason.readonly', 'This field is read-only.') };
+      }
       const fields = collectRequiredWhenPromptFields(
         objectDef?.fields,
         record,
@@ -1944,7 +2363,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
       return persistCardMove(cardId, fromColumnId, toColumnId);
     },
-    [schema.groupBy, rawData, objectDef, persistCardMove],
+    [schema.groupBy, rawData, objectDef, persistCardMove, tt, predicateScope],
   );
 
   // Label + localized options for each prompted field, resolved with the same
@@ -1970,7 +2389,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     if (!pendingMove || !schema.groupBy) return null;
     const objectKey = objectDef?.name || schema.objectName || '';
     const declared = objectDef?.fields?.[schema.groupBy]?.label;
-    const column = (effectiveColumns as Array<{ id: unknown; title?: unknown }>)
+    const column = (boardColumns as Array<{ id: unknown; title?: unknown }>)
       .find((c) => String(c.id) === String(pendingMove.toColumnId));
     const record = pendingMove.record;
     const name = getRecordDisplayName(objectDef, record);
@@ -1989,6 +2408,25 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       ).map(labelPromptField),
     };
   })();
+
+  // objectstack#36370 — the host's lane menu, with the lanes that take its
+  // hide and create actions: every lane but `Uncategorized`, which holds the
+  // records whose value names no lane.
+  const laneMenuCollapseKey = laneMenu?.collapseKey;
+  const laneMenuHide = laneMenu?.onHideLane;
+  const laneMenuCreate = laneMenu?.onCreateInLane;
+  const laneMenuChannel = React.useMemo<KanbanLaneMenu | null>(
+    () => (laneMenu
+      ? {
+          collapseKey: laneMenuCollapseKey,
+          onHideLane: laneMenuHide,
+          onCreateInLane: laneMenuCreate,
+          laneTakesActions: (laneId: string) => laneId !== KANBAN_UNCOLUMNED_ID,
+        }
+      : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the request's parts, not its identity
+    [!!laneMenu, laneMenuCollapseKey, laneMenuHide, laneMenuCreate],
+  );
 
   // Error branch renders only after every hook above has run, so hook order
   // stays stable across renders (no early return before the hooks).
@@ -2108,6 +2546,11 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           same kind of private channel. `null` (one query) leaves every lane
           as it was. See `KanbanLanePaging.ts`. */}
       <KanbanLanePagingContext.Provider value={lanePagingChannel}>
+      {/* objectstack#36370 — the lane header's 「+」 and 「⋯」, on the same
+          kind of private channel. `null` (no `laneMenu`) leaves every header
+          as it was. See `KanbanLaneMenu.ts`. */}
+      <KanbanLaneMenuContext.Provider value={laneMenuChannel}>
+      <KanbanCardDisplayContext.Provider value={cardDisplay}>
       {/* objectui#11234 — the internal board, not the exported
           `KanbanRenderer`. It takes the Quick Add pair only as explicit props,
           and this call passes neither, so the object-bound board draws no
@@ -2126,6 +2569,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // definition, never an authoring surface. On the schema bag it was
         // reachable by an author through `BaseSchema`'s passthrough.
         objectFields={objectDef?.fields}
+        // objectstack#36930 — the swimlane field's target object, so a
+        // reference swimlane is titled by its `nameField` (see
+        // `swimlaneTargetDef` above). A PROP for the reason `objectFields` is.
+        swimlaneTargetDef={swimlaneTargetDef ?? undefined}
         // A PROP, not a schema key (objectui#9342, executing the ruling on PR
         // objectui#9338) — the same remedy `objectFields` above took one card
         // earlier. `handleCardMove` owns the optimistic write, the
@@ -2138,7 +2585,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // objectui#12082: handed only when `kanbanCardMove` allows the write,
         // and the cards are drawn not movable otherwise (see `cardMoveGranted`).
         onCardMove={cardMoveGranted ? handleCardMove : undefined}
-        cardsMovable={cardMoveGranted}
+        cardsMovable={cardMoveGranted && !laneFieldLocked}
         // objectstack#33548 — the host's answer to "does a card click open
         // anything"; absent ⇒ every card as before.
         rowOpensRecord={rowOpensRecord}
@@ -2148,6 +2595,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         dropBlockedReason={dropBlockedReason}
         // objectstack#28461 — the cards each open lane shows, for the host.
         onLaneRowsChange={onRowGroupsChange}
+        // objectstack#37327 — each lane's whole count on the board handed one
+        // page (see `hostLaneCounts`). A PROP for the reason `objectFields` is.
+        laneCounts={hostLaneCounts}
         schema={{
           ...effectiveSchema,
           // `5591f03bd` — the lane headers count rows that came back, so when
@@ -2174,6 +2624,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
           },
         }}
       />
+      </KanbanCardDisplayContext.Provider>
+      </KanbanLaneMenuContext.Provider>
       </KanbanLanePagingContext.Provider>
       </KanbanColumnSummaryContext.Provider>
       </KanbanRecordsSettledContext.Provider>

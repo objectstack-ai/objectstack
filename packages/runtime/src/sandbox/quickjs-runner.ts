@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, isNativeErrorName, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import { isUnlandedWriteRefusal } from '@objectstack/objectql';
 import { actionBodyFunctionExpression, hookBodyFunctionExpression } from '@objectstack/lint/runtime';
@@ -395,8 +395,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
               try {
                 var __refusalParams;
                 try { __refusalParams = (e && e.params !== undefined) ? JSON.parse(JSON.stringify(e.params)) : undefined; } catch (_) { __refusalParams = undefined; }
+                var __refusalReasons, __hasReasons = false;
+                try { __hasReasons = !!e && e.reasons !== undefined; __refusalReasons = __hasReasons ? JSON.parse(JSON.stringify(e.reasons)) : undefined; } catch (_) { __refusalReasons = null; }
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
-                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true, reason: typeof e.reason === 'string' ? e.reason : undefined, params: __refusalParams })
+                  ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true, reason: typeof e.reason === 'string' ? e.reason : undefined, params: __refusalParams, hasReasons: __hasReasons || undefined, reasons: __hasReasons ? (__refusalReasons === undefined ? null : __refusalReasons) : undefined })
                   : undefined;
               } catch (_) { globalThis.__errorInfo = undefined; }
               try {
@@ -453,8 +455,8 @@ export class QuickJSScriptRunner implements ScriptRunner {
         }
         const err = vm.dump(evalRes.error);
         evalRes.error.dispose();
-        if (args.origin.kind === 'action' && isCompileFailure(err)) {
-          throw actionBodyCompileFailure(args.origin.name, formatErr(err));
+        if (isCompileFailure(err)) {
+          throw bodyCompileFailure(args.origin, formatErr(err));
         }
         throw new SandboxError(
           `${args.origin.kind} '${args.origin.name}' threw: ${formatErr(err)}`,
@@ -571,7 +573,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const relayed = readRelayedRefusal(vm);
           const thrown = new SandboxError(
             `${args.origin.kind} '${args.origin.name}' threw: ${errStr}`,
-            relayed ?? userFacingMessage(withoutSandboxErrorPrefix(String(errStr))),
+            relayed ?? refusalSentence(userFacingMessage(withoutSandboxErrorPrefix(String(errStr))), info),
             info,
           );
           if (relayed !== undefined) relayedRefusals.add(thrown);
@@ -2411,28 +2413,48 @@ function isCompileFailure(err: unknown): boolean {
 }
 
 /**
- * The error an action whose body does not compile answers with, on every run.
+ * The error an action, a hook or a job whose body does not compile answers
+ * with, on every run.
  *
- * Not a crash, and not a refusal. A crash (`TypeError` in `innerMessage`) is
- * answered with the sanitised `500 Internal server error`, because its text may
- * carry the data the body was reading; a compile error carries none, and the
- * opaque answer was all an MCP caller of `run_action` ever saw for a body that
- * can never run. So the sentence names the action and the compiler's reason,
- * and the declared status is `500`: the caller sent nothing wrong, the
- * deployed metadata is broken, and no retry of the same call can succeed. No
- * code is declared, so the doors answer the status's own `INTERNAL_ERROR` and
- * relay the sentence (a declared 5xx code would withhold it). The operator line
- * keeps the runner's `KIND 'NAME' …` shape.
+ * Its `.message`, the operator line, keeps the runner's `KIND 'NAME' …` shape
+ * and says `does not compile` where a body that ran and threw says `threw`, so
+ * the log tells the two apart for every body kind and names the body's owner
+ * and the compiler's reason.
  *
- * The author-time rule `action-body-does-not-compile` refuses such a body at
- * `os validate` / `os build` / publish; this is the answer for one that got
- * past it (deployed before the rule, or syntax the author's host accepted).
+ * An ACTION's is not a crash, and not a refusal. A crash (`TypeError` in
+ * `innerMessage`) is answered with the sanitised `500 Internal server error`,
+ * because its text may carry the data the body was reading; a compile error
+ * carries none, and the opaque answer was all an MCP caller of `run_action`
+ * ever saw for a body that can never run. So its caller sentence names the
+ * action and the compiler's reason, and the declared status is `500`: the
+ * caller sent nothing wrong, the deployed metadata is broken, and no retry of
+ * the same call can succeed. No code is declared, so the `/actions` door
+ * answers the status's own `INTERNAL_ERROR` and relays the sentence (a declared
+ * 5xx code would withhold it).
+ *
+ * A HOOK's and a JOB's keep the compiler's own text in `innerMessage` and
+ * declare no status, exactly as before: no door that answers a hook or a job
+ * relays a server-band sentence (the `/data` door withholds it, and answers a
+ * declared `500` without its `INTERNAL_ERROR` code), so a caller sentence there
+ * would reach nobody and the declared status would only cost the envelope its
+ * code. The native `SyntaxError: …` keeps the doors' crash read, the sanitised
+ * `500 INTERNAL_ERROR`, unchanged.
+ *
+ * The author-time rules `action-body-does-not-compile`,
+ * `hook-body-does-not-compile` and `job-body-does-not-compile` refuse such a
+ * body at `os validate` / `os build` / publish; this is the answer for one that
+ * got past them (deployed before the rule, brought in from an artifact by the
+ * boot or `os package install`, which run no author-time rule, or syntax the
+ * author's host accepted).
  */
-function actionBodyCompileFailure(actionName: string, compilerError: string): SandboxError {
+function bodyCompileFailure(origin: ScriptOrigin, compilerError: string): SandboxError {
+  if (origin.kind !== 'action') {
+    return new SandboxError(`${origin.kind} '${origin.name}' does not compile: ${compilerError}`, userFacingMessage(compilerError));
+  }
   const reason = compilerError.split('\n')[0].slice(0, 240);
   return markRunnerOwnFault(new SandboxError(
-    `action '${actionName}' does not compile: ${compilerError}`,
-    `Action '${actionName}' cannot run: its body does not compile (${reason}). ` +
+    `${origin.kind} '${origin.name}' does not compile: ${compilerError}`,
+    `Action '${origin.name}' cannot run: its body does not compile (${reason}). ` +
       'The action\'s author must fix its body.source and publish it again.',
     { status: 500 },
   ));
@@ -2445,7 +2467,7 @@ function actionBodyCompileFailure(actionName: string, compilerError: string): Sa
  * A timeout is neither a refusal nor a crash. It stays a server fault, so the
  * declared status is `500` and no code is declared: the doors answer the
  * status's own `INTERNAL_ERROR` and relay this sentence, as they do for an
- * action body that does not compile ({@link actionBodyCompileFailure}). What
+ * action body that does not compile ({@link bodyCompileFailure}). What
  * the sentence adds is the one fact a caller cannot get any other way: this
  * action was slow, the platform did not break. A crash keeps the sanitised
  * `Internal server error`, because its native text may carry the data the body
@@ -2520,6 +2542,15 @@ export class SandboxError extends Error {
    * body's own throw declared it — the sandbox never invents one.
    */
   readonly userMessage?: string;
+  /**
+   * [#36877, ruling 7178348458 term 3] The sentences of a declared refusal
+   * thrown as a `reasons` list, each rendered in the caller's locale, in the
+   * order thrown — the wire's `details.refusals` (`declaredRefusalLines` in
+   * `@objectstack/types` reads it). Set only by the refusal catalogue
+   * (`hook-refusal-catalogue.ts`), never read off the VM: a body cannot hand
+   * the wire a list the catalogue did not render.
+   */
+  readonly refusals?: ReadonlyArray<{ reason: string; message: string }>;
   constructor(message: string, innerMessage?: string, info?: SandboxErrorInfo) {
     super(message);
     this.name = 'SandboxError';
@@ -2528,6 +2559,7 @@ export class SandboxError extends Error {
     if (info?.fields) this.fields = info.fields;
     if (typeof info?.status === 'number') this.status = info.status;
     if (info?.userMessage) this.userMessage = info.userMessage;
+    if (Array.isArray(info?.refusals)) this.refusals = info.refusals;
   }
 }
 
@@ -2539,6 +2571,8 @@ export interface SandboxErrorInfo {
   status?: number;
   /** [commit 79c46da90] See {@link SandboxError.userMessage}. */
   userMessage?: string;
+  /** [#36877] See {@link SandboxError.refusals}. Never read off the VM's `__errorInfo` channel. */
+  refusals?: ReadonlyArray<{ reason: string; message: string }>;
   /**
    * [#4431] The error that crossed `__error` was the SANDBOX's own fault — an
    * unavailable `ctx.api`, a marshalling failure — not
@@ -2602,7 +2636,7 @@ export function isHostRelayedSandboxError(err: unknown): boolean {
 /**
  * The faults this runner made itself that still carry a caller sentence: an
  * action's timeout ({@link actionTimeoutSentence}) and an action body that does
- * not compile ({@link actionBodyCompileFailure}). Both are `innerMessage` + a
+ * not compile ({@link bodyCompileFailure}). Both are `innerMessage` + a
  * declared `500` + no `code`, which is also what a body's own code-less throw
  * of `{ status: 500 }` looks like, so no field tells them apart: identity does,
  * for the reason {@link relayedRefusals} gives. The runner's other faults carry
@@ -2636,6 +2670,77 @@ export function isRunnerOwnFault(err: unknown): boolean {
 export interface SandboxRefusalAddress {
   reason?: string;
   params?: Record<string, unknown>;
+  /**
+   * [#36877, ruling 7178348458 term 1] The ordered list of declared sentences
+   * the throw named instead of one `reason`: `{ code, reasons: [{ reason,
+   * params? }, …] }`. Present only when the list is readable; `listProblem`
+   * says why it is not.
+   */
+  reasons?: SandboxRefusalLine[];
+  /** [#36877] Why the throw's `reasons` cannot be answered — the run-time fault's subject. */
+  listProblem?: 'both' | 'empty' | 'malformed';
+}
+
+/** [#36877] One sentence of a thrown `reasons` list: a reason and the params its holes name. */
+export interface SandboxRefusalLine {
+  reason: string;
+  params?: Record<string, unknown>;
+}
+
+/**
+ * [#36877] The refusal address read off a throw's `reason`, `params` and
+ * `reasons` — the ONE reading both run paths make (the body path from the
+ * VM's `__errorInfo` channel, the in-process path off the thrown value), so
+ * the two cannot read a throw differently (ruling 7178348458 term 4).
+ *
+ *  - `reason` only as a non-empty string, `params` only as a non-array object
+ *    (unchanged since #33214);
+ *  - `reasons`, when the throw carries the key at all: a non-empty list whose
+ *    every element is `{ reason: non-empty string, params?: non-array object }`;
+ *    anything else is a `listProblem` (`malformed`, `empty`), and a list
+ *    beside a single `reason` is `both` — each the loud fault, never a list
+ *    quietly shortened.
+ *
+ * `hasReasons` says the key was present (a value JSON could not carry arrives
+ * as `null`, which is `malformed`).
+ */
+export function refusalAddressFrom(raw: {
+  reason?: unknown;
+  params?: unknown;
+  reasons?: unknown;
+  hasReasons?: boolean;
+}): SandboxRefusalAddress | undefined {
+  const address: SandboxRefusalAddress = {};
+  if (typeof raw.reason === 'string' && raw.reason.length > 0) address.reason = raw.reason;
+  if (isPlainParams(raw.params)) address.params = raw.params;
+  if (raw.hasReasons) {
+    const list = raw.reasons;
+    if (address.reason !== undefined) address.listProblem = 'both';
+    else if (!Array.isArray(list)) address.listProblem = 'malformed';
+    else if (list.length === 0) address.listProblem = 'empty';
+    else {
+      const lines: SandboxRefusalLine[] = [];
+      for (const item of list as unknown[]) {
+        const line = item as { reason?: unknown; params?: unknown } | null;
+        if (line === null || typeof line !== 'object' || Array.isArray(line)
+          || typeof line.reason !== 'string' || line.reason.length === 0
+          || (line.params !== undefined && !isPlainParams(line.params))) {
+          address.listProblem = 'malformed';
+          break;
+        }
+        lines.push(line.params !== undefined ? { reason: line.reason, params: line.params as Record<string, unknown> } : { reason: line.reason });
+      }
+      if (address.listProblem === undefined) address.reasons = lines;
+    }
+  }
+  return address.reason !== undefined || address.params !== undefined || address.reasons !== undefined
+    || address.listProblem !== undefined
+    ? address
+    : undefined;
+}
+
+function isPlainParams(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /** [#33214] The errors this runner built from a body throw that named a refusal address. */
@@ -2657,18 +2762,19 @@ function readRefusalAddress(vm: QuickJSContext): SandboxRefusalAddress | undefin
     return undefined;
   }
   if (typeof raw !== 'string' || !raw) return undefined;
-  let parsed: { reason?: unknown; params?: unknown };
+  let parsed: { reason?: unknown; params?: unknown; reasons?: unknown; hasReasons?: unknown };
   try {
     parsed = JSON.parse(raw);
   } catch {
     return undefined;
   }
-  const address: SandboxRefusalAddress = {};
-  if (typeof parsed?.reason === 'string' && parsed.reason.length > 0) address.reason = parsed.reason;
-  if (parsed?.params !== null && typeof parsed?.params === 'object' && !Array.isArray(parsed.params)) {
-    address.params = parsed.params as Record<string, unknown>;
-  }
-  return address.reason !== undefined || address.params !== undefined ? address : undefined;
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  return refusalAddressFrom({
+    reason: parsed.reason,
+    params: parsed.params,
+    reasons: parsed.reasons,
+    hasReasons: parsed.hasReasons === true,
+  });
 }
 
 /** [#26170] Read the `__errorFromHost` channel the wrapper's reject handler writes. */
@@ -2734,4 +2840,26 @@ function readErrorInfo(vm: QuickJSContext): SandboxErrorInfo | undefined {
  */
 function userFacingMessage(raw: string): string {
   return raw.startsWith('Error: ') ? raw.slice('Error: '.length) : raw;
+}
+
+/**
+ * [#37533] A CODED refusal's sentence is its message, without the class name
+ * the reject handler flattened in front of it. A record `ValidationError` a
+ * host write rejected with (`code: 'VALIDATION_FAILED'`, `fields[]`) used to
+ * reach the toast as `ValidationError: <localized message>`, where a form
+ * save of the same refusal shows the message alone.
+ *
+ * Only a throw that carries `code` or `fields` (`__errorInfo`) is a refusal
+ * the author or the engine meant, so only there is the name dropped, and only
+ * a name ending in `Error` that is not a native constructor's: a crash
+ * (`TypeError: …`) keeps its name, which is how every door tells it from a
+ * refusal (`isNativeErrorName`). The class stays in `.message`, the log's
+ * line, and the code in `.code`.
+ */
+const CODED_REFUSAL_NAME_RE = /^([A-Z][A-Za-z0-9_$]*Error): (?=\S)/;
+function refusalSentence(sentence: string, info: SandboxErrorInfo | undefined): string {
+  if (!info?.code && !info?.fields) return sentence;
+  const named = CODED_REFUSAL_NAME_RE.exec(sentence);
+  if (!named || isNativeErrorName(named[1])) return sentence;
+  return sentence.slice(named[0].length);
 }

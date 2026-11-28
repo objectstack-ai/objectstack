@@ -107,7 +107,10 @@ export default defineStack({
     security: {
       rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 300 },
     },
-    trustProxy: true, // only behind a proxy that overwrites X-Forwarded-For
+    // Your reverse proxies' own addresses (never a range clients connect
+    // from): X-Forwarded-For is believed only from them, and read from the
+    // right, past them.
+    trustProxy: { networks: ['10.20.0.0/28'] },
   },
 });
 ```
@@ -117,10 +120,19 @@ preflights excepted) against one token bucket per caller, and answers an
 over-budget caller `429` with `Retry-After`. The bucket is keyed by the
 signed-in principal, and by the caller's address for anonymous traffic. That
 address is the connection's peer address unless `server.trustProxy` is
-`true`, in which case the leftmost `X-Forwarded-For` entry (else
-`X-Real-IP`) is believed — so set it only when a reverse proxy you control
-overwrites that header on every request; behind a proxy with it unset, all
-anonymous traffic shares the proxy's one bucket. The counters live in the
+declared. Its trusted-network form, `{ networks: [...] }`, believes
+`X-Forwarded-For` only on a connection from inside `networks` (your proxies),
+and reads it from the right: every entry inside `networks` is a hop of yours,
+and the first entry outside them is the client. Every address inside
+`networks` is taken for a proxy, so list only your proxies' addresses, never
+a range your clients connect from; a prefix length of 0 is refused. `header: 'x-real-ip'` reads
+`X-Real-IP` instead, for a proxy that sets that header. `true` believes the
+leftmost `X-Forwarded-For` entry (else `X-Real-IP`) from any connection, so
+it is sound only when a reverse proxy you control overwrites that header on
+every request, never one that appends to it; under `true` the server warns
+once when a multi-entry `X-Forwarded-For` arrives, and `true` is refused from
+the next major. Behind a proxy with `server.trustProxy` unset, all anonymous
+traffic shares the proxy's one bucket. The counters live in the
 kernel `cache` service, which `objectstack serve` serves in memory, per
 process: on several nodes the effective limit is the budget times the node
 count until a shared `cache` service is registered. Key rules, multi-node
@@ -130,14 +142,20 @@ and per-class budgets:
 ## Go-live checklist
 
 - [ ] HSTS enabled (after TLS is confirmed and you accept the lock-in).
+- [ ] Browsers reach the public origin over HTTP/2 (DevTools shows `h2` for the
+      Console's scripts), so the first screen's script files (well over a
+      hundred) do not queue on six HTTP/1.1 connections. See
+      [Self-hosting § Serve HTTP/2 to browsers](/docs/deployment/self-hosting#serve-http2-to-browsers).
 - [ ] CSP tuned for your serving topology (deny-all API, looser for
       SPA-on-same-origin).
 - [ ] `server.security.rateLimit` enabled with a budget sized for your
       traffic; the boot log shows `Inbound rate limit armed`. Sign-in can take its
       own tighter budget (`rate_limit_max` / `rate_limit_window_seconds` in
       Setup → Authentication).
-- [ ] `server.trustProxy` matches the topology: `true` only behind a reverse
-      proxy that overwrites `X-Forwarded-For`, unset otherwise.
+- [ ] `server.trustProxy` matches the topology: behind reverse proxies, the
+      trusted-network form naming them (`{ networks: [...] }`); `true` only
+      behind a proxy that overwrites `X-Forwarded-For`, never one that
+      appends to it; unset otherwise.
 - [ ] Multi-node: a shared `cache` service is registered, or each node
       enforces the budget on its own (the in-memory default is per process).
 - [ ] Metrics adapter wired; `/metrics` endpoint (Prom) or OTel
@@ -191,6 +209,8 @@ and per-class budgets:
       the `lifecycle.retention_overrides` setting **before** go-live if your
       compliance regime needs longer, and register an `archive` datasource
       if audit data must move to cold storage instead of being retained hot.
+      The sealed audit log expires by whole checkpoints under its global
+      window: a tenant-scoped override does not change it.
 
 ## CDN / reverse-proxy caching of `/meta` object schemas
 
@@ -268,5 +288,6 @@ strongly, so a layer that weakens it to `W/` makes those saves fail.
   recipe, not the endpoint, because TLS / auth / path conventions vary.
 - **A built-in audit log immutability layer.** `@objectstack/plugin-audit`
   writes `sys_audit_log` records via ObjectQL afterInsert/afterUpdate/afterDelete
-  hooks; durable storage and tamper-evidence are the host's choice
-  (append-only S3, immudb, etc.).
+  hooks and seals them (ADR-0154), so a change or delete made outside the
+  platform shows in `os audit verify`. Sealing detects; it does not prevent:
+  write-once storage is the host's choice (append-only S3, immudb, etc.).

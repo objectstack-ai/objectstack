@@ -34,7 +34,7 @@ import { bootShowcase } from './showcase-boot.js';
 
 const PKG = 'com.example.qasaveother';
 const action = (name: string, label: string, objectName: string) => ({
-  name, label, objectName, type: 'url', target: `https://example.invalid/${label}`, locations: ['record_more'],
+  name, label, objectName, type: 'url', target: `https://example.invalid/${label}`, locations: ['record_page'], component: 'action:menu',
 });
 
 describe('[ADR-0150 D4] a package-less action save on an object the package does not bind', () => {
@@ -45,7 +45,14 @@ describe('[ADR-0150 D4] a package-less action save on an object the package does
     stack = await bootShowcase();
     admin = await stack.signIn();
     const created = await stack.apiAs(admin, 'POST', '/packages', {
-      manifest: { id: PKG, name: 'QA save other object', version: '0.1.0', type: 'app', namespace: 'qasaveother' },
+      // P binds an action to `showcase_invoice`, which the showcase package
+      // owns, so P declares that package: the publish gate refuses an action
+      // bound to an object outside the package's closure (#35143), as it
+      // already refused a flow there.
+      manifest: {
+        id: PKG, name: 'QA save other object', version: '0.1.0', type: 'app', namespace: 'qasaveother',
+        dependencies: { 'com.example.showcase': '*' },
+      },
     });
     expect(created.status, await created.clone().text()).toBe(201);
   }, 240_000);

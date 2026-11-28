@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/react",
-  "version": "18.6.0",
+  "version": "19.0.0-next.2",
   "type": "module",
   "license": "MIT",
   "description": "React bindings and SchemaRenderer component for ObjectUI",

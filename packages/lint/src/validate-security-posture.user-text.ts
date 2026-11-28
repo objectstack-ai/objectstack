@@ -23,9 +23,9 @@
  * | `security-private-no-readscope` | `permissionSet`, `object` |
  * | `security-master-detail-ungranted` | `object`, `master` (`''` when the runtime's parent names none) |
  * | `security-book-audience-unknown-set` | `book`, `permissionSet` |
- * | `security-superuser-field-mask-inert` | `permissionSet`, `field`, `object`, `inert` (`read` · `edit` · `both`) |
  * | `security-controlled-by-parent-master-reference-hidden` | `permissionSet`, `field` |
  * | `security-update-policy-no-check` | `permissionSet`, `policy` |
+ * | `security-cross-set-field-reopen` | `permissionSet` (the set that hides the field), `otherSet` (the set whose `viewAllFields` re-opens it), `field`, `object` |
  * | `security-controlled-by-parent-owner-policy-without-opt-in` | `permissionSet`, `policy`, `object`, `remedy` (`allow-owner-edit` · `key-owner-id` · `add-owner-id`) |
  *
  * Names in a sentence are the API names the rule saw (`crm_deal`, `owner_id`),
@@ -43,32 +43,32 @@ import {
   SECURITY_BOOK_AUDIENCE_UNKNOWN_SET,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_MASTER_DETAIL_UNGRANTED,
   SECURITY_PRIVATE_NO_READSCOPE,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
 } from './validate-security-posture.js';
 
 /**
- * The console's own label for Modify All, per locale. The one bypass
- * `security-superuser-field-mask-inert` reports: beside View All alone the
- * set's own `readable: false` binds (ADR-0066 D2 ⑧ note of 2026-11-15).
+ * The console's own label for `viewAllFields`, per locale: the one object-wide
+ * bit `security-cross-set-field-reopen` reports (View All and Modify All cast
+ * no field vote since the field-axis split, ruling of record 6912661484, step
+ * 3). Translated where the console translates its own labels, kept as the
+ * console's English label elsewhere.
  */
-const MODIFY_ALL_LABEL = {
-  en: 'Modify All Records',
-  'zh-Hans': '修改所有记录',
-  'zh-Hant': '修改所有記錄',
-  es: 'Modify All Records',
-  ar: 'Modify All Records',
-  fr: 'Modify All Records',
-  'pt-BR': 'Modify All Records',
-  ru: 'Modify All Records',
-  de: 'Modify All Records',
-  ja: 'Modify All Records',
-  ko: 'Modify All Records',
+const VIEW_ALL_FIELDS_LABEL = {
+  en: 'View All Fields',
+  'zh-Hans': '查看所有字段',
+  'zh-Hant': '查看所有欄位',
+  es: 'View All Fields',
+  ar: 'View All Fields',
+  fr: 'View All Fields',
+  'pt-BR': 'View All Fields',
+  ru: 'View All Fields',
+  de: 'View All Fields',
+  ja: 'View All Fields',
+  ko: 'View All Fields',
 } as const;
-
-const modifyAllLabel = (locale: keyof typeof MODIFY_ALL_LABEL): string => MODIFY_ALL_LABEL[locale];
 
 export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
   [SECURITY_PRIVATE_NO_READSCOPE]: {
@@ -234,219 +234,6 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `문서 북 "${p.book}"은(는) 권한 세트 "${p.permissionSet}"(으)로 제한되어 있지만 이 권한 세트가 정의되어 있지 ` +
       `않아 아무도 이 북을 열 수 없습니다. 기존 권한 세트로 제한하거나, "${p.permissionSet}"을(를) 설치된 다른 ` +
       `패키지가 제공한다면 이 메시지를 무시하세요.`,
-  },
-  [SECURITY_SUPERUSER_FIELD_MASK_INERT]: {
-    en: (p) => {
-      const b = modifyAllLabel('en');
-      return fieldMaskSentence(p, {
-        read:
-          `In permission set "${p.permissionSet}", hiding field "${p.field}" has no effect: the set's ${b} on ` +
-          `"${p.object}" lets all its holders read every field of that object. Remove ${b} and grant record ` +
-          `access with a read or write scope, or let the set read the field if that access is meant.`,
-        edit:
-          `In permission set "${p.permissionSet}", making field "${p.field}" read-only has no effect: the set's ` +
-          `${b} on "${p.object}" lets all its holders edit every field of that object. Remove ${b} and grant ` +
-          `record access with a read or write scope, or delete the field restriction if that access is meant.`,
-        both:
-          `In permission set "${p.permissionSet}", hiding field "${p.field}" and making it read-only have no ` +
-          `effect: the set's ${b} on "${p.object}" lets all its holders read and edit every field of that object. ` +
-          `Remove ${b} and grant record access with a read or write scope, or delete the field restriction if ` +
-          `that access is meant.`,
-      });
-    },
-    'zh-Hans': (p) => {
-      const b = modifyAllLabel('zh-Hans');
-      return fieldMaskSentence(p, {
-        read:
-          `在权限集“${p.permissionSet}”中，隐藏字段“${p.field}”不起作用：该权限集对“${p.object}”拥有“${b}”，` +
-          `所有持有者都能读取该对象的每个字段。请移除“${b}”并改用读取或写入范围授予记录访问权限；` +
-          `如果本就打算让他们看到该字段，请允许该权限集读取它。`,
-        edit:
-          `在权限集“${p.permissionSet}”中，将字段“${p.field}”设为只读不起作用：该权限集对“${p.object}”拥有“${b}”，` +
-          `所有持有者都能编辑该对象的每个字段。请移除“${b}”并改用读取或写入范围授予记录访问权限；` +
-          `如果本就打算允许这种访问，请删除这条字段限制。`,
-        both:
-          `在权限集“${p.permissionSet}”中，隐藏字段“${p.field}”并将其设为只读都不起作用：该权限集对“${p.object}”` +
-          `拥有“${b}”，所有持有者都能读取和编辑该对象的每个字段。请移除“${b}”并改用读取或写入范围授予记录访问权限；` +
-          `如果本就打算允许这种访问，请删除这条字段限制。`,
-      });
-    },
-    'zh-Hant': (p) => {
-      const b = modifyAllLabel('zh-Hant');
-      return fieldMaskSentence(p, {
-        read:
-          `在權限集「${p.permissionSet}」中，隱藏欄位「${p.field}」不起作用：該權限集對「${p.object}」擁有「${b}」，` +
-          `所有持有者都能讀取該物件的每個欄位。請移除「${b}」並改用讀取或寫入範圍授予記錄存取權限；` +
-          `如果本就打算讓他們看到該欄位，請允許該權限集讀取它。`,
-        edit:
-          `在權限集「${p.permissionSet}」中，將欄位「${p.field}」設為只讀不起作用：該權限集對「${p.object}」擁有「${b}」，` +
-          `所有持有者都能編輯該物件的每個欄位。請移除「${b}」並改用讀取或寫入範圍授予記錄存取權限；` +
-          `如果本就打算允許這種存取，請刪除這條欄位限制。`,
-        both:
-          `在權限集「${p.permissionSet}」中，隱藏欄位「${p.field}」並將其設為只讀都不起作用：該權限集對「${p.object}」` +
-          `擁有「${b}」，所有持有者都能讀取和編輯該物件的每個欄位。請移除「${b}」並改用讀取或寫入範圍授予記錄存取權限；` +
-          `如果本就打算允許這種存取，請刪除這條欄位限制。`,
-      });
-    },
-    es: (p) => {
-      const b = modifyAllLabel('es');
-      return fieldMaskSentence(p, {
-        read:
-          `En el conjunto de permisos "${p.permissionSet}", ocultar el campo "${p.field}" no tiene efecto: el ` +
-          `permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares leer todos los campos de ` +
-          `ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura (Read scope) o de escritura (Write scope), o ` +
-          `permita que el conjunto lea el campo si ese acceso es intencionado.`,
-        edit:
-          `En el conjunto de permisos "${p.permissionSet}", dejar el campo "${p.field}" en solo lectura no tiene ` +
-          `efecto: el permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares editar todos ` +
-          `los campos de ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de lectura (Read scope) o ` +
-          `de escritura (Write scope), o elimine la restricción del campo si ese acceso es intencionado.`,
-        both:
-          `En el conjunto de permisos "${p.permissionSet}", ocultar el campo "${p.field}" y dejarlo en solo lectura ` +
-          `no tiene efecto: el permiso "${b}" del conjunto sobre "${p.object}" permite a todos sus titulares leer y ` +
-          `editar todos los campos de ese objeto. Quite "${b}" y conceda el acceso a los registros con un ámbito de ` +
-          `lectura (Read scope) o de escritura (Write scope), o elimine la restricción del campo si ese acceso es intencionado.`,
-      });
-    },
-    ar: (p) => {
-      const b = modifyAllLabel('ar');
-      return fieldMaskSentence(p, {
-        read:
-          `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لإخفاء الحقل "${p.field}" أي أثر: إذن "${b}" الذي ` +
-          `تملكه المجموعة على "${p.object}" يتيح لجميع حامليها قراءة كل حقول هذا الكائن. أزل "${b}" وامنح الوصول ` +
-          `إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو اسمح للمجموعة بقراءة الحقل إذا كان هذا الوصول مقصودًا.`,
-        edit:
-          `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لجعل الحقل "${p.field}" للقراءة فقط أي أثر: إذن "${b}" ` +
-          `الذي تملكه المجموعة على "${p.object}" يتيح لجميع حامليها تعديل كل حقول هذا الكائن. أزل "${b}" وامنح ` +
-          `الوصول إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
-        both:
-          `في مجموعة الأذونات "${p.permissionSet}"، لا يكون لإخفاء الحقل "${p.field}" وجعله للقراءة فقط أي أثر: ` +
-          `إذن "${b}" الذي تملكه المجموعة على "${p.object}" يتيح لجميع حامليها قراءة كل حقول هذا الكائن وتعديلها. ` +
-          `أزل "${b}" وامنح الوصول إلى السجلات عبر نطاق قراءة (Read scope) أو نطاق كتابة (Write scope)، أو احذف تقييد الحقل إذا كان هذا الوصول مقصودًا.`,
-      });
-    },
-    fr: (p) => {
-      const b = modifyAllLabel('fr');
-      return fieldMaskSentence(p, {
-        read:
-          `Dans l’ensemble d’autorisations « ${p.permissionSet} », masquer le champ « ${p.field} » n’a aucun effet : ` +
-          `l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ses détenteurs de lire tous les ` +
-          `champs de cet objet. Retirez « ${b} » et accordez l’accès aux enregistrements avec une portée de lecture (Read scope) ` +
-          `ou d’écriture (Write scope), ou autorisez l’ensemble à lire le champ si cet accès est voulu.`,
-        edit:
-          `Dans l’ensemble d’autorisations « ${p.permissionSet} », mettre le champ « ${p.field} » en lecture seule ` +
-          `n’a aucun effet : l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ses détenteurs ` +
-          `de modifier tous les champs de cet objet. Retirez « ${b} » et accordez l’accès aux enregistrements avec ` +
-          `une portée de lecture (Read scope) ou d’écriture (Write scope), ou supprimez la restriction du champ si cet accès est voulu.`,
-        both:
-          `Dans l’ensemble d’autorisations « ${p.permissionSet} », masquer le champ « ${p.field} » et le mettre en ` +
-          `lecture seule n’a aucun effet : l’autorisation « ${b} » de l’ensemble sur « ${p.object} » permet à tous ` +
-          `ses détenteurs de lire et de modifier tous les champs de cet objet. Retirez « ${b} » et accordez l’accès ` +
-          `aux enregistrements avec une portée de lecture (Read scope) ou d’écriture (Write scope), ou supprimez la restriction du champ si cet ` +
-          `accès est voulu.`,
-      });
-    },
-    'pt-BR': (p) => {
-      const b = modifyAllLabel('pt-BR');
-      return fieldMaskSentence(p, {
-        read:
-          `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" não tem efeito: a permissão ` +
-          `"${b}" do conjunto em "${p.object}" permite que todos os seus titulares leiam todos os campos desse ` +
-          `objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura (Read scope) ou de gravação (Write scope), ou permita ` +
-          `que o conjunto leia o campo se esse acesso for intencional.`,
-        edit:
-          `No conjunto de permissões "${p.permissionSet}", deixar o campo "${p.field}" como somente leitura não tem ` +
-          `efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus titulares editem todos os ` +
-          `campos desse objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura (Read scope) ou ` +
-          `de gravação (Write scope), ou exclua a restrição do campo se esse acesso for intencional.`,
-        both:
-          `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" e deixá-lo como somente ` +
-          `leitura não tem efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus ` +
-          `titulares leiam e editem todos os campos desse objeto. Remova "${b}" e conceda o acesso aos registros ` +
-          `com um escopo de leitura (Read scope) ou de gravação (Write scope), ou exclua a restrição do campo se esse acesso for intencional.`,
-      });
-    },
-    ru: (p) => {
-      const b = modifyAllLabel('ru');
-      return fieldMaskSentence(p, {
-        read:
-          `В наборе разрешений «${p.permissionSet}» скрытие поля «${p.field}» не действует: право «${b}» этого ` +
-          `набора для «${p.object}» позволяет всем его владельцам читать все поля этого объекта. Уберите «${b}» и ` +
-          `предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) либо разрешите набору читать это поле, ` +
-          `если такой доступ задуман.`,
-        edit:
-          `В наборе разрешений «${p.permissionSet}» режим «только чтение» для поля «${p.field}» не действует: право ` +
-          `«${b}» этого набора для «${p.object}» позволяет всем его владельцам изменять все поля этого объекта. ` +
-          `Уберите «${b}» и предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) либо удалите ограничение ` +
-          `поля, если такой доступ задуман.`,
-        both:
-          `В наборе разрешений «${p.permissionSet}» скрытие поля «${p.field}» и режим «только чтение» для него не ` +
-          `действуют: право «${b}» этого набора для «${p.object}» позволяет всем его владельцам читать и изменять ` +
-          `все поля этого объекта. Уберите «${b}» и предоставьте доступ к записям через область чтения (Read scope) или записи (Write scope) ` +
-          `либо удалите ограничение поля, если такой доступ задуман.`,
-      });
-    },
-    de: (p) => {
-      const b = modifyAllLabel('de');
-      return fieldMaskSentence(p, {
-        read:
-          `Im Berechtigungssatz „${p.permissionSet}“ ist das Ausblenden des Felds „${p.field}“ wirkungslos: Die ` +
-          `Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes Feld dieses Objekts lesen. ` +
-          `Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lesebereich (Read scope) oder Schreibbereich (Write scope), ` +
-          `oder erlauben Sie dem Satz, das Feld zu lesen, wenn dieser Zugriff beabsichtigt ist.`,
-        edit:
-          `Im Berechtigungssatz „${p.permissionSet}“ ist der Schreibschutz des Felds „${p.field}“ wirkungslos: Die ` +
-          `Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes Feld dieses Objekts ` +
-          `bearbeiten. Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf Datensätze über einen Lesebereich (Read scope) oder ` +
-          `Schreibbereich (Write scope), oder löschen Sie die Feldeinschränkung, wenn dieser Zugriff beabsichtigt ist.`,
-        both:
-          `Im Berechtigungssatz „${p.permissionSet}“ sind das Ausblenden des Felds „${p.field}“ und sein ` +
-          `Schreibschutz wirkungslos: Die Berechtigung „${b}“ des Satzes für „${p.object}“ lässt alle Inhaber jedes ` +
-          `Feld dieses Objekts lesen und bearbeiten. Entfernen Sie „${b}“ und gewähren Sie den Zugriff auf ` +
-          `Datensätze über einen Lesebereich (Read scope) oder Schreibbereich (Write scope), oder löschen Sie die Feldeinschränkung, wenn dieser ` +
-          `Zugriff beabsichtigt ist.`,
-      });
-    },
-    ja: (p) => {
-      const b = modifyAllLabel('ja');
-      return fieldMaskSentence(p, {
-        read:
-          `権限セット「${p.permissionSet}」では、項目「${p.field}」を非表示にする設定が効いていません。この権限セットは` +
-          `「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を読み取れるためです。` +
-          `「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、このアクセスが意図したもので` +
-          `あれば、この権限セットにこの項目の読み取りを許可してください。`,
-        edit:
-          `権限セット「${p.permissionSet}」では、項目「${p.field}」を読み取り専用にする設定が効いていません。この権限` +
-          `セットは「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を編集できる` +
-          `ためです。「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、このアクセスが` +
-          `意図したものであれば、この項目の制限を削除してください。`,
-        both:
-          `権限セット「${p.permissionSet}」では、項目「${p.field}」を非表示かつ読み取り専用にする設定が効いていません。` +
-          `この権限セットは「${p.object}」に「${b}」を持っており、すべての保持者がこのオブジェクトのすべての項目を` +
-          `読み取り・編集できるためです。「${b}」を外して読み取り範囲（Read scope）または書き込み範囲（Write scope）でレコードへのアクセスを付与するか、` +
-          `このアクセスが意図したものであれば、この項目の制限を削除してください。`,
-      });
-    },
-    ko: (p) => {
-      const b = modifyAllLabel('ko');
-      return fieldMaskSentence(p, {
-        read:
-          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기는 설정은 효과가 없습니다. 이 권한 세트는 ` +
-          `"${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 읽을 수 있습니다. ` +
-          `"${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 액세스가 의도된 것이라면 ` +
-          `권한 세트가 이 필드를 읽을 수 있도록 하세요.`,
-        edit:
-          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 읽기 전용으로 하는 설정은 효과가 없습니다. ` +
-          `이 권한 세트는 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 편집할 수 ` +
-          `있습니다. "${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 액세스가 의도된 ` +
-          `것이라면 이 필드 제한을 삭제하세요.`,
-        both:
-          `권한 세트 "${p.permissionSet}"에서 필드 "${p.field}"을(를) 숨기고 읽기 전용으로 하는 설정은 효과가 ` +
-          `없습니다. 이 권한 세트는 "${p.object}"에 대해 "${b}" 권한을 가지므로 모든 보유자가 이 개체의 모든 필드를 ` +
-          `읽고 편집할 수 있습니다. "${b}"을(를) 제거하고 읽기 범위(Read scope) 또는 쓰기 범위(Write scope)로 레코드 액세스를 부여하거나, 이 ` +
-          `액세스가 의도된 것이라면 이 필드 제한을 삭제하세요.`,
-      });
-    },
   },
   [SECURITY_CBP_MASTER_REFERENCE_HIDDEN]: {
     en: (p) =>
@@ -670,6 +457,80 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
           `"${p.object}"에 레코드 소유자(owner_id)를 추가하고 정책 조건으로 지정하거나, 이 정책을 삭제하세요.`,
       }),
   },
+  // [Field-axis split, ruling of record 6912661484, steps 2 and 3] Each
+  // sentence names the two sets, the field and the bit (by its console
+  // label), says that a holder of both can still read the field, and gives
+  // the two fixes the rule's hint leads with: remove the bit, or protect the
+  // field on the field itself (Required permissions, ADR-0066 D3). The bit
+  // votes no edit, so a read-only field is never re-opened.
+  [SECURITY_CROSS_SET_FIELD_REOPEN]: {
+    en: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['en'];
+      const opens = `"${p.otherSet}" has ${b} on "${p.object}", which opens every field of that object.`;
+      const hidden = `Remove ${b} from "${p.otherSet}", or, if the field must stay hidden from everyone without a specific permission, set required permissions on the field itself.`;
+      return `Field "${p.field}" is hidden in permission set "${p.permissionSet}", but anyone who also holds permission set "${p.otherSet}" can still read it: ${opens} ${hidden}`;
+    },
+    'zh-Hans': (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['zh-Hans'];
+      const opens = `“${p.otherSet}”对“${p.object}”拥有“${b}”，会开放该对象的每个字段。`;
+      const hidden = `请从“${p.otherSet}”移除“${b}”；如果该字段必须对所有没有特定权限的人隐藏，请直接在字段上设置所需权限。`;
+      return `字段“${p.field}”在权限集“${p.permissionSet}”中被隐藏，但同时持有权限集“${p.otherSet}”的人仍能读取它：${opens}${hidden}`;
+    },
+    'zh-Hant': (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['zh-Hant'];
+      const opens = `「${p.otherSet}」對「${p.object}」擁有「${b}」，會開放該物件的每個欄位。`;
+      const hidden = `請從「${p.otherSet}」移除「${b}」；如果該欄位必須對所有沒有特定權限的人隱藏，請直接在欄位上設定所需權限。`;
+      return `欄位「${p.field}」在權限集「${p.permissionSet}」中被隱藏，但同時持有權限集「${p.otherSet}」的人仍能讀取它：${opens}${hidden}`;
+    },
+    es: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['es'];
+      const opens = `"${p.otherSet}" tiene "${b}" sobre "${p.object}", que abre todos los campos de ese objeto.`;
+      const hidden = `Quite "${b}" de "${p.otherSet}" o, si el campo debe permanecer oculto para todos los que no tengan un permiso específico, defina los permisos requeridos en el propio campo.`;
+      return `El campo "${p.field}" está oculto en el conjunto de permisos "${p.permissionSet}", pero quien también tenga el conjunto de permisos "${p.otherSet}" aún puede leerlo: ${opens} ${hidden}`;
+    },
+    ar: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['ar'];
+      const opens = `لدى "${p.otherSet}" الإذن "${b}" على "${p.object}"، وهو يفتح كل حقول هذا الكائن.`;
+      const hidden = `أزل "${b}" من "${p.otherSet}"، أو إذا كان يجب أن يبقى الحقل مخفيًا عن كل من لا يملك إذنًا محددًا، فحدّد الأذونات المطلوبة على الحقل نفسه.`;
+      return `الحقل "${p.field}" مخفي في مجموعة الأذونات "${p.permissionSet}"، لكن من يحمل أيضًا مجموعة الأذونات "${p.otherSet}" لا يزال يستطيع قراءته: ${opens} ${hidden}`;
+    },
+    fr: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['fr'];
+      const opens = `« ${p.otherSet} » dispose de « ${b} » sur « ${p.object} », ce qui ouvre tous les champs de cet objet.`;
+      const hidden = `Retirez « ${b} » de « ${p.otherSet} » ou, si le champ doit rester masqué pour toute personne sans autorisation spécifique, définissez les autorisations requises sur le champ lui-même.`;
+      return `Le champ « ${p.field} » est masqué dans l’ensemble d’autorisations « ${p.permissionSet} », mais quiconque détient aussi l’ensemble d’autorisations « ${p.otherSet} » peut encore le lire : ${opens} ${hidden}`;
+    },
+    'pt-BR': (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['pt-BR'];
+      const opens = `"${p.otherSet}" tem "${b}" em "${p.object}", o que abre todos os campos desse objeto.`;
+      const hidden = `Remova "${b}" de "${p.otherSet}" ou, se o campo precisa ficar oculto para todos que não têm uma permissão específica, defina as permissões exigidas no próprio campo.`;
+      return `O campo "${p.field}" está oculto no conjunto de permissões "${p.permissionSet}", mas quem também tem o conjunto de permissões "${p.otherSet}" ainda pode lê-lo: ${opens} ${hidden}`;
+    },
+    ru: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['ru'];
+      const opens = `у «${p.otherSet}» есть «${b}» для «${p.object}», что открывает все поля этого объекта.`;
+      const hidden = `Уберите «${b}» из «${p.otherSet}» или, если поле должно оставаться скрытым от всех, у кого нет определённого разрешения, задайте требуемые разрешения в самом поле.`;
+      return `Поле «${p.field}» скрыто в наборе разрешений «${p.permissionSet}», но тот, у кого есть ещё и набор разрешений «${p.otherSet}», по-прежнему может его читать: ${opens} ${hidden}`;
+    },
+    de: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['de'];
+      const opens = `„${p.otherSet}“ hat „${b}“ auf „${p.object}“, was jedes Feld dieses Objekts öffnet.`;
+      const hidden = `Entfernen Sie „${b}“ aus „${p.otherSet}“, oder legen Sie, wenn das Feld für alle ohne eine bestimmte Berechtigung verborgen bleiben muss, die erforderlichen Berechtigungen am Feld selbst fest.`;
+      return `Das Feld „${p.field}“ ist im Berechtigungssatz „${p.permissionSet}“ ausgeblendet, aber wer zusätzlich den Berechtigungssatz „${p.otherSet}“ hat, kann es weiterhin lesen: ${opens} ${hidden}`;
+    },
+    ja: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['ja'];
+      const opens = `「${p.otherSet}」は「${p.object}」に対して「${b}」を持ち、このオブジェクトのすべてのフィールドを開くためです。`;
+      const hidden = `「${p.otherSet}」から「${b}」を外すか、特定の権限を持たない全員からこのフィールドを隠す必要がある場合は、フィールド自体に必要な権限を設定してください。`;
+      return `フィールド「${p.field}」は権限セット「${p.permissionSet}」で非表示になっていますが、権限セット「${p.otherSet}」も持つユーザーは引き続き読み取れます。${opens}${hidden}`;
+    },
+    ko: (p) => {
+      const b = VIEW_ALL_FIELDS_LABEL['ko'];
+      const opens = `"${p.otherSet}"이(가) "${p.object}"에 대해 "${b}"을(를) 가지고 있어 이 개체의 모든 필드를 열기 때문입니다.`;
+      const hidden = `"${p.otherSet}"에서 "${b}"을(를) 제거하거나, 특정 권한이 없는 모든 사람에게 이 필드를 계속 숨겨야 한다면 필드 자체에 필요한 권한을 설정하세요.`;
+      return `필드 "${p.field}"은(는) 권한 세트 "${p.permissionSet}"에서 숨겨져 있지만, 권한 세트 "${p.otherSet}"도 보유한 사람은 여전히 이 필드를 읽을 수 있습니다. ${opens} ${hidden}`;
+    },
+  },
 });
 
 /**
@@ -683,20 +544,4 @@ type OwnerPolicyRemedy = 'allow-owner-edit' | 'key-owner-id' | 'add-owner-id';
 
 function ownerPolicyRemedy(p: UserTextParams, sentences: Readonly<Record<OwnerPolicyRemedy, string>>): string {
   return Object.prototype.hasOwnProperty.call(sentences, p.remedy) ? sentences[p.remedy as OwnerPolicyRemedy] : '';
-}
-
-/**
- * The sentence of `security-superuser-field-mask-inert`, by the `inert` param
- * its push site sets: the half of the field restriction the set's Modify All
- * unbinds. A row that hides the field and leaves it editable has an inert
- * read mask only (`read`), so that sentence never prescribes deleting the
- * restriction; a readable row has an inert edit lock (`edit`); a row that
- * hides and locks has both (`both`). An `inert` the push site did not set
- * reads as `both`, which is what Modify All unbinds.
- */
-type FieldMaskInert = 'read' | 'edit' | 'both';
-
-function fieldMaskSentence(p: UserTextParams, sentences: Readonly<Record<FieldMaskInert, string>>): string {
-  if (p.inert === 'read' || p.inert === 'edit' || p.inert === 'both') return sentences[p.inert];
-  return sentences.both;
 }

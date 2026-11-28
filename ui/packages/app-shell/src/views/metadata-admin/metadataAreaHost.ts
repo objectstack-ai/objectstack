@@ -49,6 +49,19 @@ export interface MetadataAreaHost {
   readOnly: boolean;
   /** The area's root route, `/studio/<package or ~all>/metadata`, without a trailing slash. */
   basePath: string;
+  /**
+   * objectstack#36897 — on a read-only base, a create lands in the base's
+   * `.custom` pair (ADR-0146 D3): the area opens it there (`AreaCreate`), so
+   * the list offers its 「新建」. `false` or absent where the area has no
+   * customization to create with, or the ensure door refuses this caller.
+   */
+  pairCreate?: boolean;
+  /**
+   * objectstack#36903 — what an empty list of the area says under its title in
+   * place of the type's own hint: the package-less scope's flow list says how a
+   * packaged flow is changed instead (ADR-0146 D11). Absent elsewhere.
+   */
+  emptyListHint?: string;
 }
 
 export const MetadataAreaHostContext = React.createContext<MetadataAreaHost | null>(null);

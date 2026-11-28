@@ -95,42 +95,6 @@ const AGGREGATION_FUNCTIONS: ReadonlySet<string> = new Set(AggregationFunction.o
 const DATE_GRANULARITIES: ReadonlySet<string> = new Set(DateGranularity.options);
 
 /**
- * [#6994] Field types whose value NO driver materialises, so no driver can
- * ORDER BY them.
- *
- * `formula` is the whole set today, and deliberately not a synonym for
- * "computed": the three computed types diverge exactly here.
- *
- * | type | column | sortable |
- * |---|---|---|
- * | `formula` | none — `SqlDriver.createColumn` returns early; `driver-turso`'s transport skips it with the same `Virtual — no column` note | **no** |
- * | `summary` | an engine-maintained numeric column — `table.decimal` on tables created since #16318, `table.float` on earlier ones | yes (measured #6924: `orderBy <summary> desc` -> E D C B A over 5 4 3 2 1) |
- * | `autonumber` | `table.string`, engine-assigned | yes |
- *
- * So the spec's own `COMPUTED_VALUE_TYPES` (`formula`/`summary`/`autonumber`)
- * is the WRITE contract — "never client-written" — and is the wrong set to
- * gate a sort with: it would refuse the two types that sort correctly.
- *
- * This is a local set rather than a shared spec constant because the same fact
- * is currently spelled in five places, none of them in `packages/spec`:
- * `driver-sql`'s `fieldHasColumn` and `createColumn`, `driver-turso`'s
- * `remote-transport`, `objectql`'s `planFormulaProjection` and
- * `search-companion`, and `plugin-audit`'s `VIRTUAL_FIELD_TYPES`.
- * Consolidating them is a cross-package change and is filed separately; adding
- * a sixth local spelling here — with that ledger written down — keeps this fix
- * inside one package rather than opening a spec-wide edit for one string.
- *
- * One deliberate divergence from `fieldHasColumn`: that helper short-circuits
- * on `multiple` (a `multiple` field is a JSON column whatever its type), so it
- * would answer "has a column" for a `multiple` formula. This set does not,
- * because the questions differ — `fieldHasColumn` asks whether DDL emits a
- * column, this asks whether there is a persisted VALUE to order by, and a
- * formula's value is computed on read and never written, so that JSON column
- * is always empty. Ordering by it degrades exactly as the bare case does.
- */
-const UNMATERIALIZED_SORT_TYPES: ReadonlySet<string> = new Set(['formula']);
-
-/**
  * [#4254] An aggregation-axis value (`groupBy` / `aggregations`) whose SHAPE
  * the spec's `QueryAST` cannot read — a non-array, an entry that names no
  * field, a function or granularity outside the spec enums, a missing alias.
@@ -256,7 +220,9 @@ const INTERNAL_FIELD_WALK_DEPTH = 8;
  * that serves exactly those records by id; it is not the read this is. The
  * dataset door's dimension-label pass asks the same operation of the same
  * target (`@objectstack/service-analytics`), so a lookup renders its name, or
- * its stored id, alike on both doors.
+ * its stored id, alike on both doors. A target of a disabled package renders
+ * its stored id on both too: each door also asks the registry's
+ * `isObjectPackageDisabled` and withholds it ({@link servesExpansionTarget}).
  */
 const EXPANSION_TARGET_OPERATION = 'get';
 
@@ -615,8 +581,8 @@ export function assertSortFieldsExist(
 
     // [#6994] The third verdict on this axis: a name that is a REAL,
     // non-dotted field of this object and still cannot be ordered by,
-    // because its TYPE materialises no column ({@link
-    // UNMATERIALIZED_SORT_TYPES} — `formula`, today the whole set).
+    // because its TYPE materialises no column ({@link isVirtualSearchField}
+    // / `SEARCH_VIRTUAL_TYPES` — `formula`, today the whole set).
     //
     // This is the shape the doc comment above already describes and this
     // gate already let through: being in `gate.known` is what carried it
@@ -641,9 +607,25 @@ export function assertSortFieldsExist(
     // therefore unchanged verdict-for-verdict, and a dotted path whose head
     // is a formula field keeps the dotted answer (it is wrong about the
     // shape too, and the shape is what the caller wrote).
-    const unmaterialized = names.filter(
-        (f) => UNMATERIALIZED_SORT_TYPES.has(String(gate.fields[f]?.type ?? '')),
-    );
+    //
+    // ONE SOURCE — judged by {@link isVirtualSearchField}, the
+    // `@objectstack/spec/data` predicate the served sortability projection
+    // reads for its `virtual-type` verdict ({@link resolveObjectSortability})
+    // and the filter and search axes of this file read too. This door used
+    // to carry a set of its own for the same fact (`UNMATERIALIZED_SORT_TYPES`,
+    // `formula` alone, retired here): two one-member sets that agreed only
+    // while neither grew. A type added to this door's alone is a sort the
+    // grid offers and this door refuses; one added to the spec's alone is
+    // refused by the fourth verdict below, worded as an author's
+    // `sortable: false`. `protocol.sort-door-projection-agreement-37386.test.ts`
+    // holds this verdict to the projection for every `FieldType`.
+    //
+    // The predicate is the STORAGE fact, and deliberately not the spec's
+    // `COMPUTED_VALUE_TYPES` (`formula` / `summary` / `autonumber`), which is
+    // the WRITE contract: `summary` and `autonumber` have stored columns and
+    // sort correctly (`SEARCH_VIRTUAL_TYPES`' docblock, and the projection's
+    // "Considered and deliberately NOT members").
+    const unmaterialized = names.filter((f) => isVirtualSearchField(gate.fields[f]));
     if (unmaterialized.length === 0) {
         assertSortFieldsAreOffered(gate.schema, object, names, param);
         return;

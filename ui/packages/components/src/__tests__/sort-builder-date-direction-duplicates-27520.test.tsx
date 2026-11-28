@@ -21,8 +21,9 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
-import { cleanup, render, screen, fireEvent, within } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
+import { I18nProvider } from '@object-ui/i18n';
 import { SortBuilder, type SortBuilderProps, type SortItem } from '../custom/sort-builder';
 
 type Fields = NonNullable<SortBuilderProps['fields']>;
@@ -137,5 +138,67 @@ describe('SortBuilder keeps one row per field (objectstack#27520 row 7)', () => 
   it('CONTROL: with a field still free, "Add sort" stays enabled', () => {
     mount([asc('title'), asc('due_date')]);
     expect(screen.getByRole('button', { name: /add sort/i })).toBeEnabled();
+  });
+});
+
+describe('SortBuilder words a direction by the field\'s type: size, time or the alphabet', () => {
+  const NUMERIC: Fields = [
+    { value: 'title', label: 'Title', type: 'text' },
+    { value: 'due_date', label: 'Due Date', type: 'date' },
+    { value: 'estimate_hours', label: 'Estimate', type: 'number' },
+    { value: 'progress', label: 'Progress', type: 'progress' },
+    { value: 'completion', label: 'Completion', type: 'percent' },
+    { value: 'budget', label: 'Budget', type: 'currency' },
+    { value: 'active', label: 'Active', type: 'boolean' },
+    { value: 'starts_at', label: 'Starts At', type: 'time' },
+  ];
+  const optionLabels = (i: number) => optionsOf(directionTriggers()[i]).map((o) => o.label);
+
+  it('number, progress, percent and currency rows read "Low → High" / "High → Low"', () => {
+    mount([asc('estimate_hours'), asc('progress'), asc('completion'), { field: 'budget', order: 'desc' }], NUMERIC);
+    for (const i of [0, 1, 2, 3]) expect(optionLabels(i)).toEqual(['Low → High', 'High → Low']);
+    expect(directionTriggers()[3]).toHaveTextContent('High → Low');
+  });
+
+  it('a boolean row reads as size and a time row as time', () => {
+    mount([asc('active'), asc('starts_at')], NUMERIC);
+    expect(optionLabels(0)).toEqual(['Low → High', 'High → Low']);
+    expect(optionLabels(1)).toEqual(['Oldest → Newest', 'Newest → Oldest']);
+  });
+
+  it('CONTROL: beside them a date keeps time and text keeps the alphabet', () => {
+    mount([asc('due_date'), asc('title'), asc('estimate_hours')], NUMERIC);
+    expect(optionLabels(0)).toEqual(['Oldest → Newest', 'Newest → Oldest']);
+    expect(optionLabels(1)).toEqual(['A → Z', 'Z → A']);
+  });
+});
+
+describe('SortBuilder reads its direction words from the locale pack', () => {
+  const PACK_FIELDS: Fields = [
+    { value: 'title', label: 'Title', type: 'text' },
+    { value: 'estimate_hours', label: 'Estimate', type: 'number' },
+    { value: 'progress', label: 'Progress', type: 'progress' },
+  ];
+  const inLanguage = (language: string, initial: Row[]) =>
+    render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+        <Harness fields={PACK_FIELDS} initial={initial} onChange={() => {}} />
+      </I18nProvider>,
+    );
+  const labelsAt = (i: number) => optionsOf(directionTriggers()[i]).map((o) => o.label);
+
+  it('zh: a number and a progress row read 「小 → 大」 / 「大 → 小」', async () => {
+    inLanguage('zh', [asc('estimate_hours'), asc('progress')]);
+    await waitFor(() => expect(directionTriggers()[0]).toHaveTextContent('小 → 大'));
+    expect(labelsAt(0)).toEqual(['小 → 大', '大 → 小']);
+    expect(labelsAt(1)).toEqual(['小 → 大', '大 → 小']);
+  });
+
+  it('ar: a text row reads the Latin pair left to right, "A → Z" / "Z → A"', async () => {
+    inLanguage('ar', [asc('title'), asc('estimate_hours')]);
+    // The Arabic pack is in once the number row reads in Arabic; only then is
+    // the text row's pair the pack's and not the built-in English default.
+    await waitFor(() => expect(directionTriggers()[1]).toHaveTextContent('الأصغر ← الأكبر'));
+    expect(labelsAt(0)).toEqual(['A → Z', 'Z → A']);
   });
 });

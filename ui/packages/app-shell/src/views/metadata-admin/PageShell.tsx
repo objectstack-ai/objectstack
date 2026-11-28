@@ -24,8 +24,9 @@ import type { RichMetadataTypeEntry } from './useMetadata.js';
 import { useMetadataLocale, t, translateMetadataType, translateMetadataDomain } from './i18n.js';
 import { environmentScopeSuffix } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
-import { isStudioCustomizeType } from '../studio-design/StudioCustomizeControls.js';
+import { isStudioCustomizeType } from '../studio-design/customizeOverride.js';
 import { AREA_CUSTOMIZE_EDITOR_TYPES, AREA_FORM_EDITOR_TYPES } from '../studio-design/metadataArea.js';
+import { StudioTitleRowEnd } from '../studio-design/studioTitleRow.js';
 
 export interface PageShellProps {
   /** The type entry from `/meta/types` (or a synthesized stub). */
@@ -98,10 +99,11 @@ export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Obje
 /**
  * objectstack#30062 — whether Studio offers Customize on a read-only base's
  * item of `type`, read from the doors that offer it, never from the type's
- * overlay flag: the Interfaces pillar's header ({@link isStudioCustomizeType}),
+ * overlay flag: the app's navigation customize ({@link isStudioCustomizeType}),
  * the All metadata area's form editor ({@link AREA_FORM_EDITOR_TYPES}) and
- * its customize editor on a read-only package ({@link AREA_CUSTOMIZE_EDITOR_TYPES},
- * a dataset, objectstack#30064), and the Automations pillar's flow header
+ * its customize editor on a read-only package ({@link AREA_CUSTOMIZE_EDITOR_TYPES}:
+ * a dataset, objectstack#30064; a view, dashboard, report or page since
+ * objectstack#36502 retired the Interfaces pillar), and the Automations pillar's flow header
  * (objectstack#28570). A door added to one of those lists moves its type's
  * tile with it.
  *
@@ -240,6 +242,11 @@ export function PageShell({
   // Setup catalog, not to the package-scoped Studio list of the same type.
   const [search] = useSearchParams();
   const scopeSuffix = environmentScopeSuffix(search);
+  // objectstack#37520 (N3) — the hairline before the assistant separates it
+  // from the row's own stats and actions; a row with neither draws none, as
+  // the item header and the directory header already do (`StudioTitleRowEnd`
+  // still draws it before Save, which always counts as an action).
+  const rowHasOwnControls = (stats?.length ?? 0) > 0 || !!actions;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -320,6 +327,10 @@ export function PageShell({
                 </div>
               ))}
               {actions}
+              {/* objectstack#37455 — under Studio, the page's Save and the AI
+                  assistant end the title row (nothing elsewhere, nor embedded
+                  in another page). */}
+              {!embedded && <StudioTitleRowEnd divider={rowHasOwnControls} />}
             </div>
           </div>
         </div>
@@ -375,6 +386,8 @@ export function PageShell({
                 </div>
               ))}
               {actions}
+              {/* objectstack#37455 — under Studio, the page's Save and the AI assistant end the title row. */}
+              {!embedded && <StudioTitleRowEnd divider={rowHasOwnControls} />}
             </div>
           </div>
         </div>

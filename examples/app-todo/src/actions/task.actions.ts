@@ -10,7 +10,7 @@ export const CompleteTaskAction = defineAction({
   icon: 'check-circle',
   type: 'script',
   target: 'completeTask',
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   successMessage: 'Task marked as complete!',
   refreshAfter: true,
   ai: {
@@ -27,7 +27,7 @@ export const StartTaskAction = defineAction({
   icon: 'play-circle',
   type: 'script',
   target: 'startTask',
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   successMessage: 'Task started!',
   refreshAfter: true,
   ai: {
@@ -55,7 +55,7 @@ export const DeferTaskAction = defineAction({
   icon: 'clock',
   type: 'script',
   target: 'deferTask',
-  locations: ['record_header'],
+  locations: ['record_page'],
   params: [
     {
       name: 'new_due_date',
@@ -82,7 +82,7 @@ export const SetReminderAction = defineAction({
   icon: 'bell',
   type: 'script',
   target: 'setReminder',
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   params: [
     {
       name: 'reminder_date',
@@ -103,7 +103,7 @@ export const CloneTaskAction = defineAction({
   icon: 'copy',
   type: 'script',
   target: 'cloneTask',
-  locations: ['record_header'],
+  locations: ['record_page'],
   successMessage: 'Task cloned successfully!',
   refreshAfter: true,
   ai: {
@@ -112,7 +112,12 @@ export const CloneTaskAction = defineAction({
   },
 });
 
-/** Mass Complete Tasks */
+/**
+ * Mass Complete Tasks — a bulk action written per record: a list view's
+ * selection dispatches it once per selected row, each call carrying that row's
+ * `recordId`, so every write is to a row the platform has already loaded in
+ * the caller's own scope (`ctx.record`).
+ */
 export const MassCompleteTasksAction = defineAction({
   name: 'todo_mass_complete',
   label: 'Complete Selected',
@@ -120,12 +125,13 @@ export const MassCompleteTasksAction = defineAction({
   icon: 'check-square',
   type: 'script',
   target: 'massCompleteTasks',
-  locations: ['list_toolbar'],
+  execution: 'perRecord',
+  locations: ['list'],
   successMessage: 'Selected tasks marked as complete!',
   refreshAfter: true,
   ai: {
     exposed: true,
-    description: 'Mark all currently selected todo tasks as complete in one bulk operation.',
+    description: 'Mark a todo task as complete; a list selection runs it once for each selected task.',
   },
 });
 
@@ -137,7 +143,7 @@ export const DeleteCompletedAction = defineAction({
   icon: 'trash',
   type: 'script',
   target: 'deleteCompletedTasks',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   // Destructive + irreversible — flag as danger so Studio paints it red
   // and the AI tool runtime routes through the HITL approval queue when
   // `enableActionApproval` is on.
@@ -162,7 +168,7 @@ export const ExportToCsvAction = defineAction({
   icon: 'download',
   type: 'script',
   target: 'exportTasksToCSV',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   successMessage: 'Export completed!',
   refreshAfter: false,
   ai: {

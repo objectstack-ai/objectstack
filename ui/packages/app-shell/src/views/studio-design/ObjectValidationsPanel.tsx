@@ -532,13 +532,31 @@ function JsonField({
 }
 
 /**
+ * A row's targets: its named next states, then the `''` target (a clear of
+ * the field, allowed from this state) when `clearable`. Targets are a set, so
+ * `''` is always written last.
+ */
+function rowTargets(named: string[], clearable: boolean): string[] {
+  return clearable ? [...named, ''] : named;
+}
+
+/**
  * State-machine `transitions` editor: from-state → allowed next states (CSV).
+ *
+ * The CSV box holds the named next states; the `''` target, which lets a user
+ * clear the field while the record is in the row's state, is the row's
+ * "May be cleared" checkbox, and editing the box keeps it.
  *
  * objectstack#26731 — the row "Add transition" opens is kept HERE until it has
  * a from-state. It used to be written as the key `""`, which is no transition:
  * the autosave stored it and Publish shipped it. The blank row renders at the
  * index, and so under the key, its row takes once written, so typing its first
  * letter keeps the focus in the input.
+ *
+ * objectstack#36733 — a row's "Next states" box keeps its own text while it
+ * is being edited: each change writes the parsed targets, but the box is not
+ * re-derived from them, so a typed `,` or space survives until the next key.
+ * Once the box loses focus it shows the targets again.
  */
 function TransitionsField({
   transitions,
@@ -554,6 +572,8 @@ function TransitionsField({
   const rows = Object.entries(transitions);
   // The next states typed into the blank row, or `null` while there is none.
   const [blank, setBlank] = React.useState<string[] | null>(null);
+  // The "Next states" box being edited: its row index and its typed text.
+  const [editing, setEditing] = React.useState<{ idx: number; text: string } | null>(null);
   const shown: Array<[string, string[]]> = blank ? [...rows, ['', blank]] : rows;
   const setRow = (idx: number, from: string, to: string[]) => {
     if (idx === rows.length) {
@@ -590,19 +610,42 @@ function TransitionsField({
           />
           <span className="text-muted-foreground">→</span>
           <input
-            value={to.join(', ')}
+            value={editing?.idx === i ? editing.text : to.filter((s) => s !== '').join(', ')}
             disabled={disabled}
             placeholder={t('engine.studio.rules.transitionTo', locale)}
-            onChange={(e) =>
-              setRow(i, from, e.target.value.split(',').map((s) => s.trim()).filter(Boolean))
-            }
+            onChange={(e) => {
+              setEditing({ idx: i, text: e.target.value });
+              setRow(
+                i,
+                from,
+                rowTargets(e.target.value.split(',').map((s) => s.trim()).filter(Boolean), to.includes('')),
+              );
+            }}
+            onBlur={() => setEditing(null)}
             className={`min-w-0 flex-1 rounded border bg-background px-2 py-1 text-[12px] ${DISABLED_LOOK}`}
           />
+          <label
+            title={t('engine.studio.rules.transitionClearableHint', locale)}
+            className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground"
+          >
+            <input
+              type="checkbox"
+              checked={to.includes('')}
+              disabled={disabled}
+              onChange={(e) => setRow(i, from, rowTargets(to.filter((s) => s !== ''), e.target.checked))}
+            />
+            {t('engine.studio.rules.transitionClearable', locale)}
+          </label>
           {!disabled && (
             <button
               type="button"
               aria-label={t('engine.studio.rules.delete', locale)}
-              onClick={() => (i === rows.length ? setBlank(null) : setRow(i, '', []))}
+              onClick={() => {
+                // The rows below move up an index: no box keeps a typed text.
+                setEditing(null);
+                if (i === rows.length) setBlank(null);
+                else setRow(i, '', []);
+              }}
               className="rounded border border-destructive/40 p-1 text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="h-3 w-3" />

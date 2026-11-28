@@ -111,7 +111,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? OBJECT_SCHEMA}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         {opts.editing && <EnterEditing />}
@@ -138,7 +138,17 @@ beforeEach(() => {
   perms.writeDenied = [];
 });
 
-afterEach(() => cleanup());
+// objectstack#35928 — the stage confirm asks which flows the move would start.
+// Answered here as a deployment without that read (501), so the confirm reads as
+// it does without it and no request leaves for the network.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 501, json: async () => ({}) })));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('record:path allowStageChange — a press writes the stage', () => {
   it('every stage but the current one is a button, on both rows', () => {
@@ -330,7 +340,7 @@ function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> =
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? QUOTE_DEF}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <SchemaRenderer schema={node as never} />
@@ -454,5 +464,77 @@ describe('record:path allowStageChange — a status field carrying an expression
         objectSchema: { name: 'crm_quote', fields: { status: { type: 'select', expression: "record.amount > 0 ? 'sent' : 'draft'" } } },
       }).container,
     );
+  });
+});
+
+// objectstack#35928 — under its sentence the confirm names the flows the move
+// would start (`POST /api/v1/automation/_record-starts`, read through
+// `../stageChangeStarts`, the reader the list cell's confirm shares); no flows,
+// a refused read and a malformed answer leave the sentence alone.
+describe('record:path allowStageChange — the confirmation names the flows the move starts (objectstack#35928)', () => {
+  const CLOSURE = { name: 'closure', label: 'Closure Sign-off', startsApproval: true };
+  const NOTIFY = { name: 'notify_owner', label: 'Notify Owner', startsApproval: false };
+  type StartsAnswer = { status: number; body: unknown } | 'network-error';
+
+  /** The global `fetch`, answering the read with `answer` and recording every request. */
+  function installStartsFetch(answer: StartsAnswer) {
+    const calls: Array<{ url: string; body: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (answer === 'network-error') throw new TypeError('Failed to fetch');
+      return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+    }));
+    return calls;
+  }
+  const listed = (flows: unknown[]): StartsAnswer => ({ status: 200, body: { success: true, data: { flows } } });
+  const startsCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url === '/api/v1/automation/_record-starts');
+  /** Let an answer that arrived land before reading that nothing was drawn for it. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  async function openConfirm(): Promise<HTMLElement> {
+    const { container } = mount({ allowStageChange: true });
+    fireEvent.click(within(rows(container)[0]).getByRole('button', { name: 'Move to Accepted' }));
+    return screen.findByRole('alertdialog');
+  }
+
+  it('list: asks for the record and the move, and names each flow under the sentence, approval marked', async () => {
+    const calls = installStartsFetch(listed([CLOSURE, NOTIFY]));
+    const dialog = await openConfirm();
+    const list = await within(dialog).findByTestId('stage-change-starts');
+    expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+    expect(list).toHaveTextContent('Saving this change starts these flows:');
+    const closure = list.querySelector('[data-stage-change-start="closure"]')!;
+    const notify = list.querySelector('[data-stage-change-start="notify_owner"]')!;
+    expect(closure).toHaveTextContent('Closure Sign-off');
+    expect(closure.querySelector('[data-stage-change-start-approval]')).toHaveTextContent('starts an approval');
+    expect(notify).toHaveTextContent('Notify Owner');
+    expect(notify.querySelector('[data-stage-change-start-approval]')).toBeNull();
+    expect(startsCalls(calls).map((c: any) => c.body)).toEqual([{ object: 'crm_quote', recordId: 'q1', changes: { status: 'accepted' } }]);
+  });
+
+  it('empty: no flows answered draws no list, and the sentence stands alone', async () => {
+    const calls = installStartsFetch(listed([]));
+    const dialog = await openConfirm();
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    await settle();
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+  });
+
+  it('failure: a refused read, a network error and a malformed answer each draw no list', async () => {
+    const answers: StartsAnswer[] = [
+      { status: 404, body: { success: false, error: { code: 'RECORD_NOT_FOUND', message: 'no' } } },
+      'network-error',
+      { status: 200, body: { flows: [CLOSURE] } },
+    ];
+    for (const answer of answers) {
+      const calls = installStartsFetch(answer);
+      const dialog = await openConfirm();
+      await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+      await settle();
+      expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+      expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+      cleanup();
+    }
   });
 });

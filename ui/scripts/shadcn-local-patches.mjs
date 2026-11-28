@@ -157,12 +157,64 @@ const sidebarCookieReadPatches = [
       'the first render, not applied after one expanded paint. Precedence is ' +
       'cookie > `defaultOpen`; the controlled `open` prop still wins, because ' +
       'it is applied downstream of this state (`openProp ?? _open`). ' +
-      'SIDEBAR_COOKIE_NAME is passed in so the cookie name keeps exactly one ' +
-      'spelling — the write side\'s.',
+      'The provider\'s `cookieName` (default SIDEBAR_COOKIE_NAME, the ' +
+      '`sidebar-cookie-name-*` patches below) is passed in so the read and the ' +
+      'write name the same cookie.',
     find: 'const [_open, _setOpen] = React.useState(defaultOpen)',
     replace:
-      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(SIDEBAR_COOKIE_NAME) ?? defaultOpen)',
-    marker: 'readSidebarStateCookie(SIDEBAR_COOKIE_NAME)',
+      'const [_open, _setOpen] = React.useState(() => readSidebarStateCookie(cookieName) ?? defaultOpen)',
+    marker: 'readSidebarStateCookie(cookieName)',
+    occurrences: 1,
+  },
+];
+
+/**
+ * The sidebar cookie-name patches (objectstack#36899).
+ *
+ * `SidebarProvider` reads and writes ONE cookie, `sidebar_state`, so a second
+ * provider in the same console (Studio's left menu) would share the app
+ * sidebar's collapse state: collapsing one collapsed the other on the next
+ * load. A `cookieName` prop, defaulting to `SIDEBAR_COOKIE_NAME`, lets a
+ * provider keep its own; every existing provider passes none and is unchanged.
+ * The read above takes the same prop.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarCookieNamePatches = [
+  {
+    id: 'sidebar-cookie-name-prop',
+    issue: 'objectstack#36899',
+    reason: 'Declares the provider\'s optional `cookieName` prop beside `onOpenChange`.',
+    find: '    onOpenChange?: (open: boolean) => void\n',
+    replace: '    onOpenChange?: (open: boolean) => void\n    cookieName?: string\n',
+    marker: '    cookieName?: string\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-destructure',
+    issue: 'objectstack#36899',
+    reason: 'Reads the prop, defaulting to the one name every existing provider uses.',
+    find: '      onOpenChange: setOpenProp,\n',
+    replace: '      onOpenChange: setOpenProp,\n      cookieName = SIDEBAR_COOKIE_NAME,\n',
+    marker: 'cookieName = SIDEBAR_COOKIE_NAME,',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write',
+    issue: 'objectstack#36899',
+    reason: 'Writes the collapse state under the provider\'s own cookie name.',
+    find: 'document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}',
+    replace: 'document.cookie = `${cookieName}=${openState}',
+    marker: '`${cookieName}=${openState}',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-cookie-name-write-deps',
+    issue: 'objectstack#36899',
+    reason: 'The write\'s callback depends on the name it writes.',
+    find: '      [setOpenProp, open]\n',
+    replace: '      [setOpenProp, open, cookieName]\n',
+    marker: '[setOpenProp, open, cookieName]',
     occurrences: 1,
   },
 ];
@@ -323,6 +375,67 @@ const sidebarOffcanvasStateQualifierPatches = [
   marker: replace,
   occurrences: 1,
 }));
+
+/**
+ * The sidebar phone-drawer accessible-name patches (objectstack#37018).
+ *
+ * Below the mobile breakpoint `Sidebar` renders a Sheet, a dialog whose `sr-only`
+ * header upstream fills with the English literals "Sidebar" and "Displays the
+ * mobile sidebar.", so a screen reader in a zh / ja / es workspace announced
+ * English on opening a drawer whose every visible row is translated.
+ *
+ * As with the close-label family, the payload stays OUT of `src/ui/`: the
+ * translated title lives in `packages/components/src/lib/sidebar-drawer-label.tsx`
+ * (`console.nav.menuLabel`, the name the app menu inside the drawer already
+ * announces, with an English fallback), and the primitive gets three anchored
+ * edits. The description has no counterpart in the locale packs, so it is
+ * dropped and Radix is told so with `aria-describedby={undefined}`, the spelling
+ * that keeps its missing-description warning quiet. Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/sidebar.registry.txt` after
+ * `rewriteRegistryImports`.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarDrawerLabelPatches = [
+  {
+    id: 'sidebar-drawer-label-import',
+    issue: 'objectstack#37018',
+    reason:
+      'Imports the translated drawer title and drops `SheetDescription` from the ' +
+      'sheet import, since the header below no longer renders one.',
+    find: '  SheetDescription,\n  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n',
+    replace:
+      '  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n' +
+      'import { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    marker: '  SheetTitle,\n} from "./sheet"\nimport { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-no-description',
+    issue: 'objectstack#37018',
+    reason:
+      'Declares that the phone drawer has no description, so Radix does not warn ' +
+      'about a missing `Description` once the English one is dropped.',
+    find: '            data-mobile="true"\n',
+    replace: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    marker: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-title',
+    issue: 'objectstack#37018',
+    reason:
+      "The drawer dialog's accessible name: `console.nav.menuLabel` for the session " +
+      'locale, "App navigation" when no I18nProvider is mounted, in place of the ' +
+      'English "Sidebar" title and its English description.',
+    find:
+      '              <SheetTitle>Sidebar</SheetTitle>\n' +
+      '              <SheetDescription>Displays the mobile sidebar.</SheetDescription>\n',
+    replace: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    marker: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    occurrences: 1,
+  },
+];
 
 /**
  * Upstream's thumb class list, spelled exactly once.
@@ -784,6 +897,31 @@ const dropdownMenuRowTouchTargetPatches = [
 ];
 
 /**
+ * The dropdown-menu label weight patch (objectstack#36047).
+ *
+ * The console sets text in two weights, 400 and 500. Upstream's
+ * `DropdownMenuLabel` is `font-semibold` (600), the one menu face outside
+ * them; it is `font-medium` (500), size and spacing upstream's. Anchored on
+ * the label's whole class run, written from
+ * `scripts/__tests__/fixtures/shadcn-registry/dropdown-menu.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const dropdownMenuLabelWeightPatches = [
+  {
+    id: 'dropdown-menu-label-medium-weight',
+    issue: 'objectstack#36047',
+    reason:
+      'The console uses two text weights, 400 and 500. Upstream DropdownMenuLabel is ' +
+      '`font-semibold` (600); it is `font-medium` (500), everything else upstream.',
+    find: '"px-2 py-1.5 text-sm font-semibold",',
+    replace: '"px-2 py-1.5 text-sm font-medium",',
+    marker: '"px-2 py-1.5 text-sm font-medium",',
+    occurrences: 1,
+  },
+];
+
+/**
  * The tabs touch-target patch (objectstack#29215).
  *
  * `TabsTrigger` is `py-1.5 text-sm` upstream, 38 px tall inside the fixed
@@ -824,22 +962,175 @@ const tabsTouchTargetPatches = [
 ];
 
 /**
+ * The shared dialog surface (objectstack-ai/objectstack#35980), for `dialog`
+ * and `alert-dialog`.
+ *
+ * Every modal dialog draws one look: a faint overlay with no blur, a white
+ * card with a hairline edge and a translucent outer ring, and controls one
+ * step smaller. Upstream draws an 80% black overlay and a `bg-background`
+ * card with `sm:rounded-lg`; the console used to restyle both with global
+ * `[role="dialog"]` rules, which also caught every popover and drawer.
+ *
+ * The payload stays OUT of `src/ui/`: the classes live in
+ * `packages/components/src/lib/dialog-surface.ts`. Each primitive gets one
+ * import and one class token on its overlay and on its content, placed just
+ * before `className`, so `tailwind-merge` resolves them over upstream's and a
+ * call site's own classes still win. Every `find` was written from the
+ * vendored registry bytes (`dialog.registry.txt`, `alert-dialog.registry.txt`).
+ *
+ * @param {string} primitive Human-readable primitive name, for messages.
+ * @param {string} importAnchor The upstream import line the new import follows.
+ * @returns {LocalPatch[]}
+ */
+function dialogSurfacePatches(primitive, importAnchor) {
+  const id = primitive.toLowerCase().replace(/\s+/g, '-');
+  const surfaceImport =
+    'import { DIALOG_CONTENT_SURFACE, DIALOG_OVERLAY_SURFACE } from "../lib/dialog-surface"';
+  const overlayEnd = 'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",\n';
+  const contentEnd = 'sm:rounded-lg",\n';
+  return [
+    {
+      id: `${id}-surface-import`,
+      issue: 'objectstack#35980',
+      reason: `Imports the shared dialog surface classes ${primitive}'s overlay and content append.`,
+      find: importAnchor,
+      replace: `${importAnchor}\n${surfaceImport}`,
+      marker: surfaceImport,
+      occurrences: 1,
+    },
+    {
+      id: `${id}-surface-overlay`,
+      issue: 'objectstack#35980',
+      reason:
+        `${primitive}'s overlay takes the shared faint dim in place of upstream's ` +
+        '80% black. Anchored on the end of the overlay class string, the only ' +
+        'string in the file that ends in `fade-in-0`.',
+      find: overlayEnd,
+      replace: `${overlayEnd}      DIALOG_OVERLAY_SURFACE,\n`,
+      marker: '      DIALOG_OVERLAY_SURFACE,\n',
+      occurrences: 1,
+    },
+    {
+      id: `${id}-surface-content`,
+      issue: 'objectstack#35980',
+      reason:
+        `${primitive}'s content takes the shared card (white, hairline edge, ` +
+        'outer ring, 12px corner, compact controls) over upstream\'s ' +
+        '`bg-background` / `shadow-lg` / `sm:rounded-lg`. Anchored on the end of ' +
+        'the content class string.',
+      find: contentEnd,
+      replace: `${contentEnd}        DIALOG_CONTENT_SURFACE,\n`,
+      marker: '        DIALOG_CONTENT_SURFACE,\n',
+      occurrences: 1,
+    },
+  ];
+}
+
+/**
+ * The badge weight patch (objectstack#36047).
+ *
+ * The console sets text in two weights, 400 and 500; upstream's `Badge` is
+ * `font-semibold` (600), the one weight that sits outside them on every list
+ * cell and record field that shows a status or a choice. The badge keeps its
+ * size, shape and colours; only the weight is 500. Anchored on the class run
+ * that ends in the weight, written from
+ * `scripts/__tests__/fixtures/shadcn-registry/badge.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const badgeWeightPatches = [
+  {
+    id: 'badge-medium-weight',
+    issue: 'objectstack#36047',
+    reason:
+      'The console uses two text weights, 400 and 500. Upstream Badge is `font-semibold` ' +
+      '(600); it is `font-medium` (500), everything else upstream.',
+    find: 'rounded-full border px-2.5 py-0.5 text-xs font-semibold',
+    replace: 'rounded-full border px-2.5 py-0.5 text-xs font-medium',
+    marker: 'py-0.5 text-xs font-medium',
+    occurrences: 1,
+  },
+];
+
+/**
+ * objectstack#37761 — a long unbroken token keeps an alert dialog inside
+ * `max-w-lg`.
+ *
+ * The record delete confirm puts the record's title in `AlertDialogTitle`.
+ * Upstream's content is a grid with one `auto` track and its title and
+ * description carry no wrap rule, so a token wider than the dialog (a pasted
+ * URL, a file name, a hash) set the track's width: the dialog grew past the
+ * viewport and the right-aligned Cancel / confirm buttons went off-screen.
+ * The content's grid items may shrink below their min-content width, and the
+ * title and description break such a token (`overflow-wrap: anywhere`, which,
+ * unlike `break-word`, lowers the min-content width). Every `find` was written
+ * from `alert-dialog.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const alertDialogLongTokenPatches = [
+  {
+    id: 'alert-dialog-content-items-shrink',
+    issue: 'objectstack#37761',
+    reason:
+      'The content grid lets each item shrink below its min-content width (`[&>*]:min-w-0`), ' +
+      'so one long unbroken token cannot widen the track past `max-w-lg`.',
+    find: 'z-50 grid w-full max-w-lg translate-x-[-50%]',
+    replace: 'z-50 grid w-full max-w-lg [&>*]:min-w-0 translate-x-[-50%]',
+    marker: 'max-w-lg [&>*]:min-w-0',
+    occurrences: 1,
+  },
+  {
+    id: 'alert-dialog-title-wrap-anywhere',
+    issue: 'objectstack#37761',
+    reason: 'The title breaks a token wider than the dialog instead of overflowing it.',
+    find: 'className={cn("text-lg font-semibold", className)}',
+    replace: 'className={cn("text-lg font-semibold [overflow-wrap:anywhere]", className)}',
+    marker: '"text-lg font-semibold [overflow-wrap:anywhere]"',
+    occurrences: 1,
+  },
+  {
+    id: 'alert-dialog-description-wrap-anywhere',
+    issue: 'objectstack#37761',
+    reason: 'The description breaks a token wider than the dialog instead of overflowing it.',
+    find: 'className={cn("text-sm text-muted-foreground", className)}',
+    replace: 'className={cn("text-sm text-muted-foreground [overflow-wrap:anywhere]", className)}',
+    marker: '"text-sm text-muted-foreground [overflow-wrap:anywhere]"',
+    occurrences: 1,
+  },
+];
+
+/**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
  */
 export const LOCAL_PATCHES = {
   sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
-  dialog: [...i18nCloseLabelPatches('Dialog'), ...phoneCloseTouchTargetPatches('Dialog')],
+  dialog: [
+    ...i18nCloseLabelPatches('Dialog'),
+    ...phoneCloseTouchTargetPatches('Dialog'),
+    ...dialogSurfacePatches('Dialog', 'import { X } from "lucide-react"'),
+  ],
+  'alert-dialog': [
+    ...dialogSurfacePatches(
+      'AlertDialog',
+      'import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog"',
+    ),
+    ...alertDialogLongTokenPatches,
+  ],
   sidebar: [
+    ...sidebarCookieNamePatches,
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
     ...sidebarOffcanvasStateQualifierPatches,
+    ...sidebarDrawerLabelPatches,
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,
-  'dropdown-menu': dropdownMenuRowTouchTargetPatches,
+  'dropdown-menu': [...dropdownMenuRowTouchTargetPatches, ...dropdownMenuLabelWeightPatches],
   tabs: tabsTouchTargetPatches,
+  badge: badgeWeightPatches,
 };
 
 /** Components that carry at least one declared patch. */

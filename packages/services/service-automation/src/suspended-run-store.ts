@@ -263,6 +263,14 @@ export interface SuspendedRunStoreEngine {
    * best-effort posture the resolver itself takes).
    */
   getSchema?(objectName: string): unknown;
+  /**
+   * [#37705] Run `body` outside every unit of work open now — `ObjectQL`'s
+   * member of that name. What {@link ObjectStoreSuspendedRunStore.recordTerminal}
+   * runs its unawaited write in. Optional so a test double without units
+   * degrades to running `body` where it is, which is where it already runs
+   * when no unit is open.
+   */
+  runOutsideOpenUnits?<T>(body: () => T): T;
 }
 
 interface MinimalLogger {
@@ -697,8 +705,26 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
    *    snapshot's node is rebuilt from that one column;
    *  - an over-budget snapshot is recorded as a drop notice rather than
    *    dropped silently, because a bare NULL reads as "the run moved on".
+   *
+   * [#37705] The write runs outside every unit of work open when it is asked
+   * for ({@link SuspendedRunStoreEngine.runOutsideOpenUnits}). Its one caller
+   * (`run-history.ts`, the terminal arm of `recordLog`) does not await it, and
+   * a run is often inside a unit when it finishes: a record-change flow runs in
+   * the triggering write's after-hooks, inside the unit the write door opens for
+   * them. Enrolled there, the write's first read took that unit's handle, the
+   * write's own unit committed under it, and the statement failed with
+   * "Transaction query already complete", so the history row never landed. It
+   * is history beside the run, not part of the run's own work, so it neither
+   * waits for nor rolls back with that unit.
    */
-  async recordTerminal(record: RunRecord): Promise<void> {
+  recordTerminal(record: RunRecord): Promise<void> {
+    return typeof this.engine.runOutsideOpenUnits === 'function'
+      ? this.engine.runOutsideOpenUnits(() => this.writeTerminal(record))
+      : this.writeTerminal(record);
+  }
+
+  /** The body of {@link recordTerminal}, run outside the open units; that method's docblock is its contract. */
+  private async writeTerminal(record: RunRecord): Promise<void> {
     const now = new Date().toISOString();
     const id = HISTORY_PREFIX + record.runId;
     const row = {

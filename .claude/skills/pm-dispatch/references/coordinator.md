@@ -1,11 +1,11 @@
 # 协调者(Coordinator;维护者本机的专题负责人 epic lead 另是一席,⛔ 不用本文)
 
-它不是 `domain:*` 席:不坐座位贴、不认领卡;席位线程照 SKILL.md 与 `execution-duties.md` 跑循环。
+它不是执行席:不坐座位贴、不认领卡;席位线程照 SKILL.md 与 `execution-duties.md` 跑循环。
 
 ## 一、车道归属登记在座位贴(coordinator 开席位线程前读;席位线程坐席时读)
 
 - 项目管哪些车道只由项目指令声明;每条车道开一个席位线程,坐该车道空着的座位贴。
-- 一个项目在一条车道默认一席,维护者明说开座位(「开座位」「再开一个座位」)才加席。维护者对本项目已有席的车道再点 `area:*`(「接 area:X」「再开一个 area:X」)⇒ 交给该席:席把 `area:X` 写进座位贴说明段的接卡行,照 `area-lease.md` 分区(自开一区或并入现有区);⛔ 不另开席位线程、座位贴、信箱或巡检。
+- 一个项目在一条车道默认一席,维护者明说开座位(「开座位」「再开一个座位」)才加席。维护者对本项目已有席的车道再点 `area:*`(「接 area:X」「再开一个 area:X」)⇒ 交给该席:席把 `area:X` 写进座位贴标题与接卡行,照 `area-lease.md` 分区(自开一区或并入现有区);⛔ 不另开席位线程、座位贴、信箱或巡检。
 - 车道没有本项目的席时照常开席;下文 L2 积压加开照旧。
 - 席位线程在贴的说明段写「由 X 账户的项目负责」;贴协议与互斥照 `seat-lifecycle.md`。
 - 一车道归一项目:座位贴 🟢 写他账号 ⇒ 车道已有主;仲裁者是座位贴,⛔ 不是项目记忆。
@@ -19,7 +19,7 @@
 - 取卡面 = 各车道 open 卡,次序现读 `card-pick.mjs --order <序>`;判据照 `execution-duties.md`。
 - 维护者只说改级 ⇒ 只落级,评论照 `filing-gate.md` 引原话;⛔ 不借此开线程,照取卡全序。
 - 每张卡交其车道的席位线程;车道无席位线程而座位贴空着 ⇒ 先开席位线程再交卡。
-- 维护者 ⛔ 不逐卡点名车道:车道读卡的 `domain:*`;S/M 分流见 `dispatch-runbook.md` 卡线程节。
+- 维护者 ⛔ 不逐卡点名车道:车道读卡 `area:*` 与父单;S/M 分流见 `dispatch-runbook.md` 卡线程节。
 
 ## 三、全项目一个上限,p1 先(coordinator 调度读;席位交候选时读)
 
@@ -31,14 +31,15 @@
 - 槽位只算在建的线程:等人(授权批准、决策卡)或等席位 L1/L2 审核的卡线程不占槽。
 - 交回或合入即释放槽位;S 卡的席内子代理只计该席 `batch`,不计本上限。
 
-## 四、effort 与档位按难度(coordinator 开线程时读;席位请线程时读)
+## 四、档位与 effort 照派发令(coordinator 开线程时读;席位请线程时读)
 
-- 档位与 effort 的定法住 `execution-duties.md` 派发节:档位引 `dispatch-gates --tier`,effort 按卡难度。
-- 改协议语义面卡恒 `CONTRACT_REVIEW_TIER`,⛔ 不抄模型名;隔离子代理照 `--brief-template` L2 审核。
+- 档位与 effort 的取值只住 `execution-duties.md` 定档节;coordinator 照派发令所写开线程,⛔ 不另定。
+- 开卡线程前查令:`model:` 写上限而同行既无 `--tier` MANDATORY 行、又无点名裁决的 `reason:`(评论 id,或常设档位令的 id 与时刻)⇒ 退回席位,⛔ 不开线程。
+- 隔离子代理照 `--brief-template` L2 审核。
 
 ## 五、卡线程的 `needs_decision`(coordinator 收到时读;席位请裁时读)
 
-- 席位请裁 ⇒ 开天花板档决策线程(effort `xhigh`),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
+- 席位请裁 ⇒ 开决策线程(档位与 effort 照 `execution-duties.md` 定档节),附 dev 报告;规则住 SKILL.md〈升级与决策〉。
 - 等裁的卡线程不占槽(见第三节);裁决记录 = 卡上裁决评论,⛔ 不落项目文件或记忆。
 
 ## 六、额度压力(coordinator 每次开线程前读)

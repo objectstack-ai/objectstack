@@ -88,3 +88,27 @@ describe('useAiModels — a 501 means no AI service for the session (objectui#12
     hook.unmount();
   });
 });
+
+describe('useAiModels — a served tier name reaches the picker as the spec declares it (objectstack#35578)', () => {
+  it('keeps a non-empty `tierLabel`, and leaves it off an entry that has none or an off-spec one', async () => {
+    answer = () =>
+      json(200, {
+        models: [
+          { id: 'haiku', label: 'Fast · Claude Haiku 5.5', default: true, tierLabel: 'Fast' },
+          { id: 'sonnet', label: 'Advanced · Claude Sonnet 5', default: false },
+          { id: 'blank', label: 'Blank', default: false, tierLabel: '' },
+          { id: 'num', label: 'Num', default: false, tierLabel: 3 },
+        ],
+      });
+    const hook = renderHook(() => useAiModels({ apiBase: API }));
+    await pastRetries();
+
+    expect(hook.result.current.models).toEqual([
+      { id: 'haiku', label: 'Fast · Claude Haiku 5.5', tierLabel: 'Fast' },
+      { id: 'sonnet', label: 'Advanced · Claude Sonnet 5' },
+      { id: 'blank', label: 'Blank' },
+      { id: 'num', label: 'Num' },
+    ]);
+    hook.unmount();
+  });
+});

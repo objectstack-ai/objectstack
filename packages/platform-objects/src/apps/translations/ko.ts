@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { koObjects } from './ko.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 한국어 (ko) — Setup App Translations
  */
 export const ko: TranslationData = {
   objects: koObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ko'),
   apps: {
     account: {
       label: '계정',
@@ -40,7 +43,7 @@ export const ko: TranslationData = {
         group_overview: { label: '개요' },
         group_apps: { label: '앱' },
         nav_marketplace_browse: { label: '마켓플레이스 둘러보기' },
-        nav_marketplace_installed: { label: '설치된 앱' },
+        nav_packages: { label: '패키지' },
         nav_cloud_connection: { label: '클라우드 연결' },
         group_people_org: { label: '사용자 및 조직' },
         group_access_control: { label: '액세스 제어' },
@@ -77,6 +80,7 @@ export const ko: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'SCIM 자격 증명' },
         nav_api_keys: { label: 'API 키' },
+        nav_access_directory: { label: '직위 및 권한' },
 
         // 승인 받은편지함 = the Approvals Inbox component (#7234) — the surface
         // with decision actions. The three below are the engine's raw tables;
@@ -96,6 +100,7 @@ export const ko: TranslationData = {
         nav_settings_localization: { label: '현지화' },
         nav_exchange_rates: { label: '환율' },
         nav_units_of_measure: { label: '측정 단위' },
+        nav_standard_unit_settings: { label: '표준 단위 설정' },
         nav_work_calendars: { label: '근무 캘린더' },
         nav_work_calendar_exceptions: { label: '캘린더 예외' },
         nav_settings_company: { label: '회사' },
@@ -109,6 +114,7 @@ export const ko: TranslationData = {
         nav_settings_knowledge: { label: '지식' },
         nav_settings_lifecycle: { label: '데이터 수명 주기' },
         nav_recycle_bin: { label: '휴지통' },
+        nav_public_forms: { label: '공개 양식' },
         nav_notification_preferences: { label: '알림 기본 설정' },
         nav_notification_templates: { label: '알림 템플릿' },
 
@@ -132,7 +138,7 @@ export const ko: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: '개발자, 분석가, 구현 담당자를 위한 메타데이터 작업대',
       navigation: {
         group_overview: { label: '개요' },

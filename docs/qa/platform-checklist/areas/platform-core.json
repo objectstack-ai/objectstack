@@ -640,7 +640,7 @@
       "title": "The built-in apps a stock boot REGISTERS (Setup / Account) render every merged-nav destination; app-level and entry-level gates are enforced, not errored — and Studio's deliberate absence is asserted, never hunted",
       "since": "v15",
       "status": "active",
-      "revision": 17,
+      "revision": 20,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -662,10 +662,10 @@
       "steps": [
         "as admin, GET /api/v1/meta/app?id=setup and extract every merged nav destination — Setup is a SHELL of empty group anchors (packages/platform-objects/src/apps/setup.app.ts: group_overview/apps/people_org/access_control/approvals/configuration/diagnostics/integrations/advanced) filled by SETUP_NAV_CONTRIBUTIONS (setup-nav.contributions.ts) plus capability-plugin contributions (plugin-security Positions/Permission Sets, plugin-sharing Sharing Rules/Record Shares, plugin-approvals, plugin-webhooks)",
         "GET /api/v1/meta/app with NO query first and record the names actually served — a stock boot answers exactly showcase_app, setup, account. Then GET /api/v1/meta/app?id=account (account.app.ts — Profile + Inbox/Security/Developer groups). ⚠️ GET /api/v1/meta/app?id=studio answers 200 {\"items\":[]} on every stock boot and that is the expected result (knownGap): record the absence as an assertion and move on — do NOT install @objectstack/studio to make the step runnable",
-        "as admin, hand-walk each destination in each app. At a window narrower than 1416 px (1280 px included) the console folds the sidebar, and Setup and Account open that way (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, objectstack#27593; QA run #29877 met it at 1280 px). Folded, the sidebar is hidden, with no icon column (ruling 6973617688 on objectstack#35062): press the sidebar toggle at the app bar's left edge (Ctrl/⌘+B), or rest the pointer on the window's left edge, to float the full menu over the page before expanding any group. The float folds back after each chosen entry, so float it again for the next destination. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
-        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 11 namespaces of a stock single-posture boot, localization/company/branding/auth/access_policy/mail/sms/storage/ai/knowledge/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands, and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user's record page, /_console/apps/setup/sys_user/record/ID (a row click on the Users list opens a side panel at ?recordId=, which is not that page: take the id from the row or the panel), and confirm the user page's Preferences and Linked Accounts tabs (packages/platform-objects/src/pages/sys-user.page.ts#SysUserDetailPage) render that user's rows",
+        "as admin, hand-walk each destination in each app. At a window narrower than 1280 px a browser with no choice kept opens Setup and Account with the sidebar collapsed, and from 1280 px expanded (ui/packages/app-shell/src/layout/consoleSidebarRail.ts CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, ruling 7069868269 on objectstack#36112); a reader's own collapse or expand is kept per browser, on each side of that width. Collapsed, the sidebar is hidden, with no icon column (ruling 6973617688 on objectstack#35062): press the expand button at the page header's left edge, or press Ctrl/⌘+B, which does the same (ruling 7074574380 on objectstack#36112), to put it back beside the page before expanding any group — or rest the pointer on the window's left edge to float the full menu over the page; the float folds back after each chosen entry, so float it again for the next destination. EXPAND every nav group first: some render collapsed by default — Setup's Advanced group and Account's Developer group declare `expanded: false` (packages/platform-objects/src/apps/setup.app.ts, account.app.ts), and QA run #24557 found Setup's Configuration group collapsed as well — so a walk that never expands them never reaches their entries. Then navigate, wait for render, SCREENSHOT FIRST, then read the DOM — assert no pageerror, no 'failed to load', no blank <main>, no 'no actions configured' placeholder",
+        "Setup detail: confirm each settings URL entry (nav_settings_* → /apps/setup/system/settings/<namespace>) opens the settings namespace form — the 10 namespaces of a stock single-posture boot, localization/company/branding/auth/access_policy/mail/sms/storage/ai/lifecycle: the nav_settings_* entries of packages/platform-objects/src/apps/setup-nav.contributions.ts, plus nav_settings_branding, which packages/services/service-settings/src/settings-service-plugin.ts contributes only where no organization wall stands (Knowledge, nav_settings_knowledge, is contributed by packages/services/service-knowledge/src/knowledge-settings-contribution.ts only where the knowledge service is mounted, which no stock app does), and Users / Organization / Business Units / Teams / Sessions / OAuth Applications render. User preferences and identity links are not Setup destinations: open a user's record page, /_console/apps/setup/sys_user/record/ID (a row click on the Users list opens a side panel at ?recordId=, which is not that page: take the id from the row or the panel), and confirm the user page's Preferences and Linked Accounts tabs (packages/platform-objects/src/pages/sys-user.page.ts#SysUserDetailPage) render that user's rows",
         "Studio detail is NOT walked from here — the app is not registered on a stock boot (knownGap), so there is no merged nav to render. Its metadata:resource lists and component surfaces (App Builder, All Metadata Types, Packages, API Console, Flow Runs, Public Forms) are reached through the console surface at /_console/studio/<pkg>/<pillar> and are covered by area studio-authoring. What THIS item asserts about Studio is the absence itself, per clause 6",
-        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 47 Setup destinations for the admin on a stock single-org showcase boot, read from source after objectstack#34724 retired Setup › Packaged Actions (nav_packaged_actions; its switch moved onto the action in Studio); QA runs #32953 (at 5fb79bc0) and #33087 (at 8e3d4a54) read 48 before it (GET /api/v1/meta/app leaves, which match the nav source minus its gates). QA run #29877 read 46 at 589049b0, before Access policy (nav_settings_access_policy, the access_policy namespace) joined the Configuration group. Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785, itself retired by objectstack#34724), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
+        "Account detail: confirm Profile (account:profile_card), Notifications (sys_inbox_message/mine), Approvals (nav_account_approvals, the approvals:inbox component, served as …/component/approvals/inbox — the Approvals Inbox, not the sys_approval_request grid; account.app.ts), Linked Accounts (sys_account), Active Sessions (sys_session/mine), API Keys (sys_api_key/mine), OAuth Applications (sys_oauth_application/mine) and Connect an Agent (nav_connect_agent) each render — 8 Account destinations and 46 Setup destinations for the admin on a stock single-org showcase boot, read from source after #33933 took Knowledge (nav_settings_knowledge) out of the stock Setup tree (47 before it, after objectstack#34724 retired Setup › Packaged Actions, nav_packaged_actions, whose switch moved onto the action in Studio); QA runs #32953 (at 5fb79bc0) and #33087 (at 8e3d4a54) read 48 before objectstack#34724 (GET /api/v1/meta/app leaves, which match the nav source minus its gates). QA run #29877 read 46 at 589049b0, before Access policy (nav_settings_access_policy, the access_policy namespace) joined the Configuration group. Since QA run #28545's reading Setup's Packaged automation page retired under ADR-0146 D11, leaving Packaged Actions (nav_packaged_actions, automation:packaged-actions; #28785, itself retired by objectstack#34724), and its unfiltered Packages entry moved to Studio (#29547) (47 for #28927, 50 at eeec88d1 for QA run #28545, 48 re-measured at 3fd80337 for #28338, QA run #27481 read 44 and 8, QA run #24557 read 42 at 5b14b7f3, 45 on 2026-10-01, and #9453 recorded 43 and 7). Recount from the payload each run",
         "confirm the gated entries resolve to ABSENT-not-erroring for the admin: nav_organizations (requiresService org-scoping) is absent in single-org mode; nav_jwks Signing Keys is ABSENT for EVERY persona, admin included — the entry was removed in #7544 because sys_jwks declares apiEnabled:false, so its list answers OBJECT_API_DISABLED (404) for all callers and no permission gate could prune it; SSO Providers is absent unless OS_SSO_ENABLED (knownGap)",
         "sign in as the plain member: attempt to open Setup (app name setup) — capture the app-level refusal (App.requiredPermissions setup.access); open Account (declares no requiredPermissions) — capture it opening. Studio is not part of this comparison: it is absent for EVERY persona including the admin, so a member failing to reach it proves nothing about the gate (the same reasoning #7544 applied to nav_jwks)",
         "as the member, GET /api/v1/meta/app for a reachable app and confirm every manage_platform_settings-gated entry (API Keys, the manage_platform_settings settings URLs) is ABSENT from the member's payload — the server prunes, the client does not merely hide. JWKS is deliberately NOT in this list any more: it is absent for admins too, so finding it absent for a member proves nothing about the gate (#7544)",
@@ -822,6 +822,24 @@
           "date": "2026-11-18",
           "change": "steps[2]: below 1416 px the fold now hides the sidebar instead of leaving its icon rail (ruling 6973617688 on #35062): the walk floats the full menu with the toggle (Ctrl/⌘+B) or by resting the pointer on the window's left edge, and floats it again after each chosen entry, since the float folds back on navigation. The walk is unchanged in substance. No clause changed. Read from source, and measured on a CRM boot (at 1280×800 the toggle floated the menu with focus on its entry; at 1600×900 choosing an entry in the float folded it); not yet re-run by a QA run.",
           "ref": "#35187"
+        },
+        {
+          "revision": 18,
+          "date": "2026-11-22",
+          "change": "steps[2]: the threshold is 1280 px, not 1416 px, and it sets only where a browser with no choice kept starts — collapsed below it, expanded from it (ruling 7069868269 on #36112); the reader's own collapse or expand is kept per browser on each side, and the 'Keep sidebar open' switch is gone, so the walk docks the sidebar with the page header's expand button, or floats it with Ctrl/⌘+B or the window's left edge as before. The app bar named in revision 17 is gone from 768 px up (#36187). No clause changed. Read from source; not yet re-run by a QA run.",
+          "ref": "#36112"
+        },
+        {
+          "revision": 19,
+          "date": "2026-11-22",
+          "change": "steps[2]: Ctrl/⌘+B is a press on the expand / collapse button (ruling 7074574380 on #36112, which replaces the words '⌘B unchanged' of ruling 7069868269): it docks the collapsed sidebar beside the page as the reader's choice, a float included, and collapses a docked one; it no longer floats the menu, which floats only from the window's left edge. The walk is unchanged in substance. No clause changed. Read from source; not yet re-run by a QA run.",
+          "ref": "#36347"
+        },
+        {
+          "revision": 20,
+          "date": "2026-11-24",
+          "change": "steps[3] and steps[5] follow #33933: the knowledge settings page left the stock Setup tree. steps[3] lists the 10 namespaces of a stock single-posture boot (knowledge removed) and names where nav_settings_knowledge comes from now (packages/services/service-knowledge/src/knowledge-settings-contribution.ts, only where the knowledge service is mounted); steps[5] counts 46 Setup destinations, one fewer. No clause weakened. Read from source, not driven live",
+          "ref": "#33933"
         }
       ]
     },
@@ -830,7 +848,7 @@
       "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles served MASKED — anonymous denied",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -840,7 +858,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the 11 open-framework settings namespaces a stock boot serves: the 10 in builtinSettingsManifests (packages/services/service-settings/src/manifests: localization, company, branding, auth, access_policy, mail, sms, storage, ai, knowledge; access_policy is tenant-scoped, ADR-0069) PLUS lifecycle (5 specifiers), which is NOT in that aggregate — ObjectQLPlugin registers it at kernel:ready whenever a SettingsService is present (packages/objectql/src/lifecycle/lifecycle-settings.ts). Enumerating only the manifests directory undercounts by one. The stock showcase also env-pins one key: examples/app-showcase/.env sets OS_LOCALIZATION_CURRENCY=USD, so on every stock boot localization.currency reads source 'env', locked, the console shows Locked by env on Default currency, and a PUT of currency answers 409 SETTINGS_LOCKED. That is the env lock working (steps' env-lock leg), not leakage from the runner's shell; keep currency out of the round-trip and source-badge legs",
+          "the 10 open-framework settings namespaces a stock boot serves: the 9 in builtinSettingsManifests (packages/services/service-settings/src/manifests: localization, company, branding, auth, access_policy, mail, sms, storage, ai; access_policy is tenant-scoped, ADR-0069) PLUS lifecycle (5 specifiers), which is NOT in that aggregate — ObjectQLPlugin registers it at kernel:ready whenever a SettingsService is present (packages/objectql/src/lifecycle/lifecycle-settings.ts). Enumerating only the manifests directory undercounts by one. The stock showcase also env-pins one key: examples/app-showcase/.env sets OS_LOCALIZATION_CURRENCY=USD, so on every stock boot localization.currency reads source 'env', locked, the console shows Locked by env on Default currency, and a PUT of currency answers 409 SETTINGS_LOCKED. That is the env lock working (steps' env-lock leg), not leakage from the runner's shell; keep currency out of the round-trip and source-badge legs",
           "the settings service wired with a data engine so it swaps from in-memory to the sys_setting table, and with the sys_secret store + auditWriter (SettingsServicePlugin binds these on kernel:ready; the showcase stack mounts the engine)"
         ],
         "knownGaps": [
@@ -848,7 +866,7 @@
         ]
       },
       "steps": [
-        "as admin, GET /api/settings — capture the visible manifests (the 11 open-framework namespaces above; the route is the SettingsService REST surface in settings-routes.ts)",
+        "as admin, GET /api/settings — capture the visible manifests (the 10 open-framework namespaces above, and no knowledge namespace: service-knowledge contributes it, with the ai embedder_* keys, only where it is mounted; the route is the SettingsService REST surface in settings-routes.ts)",
         "pick localization (an OBSERVABLE-CONSUMER namespace — packages/core/src/security/resolve-authz-context.ts reads localization.timezone/locale/currency onto ExecutionContext). GET /api/settings/localization — capture {manifest, values}; note the timezone value and its source. On an `os dev --seed-admin` boot the dev seed has ALREADY written the host's zone (UTC in these containers) at tenant scope (packages/plugins/plugin-auth/src/auth-plugin.ts, #23175), so source reads 'tenant' before any PUT; only a boot without the dev seed starts at 'default'",
         "change it: PUT /api/settings/localization { timezone: 'Asia/Tokyo' }; re-read GET /api/settings/localization and confirm the value persists and source is the scope, 'tenant' (localization scope is 'tenant'): on a dev-seeded boot the source already read 'tenant', so the value is what round-trips; on an unseeded boot the source flips from 'default'. For the console badge (steps[5]) pick a localization key the dev seed did NOT write (e.g. default_country), so its source starts at 'default'",
         "prove EFFECT (not just the saved form): re-derive an ExecutionContext-dependent output and confirm it now resolves against the saved zone, not UTC. Two stock consumers serve: GET /api/v1/auth/me/localization (the resolved timezone the session carries), and a datetime the console renders — e.g. showcase_field_zoo's f_datetime on its record page, which shifts by exactly the zone offset. ⛔ The analytics date bucket has no stock observable (the only date-typed time dimension is due_date, and the seeded admin holds no export grant), so do not reach for it. If no localization effect is observable at all, fall back to branding.workspace_name visible in the console shell — but never tick effect off the form alone",
@@ -907,7 +925,7 @@
           "evidence": "the action response"
         },
         {
-          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: the settings row's value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext. Which settings table holds the row follows the namespace's scope: a GLOBAL-scope namespace (mail, ai, sms, storage, auth, knowledge) lands in sys_platform_setting, a tenant- or user-scope one in sys_setting",
+          "clause": "an encrypted specifier's value lands in sys_secret as a handle, never plaintext: the settings row's value_enc holds a 'sec_' handle id and sys_secret holds the ciphertext. Which settings table holds the row follows the namespace's scope: a GLOBAL-scope namespace (mail, ai, sms, storage, auth) lands in sys_platform_setting, a tenant- or user-scope one in sys_setting",
           "oracle": "api",
           "verify": "the sys_secret row (id starts 'sec_', ciphertext present) + the settings row's value_enc = that handle, value null (materialiseRow dereferences through sys_secret) — read it from sys_platform_setting for mail.smtp_password / ai.*_api_key (global scope), never from sys_setting, which holds tenant/user rows only",
           "evidence": "the sys_secret row + sys_setting.value_enc"
@@ -937,7 +955,7 @@
           "evidence": "the two 401 bodies"
         },
         {
-          "clause": "each of the 11 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
+          "clause": "each of the 10 open-framework namespaces resolves GET /api/settings/:ns with its manifest + values — no namespace 500s or serves an empty manifest",
           "oracle": "api",
           "verify": "one GET per variant in variants[]; each returns {manifest, values} with the manifest's specifiers",
           "evidence": "the per-namespace responses"
@@ -963,7 +981,6 @@
         "sms",
         "storage",
         "ai",
-        "knowledge",
         "lifecycle"
       ],
       "traps": ["stale-console-bundle", "dispatcher-vs-hono-route"],
@@ -1001,6 +1018,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0], steps[0], acceptance[12] and variants recounted (stale count, card #33330, row 143 of the #32908 close-out ledger; QA run #33048 comment 6846028996 on #32908). builtinSettingsManifests (packages/services/service-settings/src/manifests/index.ts) now holds 10 manifests, access_policy (tenant scope) among them, so a stock boot serves 11 namespaces with lifecycle. variants gains access_policy and lifecycle, so acceptance[12]'s one-GET-per-variant reads all 11 (lifecycle was counted but missing from the list before). The fixture also names the showcase's own env pin, OS_LOCALIZATION_CURRENCY=USD in examples/app-showcase/.env, whose Locked by env badge and 409 SETTINGS_LOCKED #33048 met. No clause weakened: acceptance[12] now binds one more namespace. Read from source at base 87330e89, not driven live",
           "ref": "#33330"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-15",
+          "change": "fixtures.requires[0], steps[0], acceptance[7], acceptance[12] and variants recounted for #33933: knowledgeSettingsManifest left builtinSettingsManifests (9 manifests, so a stock boot serves 10 namespaces with lifecycle), and service-knowledge contributes the knowledge namespace and the ai embedder_* keys only where it is mounted. variants drops knowledge; acceptance[7]'s global-scope list drops it. No clause weakened: every namespace a stock boot still serves is still read. Read from source, not driven live",
+          "ref": "#33933"
         }
       ]
     },
@@ -3214,7 +3237,7 @@
       "title": "Seed mode matrix (update/upsert/ignore): each live mode does exactly its verb through the ONE SeedLoaderService, no-op replays skip instead of churning, ignore reports skips — and the retired `insert` and `replace` are refused at the draft save with SeedMode's own prescription, so neither can reach a load",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -3234,7 +3257,7 @@
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
-        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 18.7.0 …); nothing is stored under the seed's name",
+        "INSERT (retired): PUT a seed draft (mode insert) declaring A → refused 422 INVALID_METADATA, one issues[] entry {path: 'mode', code: 'invalid_value'} whose message is SeedMode's own prescription (`seed.mode: 'insert'` was removed in @objectstack/spec 19.0.0 …); nothing is stored under the seed's name",
         "REPLACE (retired): the same draft with mode replace → the same 422 refusal at `mode`, carrying replace's own prescription (it inserted every record and left clearing the table to the caller); nothing is stored",
         "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because the UPDATE step set A to a2, so it re-converges A to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the run's own DB"
@@ -3355,6 +3378,12 @@
           "date": "2026-11-19",
           "change": "title, fixtures, steps[4] to [6], acceptance[3] to [5], variants, enumSource and source[0] to [1] revised to the three live modes. #34791 (#34613) retired `insert` and `replace` at the schema: SeedMode became enumWithRetiredValues(SEED_MODE_VALUES, SEED_MODE_RETIRED), so the pin read 0 members and the watchdog went red; it now counts SEED_MODE_VALUES (3). steps[4] and [5] and acceptance[3] and [4] score the two retired modes as refused at the draft save, the answer measured in-process at base b65488a8 (the save door's own suite, protocol.seed-external-id-refusal.test.ts): 422 INVALID_METADATA, issue at mode, code invalid_value, message the mode's prescription. knownGaps[1] and [2] described insert-mode duplication and go with it; the stored-dataset refusal is recorded as scored from its unit pin. No live-mode verdict moves",
           "ref": "#35297"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-25",
+          "change": "steps[5]'s quoted prescription names @objectstack/spec 19.0.0, not 18.7.0. The retirement is not in the published 18.6.0 (read off the tag's tree), and with PROTOCOL_VERSION at 19 under pre mode the next release main cuts is 19.0.0, so SeedMode's own message now says 19.0.0 (packages/spec/src/data/seed.zod.ts, the same PR). No step, clause or verdict moves",
+          "ref": "#37314"
         }
       ]
     },
@@ -3765,10 +3794,10 @@
     },
     {
       "id": "platform-core.protocol-18-handshake-and-stored-replay",
-      "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
+      "title": "Protocol upgrade surfaces at protocol 19: a package declaring engines.protocol \"^18\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 18` (\"^19\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and an artifact built before a retirement, whose range admits 19 from a floor below the runtime's spec label, boots with one warn per replayed conversion",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3780,14 +3809,14 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "a scratch package manifest with engines.protocol \"^17\" and one with \"^18\"",
+          "a scratch package manifest with engines.protocol \"^18\" and one with \"^19\"",
           "a stored v17-shaped row (e.g. an element using a retired flat data-binding key) planted into the scratch DB"
         ]
       },
       "steps": [
-        "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^17 manifest; then the ^18 one",
+        "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^18 manifest; then the ^19 one",
         "plant the row into sys_metadata, then reboot on the same DB (or plant with the server stopped), then GET /api/v1/meta/page/PLANTED and compare with the planted body; PUT the planted (old-shape) body back. ⚠️ A row planted under a running server is not what a GET reads: the server answers from its in-memory registry until it reboots (QA run #27438 read the pre-plant body), so a GET before the reboot scores the cache, not the stored-row replay",
-        "boot (`os start`) a ^18 dist/objectstack.json built before a retirement; read the boot warns. An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`. ⚠️ Such a copy boots ALONE: the cwd config joins a boot only when the artifact is its own compiled output (packages/cli/src/utils/artifact-precedence.ts#cwdConfigJoinsBoot), so the config's code plugins drop out, and the showcase's boot aborts after the conversion warns (service-automation refuses connector 'showcase_status_api', provider 'rest': 'Installed providers: [none]'; QA run #33853 at a557fa38, where an unedited copy aborted the same way). The warns print before the abort, so acceptance[3] is read from that log; for a boot that also serves, build the artifact from an app with no code-plugin connector (examples/app-todo). Putting the edited copy at a scratch copy's conventional dist/objectstack.json is no way round it: there the config boots, not the copy, and no conversion warn prints"
+        "boot (`os start`) a dist/objectstack.json built before a retirement, its engines.protocol edited to '>=18.0.0'; read the boot warns. A '^18' artifact (what an 18.x build declares) is refused at the handshake under protocol 19 before any conversion runs, and a bare '^19' reads as the floor 19.0.0, above every step-18 stamp, so neither opens the window; '>=18.0.0' keeps the floor 18.0.0 below the runtime's spec label and admits 19, as the runtime's own option-B pin does (packages/runtime/src/standalone-stack-option-b-forward-conversion.test.ts). An edited copy of a built artifact must sit where its references resolve: its runtimeModule (objectstack-runtime.HASH.mjs) is resolved relative to the artifact's own directory (packages/runtime/src/load-artifact-bundle.ts#mergeRuntimeModule) and imports from node_modules, so keep the copy beside the original in the app's dist/ and boot it with `--artifact COPY`. ⚠️ Such a copy boots ALONE: the cwd config joins a boot only when the artifact is its own compiled output (packages/cli/src/utils/artifact-precedence.ts#cwdConfigJoinsBoot), so the config's code plugins drop out, and the showcase's boot aborts after the conversion warns (service-automation refuses connector 'showcase_status_api', provider 'rest': 'Installed providers: [none]'; QA run #33853 at a557fa38, where an unedited copy aborted the same way). The warns print before the abort, so acceptance[3] is read from that log; for a boot that also serves, build the artifact from an app with no code-plugin connector (examples/app-todo). Putting the edited copy at a scratch copy's conventional dist/objectstack.json is no way round it: there the config boots, not the copy, and no conversion warn prints"
       ],
       "acceptance": [
         {
@@ -3797,13 +3826,13 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "^17 → 422 OS_PROTOCOL_INCOMPATIBLE with migrateCommand naming --from 17; ^18 admitted",
+          "clause": "^18 → 422 OS_PROTOCOL_INCOMPATIBLE with migrateCommand naming --from 18; ^19 admitted",
           "oracle": "api",
           "verify": "status + code + migrateCommand",
           "evidence": "both answers"
         },
         {
-          "clause": "the planted row is served in the canonical v18 shape; PUT of the old shape → 422 with the tombstone prescription",
+          "clause": "the planted row is served in the canonical shape; PUT of the old shape → 422 with the tombstone prescription",
           "oracle": "api",
           "verify": "GET body vs planted; PUT status + message",
           "evidence": "both excerpts"
@@ -3825,7 +3854,8 @@
         "packages/spec/src/conversions/stored.ts#applyConversionsToStoredItem",
         "packages/metadata-core/src/artifact-forward-conversion.ts#applyArtifactForwardConversions",
         "ADR-0087",
-        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22130-protocol-18, 23001-prerelease-artifact-window"
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22130-protocol-18, 23001-prerelease-artifact-window",
+        "v19 changeset 37229-protocol-19 and the step-19 semantic entry packages/spec/src/migrations/entries/semantic/19.protocol-18-range-refused.ts"
       ],
       "history": [
         {
@@ -3857,6 +3887,12 @@
           "date": "2026-11-15",
           "change": "acceptance[0].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-25",
+          "change": "Revised to protocol 19: PROTOCOL_VERSION moved to 19.0.0, so the handshake refuses a range that admits 18 and not 19. title, fixtures.requires[2], steps[0], acceptance[1] and source move the refused/admitted pair from ^17/^18 to ^18/^19 and the migrateCommand from --from 17 to --from 18 (measured at the PR head: 'targets protocol ^18 (engines.protocol) but this runtime is protocol 19.0.0 … Run: objectstack migrate meta --from 18'). steps[2] and the title's artifact half: a ^18 artifact is now refused at the handshake before any conversion, and ^19 reads as the floor 19.0.0, which opens no window for step-18 retirements (artifact-forward-conversion.ts policy), so the run edits the copy's range to '>=18.0.0', the move the runtime's option-B pin made. acceptance[2] drops 'v18' from the canonical shape: the stored replay (applyConversionsToStoredItem, includeRetired) is unchanged at 19. The id keeps its protocol-18 slug because ids are immutable. No acceptance[0] ref changes; each still passes at protocol 19",
+          "ref": "#37314"
         }
       ]
     },
@@ -5251,6 +5287,134 @@
           "date": "2026-11-10",
           "change": "initial — multi-replica on Redis: one shared Redis cache, so cache-backed limits hold across replicas (#31624). Blocked(fixture): no multi-node gate in the open tree. Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
           "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.disabled-package-every-surface-agrees",
+      "title": "Once a package is disabled every surface says the same: its objects are gone from the MCP tools, global search and the metadata reads as well as the data API and the console, and enabling brings every surface back together",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin, who disables and enables the package",
+        "the admin's MCP client with a personal osk_ key"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the writable probe package of platform-core.package-lifecycle-enable-disable, published with a searchable probe object holding seeded rows and a nav entry"
+        ]
+      },
+      "steps": [
+        "with the package enabled: over MCP call list_objects and query_records on the probe object; GET /api/v1/search?q= a term in a probe row; GET /api/v1/meta/object/PROBE; open the probe's list in the console",
+        "PATCH /api/v1/packages/:id/disable",
+        "repeat every read of steps[0]",
+        "PATCH /api/v1/packages/:id/enable and repeat every read again"
+      ],
+      "acceptance": [
+        {
+          "clause": "after disable no surface serves the probe object: MCP list_objects omits it and query_records refuses it, global search returns no probe hit, the metadata read does not serve it, and the console shows its named not-found state",
+          "oracle": "api",
+          "verify": "compare the five reads before and after disable (packages/objectql/src/registry-packages.ts#disablePackage flips the registry every surface reads)",
+          "evidence": "the five reads in both states"
+        },
+        {
+          "clause": "after enable every surface serves it again, the rows intact",
+          "oracle": "api",
+          "verify": "the five reads match the first state, row counts equal",
+          "evidence": "the reads after enable"
+        }
+      ],
+      "negative": [
+        "any one surface still serving the disabled package's object while another refuses it is a FAIL: the surfaces disagree",
+        "a search hit or an MCP row from a disabled package is a FAIL"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 1: once disabled every surface says the same",
+        "packages/objectql/src/registry-packages.ts#disablePackage",
+        "the REST, /meta/app and console half is platform-core.package-lifecycle-enable-disable"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps the every-surface half of North Star core feature package 1 (MCP and search beside the REST and console reads platform-core.package-lifecycle-enable-disable covers); read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.release-notes-and-migration-guide-gates",
+      "title": "Every released major has a curated, navigable release page, every breaking change carries its migration in its changeset and its ADR-0087 disposition, and the protocol upgrade guide is generated from the change registry — each gate can go red",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "build",
+      "personas": [
+        "ci",
+        "the release maintainer who reads the gates before a release"
+      ],
+      "fixtures": {
+        "app": "any",
+        "requires": [
+          "a checkout with packages/spec/CHANGELOG.md and content/docs/releases",
+          "a built packages/spec for the upgrade-guide check"
+        ]
+      },
+      "steps": [
+        "run pnpm check:release-notes; record the verdict and the released majors it read",
+        "run pnpm check:adr-0087-registration; record the verdict",
+        "run pnpm --filter @objectstack/spec check:upgrade-guide and check:spec-changes; record the verdicts",
+        "run each gate's --self-test; record that each red path is exercised",
+        "red probe: in a scratch copy, remove the newest major's entry from content/docs/releases/meta.json; run check:release-notes against it; record the red; revert"
+      ],
+      "acceptance": [
+        {
+          "clause": "every gate is green on a clean tree",
+          "oracle": "build",
+          "verify": "each command exits 0 with its own pass line",
+          "evidence": "the gate outputs"
+        },
+        {
+          "clause": "a released major without a navigable release page fails the release-notes gate, naming the major",
+          "oracle": "build",
+          "verify": "the probe run exits non-zero naming the unwired page (scripts/check-release-notes.mjs#findProblems; the two documented exceptions are scripts/check-release-notes.mjs#KNOWN_MISSING)",
+          "evidence": "the red output and the green re-run"
+        },
+        {
+          "clause": "the upgrade guide is a projection of the change registry, so a registry change without its guide cannot pass",
+          "oracle": "build",
+          "verify": "check:upgrade-guide generates in memory and exits 0 (packages/spec/scripts/build-upgrade-guide.ts#build)",
+          "evidence": "the gate output"
+        },
+        {
+          "clause": "the self-tests prove each gate can go red",
+          "oracle": "build",
+          "verify": "every --self-test passes its batteries",
+          "evidence": "the self-test outputs"
+        }
+      ],
+      "negative": [
+        "a green release-notes run with the newest major unwired is a FAIL of the gate",
+        "a breaking changeset that lands without its migration and disposition is a FAIL of the registration gate; report it against the changeset, not the ledger"
+      ],
+      "source": [
+        "docs/NORTH-STAR.md, Product areas, area:package core feature 4: every release has release notes, and a breaking change has a migration guide",
+        "scripts/check-release-notes.mjs#findProblems",
+        "scripts/check-adr-0087-registration.mjs#MIGRATION_LEDGER_GENERATOR",
+        "packages/spec/scripts/build-upgrade-guide.ts#build",
+        "AGENTS.md, Post-Task Checklist step 3 (breaking changesets carry their migration)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-25",
+          "change": "initial — maps North Star core feature package 4 to an item; read from source at 49c8e0f0, no live run made",
+          "ref": "#35212"
         }
       ]
     }

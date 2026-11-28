@@ -86,7 +86,8 @@ describe('resolveDateMacros', () => {
 
   it('leaves unknown tokens untouched and ignores non-strings', () => {
     expect(resolveDateMacros('{not_a_macro}', now)).toBe('{not_a_macro}');
-    expect(resolveDateMacros('hello {today} world', now)).toBe('hello 2026-05-25 world');
+    // A macro inside a longer string is a literal, as on the server.
+    expect(resolveDateMacros('hello {today} world', now)).toBe('hello {today} world');
     expect(resolveDateMacros(42 as any, now)).toBe(42);
     expect(resolveDateMacros(null as any, now)).toBe(null);
   });
@@ -94,7 +95,7 @@ describe('resolveDateMacros', () => {
   it('accepts both {token} and ${token} forms', () => {
     expect(resolveDateMacros('${today}', now)).toBe('2026-05-25');
     expect(resolveDateMacros('range: ${last_week_start}..${today}', now)).toBe(
-      'range: 2026-05-18..2026-05-25',
+      'range: ${last_week_start}..${today}',
     );
   });
 

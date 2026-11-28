@@ -8,6 +8,7 @@ import { SysMigrationJournal } from './system/sys-migration-journal.object.js';
 import { SysSecret } from './system/sys-secret.object.js';
 import { SysExchangeRate } from './system/sys-exchange-rate.object.js';
 import { SysUnit } from './system/sys-unit.object.js';
+import { SysStandardUnitSetting } from './system/sys-standard-unit-setting.object.js';
 import { SysWorkCalendar } from './system/sys-work-calendar.object.js';
 import { SysWorkCalendarException } from './system/sys-work-calendar-exception.object.js';
 import { SysTrustedKey } from './system/sys-trusted-key.object.js';
@@ -15,6 +16,10 @@ import { SysLifecycleState } from './system/sys-lifecycle-state.object.js';
 import { SysRecycleBin } from './system/sys-recycle-bin.object.js';
 import { SysSeedLandedKey } from './system/sys-seed-landed-key.object.js';
 import { attestFreshDatastore } from './system/migration-flag.js';
+import { SysTask } from './work/sys-task.object.js';
+import { SysNote } from './work/sys-note.object.js';
+import { WORK_OBJECT_SHARING_RULES } from './work/sharing-rules.js';
+import { installWorkObjectHooks } from './work/hooks.js';
 import type {
   II18nService,
   IObjectQLEngine,
@@ -123,12 +128,25 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  *    in every composition that can write or read a record, so it has no
  *    on/off capability boundary of its own (ADR-0029 D2) and registers here,
  *    in the first manifest beside the exchange rates.
+ *  - **`sys_standard_unit_setting`** — the organization's display decimal
+ *    places for a standard unit code (ADR-0158 U6, Open item 10 option A),
+ *    the standard-code counterpart of `sys_unit`'s own `decimal_places`. Its
+ *    reader is the display of a quantity with its unit, so it registers
+ *    beside `sys_unit` for the same reason.
  *  - **`sys_work_calendar`** / **`sys_work_calendar_exception`** — the
  *    organization's working calendars and their dated holidays and make-up
  *    workdays (ADR-0157 D1). Registered here for the reason the rate table
  *    is: their readers are the ObjectQL engine's calendar service and what it
  *    serves — the working-day formula functions and the approval sweep's
  *    working-time clock — not one optional service. Same manifest.
+ *  - **`sys_task`** / **`sys_note`** — the built-in tasks and notes every
+ *    environment carries, so any application's navigation can name them
+ *    (step 1: no links to other records). Unlike everything above they are
+ *    business data, not infrastructure, so they ride a manifest of their own
+ *    ({@link WORK_OBJECTS_MANIFEST}) carrying the task's assignee sharing
+ *    rule; the completion stamp and the note heading are before-write hooks
+ *    installed on the engine in `start()` (`work/hooks.ts`). Same database as
+ *    the first manifest: no `defaultDatasource`.
  *  - **Fresh-datastore attestation** (#3438, ADR-0104 2026-07-30) —
  *    travels with the ledger registration: a store this boot created from
  *    empty is attested once that boot's own data has settled
@@ -155,7 +173,7 @@ import { SEED_SETTLEMENT_SERVICE } from '@objectstack/spec/contracts';
  * ledger is simply absent — every flag reader answers "not verified", the
  * safe posture — secret-field writes fail closed (throw, never cleartext),
  * and without an i18n service the UI falls back to the inline literals
- * carried on each App / Dashboard / `*.form.ts` schema.
+ * carried on each App / Dashboard / `*.metadata-form.ts` schema.
  *
  * Structurally typed against `@objectstack/core`'s `Plugin` contract so
  * this package does not need to depend on the kernel at compile time.
@@ -217,6 +235,21 @@ const ACTIVATION_LEDGER_MANIFEST = {
   namespace: 'sys',
 } as const;
 
+/**
+ * The manifest the built-in tasks and notes register under: their own package
+ * id, so the assignee sharing rule is addressed as this package's
+ * (`(package, name)`, ADR-0150 D1) and an organization's own objects and rules
+ * never collide with the infrastructure manifest's. No `defaultDatasource`:
+ * the rows live on the project database with every other business record.
+ */
+export const WORK_OBJECTS_MANIFEST = {
+  id: 'com.objectstack.platform-objects.work',
+  name: 'Tasks and Notes',
+  version: '1.0.0',
+  type: 'plugin',
+  scope: 'system',
+} as const;
+
 export class PlatformObjectsPlugin {
   readonly name = 'com.objectstack.platform-objects';
   readonly type = 'standard';
@@ -238,7 +271,7 @@ export class PlatformObjectsPlugin {
         version: this.version,
         type: 'plugin',
         scope: 'system',
-        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysUnit, SysWorkCalendar, SysWorkCalendarException, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey],
+        objects: [SysMigration, SysMigrationJournal, SysSecret, SysExchangeRate, SysUnit, SysStandardUnitSetting, SysWorkCalendar, SysWorkCalendarException, SysTrustedKey, SysLifecycleState, SysRecycleBin, SysSeedLandedKey],
       });
       ctx?.getService?.('manifest')?.register?.({
         ...ACTIVATION_LEDGER_MANIFEST,
@@ -252,6 +285,33 @@ export class PlatformObjectsPlugin {
       // refuses loudly with 503 rather than keeping a bit that reverts).
     }
 
+    // The built-in tasks and notes, on their own manifest. Asked separately so
+    // a refusal says so: the infrastructure manifests above stay registered,
+    // and a kernel that cannot register these two is told why instead of
+    // booting without them silently (a host that declares its own `sys_task`
+    // is refused by the registry's single-owner rule, ADR-0029 D3).
+    let manifest: { register?: (m: unknown) => unknown } | undefined;
+    try {
+      manifest = ctx?.getService?.('manifest');
+    } catch {
+      manifest = undefined;
+    }
+    if (manifest && typeof manifest.register === 'function') {
+      try {
+        manifest.register({
+          ...WORK_OBJECTS_MANIFEST,
+          objects: [SysTask, SysNote],
+          sharingRules: WORK_OBJECT_SHARING_RULES,
+        });
+      } catch (err: any) {
+        ctx?.logger?.warn?.(
+          `[platform-objects] the built-in task and note objects (sys_task, sys_note) were not registered: ${
+            err?.message ?? err
+          }. Applications that put them in their navigation will find no such object on this kernel.`,
+        );
+      }
+    }
+
     // The translation backstop for a kernel with no i18n service yet at this
     // plugin's `start()`. Registered here, not in `start()`, so it runs ahead of
     // the authored-translation sync hooks of the plugins ordered after this one
@@ -260,6 +320,20 @@ export class PlatformObjectsPlugin {
   }
 
   async start(ctx: any): Promise<void> {
+    // The platform-owned columns of the built-in tasks and notes
+    // (`sys_task.completed_at`, `sys_note.heading`): before-write hooks on the
+    // engine, under the work manifest's package id. A kernel with no engine
+    // has no task or note to write.
+    let engine: { registerHook?: unknown } | undefined;
+    try {
+      engine = ctx?.getService?.('objectql');
+    } catch {
+      engine = undefined;
+    }
+    if (engine && typeof engine.registerHook === 'function') {
+      installWorkObjectHooks(engine as Parameters<typeof installWorkObjectHooks>[0], WORK_OBJECTS_MANIFEST.id);
+    }
+
     // ── Fresh-datastore attestation (#3438, ADR-0104 2026-07-30) ────────
     // A store this process just created from empty can hold no legacy
     // value, so the data migrations that exist to find and convert them

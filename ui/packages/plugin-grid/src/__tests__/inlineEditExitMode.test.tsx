@@ -5,14 +5,15 @@
  * type (text, number, date, lookup, …) as the in-cell editor. Non-discrete
  * types stage their value on every change and used to have NO way to leave edit
  * mode — click-outside, Enter, and the Save button all failed to dismiss the
- * editor, leaving the cell permanently stuck showing the widget.
+ * editor, leaving the cell permanently stuck showing the widget. (The Save
+ * button went with the staged model, objectstack#35827: a commit is the save.)
  *
  * These tests drive the real DataTable ← ObjectGrid path against an in-memory
  * fake server and assert the editor actually exits (its <input> / trigger is
  * gone) while the staged value is preserved (or reverted, for Escape).
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -103,7 +104,6 @@ function renderGrid(ds: any, columns: any[]) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns,
     pagination: { pageSize: 50 },
   };
@@ -128,6 +128,22 @@ const cellByText = (row: HTMLElement, text: string) =>
 const firstRow = (container: HTMLElement) =>
   container.querySelector('tbody tr') as HTMLElement;
 
+/**
+ * Open `td`'s editor the select-first way (a click selects, a double-click
+ * edits; objectstack#35827) and hand back the input on its overlay layer
+ * (objectstack#35688), read once that layer has settled.
+ */
+async function openEditor(td: HTMLElement): Promise<HTMLInputElement> {
+  fireEvent.click(td);
+  fireEvent.doubleClick(td);
+  await waitFor(() => expect(td.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+  await act(async () => {});
+  return td.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
+}
+
+/** The cell's editor layer, or null once the edit has ended. */
+const editorOf = (td: HTMLElement) => td.querySelector('[data-slot="cell-editor-overlay"]');
+
 describe('ObjectGrid — injected text/number editor exits edit mode', () => {
   const textCols = [
     { field: 'name', label: 'Name', type: 'text' },
@@ -140,21 +156,15 @@ describe('ObjectGrid — injected text/number editor exits edit mode', () => {
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
 
     const nameTd = cellByText(firstRow(container), 'Row One');
-    fireEvent.click(nameTd);
-
-    const input = await waitFor(() => {
-      const el = nameTd.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
+    const input = await openEditor(nameTd);
     fireEvent.change(input, { target: { value: 'Row One EDITED' } });
 
     // Click truly outside the editor.
     fireEvent.pointerDown(screen.getByTestId('outside'));
 
     // Editor is gone…
-    await waitFor(() => expect(nameTd.querySelector('input')).toBeNull());
-    // …and the staged value remains (pending change).
+    await waitFor(() => expect(editorOf(nameTd)).toBeNull());
+    // …and the committed value is what the cell draws.
     expect(within(nameTd).getByText('Row One EDITED')).toBeInTheDocument();
   });
 
@@ -164,17 +174,11 @@ describe('ObjectGrid — injected text/number editor exits edit mode', () => {
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
 
     const qtyTd = cellByText(firstRow(container), '10');
-    fireEvent.click(qtyTd);
-
-    const input = await waitFor(() => {
-      const el = qtyTd.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
+    const input = await openEditor(qtyTd);
     fireEvent.change(input, { target: { value: '42' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    await waitFor(() => expect(qtyTd.querySelector('input')).toBeNull());
+    await waitFor(() => expect(editorOf(qtyTd)).toBeNull());
     expect(within(qtyTd).getByText('42')).toBeInTheDocument();
   });
 
@@ -184,49 +188,30 @@ describe('ObjectGrid — injected text/number editor exits edit mode', () => {
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
 
     const nameTd = cellByText(firstRow(container), 'Row One');
-    fireEvent.click(nameTd);
-
-    const input = await waitFor(() => {
-      const el = nameTd.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
+    const input = await openEditor(nameTd);
     fireEvent.change(input, { target: { value: 'discard me' } });
     fireEvent.keyDown(input, { key: 'Escape' });
 
-    await waitFor(() => expect(nameTd.querySelector('input')).toBeNull());
-    // Reverted to the original value — no pending change left behind.
+    await waitFor(() => expect(editorOf(nameTd)).toBeNull());
+    // Reverted to the original value — nothing written.
     expect(within(nameTd).getByText('Row One')).toBeInTheDocument();
     expect(within(nameTd).queryByText('discard me')).toBeNull();
   });
 
-  it('a staged injected edit persists through Save All after exiting', async () => {
+  it('an injected edit committed by a press outside is saved', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds, textCols);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
 
     const nameTd = cellByText(firstRow(container), 'Row One');
-    fireEvent.click(nameTd);
-    const input = await waitFor(() => {
-      const el = nameTd.querySelector('input') as HTMLInputElement;
-      expect(el).toBeTruthy();
-      return el;
-    });
+    const input = await openEditor(nameTd);
     fireEvent.change(input, { target: { value: 'Row One SAVED' } });
     fireEvent.pointerDown(screen.getByTestId('outside'));
-    await waitFor(() => expect(nameTd.querySelector('input')).toBeNull());
+    await waitFor(() => expect(editorOf(nameTd)).toBeNull());
 
-    const saveAll = await waitFor(() => {
-      const btn = Array.from(container.querySelectorAll('button')).find((b) =>
-        /Save All|全部保存/.test(b.textContent || ''),
-      ) as HTMLButtonElement;
-      expect(btn).toBeTruthy();
-      return btn;
-    });
-    fireEvent.click(saveAll);
-
-    // The fourth argument is the save's write options: this fixture's rows carry
-    // no `updated_at`, so no `ifMatch` is sent (objectui#12292).
+    // The commit is the save (objectstack#35827). The fourth argument is the
+    // save's write options: this fixture's rows carry no `updated_at`, so no
+    // `ifMatch` is sent (objectui#12292).
     await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 'r1', { name: 'Row One SAVED' }, undefined));
     expect(ds.store.r1.name).toBe('Row One SAVED');
   });
@@ -255,8 +240,10 @@ describe('ObjectGrid — injected lookup editor exits edit mode', () => {
     };
     const panel = () => managerTd().querySelector('[data-testid="lookup-in-cell"]') as HTMLElement | null;
 
-    // Enter edit mode: the list is open at once, inside the cell.
+    // Enter edit mode (select-first: a click selects, a double-click edits):
+    // the list is open at once, inside the cell.
     fireEvent.click(managerTd());
+    fireEvent.doubleClick(managerTd());
     await waitFor(() => expect(panel()).toBeTruthy());
 
     const option = await waitFor(() => within(panel()!).getByText('Dev Admin'));
@@ -281,6 +268,7 @@ describe('ObjectGrid — injected lookup editor exits edit mode', () => {
     const panel = () => managerTd().querySelector('[data-testid="lookup-in-cell"]') as HTMLElement | null;
 
     fireEvent.click(managerTd());
+    fireEvent.doubleClick(managerTd());
     await waitFor(() => expect(panel()).toBeTruthy());
 
     // The click-outside guard treats the editor's own content as inside: a

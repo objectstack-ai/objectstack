@@ -17,7 +17,7 @@
  */
 
 import type { FormField } from '@object-ui/types';
-import { isExpressionComputedField } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpressionComputedField } from '@object-ui/core';
 import { SERVER_OWNED_FIELD_NAMES } from './sanitize';
 
 /** FormField types that are computed/aggregate and must be excluded from modal edit/create forms */
@@ -113,16 +113,42 @@ export function isWideFieldType(type: string): boolean {
 const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:image']);
 
 /**
+ * The object field type that takes the whole row on its declaration alone,
+ * whatever widget id it maps to: `repeater`, an embedded array of rows
+ * (objectstack-ai/objectstack#37677).
+ *
+ * Read off the OBJECT field, not the resolved `FormField.type`, because the
+ * widget id it maps to is shared: `mapFieldTypeToFormType` maps `repeater` to
+ * `field:object`, the JSON editor that `json`, `object`, `composite` and
+ * `record` take too (objectui#11448). Putting `field:object` on
+ * {@link WIDE_FIELD_TYPES} would widen all five. `repeater` used to reach the
+ * full row through the wide `field:grid` widget it mapped to, and lost it when
+ * the alias moved, while the spec `span` docblock still lists it as wide.
+ *
+ * The bare name is matched on `FormField.type` as well, for a caller that
+ * passes a raw object-field type: app-shell's `ObjectFormDesigner` canvas asks
+ * {@link resolveColSpan} with the raw type in the stash, so it lays a repeater
+ * out the way the runtime form does. It is kept
+ * OFF {@link WIDE_FIELD_TYPES} on purpose: {@link isWideFieldType} is the
+ * type-only answer app-shell's `richtextSurfaceParity` test holds equal to
+ * plugin-detail's, and the detail view's width is not this rule's to change.
+ */
+const WIDE_DECLARED_FIELD_TYPES = new Set(['repeater']);
+
+/**
  * Does this form field take the whole row by default (the `span: 'auto'` rule)?
  *
- * A wide type (see {@link isWideFieldType}), or a `file` / `image` field whose
- * OBJECT field declares `multiple: true` — the rule plugin-detail's
- * `isWideDetailField` applies to the detail view, so a multi-file field reads
- * wide on both surfaces.
+ * A wide type (see {@link isWideFieldType}), a `repeater` (see
+ * {@link WIDE_DECLARED_FIELD_TYPES}), or a `file` / `image` field whose OBJECT
+ * field declares `multiple: true`. The first and the last are the rule
+ * plugin-detail's `isWideDetailField` applies to the detail view, so a
+ * multi-file field reads wide on both surfaces; the repeater rule is the
+ * form's alone (the spec `span` key is a form-field key).
  *
- * `multiple` is read off the object-field definition the object-bound form
- * paths stash on the FormField (`FormField.field`), and nothing else, as the
- * detail rule reads it off the object schema: it is the field's declaration.
+ * `type` and `multiple` are read off the object-field definition the
+ * object-bound form paths stash on the FormField (`FormField.field`), and
+ * nothing else, as the detail rule reads `multiple` off the object schema:
+ * they are the field's declaration.
  * A field with no stashed object field (an inline member, a form mounted
  * without an object) keeps the type-only answer.
  *
@@ -132,6 +158,8 @@ const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:im
 function isWideFormField(field: FormField): boolean {
   if (!field.type) return false;
   if (isWideFieldType(field.type)) return true;
+  if (WIDE_DECLARED_FIELD_TYPES.has(field.type)) return true;
+  if (WIDE_DECLARED_FIELD_TYPES.has(field.field?.type)) return true;
   return MULTI_FILE_FIELD_TYPES.has(field.type) && field.field?.multiple === true;
 }
 
@@ -188,7 +216,8 @@ function clampGrid(n: number | undefined): number {
  *
  *   2. legacy `colSpan`   → honoured but CLAMPED to the grid (never overflows).
  *   3. wide widget type   → whole row (textarea/markdown/… — the `span:'auto'` default),
- *      and a `file` / `image` field whose object field declares `multiple: true`.
+ *      a `repeater` (by its type or its object field's type), and a `file` /
+ *      `image` field whose object field declares `multiple: true`.
  *   4. section density    → grid / sectionColumns, so `sectionColumns` fields fill a row.
  *
  * `sectionColumns` defaults to the grid width, i.e. one field per cell (the flat
@@ -211,7 +240,7 @@ export function resolveColSpan(
     return Math.min(Math.max(1, Math.floor(field.colSpan)), grid);
   }
 
-  // `span: 'auto'` (or unset): wide widgets, and multi-file uploads, take the whole row.
+  // `span: 'auto'` (or unset): wide widgets, repeaters and multi-file uploads take the whole row.
   if (isWideFormField(field)) return grid;
 
   // Otherwise fill the section's density: N per row → grid/N cells each.
@@ -286,8 +315,11 @@ export function filterSystemFields(
     // textarea into the edit dialog. Applied in create AND edit.
     if (objField?.hidden === true) return false;
     // Also drop fields the schema explicitly marks readonly — these are
-    // platform-managed (e.g. id alias, formula result columns).
-    if (objField?.readonly === true) return false;
+    // platform-managed (e.g. id alias, formula result columns) — and fields
+    // hand-locked by `uiReadonly`: no person edits them in a dialog, so
+    // neither dialog draws an input for them (`fieldStaticallyReadOnlyByHand`,
+    // the one hand-lock read in `@object-ui/core`).
+    if (fieldStaticallyReadOnlyByHand(objField)) return false;
     return true;
   });
 }
@@ -327,8 +359,10 @@ export function filterCreateModeFields(
     const objField = objectSchema.fields[field.name];
     if (!objField) return true; // keep fields not in schema (custom fields)
 
-    // Drop fields the schema declares as readonly — they are auto-managed.
-    if (objField.readonly === true) return false;
+    // Drop fields the schema declares as readonly — they are auto-managed —
+    // and hand-locked (`uiReadonly`) fields: a console create leaves them out
+    // and the server applies their `defaultValue`.
+    if (fieldStaticallyReadOnlyByHand(objField)) return false;
 
     return !isAutoGeneratedFieldType(objField.type) && !isExpressionComputedField(objField);
   });
@@ -453,13 +487,21 @@ export interface SectionedGridLayout {
   columns: 1 | 2 | 3 | 4;
   /** The field container's grid classes; `undefined` for a one-column form. */
   fieldContainerClass: string | undefined;
+  /**
+   * How many fields per row ONE section draws, given its DECLARED `columns`
+   * (`undefined` when none): its own count, else the form's, else the
+   * undeclared count, clamped to {@link columns}. A host that draws each
+   * section on a grid of its own reads this instead of the shared field grid.
+   */
+  sectionColumns: (sectionColumns?: unknown) => number;
   /** Lay one section's fields out at that section's DECLARED `columns` (`undefined` when none). */
   layOut: (fields: FormField[], sectionColumns?: unknown) => FormField[];
 }
 
 /**
  * The ONE layout rule of a sectioned form — `ModalForm`, `ObjectForm`,
- * `TabbedForm` and `WizardForm` all call it (objectui#12548).
+ * `TabbedForm` and `WizardForm` all call it (objectui#12548), and the
+ * console's named and public form page reads its {@link SectionedGridLayout.sectionColumns}.
  *
  * Every section shares the form's single field grid (one form, one
  * react-hook-form instance — #2153/#2959), and every authored section must
@@ -476,7 +518,8 @@ export interface SectionedGridLayout {
  *   row, and a `columns: 3` section on a 4-wide grid spanned 1 cell, FOUR per
  *   row (`Math.round(grid / sectionColumns)`). The grid becomes
  *   {@link TWELVE_TRACK_GRID_COLS} and each field spans twelfths of the row:
- *     1. `span: 'full'`, or a wide widget type or multi-file upload → 12, the whole row;
+ *     1. `span: 'full'`, or a wide widget type, a repeater or a multi-file
+ *        upload → 12, the whole row;
  *     2. an authored `colSpan` → that many of its SECTION's columns, clamped
  *        to them (it keeps winning over the density);
  *     3. otherwise → 12 / the section's columns.
@@ -513,6 +556,7 @@ export function sectionedGridLayout(
     return {
       columns: grid,
       fieldContainerClass: containerGridColsFor(grid),
+      sectionColumns: density,
       layOut: (fields, declared) =>
         grid > 1 ? applyAutoColSpan(fields, grid, density(declared)) : fields,
     };
@@ -521,6 +565,7 @@ export function sectionedGridLayout(
   return {
     columns: grid,
     fieldContainerClass: TWELVE_TRACK_GRID_COLS,
+    sectionColumns: density,
     layOut: (fields, declared) => {
       const d = density(declared);
       return fields.map((field) => {
@@ -592,6 +637,45 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
 }
 
 /**
+ * The most fields a dialog lays out in ONE column (objectstack-ai/objectstack#35980).
+ * See {@link dialogDrawsSingleColumn}. Six is the maintainer's choice (ruling
+ * of record 7061696632 on #35980, over the card's proposed eight): measured at
+ * 1366×768, six fields fit the dialog with nothing to scroll, and eight run
+ * past its height cap. This constant is the one place the number lives.
+ */
+export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 6;
+
+/**
+ * Whether a dialog draws its fields one per row in the narrow `lg` size
+ * (objectstack-ai/objectstack#35980): it lays out at most
+ * {@link DIALOG_SINGLE_COLUMN_MAX_FIELDS} fields, and NOTHING in it declares
+ * `columns` — not the form, and no section. A short create or edit form then
+ * reads top to bottom, the way a list's 「New」 dialog is filled in.
+ *
+ * This reverses, for such a dialog, the development default of at least two
+ * columns that its undeclared grid drew (objectui#12521,
+ * objectstack-ai/objectstack#34607). It keeps the section-`columns` ruling on
+ * objectui#12521 (6204264665): an undeclared count is still the renderer's
+ * choice, and a declared one is drawn as written.
+ * One declared count anywhere keeps the dialog as it was — the declared count
+ * is drawn as written, the dialog is as wide as it needs, and an undeclared
+ * section beside it keeps {@link dialogUndeclaredColumns}.
+ *
+ * @param fieldCount     The number of fields the dialog lays out.
+ * @param formColumns    The form's authored `columns`.
+ * @param sectionColumns Each section's authored `columns` (empty for a flat form).
+ */
+export function dialogDrawsSingleColumn(
+  fieldCount: number,
+  formColumns: unknown,
+  sectionColumns: ReadonlyArray<unknown> = [],
+): boolean {
+  if (fieldCount > DIALOG_SINGLE_COLUMN_MAX_FIELDS) return false;
+  if (declaredColumns(formColumns) !== undefined) return false;
+  return sectionColumns.every((c) => declaredColumns(c) === undefined);
+}
+
+/**
  * How many fields per row a DIALOG draws where its author declared no
  * `columns` — on the form, and for a section on that section too
  * (objectstack-ai/objectstack#34607). Dialog-only: every page host keeps
@@ -602,8 +686,10 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
  * field-heavy business form spreads across a wide dialog while a light one is
  * never thinned out — with two bounds:
  *
- * - FLOOR two: the dialog's earlier fixed default (objectui#12521), so a form
- *   of up to eight fields draws exactly what it drew before.
+ * - FLOOR two: the dialog's earlier fixed default (objectui#12521). A dialog
+ *   that declares nothing and lays out at most six fields never reaches
+ *   this count: it draws one column ({@link dialogDrawsSingleColumn},
+ *   objectstack-ai/objectstack#35980).
  * - CAP by the dialog's size: three in a bounded dialog, four only in a
  *   `full` one. The grid's tiers are container queries
  *   ({@link CONTAINER_GRID_COLS}), and the bounded `xl` dialog's field

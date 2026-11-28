@@ -38,7 +38,7 @@ const refusal = (message: string) => Object.assign(new Error(message), { status:
 
 function makeMetadataClient(writes: Record<string, unknown> = {}) {
   return {
-    get: vi.fn().mockResolvedValue({ type: 'view', name: 'crm_deal.pipeline', item: { label: 'Pipeline' } }),
+    getDraft: vi.fn().mockResolvedValue({ type: 'view', name: 'crm_deal.pipeline', item: { label: 'Pipeline' } }),
     publish: vi.fn().mockResolvedValue(undefined),
     reset: vi.fn().mockResolvedValue(undefined),
     ...writes,

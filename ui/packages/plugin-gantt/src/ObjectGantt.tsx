@@ -39,6 +39,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  usePredicateScope,
   classifyLoadError,
 } from '@object-ui/react';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
@@ -48,6 +49,7 @@ import {
   deriveRecordPageHref,
 } from '@object-ui/plugin-detail';
 import { usePermissions } from '@object-ui/permissions';
+import { ganttHandLockedInteractions, ganttPatchByHand, type GanttLockDefs } from './ganttHandLock';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,7 +78,6 @@ import {
   resolveAffordance,
   type SchemaLike,
   applyNonGridRowCeiling,
-  nonGridRowCeilingQuery,
   GANTT_ROW_CEILING,
   type NonGridCeilingResult,
   isRealCalendarDate,
@@ -86,7 +87,6 @@ import {
   toInclusiveEndDay,
 } from '@object-ui/core';
 import {
-  getSemanticColorName,
   getSemanticHex,
   humanizeLabel,
   formatDate,
@@ -97,6 +97,7 @@ import {
 } from '@object-ui/fields';
 import { GanttView, type GanttTask, type GanttDependency, type GanttLinkType, type GanttTaskType } from './GanttView';
 import { invertFrom, invertTo, makeTzShift } from './tzShift';
+import { fetchGanttRows } from './ganttRowWalk';
 import { ResourceWorkload } from './ResourceWorkload';
 import { QuickFilterBar, type QuickFilterField, type QuickFilterOption } from './QuickFilterBar';
 import type { WorkingCalendar } from './scheduling';
@@ -1070,22 +1071,27 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       const expand = !perms?.isLoaded || !resource
         ? expandable
         : expandable.filter((f) => perms.checkField(resource, f, 'read'));
-      const result = await adapter.find(resource, {
+      // The gantt's own ceiling, `GANTT_ROW_CEILING` (objectstack#32421,
+      // ruling B), not the shared `NON_GRID_ROW_CEILING` the
+      // non-virtualised tree prices (objectui#7210, ruling a′). The gantt
+      // still fetches the whole FILTERED result set — a truthful
+      // `min(start) → max(end)` range and the group rollups need all of it,
+      // which is why paging this at `pagination.pageSize` was rejected — but
+      // "the whole result set" stops at a number instead of at whatever the
+      // table happens to hold. The walk reads one probe row past the ceiling,
+      // which is what makes the cut DETECTABLE; `applyNonGridRowCeiling`
+      // slices it back off at the SAME ceiling. ⛔ Not authorable: an
+      // authored `limit` / `pagination.pageSize` still cannot reach this
+      // query, and neither does a datasource's `external.rowCap`, by both
+      // rulings.
+      //
+      // ⛔ The ceiling is a stop condition, not a request size: the walk asks
+      // in `GANTT_FETCH_STEP` steps, because a host with a maximum page size
+      // (hosted: 5,000) refuses one `$top` of 10,001 outright, empty object
+      // or not. See `./ganttRowWalk`.
+      const result = await fetchGanttRows((params) => adapter.find(resource, params), {
         $filter: queryFilter,
         $orderby: convertSortToQueryParams(schema.sort),
-        // The gantt's own ceiling, `GANTT_ROW_CEILING` (objectstack#32421,
-        // ruling B), not the shared `NON_GRID_ROW_CEILING` the
-        // non-virtualised tree prices (objectui#7210, ruling a′). The gantt
-        // still fetches the whole FILTERED result set — a truthful
-        // `min(start) → max(end)` range and the group rollups need all of it,
-        // which is why paging this at `pagination.pageSize` was rejected — but
-        // "the whole result set" stops at a number instead of at whatever the
-        // table happens to hold. One probe row past the ceiling is what makes
-        // the cut DETECTABLE; `applyNonGridRowCeiling` slices it back off at
-        // the SAME ceiling. ⛔ Not authorable: an authored `limit` /
-        // `pagination.pageSize` still cannot reach this query, and neither
-        // does a datasource's `external.rowCap`, by both rulings.
-        ...nonGridRowCeilingQuery(GANTT_ROW_CEILING),
         ...(expand.length > 0 ? { $expand: expand } : {}),
         // objectui#10250 — the term and its field narrowing, sent together
         // or not at all. See `searchTerm` above.
@@ -1095,7 +1101,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
               ...(searchFields ? { $searchFields: searchFields } : {}),
             }
           : {}),
-      });
+      }, isCurrent);
       const capped = applyNonGridRowCeiling(result, GANTT_ROW_CEILING);
       if (isCurrent()) {
         setData(capped.rows);
@@ -1508,49 +1514,47 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // plugin-timeline and plugin-calendar via `createFieldColorResolver`:
       //   1. the field's own option `color` for this record's value —
       //      the colour the author actually declared;
-      //   2. the value itself when it already IS a colour literal;
-      //   3. the semantic-token derivation, which also maps a palette NAME
-      //      ('red') to that palette's hex — what the key's contract has always
-      //      promised ("hex or semantic name").
-      // Only when `colorField` is absent or its value is empty do we fall back
-      // to the record's status / state / priority so the chart reflects the
-      // same colour story as list/kanban; if neither exists GanttView paints
-      // the platform default blue.
+      //   2. the value itself when it already IS a colour literal.
+      // Nothing else: no colour is derived from a value, by a lookup table, a
+      // hash or the record's status / state / priority (objectstack#36882,
+      // ruled option A). With neither rung answering, `color` stays undefined
+      // and GanttView paints its default bar colour. Declaring `colorField`
+      // asks the chart to read the colours declared on that field's options,
+      // not to invent them.
       //
-      // ⛔ The raw value must never reach `color` again. That was this card's
-      // defect: `backgroundColor: "open"` is not a colour, so the browser
-      // dropped the declaration and every bar rendered identically — DECLARING
-      // the documented key was strictly worse than omitting it, silently.
+      // ⛔ The raw value must never reach `color` again. That was
+      // objectui#7243's defect: `backgroundColor: "open"` is not a colour, so
+      // the browser dropped the declaration and every bar rendered
+      // identically — DECLARING the documented key was strictly worse than
+      // omitting it, silently.
+      //
+      // A palette family name an author declares on an option (`color:
+      // 'blue'`) paints that family's palette hex, the same colour the badge
+      // shows, not the CSS named colour (`blue` is #0000ff). Only rung 1 can
+      // answer a family name (rung 2 accepts hex / rgb / hsl alone), so this
+      // maps a declaration and never a stored value; a hex or other literal
+      // passes through unchanged as the fallback.
       const colorValue = colorField ? record[colorField] : undefined;
-      let color = resolveColorFieldValue(colorValue);
-      if (!color && colorValue != null && colorValue !== '') {
-        // Rung 3 for the declared field's own value. `getSemanticColorName`
-        // always answers for a non-empty value (semantic map, else its stable
-        // hash), so a declared `colorField` always paints something real.
-        color = getSemanticHex(getSemanticColorName(String(colorValue), colorValue));
-      }
-      if (!color) {
-        const fallbackVal =
-          record.status ?? record.state ?? record.priority ?? record.severity;
-        if (fallbackVal != null && fallbackVal !== '') {
-          const name = getSemanticColorName(undefined, fallbackVal);
-          if (name) color = getSemanticHex(name);
-        }
-      }
+      const declaredColor = resolveColorFieldValue(colorValue);
+      const color = declaredColor ? getSemanticHex(declaredColor, declaredColor) : undefined;
       // Alert stroke: the option colour first (same rung 1 as the bar — an
       // authored option colour is an authored option colour whichever slot it
-      // paints), then today's behaviour: semantic palette names map to their
-      // hex, anything else (hex, css color) passes through untouched.
+      // paints), then the value itself, which `borderColorField`'s contract
+      // makes the stroke colour ("any CSS color or semantic palette name",
+      // typically a server-computed alert field). Either way a palette family
+      // name paints its palette hex — `color: 'blue'` on an option strokes
+      // #3b82f6, as the bar fills, never the CSS named colour #0000ff — and
+      // anything else (hex, css color) passes through untouched.
       //
       // Deliberately NO rung 3 here. The stroke is opt-in and exceptional —
       // deriving one for every record would draw an alert on records that have
       // none, which is a repaint, not a fix.
       const borderColorRaw = borderColorField ? record[borderColorField] : undefined;
-      const borderColor =
+      const strokeColor =
         borderColorRaw != null && borderColorRaw !== ''
-          ? resolveBorderColorFieldValue(borderColorRaw)
-            ?? getSemanticHex(String(borderColorRaw), String(borderColorRaw))
+          ? resolveBorderColorFieldValue(borderColorRaw) ?? String(borderColorRaw)
           : undefined;
+      const borderColor = strokeColor ? getSemanticHex(strokeColor, strokeColor) : undefined;
 
       return {
         id: record.id || record._id || `task-${index}`,
@@ -2104,6 +2108,19 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
     return () => { cancelled = true; };
   }, [drawerRec, recordDetailHref, resource, dataSource]);
 
+  // The host's predicate scope, as the edit dialog binds it: the hand lock's
+  // conditional half is judged with it (objectstack#37448).
+  const predicateScope = usePredicateScope();
+
+  // A write the field hand lock refuses (`ganttPatchByHand`): nothing is sent,
+  // a fresh array identity redraws every bar from the unchanged rows, and the
+  // toast says why — the in-place editor closed on Enter, so a silent snap-back
+  // would read as a lost edit.
+  const refuseLockedWrite = useCallback(() => {
+    setData((prev) => prev.slice());
+    toast.error(t('gantt.writeFailed'), { description: t('grid.readOnlyReason.readonly') });
+  }, [t]);
+
   // Persist a drag-driven reschedule back to the data source. Mirrors
   // ObjectCalendar.handleEventDropDefault: optimistic local patch, then
   // dataSource.update; on failure we revert and log.
@@ -2129,6 +2146,18 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       if (typeof changes.progress === 'number' && progressField) patch[progressField] = changes.progress;
       if (Object.keys(patch).length === 0) return;
 
+      // Every commit path lands here — drag, resize, progress, the in-place
+      // editor, auto-schedule, the conflict reschedule, undo and redo — so the
+      // field hand lock is judged here, over the stored record: a locked field
+      // the write changes refuses it, one it only echoes is left out of it.
+      const verdict = ganttPatchByHand(patch, stored, objectSchema?.fields as GanttLockDefs, predicateScope);
+      if (verdict.kind === 'refused') {
+        refuseLockedWrite();
+        return;
+      }
+      for (const key of Object.keys(patch)) if (!(key in verdict.patch)) delete patch[key];
+      if (Object.keys(patch).length === 0) return;
+
       const recordId = (task as any).data?.id ?? (task as any).data?._id ?? task.id;
       if (recordId == null) return;
 
@@ -2152,7 +2181,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         notifyWriteError(err);
       }
     },
-    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema],
+    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema, predicateScope, refuseLockedWrite],
   );
 
   // Re-serialize a normalized dependency list back onto a record field,
@@ -2181,6 +2210,13 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       if (!depField) return;
       if (!effectiveDataSource || typeof effectiveDataSource.update !== 'function') return;
       const nextValue = serializeDependencies(raw, nextDeps);
+      // A link is an edit by hand of the TARGET's dependencies field: its
+      // hand lock over that record refuses it (`ganttPatchByHand`).
+      const target = data.find((r) => String(r.id ?? r._id) === String(targetId)) ?? {};
+      if (ganttPatchByHand({ [depField]: nextValue }, target, objectSchema?.fields as GanttLockDefs, predicateScope).kind === 'refused') {
+        refuseLockedWrite();
+        return;
+      }
       const prevSnapshot = data;
       setData((prev) =>
         prev.map((r) =>
@@ -2196,7 +2232,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         notifyWriteError(err);
       }
     },
-    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError],
+    [ganttConfig, effectiveDataSource, resource, data, reload, notifyWriteError, objectSchema, predicateScope, refuseLockedWrite],
   );
 
   // Persist a created/updated dependency (create + link type): upsert the source
@@ -2584,7 +2620,14 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
           groupBy={groupByAccessor}
           defaultCollapsedDepth={ganttConfig?.defaultCollapsedDepth}
           summaryExtent={ganttConfig?.summaryExtent}
-          interactions={ganttConfig?.interactions}
+          // The static hand lock closes a gesture that can only write a field
+          // locked on every record (objectstack#37448); the rest is judged on
+          // the write, per record.
+          interactions={ganttHandLockedInteractions(
+            ganttConfig?.interactions,
+            objectSchema?.fields as GanttLockDefs,
+            ganttConfig,
+          )}
           dependencyTypes={ganttConfig?.dependencyTypes}
           timeZone={ganttConfig?.timeZone}
           onBeforeTaskUpdate={onBeforeTaskUpdate}

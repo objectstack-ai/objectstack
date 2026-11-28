@@ -6,11 +6,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
-// The chat surface derives the draft/plan affordance cards from the tool result
-// via these mappers — round-tripping our cache through them is the real
-// production path (live render → cache → cache-fallback reload).
+// The chat surface derives the affordance cards from the tool result via
+// these mappers — round-tripping our cache through them is the real production
+// path (live render → cache → cache-fallback reload).
 import { uiMessageToChatMessage, type AnswerSource } from '@object-ui/plugin-chatbot';
 // objectui#9232 — the cache round trip is only proven by driving the affordance
 // it exists to restore, so the test mounts the real HITL hook over the restored
@@ -19,7 +22,6 @@ import { uiMessageToChatMessage, type AnswerSource } from '@object-ui/plugin-cha
 // `initialMessages` from `useChatConversation`).
 import {
   useHitlInChat,
-  detectDraftResult,
   detectPendingApproval,
 } from '@object-ui/plugin-chatbot';
 import { hydratedMessagesToChatMessages } from '../../console/ai/AiChatPage';
@@ -430,132 +432,9 @@ describe('useChatConversation — resumeMode "fresh" + startNew (the floating as
   });
 });
 
-// Regression: a cache-fallback reload (server returns no/partial messages →
-// `readMessageCache`) must keep the draft/plan affordance cards, not just the
-// bare tool header. `sanitizeChatMessagesForCache` used to drop the tool
-// `output`, so `mapMessages.detect*` returned undefined for cache-restored
-// messages and the "Review N changes / Publish" card, the ADR-0038 verification
-// chip, and the "Proposed plan" card silently vanished.
-describe('sanitizeChatMessagesForCache — affordance cards survive a cache round-trip', () => {
-  // The raw tool outputs exactly as the build/propose tools return them.
-  const draftedOutput = {
-    status: 'drafted',
-    drafted: [
-      { type: 'app', name: 'tracker_app' },
-      { type: 'object', name: 'task' },
-    ],
-    summary: 'Built Tracker',
-    packageId: 'pkg_1',
-    autoPublishable: true,
-    failed: [{ type: 'view', name: 'broken' }],
-    materialized: true,
-    verification: { errors: 0, warnings: 1 },
-    issues: [{ severity: 'warning', code: 'lint_x', message: 'Consider X', fix: 'do Y' }],
-    nextSteps: ['Replace the sample data', 'Publish from the status panel'],
-  };
-  const proposedOutput = {
-    status: 'blueprint_proposed',
-    summary: 'A lightweight tracker',
-    counts: { objects: 2, views: 3, dashboards: 1, seedData: 2 },
-    questions: ['Track interviews separately?'],
-    targetApp: 'recruiting',
-    blueprint: {
-      assumptions: ['One pipeline for all roles'],
-      objects: [
-        { name: 'candidate', label: 'Candidate', fields: [{ name: 'full_name' }, { name: 'stage' }] },
-        { name: 'job', fields: [{ name: 'title' }] },
-      ],
-    },
-  };
-
-  // An assistant message carrying both an apply_blueprint (drafted) and a
-  // propose_blueprint (blueprint_proposed) tool output, as the live stream
-  // produces it.
-  const liveUiMessage = {
-    id: 'a1',
-    role: 'assistant' as const,
-    parts: [
-      { type: 'text', text: 'Done.' },
-      {
-        type: 'tool-apply_blueprint',
-        toolCallId: 'tc-draft',
-        state: 'output-available' as const,
-        input: {},
-        output: draftedOutput,
-      },
-      {
-        type: 'tool-propose_blueprint',
-        toolCallId: 'tc-plan',
-        state: 'output-available' as const,
-        input: {},
-        output: proposedOutput,
-      },
-    ],
-  };
-
-  it('preserves draftReview + proposedPlan through sanitize → localStorage → re-map', () => {
-    // 1. Live render derives the cards from the raw tool output (baseline).
-    const live = uiMessageToChatMessage(liveUiMessage);
-    expect(live.toolInvocations?.[0]?.draftReview?.items).toEqual(draftedOutput.drafted);
-    // objectui#12724 — the live plan lifts each field's name for the card's
-    // field chips; the cache copy below keeps only the count, and the card
-    // degrades to the object chips there.
-    expect(live.toolInvocations?.[1]?.proposedPlan?.objects).toEqual([
-      {
-        name: 'candidate',
-        label: 'Candidate',
-        fieldCount: 2,
-        fields: [{ name: 'full_name' }, { name: 'stage' }],
-      },
-      { name: 'job', fieldCount: 1, fields: [{ name: 'title' }] },
-    ]);
-
-    // 2. Cache it, then round-trip through JSON exactly like localStorage does.
-    const cached = sanitizeChatMessagesForCache([live]);
-    const persisted = JSON.parse(JSON.stringify(cached)) as typeof cached;
-
-    // The cached tool parts keep a compact `output` (no full blueprint).
-    const draftPart = persisted[0]?.parts.find((p) => p.type === 'tool-apply_blueprint');
-    const planPart = persisted[0]?.parts.find((p) => p.type === 'tool-propose_blueprint');
-    expect(draftPart?.output).toMatchObject({ status: 'drafted' });
-    expect(planPart?.output).toMatchObject({ status: 'blueprint_proposed' });
-    // Leanness: the field definitions are dropped, only the count is kept.
-    expect(JSON.stringify(planPart?.output)).not.toContain('full_name');
-
-    // 3. Cache-fallback reload re-derives the cards from the cached output.
-    const reloaded = uiMessageToChatMessage(persisted[0]);
-
-    const draftReview = reloaded.toolInvocations?.[0]?.draftReview;
-    expect(draftReview).toBeDefined();
-    expect(draftReview?.items).toEqual(draftedOutput.drafted);
-    expect(draftReview?.summary).toBe('Built Tracker');
-    expect(draftReview?.packageId).toBe('pkg_1');
-    expect(draftReview?.autoPublishable).toBe(true);
-    expect(draftReview?.materialized).toBe(true);
-    expect(draftReview?.failedCount).toBe(1);
-    expect(draftReview?.verification).toEqual({ errors: 0, warnings: 1 });
-    expect(draftReview?.issues).toEqual([
-      { severity: 'warning', code: 'lint_x', message: 'Consider X', fix: 'do Y' },
-    ]);
-    expect(draftReview?.nextSteps).toEqual([
-      'Replace the sample data',
-      'Publish from the status panel',
-    ]);
-
-    const proposedPlan = reloaded.toolInvocations?.[1]?.proposedPlan;
-    expect(proposedPlan).toBeDefined();
-    expect(proposedPlan?.objects).toEqual([
-      { name: 'candidate', label: 'Candidate', fieldCount: 2 },
-      { name: 'job', fieldCount: 1 },
-    ]);
-    expect(proposedPlan?.counts).toEqual({ objects: 2, views: 3, dashboards: 1, seedData: 2 });
-    expect(proposedPlan?.questions).toEqual(['Track interviews separately?']);
-    expect(proposedPlan?.assumptions).toEqual(['One pipeline for all roles']);
-    expect(proposedPlan?.summary).toBe('A lightweight tracker');
-    expect(proposedPlan?.targetApp).toBe('recruiting');
-  });
-
-  it('does not add an output to plain (non-draft/plan) tool invocations', () => {
+// A tool with nothing to restore gets no cached `output` at all.
+describe('sanitizeChatMessagesForCache — plain tool invocations', () => {
+  it('does not add an output to a plain tool invocation', () => {
     const cached = sanitizeChatMessagesForCache([
       {
         id: 'a1',
@@ -571,8 +450,8 @@ describe('sanitizeChatMessagesForCache — affordance cards survive a cache roun
 });
 
 // objectstack#31868 — the data tools' `source` block ("How this was
-// computed") must survive a cache-fallback reload like the affordance cards
-// above. It rides inside the cached `output`, beside any envelope, so a turn
+// computed") must survive a cache-fallback reload, like a pending approval
+// below. It rides inside the cached `output`, beside any envelope, so a turn
 // that also waits on an approval keeps both.
 describe('sanitizeChatMessagesForCache — the answer source survives a cache round-trip (objectstack#31868)', () => {
   const answerSource: AnswerSource = {
@@ -658,7 +537,7 @@ describe('toUIMessages — remaps the ModelMessage tool-call part type', () => {
         id: 'a1',
         role: 'assistant',
         content: [
-          { type: 'tool-call', toolCallId: 'tc1', toolName: 'apply_blueprint', input: { goal: 'tracker' } },
+          { type: 'tool-call', toolCallId: 'tc1', toolName: 'aggregate_data', input: { object: 'task' } },
         ],
       },
       {
@@ -667,25 +546,21 @@ describe('toUIMessages — remaps the ModelMessage tool-call part type', () => {
           {
             type: 'tool-result',
             toolCallId: 'tc1',
-            output: { status: 'drafted', drafted: [{ type: 'app', name: 'tracker_app' }], summary: 'Built' },
+            output: { value: 3, summary: 'Counted' },
           },
         ],
       },
     ]);
 
     const part = ui[0]?.parts[0];
-    expect(part?.type).toBe('tool-apply_blueprint');
-    expect(part?.output).toEqual({
-      status: 'drafted',
-      drafted: [{ type: 'app', name: 'tracker_app' }],
-      summary: 'Built',
-    });
+    expect(part?.type).toBe('tool-aggregate_data');
+    expect(part?.output).toEqual({ value: 3, summary: 'Counted' });
 
-    // Through the mapper the tool reads as the real tool, not "call", and its
-    // draft card survives because the result merged onto the remapped part.
+    // Through the mapper the tool reads as the real tool, not "call", and the
+    // result merged onto the remapped part.
     const cm = uiMessageToChatMessage(ui[0]);
-    expect(cm.toolInvocations?.[0]?.toolName).toBe('apply_blueprint');
-    expect(cm.toolInvocations?.[0]?.draftReview?.items).toEqual([{ type: 'app', name: 'tracker_app' }]);
+    expect(cm.toolInvocations?.[0]?.toolName).toBe('aggregate_data');
+    expect(cm.toolInvocations?.[0]?.state).toBe('output-available');
   });
 
   it('leaves a tool-call without a toolName untouched (no false remap)', () => {
@@ -1147,7 +1022,10 @@ describe('useChatConversation — clears chat cache on logout / user switch', ()
 
   it('purgeChatCaches removes only the ai-chat keys', () => {
     seedChatCache();
+    // The question card's skip marks, one key per conversation.
+    localStorage.setItem('objectstack:ai-chat-question-skip:conv-1', JSON.stringify(['call_1']));
     purgeChatCaches();
+    expect(localStorage.getItem('objectstack:ai-chat-question-skip:conv-1')).toBeNull();
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBeNull();
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1:app:crm:build`)).toBeNull();
     expect(localStorage.getItem(`${MESSAGE_PREFIX}:conv-1`)).toBeNull();
@@ -1552,8 +1430,8 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
       status: 'pending_approval',
       pendingActionId: PENDING_ACTION_ID,
     });
-    // Leanness, same bargain the draft/plan inverses strike: the operator-facing
-    // prose and the proposed arguments are NOT re-serialized into the cache.
+    // Leanness: the operator-facing prose and the proposed arguments are NOT
+    // re-serialized into the cache.
     expect(JSON.stringify(toolPart?.output)).not.toContain('Q3 rollout');
     expect(JSON.stringify(toolPart?.output)).not.toContain('task_77');
     // The state that makes the card render survived the rebuild all along.
@@ -1624,90 +1502,12 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
     expect('approval' in (toolPart as object)).toBe(false);
   });
 
-  // ── The both-at-once turn ────────────────────────────────────────────────
-  //
-  // objectui#9232 first shipped with the pending arm FIRST in the chain, on the
-  // argument that the arms were "disjoint by construction, so the order is
-  // unobservable". That argument was wrong, and a pre-existing pin
-  // (`AiChatPage.runtimeMessageSeam.test.tsx`) caught it: the detectors are
-  // disjoint over one RESULT, but `draftReview` and `pendingActionId` are
-  // independent KEYS on an invocation and a turn can carry both. Pending-first
-  // therefore stopped the draft envelope reaching the cache for such a turn —
-  // the exact "Review N changes / Publish" loss the other arms exist to
-  // prevent. The tests below pin both halves of the answer.
-  describe('a turn carrying BOTH a draft envelope and a pending approval', () => {
-    const both = [
-      {
-        id: 'a1',
-        role: 'assistant' as const,
-        content: 'Staged the changes; deleting the old object needs your approval.',
-        toolInvocations: [
-          {
-            toolCallId: 'tc-approve',
-            toolName: 'apply_blueprint',
-            state: 'approval-requested',
-            pendingActionId: PENDING_ACTION_ID,
-            draftReview: { items: [{ type: 'object', name: 'lead' }], packageId: 'app.crm' },
-          },
-        ],
-      },
-    ];
-
-    it('keeps BOTH: the draft card renders and Approve reaches the pending action', async () => {
-      const persisted = throughLocalStorage(sanitizeChatMessagesForCache(both));
-
-      // `output` is the DRAFT envelope — the richer affordance keeps the one
-      // slot it can ride in, exactly as before objectui#9232.
-      const toolPart = persisted[0]?.parts.find((p) => p.type === 'tool-apply_blueprint');
-      expect(toolPart?.output).toMatchObject({
-        status: 'drafted',
-        packageId: 'app.crm',
-        drafted: [{ type: 'object', name: 'lead' }],
-      });
-      // …and the id rides the part key, which is the carrier left over.
-      expect(toolPart?.pendingActionId).toBe(PENDING_ACTION_ID);
-
-      const restored = hydratedMessagesToChatMessages(persisted);
-      const tool = restored[0]?.toolInvocations?.[0];
-
-      // Half one: the draft card comes back.
-      expect(tool?.draftReview).toEqual({
-        items: [{ type: 'object', name: 'lead' }],
-        packageId: 'app.crm',
-      });
-      // Half two: DRIVEN, not read off the call graph — the same drive the
-      // pending-only round trip gets. Approve must reach the pending action.
-      const { urls, decision } = await pressApprove(restored);
-      expect(urls).toEqual([`${API_BASE}/pending-actions/${PENDING_ACTION_ID}/approve`]);
-      expect(decision?.state).toBe('success');
-    });
-  });
-
-  // The claim the first version of objectui#9232 asserted in prose and got
-  // wrong by over-reaching. Pinned in the narrow form that is actually true,
-  // because the arm ORDER now rests on it: over one RESULT the two envelopes
-  // are mutually exclusive, which is why a pending-only turn (the shape API
-  // mode can produce) still has `output` free to carry its id.
-  it('a single tool result cannot yield both a draft and a pending approval', () => {
-    const drafted = { status: 'drafted', drafted: [{ type: 'object', name: 'lead' }] };
-    const pending = { status: 'pending_approval', pendingActionId: PENDING_ACTION_ID };
-
-    // Lit controls first: each detector really does fire on its own envelope,
-    // so the two zeros below are readings and not two dead detectors.
-    expect(detectDraftResult(drafted)).toBeDefined();
-    expect(detectPendingApproval(pending)).toBeDefined();
-
-    expect(detectPendingApproval(drafted)).toBeUndefined();
-    expect(detectDraftResult(pending)).toBeUndefined();
-  });
-
   // ── Stale entries: the decision is READ-SIDE TOLERANCE, not a version bump ──
   //
   // Entries written by the OLD code are one format behind. They are kept and
   // read, because (1) nothing can break on them — both readers of the new keys
   // answer "absent" rather than throwing; (2) a `:v2` key or a discard would
-  // blank the transcript, the draft card and the plan card that the old writer
-  // DID keep, on the one path that renders when the server has nothing; and
+  // blank the transcript the old writer DID keep, on the one path that renders when the server has nothing; and
   // (3) they self-heal on the next server-backed load, which rewrites the cache
   // through the new writer. See the block comment on `readMessageCache`.
   describe('an entry written by the OLD cache shape', () => {
@@ -1752,5 +1552,61 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
       expect(urls).toEqual([]);
       expect(decision?.state).toBe('error');
     });
+  });
+});
+
+// ui ADR-0057 Amendment A4 — the app's AI inquiry page records the app its
+// conversation belongs to: the create on the first send carries the host's
+// `createMetadata`; every other caller still sends an empty body.
+describe('useChatConversation — createMetadata rides the first-send create (objectstack#37788)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const creates = () =>
+    fetchMock.mock.calls.filter(
+      (c) => c[0] === `${API_BASE}/conversations` && (c[1] as RequestInit | undefined)?.method === 'POST',
+    );
+
+  beforeEach(() => {
+    localStorage.clear();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends { metadata } when the host passes createMetadata', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-app', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({
+        userId: 'u1',
+        scope: 'app:com.acme.policy:ask',
+        apiBase: API_BASE,
+        forceNew: true,
+        createMetadata: { activePackageId: 'com.acme.policy' },
+      }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-app');
+    expect(creates()).toHaveLength(1);
+    expect(JSON.parse(String((creates()[0][1] as RequestInit).body))).toEqual({
+      metadata: { activePackageId: 'com.acme.policy' },
+    });
+  });
+
+  it('keeps the empty body for a caller that passes none (the drawer)', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-dock', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE, forceNew: true }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(creates()).toHaveLength(1);
+    expect((creates()[0][1] as RequestInit).body).toBe('{}');
   });
 });

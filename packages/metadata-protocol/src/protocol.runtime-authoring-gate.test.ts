@@ -5615,3 +5615,143 @@ describe('runtime authoring gate — an object list view sort the list door refu
         }
     });
 });
+
+/**
+ * ADR-0160 D1 — a context pack's author defects are "reported at save and by
+ * `os validate`". `validateAiContext` crosses to this door for `ai_context`:
+ * a runtime-created pack (Studio, REST `/meta`, an MCP/AI author) that names
+ * what the live objects lack is told so on the save it makes, in the rule ids
+ * and messages `os validate` prints.
+ *
+ * Saved with warnings, never refused: the door's precedent for every advisory
+ * rule (`protocol-save.ts`, the gate call's `[#4717]` note and the receipt's
+ * conditional `advisories` key) — the gate's errors are thrown as the 422 and
+ * its advisories ride the 2xx this write earns.
+ */
+describe('ai_context author defects at save (ADR-0160 D1)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    /** The live objects the pack is judged against, as the registry serves them. */
+    const POLICY_OBJECTS = [
+        {
+            name: 'policy',
+            fields: {
+                title: { type: 'text' },
+                status: { type: 'select' },
+                content: { type: 'markdown' },
+            },
+        },
+        { name: 'policy_revision', fields: { version: { type: 'text' }, policy: { type: 'lookup', reference: 'policy' } } },
+        { name: 'account', fields: { name: { type: 'text' } } },
+    ];
+
+    function makePackProtocol() {
+        const { engine, rows } = makeStubEngine();
+        engine.registry.listItems = (type: string) => (type === 'object' ? POLICY_OBJECTS : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
+        return { protocol: protocol as any, rows };
+    }
+
+    const pack = (over: Record<string, unknown> = {}) => ({
+        name: 'policy_document',
+        label: 'Policy document',
+        object: 'policy',
+        fields: ['title', 'status'],
+        related: [{ object: 'policy_revision', fields: ['version'] }],
+        body: { field: 'content' },
+        ...over,
+    });
+
+    const savePack = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'ai_context', name: 'policy_document', item, ...extra });
+
+    const packRows = (rows: Map<string, Row>) => Array.from(rows.values()).filter((r) => r.type === 'ai_context');
+
+    /** What `os validate` prints for the same pack over the same objects: the CLI command's own entry. */
+    const validateFindings = (item: Record<string, unknown>) =>
+        runAuthoringRules('validate', { normalized: { objects: POLICY_OBJECTS, aiContexts: [item] } })
+            .filter((f) => f.rule.startsWith('ai-context-'))
+            .map((f) => ({ rule: f.rule, where: f.where, message: f.message, hint: f.hint }));
+
+    const FAMILIES: ReadonlyArray<[string, Record<string, unknown>, string]> = [
+        ['a misspelled field', pack({ fields: ['title', 'titel'] }), 'ai-context-field-unknown'],
+        ['an unknown related object', pack({ related: [{ object: 'policy_revison' }] }), 'ai-context-object-unknown'],
+        ['a related list with no link', pack({ related: [{ object: 'account' }] }), 'ai-context-related-link-unknown'],
+        ['a body that is not long text', pack({ body: { field: 'title' } }), 'ai-context-body-not-long-text'],
+    ];
+
+    for (const [what, item, rule] of FAMILIES) {
+        it(`a runtime-created pack with ${what} is saved and told ${rule}, in os validate's words`, async () => {
+            const { protocol, rows } = makePackProtocol();
+
+            const result = await savePack(protocol, item);
+
+            expect(result.success).toBe(true);
+            expect(packRows(rows)).toHaveLength(1);
+            const advisories = (result.advisories ?? []) as Array<Record<string, unknown>>;
+            expect(advisories.map((a) => a.rule), `advisories: ${JSON.stringify(advisories)}`).toEqual([rule]);
+            expect(advisories[0]!.severity).toBe('warning');
+            expect(advisories.map((a) => ({ rule: a.rule, where: a.where, message: a.message, hint: a.hint })))
+                .toEqual(validateFindings(item));
+        });
+    }
+
+    it('a pack saved under a package scope naming an installed object outside the closure is told so, with the closure remedy', async () => {
+        const { engine, rows } = makeStubEngine();
+        // `app.fx` is installed with no dependencies; `account` belongs to another installed package.
+        engine.registry.listItems = (type: string) => (type === 'object'
+            ? POLICY_OBJECTS.map((o) => ({ ...o, _packageId: o.name === 'account' ? 'com.example.pages' : 'app.fx' }))
+            : []);
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+
+        const result = await savePack(protocol, pack({ related: [{ object: 'account' }] }), { packageId: 'app.fx' });
+
+        expect(result.success).toBe(true);
+        expect(packRows(rows)).toHaveLength(1);
+        const advisories = (result.advisories ?? []) as Array<Record<string, unknown>>;
+        expect(advisories.map((a) => [a.rule, a.path]), `advisories: ${JSON.stringify(advisories)}`)
+            .toEqual([['ai-context-object-unknown', 'aiContexts[0].related[0].object']]);
+        expect(advisories[0]!.message).toContain('outside the closure of package "app.fx"');
+        expect(advisories[0]!.message).not.toContain('this stack does not define');
+        expect(advisories[0]!.hint).toBe(
+            'Declare a dependency on the package that defines "account" in the `dependencies` of "app.fx"\'s manifest, '
+            + 'or name an object inside that closure',
+        );
+    });
+
+    it('with no package, an unknown object keeps the os validate words', async () => {
+        const { protocol } = makePackProtocol();
+        const item = pack({ related: [{ object: 'polcy_revision' }] });
+        const result = await savePack(protocol, item);
+        const advisories = (result.advisories ?? []) as Array<Record<string, unknown>>;
+        expect(advisories.map((a) => ({ rule: a.rule, where: a.where, message: a.message, hint: a.hint })))
+            .toEqual(validateFindings(item));
+        expect(advisories[0]!.message).toContain('this stack does not define');
+    });
+
+    it('a clean pack carries no advisories key at all', async () => {
+        const { protocol, rows } = makePackProtocol();
+        const result = await savePack(protocol, pack());
+        expect(result.success).toBe(true);
+        expect('advisories' in result, `advisories leaked: ${JSON.stringify(result.advisories)}`).toBe(false);
+        expect(packRows(rows)).toHaveLength(1);
+    });
+
+    it('a DRAFT save of a defective pack is not judged; its publish is', async () => {
+        const { protocol } = makePackProtocol();
+        const item = pack({ fields: ['title', 'titel'] });
+        const draft = await savePack(protocol, item, { mode: 'draft' });
+        expect(draft.success).toBe(true);
+        expect('advisories' in draft, `a draft is allowed to be half-finished: ${JSON.stringify(draft.advisories)}`).toBe(false);
+        // Non-vacuous: the same body saved active is told.
+        const active = await savePack(protocol, item);
+        expect((active.advisories ?? []).map((a: any) => a.rule)).toEqual(['ai-context-field-unknown']);
+    });
+});

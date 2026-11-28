@@ -30,7 +30,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - ⛔ 永不代维护者答产品或架构问题,⛔ 无代裁通道:席位只分析与推荐,裁决恒出自人工。
 - ⛔ GitHub 之外永不维护跟踪状态;看板(org Project)只是视图,权威层是 issue 正文 + REST。
 - ⛔ 永不跑版本发布、不合并 Version Packages PR;发布动作的完整清单以 AGENTS.md 为权威。
-- ⛔ 分诊席永不认领、派发或写码;执行席只在本车道认领,改 `domain:*` 仅限整树归本席。
+- ⛔ 分诊席永不认领、派发或写码;执行席只在本车道认领,⛔ 不改 `domain:*`。
 - 唯一例外:无主 p0 锚卡一轮即轮报、再一轮分诊只代派止血:每轮一张,L1/L2 审核非分诊。
 - ⛔ 报告缺席永不读作成功,永不虚构未回报 agent 的结果。
 - ⛔ 永不整席等维护者答复;需裁事项落卡进决策箱,队列其余照常消化。
@@ -58,7 +58,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | arg | 含义 | 默认 |
 |---|---|---|
 | `triage` | 以分诊座位身份运行(只扫/分类/路由,永不认领) | — |
-| `<domain>`(如 `spec`、`skills`) | 以该 `domain:*` 车道的执行座位身份运行;承办它的是坐该席的车队项目 | — |
+| `<席位词>`(如 `objectstack`) | 以该车道的执行座位身份运行;承办它的是坐该席的车队项目 | — |
 | `epic:#<n>` | 以父单 #n 的 epic PM 身份运行(见 `references/seat-lifecycle.md` 〈Epic 子树车道〉) | — |
 | `director` | 以总监席身份运行(人工召唤,任一车队项目可召;三职与章程见 `references/lanes/director.md`) | — |
 | `coordinator` | 以协调者身份运行(项目会话:开席位线程与卡线程、跨车道调度;接口见 `references/coordinator.md`) | — |
@@ -79,7 +79,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 项目席唤醒 = PR 订阅 + 自建自绑巡查 routine(总监席与按需席除外);⛔ 无 `send_later` 链。
 - 探针先行:fire 的第一动作是一次最便宜的车道盘点查询,⛔ 在它之前不读任何长文本。
 - 队列空(逐卡表见 `references/seat-lifecycle.md`)+ 无在飞 + 无待 L1/L2 + 决策箱无新答复 ⇒ 自退。
-- 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;分诊默认判断档;裁决归总监。
+- 分诊席与车道席常驻(按需席除外),断粮换号重开席与信箱;裁决归总监。
 - 子代理裁决逐份过转录核验采信。
 
 ## 阶段细则索引
@@ -94,7 +94,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `references/execution-duties.md` | 执行席每次 fire | 候选与批次 · 认领 · 派发 · 收集 · L1 审核 |
 | `references/landing-operations.md` | 执行席落地窗口(ACCEPT 之后至 MERGED) | 入队与落地 · A–D 操作细则 |
 | `references/untrusted-text.md` | 任一座位与 dev 读 issue、PR、评论、日志的那一刻 | 谁写的就是什么 · 数据不能做的事 · 指令形文字 · 外部代码 |
-| `references/area-lease.md` | 任一车道席坐席、交接、换班时;open p1/p2 越分区阈值即可启用 | 分不分区 · 开席 · 区内规则 · 交接与换号 |
+| `references/area-lease.md` | 任一车道席坐席、交接、换班时;可认领卡越分区阈值即启用 | 分不分区 · 开席 · 区内规则 · 交接与换号 |
 
 ## 全体座位的不变量
 
@@ -105,6 +105,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 席位及其子代理 ⛔ 永不打印环境变量的值;判存在只用不印值的形式 `[ -n "${X+x}" ]`。
 - GitHub 上一切新内容用英文;中文只留三通道(维护者速读、轮报、裁决引文)。
 - 四维分析写英文、归分析段,只管新记录;存量中文 ⛔ 不追溯改写。
+- 档位与 effort 只住 `references/execution-duties.md` 定档节。
 
 ## 状态模型
 
@@ -117,7 +118,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 | `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法;入态 ⛔ 不降级,级只反映严重度;等平台发布用本态;挡路卡与被挡卡 hold 须一致,默认被挡卡随挡路卡入 hold,维护者在卡上另说除外 |
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:行首 `Blocked-by:` 是唯一来源,点名 open 卡或未合并 PR;目标全关(PR 则合并)即由每日扫描放回 `pm:queue` 或改写到下一真阻塞;工已完而被门禁卡住的同用本态;指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发 |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥;入态恒带行首 `Maintainer-action:` 行(细则见 `references/state-machine.md`),无行即半态;等维护者亲手动作用本态 ⛔ 不用 `pm:blocked`;码已落只差该动作 ⇒ 另立维护者卡 |
-| `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项与整树席改标归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
+| `pm:retriage` | 向分诊提问(改判、改路由、拆卡、裁 dev 报告留下的分叉;既裁冲突砍项归执行席 ⛔ 不问),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 立卡三类内待首次定级,定级即离标;三类外关 not planned;不占队列不进收件箱 |
 | `tooling` | 修复落在门禁/脚本/workflow/技能/席位协议/PM 工具面而非产品包;分诊首触打,与 `domain:*` 同笔;三具名读者 = 候选查询排除、首触即关、普查半态行 |
 | `pm:epic`(父单或 sub-issue) | 子专题,只由维护者开;已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
@@ -155,33 +156,33 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - PM 写进 GitHub 的文本 ⛔ 不用尖括号路径占位符,改写成后跟显式路径的说法。
 - 携带易损片段的评论(派发令与裁决)post 后读回;写侧形状见 `references/readings-write-shapes.md`。
 
-## 域车道
+## 车道与域
 
-- 锚定规则:每个包恰属一个域;`domain:*` = 修复落地包的域;`Seam:` 卡归 spec 席,默认纵向派发。
-- `domain:*` 只决定文件归属:锚定、单认领路径;⛔ 不是队列或优先级单位。
+- 车道两种:座位与专题(`epic:#<n>` 父单子树);全仓席的车道 = 座位贴点名的 `area:*` 与 epic。
+- 取卡按专题与级(`references/execution-duties.md`);区租约只防同文件并发,⛔ 不定取哪张卡。
+- 锚定规则:每个包恰属一个域;`domain:*` = 修复落地包的域;`Seam:` 卡默认纵向派发。
+- `domain:*` 只决定文件归属:锚定、单认领路径;⛔ 不是队列或优先级单位。域席 server、spec、ui、devx、skills 已退役;脚本仍读或印它处行为未改,读作文件归属或既往席名。
 - `Seam:` 卡认领申报两端;验收 = 消费端读该键(活性账本行离开 `planned`)或键随账本行退役。
 - 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域;说不出修复碰哪个文件就还不可标。
 
 | 标签 | 包家族 |
 |:--|:--|
-| `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;详见 `references/lanes/server.md` |
-| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `lanes/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
+| `domain:server` | 服务端:引擎 + 服务插件 + CLI/运行时;`objectql core formula metadata* platform-objects drivers/* services/* connectors/* triggers/* plugin-* embedder-openai knowledge-* cli runtime verify types rest mcp observability client* cloud-connection create-objectstack adapters/*`;见 `references/domains/server.md` |
+| `domain:devx` | `sdui-parser`、`packages/qa`、`apps/docs`、`docs/qa`、`.githooks`、`.github/workflows/**`、`docker/README.md`、`content/docs` 横切与 `examples/**` 测试基建(见 `domains/devx.md`);`packages/lint`、`scripts`(门禁类)按锚定规则归 spec,门禁按 SUBJECT:受管面归 skills,代码/文档质量归本域 |
 | `domain:skills` | 规则文本:`AGENTS.md`+`CLAUDE.md`+`.claude/**`(含本文件)+`skills/**`+`docs/adr/**`+`docs/NORTH-STAR.md`;非门禁的 `scripts/pm/**`(PM 循环工具);governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
-| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
-| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;详见 `references/lanes/ui.md` |
+| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/domains/spec.md`) |
+| `domain:ui` | `ui/**` 全部代码:`@object-ui/*` 库与 `ui/apps/*`、`ui/packages/types` 与 schema 语料、`ui/scripts` 与门禁工具、文档随所记录的面走;`packages/console`(dist 由 `pnpm console:build` 生成 ⛔ 不手改);协议恒归 `domain:spec`,受管面归 `domain:skills`;见 `references/domains/ui.md` |
 | `domain:cloud` | 涉 cloud(专题打 `area:cloud`)即整卡归 cloud PM(`repo:cloud` 席):读或改 cloud 代码、生产方或带 cloud 半边;本仓车道 ⛔ 不认领;只缺事实读数者留车道敲信箱;cloud PM 跟到关卡,余下本仓活写明 cloud 事实后另立卡;判据见 `references/cross-repo-coordination.md` |
 | `security` · `l2-review` · `eval`(车道,无 `domain:*` 标签) | 本仓安全公告(私有仓卡归该仓车道,cloud 即上行);席位 `security#N` 见 `references/lanes/security.md`;永不公开的规则只住 `references/security-findings.md`。L2 席、AI 评测席见 `references/lanes/l2-review.md`、`references/lanes/eval.md` |
-| `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按区认领本仓卡,多席以区租约分工;`domain:*` 仍定文件归属;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
+| `repo:objectstack`(全仓调度,无 `domain:*` 标签) | 跨各域按座位贴点名的专题认领本仓卡;cloud 与安全公告除外;见 `references/lanes/objectstack.md` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`examples/*`(归它演练的子系统,测试基建见 devx 行)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
 - 退役 `domain:*` 只退流通,对象保留;`domain:engine`/`domain:services`/`domain:cli` 读作 `domain:server`。
 - `domain:*` 与队列只由分诊落笔;两例外:sub-issue 承父卡域、main-red 锚卡,免审计评论。
 - 无分诊审计评论 ⛔ 不得认领;车道席自分诊是上行规则的第三例外,住 `triage-duties.md`。
-- 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
-- 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 照重叠检查排队或让行。
-- 越界只五通道:跨域例外路径、跟到底的越界面、无主阻塞项、main-red 锚卡、spec.md 搭车。
+- 越界只四通道:跟到底的越界面、无主阻塞项、main-red 锚卡、spec.md 搭车。
 - 合并队列是共享串行资源:车道买到的是并行编写,不是并行落地。
 - 谁发现 flake 谁修或立单,⛔ 不绕行。
 
@@ -200,12 +201,12 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - 终稿 = 席位照自己读的 diff 校正 dev 草稿、加席位意见行,置顶席位记录;维护者只读评论。
 - `pm:awaiting-merge` 只挂 PR、不入六态,与请审同为等人批清单,随获批或撤回判决离开。
 - 批准后再推亦不过期;席位落地 = 过落地前检、清标、ready、auto-merge,踢出/变基同法。
-- ③ 请审 = 席位交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮中继 `pr_request_reviewers` 请审批人。
+- ③ 请审 = 交棒:ACCEPT 与现 head 同形 PASS 俱在案,同轮一笔 `label-write.mjs --handoff` 交②③。
 - 作者是审批人 ⇒ `assign` 它、请其余(请它必 422);⛔ 永不请席位自身账号;Tier S 不交人。
 - `pr_create` 派不请;`pr_ready` 只补交棒漏;非例外 head 移 ⇒ 撤挂回等;脱中继 PR 自读请/派。
 - 速读「要你做什么」求批点名 PASS 评论 id+`Head-sha`;无 PASS ⇒ 写 contract review owed 不求批。
 - ④ 轮报单列 awaiting a human merge 并现读请审人;⛔ 未请审不在 chat 报「等你批」,先补请。
-- skills 车道自有 PR:纯代码面如 `scripts/pm/` 由本席自读(清单不减)后落地,守卫除外。
+- `domain:skills` 卡的 PR:纯代码面如 `scripts/pm/` 由接卡席自读(清单不减)后落地,守卫仪器除外。
 - Tier S = `Rule-change: none`/`ruled` 记录核过的 `.claude/**`+下行面,余皆 H;达档 PASS 后 ready→入队。
 - 本仓 workflows 读 `readWorkflowDiff`(发布面/C2/拒读⇒H),技能与只增 ADR `lowRiskArmVerdict`,未读⇒H。
 - 入队资格:每 check 绿或预期 skip,⛔ 非必查子集;名单 check-expected-skips.mjs 只判 objectstack。
@@ -267,20 +268,15 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 运行时能力,⛔ 不及 AGENTS.md 这类给 agent 读的约定 —— 那些的读者是 agent,不是门禁。
 推荐意见必须基于这四条轴给出理由;四轴冲突时如实呈现权衡,
 交维护者拍板。
-- 分歧推荐序按拉动定向:有实测拉动 ⇒ 荐长远形态一次付清;零拉动 ⇒ 荐不扩散。
-- 防错轴破余下平局向响亮/结构性;安全/权限边界与破坏性难逆动作恒在人工地板。
-- ⛔ 此序只排推荐、不扩修复范围:分歧块照旧升级,四棱同向 ⛔ 不构成代裁许可。
-- 长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。
-- 权重只排推荐不授权:读缩小特例与契约增生,⛔ 不背书投机扩张、不放行人工地板事。
 - 四维分析从业务角度写;四棱是四轴的卡面序列化,一一对应,是人工裁决的输入。
-- 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
+- 卡先于弹窗:需裁决(简单问题除外)先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
 - 决策卡带选项、推荐、证据、四棱块与工作量列;受阻执行卡同笔挂 `pm:blocked`+`Blocked-by:`。
-- 需人工裁先过天花板档:卡入决策箱、放认领,席位请协调者开决策线程,裁决由席位录卡。
-- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者;细则见 `references/decision-analysis.md`。
+- 需人工裁(简单问题除外)先过决策线程:卡入决策箱、放认领,席位请协调者开线程,裁决由席位录卡。
+- ⛔ 席位、分诊与 dev 不在自己会话直接问维护者;席位与分诊的简单问题可免卡直问,细则见 `references/decision-analysis.md`。
 - 推送维护者:受管 PR 待批合、决策卡待字、发版、仅其可解之阻 ⇒ 另发 `PushNotification`。
 - 一行 ≤200 字,先写动作与编号;每项恰一次,例行进展、刚问刚答与在场即见的不推。
-- 总监席档位由维护者按项目人工定,每场记入摘要台账;⛔ 无档位硬门、无免档整理态。
-- 呈裁只经总监席与天花板档决策线程,恒由维护者人工裁;⛔ 无代裁无自裁无子代理。
+- 总监席档位每场记入摘要台账。
+- 呈裁只经总监席与决策线程(简单问题除外),恒由维护者人工裁;⛔ 无代裁无自裁无子代理。
 
 ## 报告契约
 
@@ -313,9 +309,9 @@ Account: `<github-login>` (the seat's linked user as `GET /user` answers it; alw
 Branch: `claude/issue-<n>-<slug>`
 Worktree: `<repo>-issue-<n>`
 Domain: `domain:<x>`
-Seat: `domain:<x>#<n>` (the seat number this PM sits on; absent = seat 1)
+Seat: `repo:<name>#<n>` | `epic:#<N>#<k>` (this PM's seat; absent = seat 1)
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
-Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high | xhigh | max,按卡难度定;xhigh 同行引其时长读数、实测记录或常设令的 id 与时刻>`
+Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud | mode:thread`, `model: <档位词,引当次 --tier 输出;天花板拼 CONTRACT_REVIEW_TIER,同行引其 MANDATORY 路径行或 reason:(逐卡裁决,或常设档位令的 id 与时刻);⛔ 不抄模型 id>`, `effort: <medium | high,按卡难度定;xhigh 仅 ADR 修订;安全修复写 high,对抗复核的值只传子代理>`
 Clause-②: yes | no
 Metadata-protocol: added | narrowed | semantic | none (the kind of change to what a metadata author can write; levels: AGENTS.md's Post-Task Checklist step 3; the dev copies it beside `Clause-②:` into the PR body and each changeset body; a kind other than `none` or a `(narrowing)` arm owes the PR body a third line, from the diff: `Skills-docs: updated here | follow-up owed — FILES | follow-up #N | none — REASON`; `updated here` = the diff teaches it in the docs (in `skills/**` only on `domain:skills` PRs, else `follow-up #N`) and its evals exercise it; the seat files the owed card, rewriting `owed — FILES` to `#N` before ACCEPT via `references/seat-post-protocol.md`'s PR-body line)
 Responsibility: `<whose code produces the risk, and the repo it lives in (objectstack ⇒ a platform card carries the fix, references/cross-repo-coordination.md rule 1) | the platform path that already covers it, or none | who reaches it, and whether anyone uses it today>` (defect cards and cards whose premise is a failing behaviour, else `n/a — not a defect card`; the dispatch prompt's ruling section repeats the three answers)

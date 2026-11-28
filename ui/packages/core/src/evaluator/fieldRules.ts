@@ -353,6 +353,18 @@ export function evalFieldPredicate(
 const VISIBLE_WHEN_FAULTED = true;
 const READONLY_WHEN_FAULTED = false;
 const REQUIRED_WHEN_FAULTED = false;
+/**
+ * The hand lock's predicate (`Field.uiReadonlyWhen`, objectstack#36806) fails
+ * CLOSED, unlike `readonlyWhen`. ADR-0137 D2 lets a lock fail open at render
+ * only because a judge stands behind it: the server drops a `readonlyWhen`
+ * write the client let through. No server evaluates `uiReadonlyWhen` — it is a
+ * console-only lock — so a fault that opened the field would be a silent edit
+ * nobody judges. Closed costs a person the edit (the warning names the fault,
+ * and actions, imports and the API still write the field); open would cost the
+ * lock. The same verdict covers a row that does not carry the predicate's
+ * operands (`No such key`): locked until the row is read in full.
+ */
+const UI_READONLY_WHEN_FAULTED = true;
 
 /**
  * The verdict {@link resolveFieldRuleState} applies when the author declared NO
@@ -403,6 +415,8 @@ const REQUIRED_WHEN_ABSENT = false;
 export interface FieldRuleFaults {
   visibleWhen?: string;
   readonlyWhen?: string;
+  /** The hand lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`); fails CLOSED (no server judges it). */
+  uiReadonlyWhen?: string;
   requiredWhen?: string;
 }
 
@@ -462,10 +476,25 @@ export function resolveFieldRuleState(
   rules: {
     visibleWhen?: FieldRulePredicate;
     readonlyWhen?: FieldRulePredicate;
+    /**
+     * The HAND lock's predicate (`@objectstack/spec` `Field.uiReadonlyWhen`,
+     * ruling record 7180466652): folded into the same `readonly` verdict, since
+     * every caller of this function is a console surface a person edits
+     * through. Fails CLOSED on a fault (see `UI_READONLY_WHEN_FAULTED`): no
+     * server judges it, so a fault never opens the field.
+     */
+    uiReadonlyWhen?: FieldRulePredicate;
     requiredWhen?: FieldRulePredicate;
   },
   record: Record<string, unknown>,
-  statics: { required?: boolean; readonly?: boolean; serverOwnedValue?: boolean; name?: string },
+  statics: {
+    required?: boolean;
+    readonly?: boolean;
+    /** The static hand lock (`Field.uiReadonly`): read-only on every console surface. */
+    uiReadonly?: boolean;
+    serverOwnedValue?: boolean;
+    name?: string;
+  },
   previous?: Record<string, unknown>,
   scope?: Record<string, unknown>,
   fieldContext?: string,
@@ -499,8 +528,13 @@ export function resolveFieldRuleState(
         )
       : VISIBLE_WHEN_ABSENT;
 
+  // The server lock (`readonly` / `readonlyWhen`) and the hand lock
+  // (`uiReadonly` / `uiReadonlyWhen`) answer one question here — "may a person
+  // edit this field now" — so they fold into one verdict. Short-circuited in
+  // that order: a predicate the verdict no longer needs never runs.
   const readonly =
     statics.readonly === true ||
+    statics.uiReadonly === true ||
     (rules.readonlyWhen != null
       ? evalFieldPredicate(
           rules.readonlyWhen,
@@ -509,6 +543,16 @@ export function resolveFieldRuleState(
           previous,
           scope,
           diag('readonlyWhen'),
+        )
+      : READONLY_WHEN_ABSENT) ||
+    (rules.uiReadonlyWhen != null
+      ? evalFieldPredicate(
+          rules.uiReadonlyWhen,
+          record,
+          UI_READONLY_WHEN_FAULTED,
+          previous,
+          scope,
+          diag('uiReadonlyWhen'),
         )
       : READONLY_WHEN_ABSENT);
 

@@ -40,10 +40,68 @@ import { ExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { implicitReferenceIndexes, indexedKeyColumns, isUniqueScopeDeclared } from './schema-drift.js';
 import {
   AUDIT_TIMESTAMP_COLUMNS, MYSQL_DATETIME_PRECISION, NUMERIC_SCALAR_TYPES, declaredValueShapes,
-  isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
+  declaresColumnNotNull, isDeferredDdlLockWaitRefusal, isMultiValuedColumn, isNowDefaultValue,
 } from './sql-driver-top-level.js';
 import type { SqlDriver } from './sql-driver.js';
 import { isInstantColumnType } from './date-on-instant-column.js';
+import { declaresSqliteNowColumnDefault, sqliteNowBackfillSql } from './sql-driver-schema-sync.js';
+import type { Knex } from 'knex';
+
+/**
+ * [#37258] Whether an `ALTER TABLE … ADD COLUMN` about to run adds a column
+ * whose statement depends on the table holding a row, to a table that does:
+ * a `storage.notNull` column, which `createColumn` then adds nullable, or
+ * [#37413] on SQLite a column whose DEFAULT is the `NOW()` expression, which
+ * `createColumn` then adds with no DEFAULT ({@link addColumnsThenBackfill}
+ * fills its rows). The remote face's twin is `addsRowSensitiveColumn`. `false`
+ * without a read when no column to be added asks it.
+ */
+async function addsRowSensitiveColumnToPopulatedTable(
+  knex: Knex,
+  table: string,
+  fields: Record<string, unknown> | undefined,
+  existingColumns: readonly string[],
+  sqlite: boolean,
+): Promise<boolean> {
+  const addsRowSensitive = Object.entries(fields ?? {}).some(
+    ([name, field]) => !existingColumns.includes(name)
+      && (declaresColumnNotNull(field) || (sqlite && declaresSqliteNowColumnDefault(field))),
+  );
+  if (!addsRowSensitive) return false;
+  const rows = await knex(table).select(knex.raw('1 as one')).limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * [#37413] Run the `ALTER TABLE … ADD COLUMN`s `addColumns` builds and, on a
+ * populated SQLite table, the one statement that fills the existing rows of
+ * every column `createColumn` added without its `NOW()` DEFAULT
+ * ({@link sqliteNowBackfillSql}) — in ONE transaction, so a column is never
+ * left added with its rows unfilled (the next sync finds it present and would
+ * send no backfill). With nothing to fill, the `ALTER` runs exactly as before.
+ * The DEFAULT itself (and a declared NOT NULL) is then owed drift, which the
+ * differ reports and the ceremony applies.
+ */
+async function addColumnsThenBackfill(
+  knex: Knex,
+  table: string,
+  addColumns: (t: Knex.CreateTableBuilder) => void,
+  fields: Record<string, unknown> | undefined,
+  existingColumns: readonly string[],
+  fillRows: boolean,
+): Promise<void> {
+  const backfill = fillRows
+    ? sqliteNowBackfillSql(table, Object.entries(fields ?? {}).filter(([name]) => !existingColumns.includes(name)))
+    : null;
+  if (backfill === null) {
+    await knex.schema.alterTable(table, addColumns);
+    return;
+  }
+  await knex.transaction(async (trx) => {
+    await trx.schema.alterTable(table, addColumns);
+    await trx.raw(backfill);
+  });
+}
 
 /**
  * The `SqlDriver` members the bodies of {@link RotationFacet} read — every one of
@@ -144,7 +202,7 @@ export class RotationFacet {
   }
 
   /** The body of `SqlDriver#ensureShardTable`; the method's docblock there is its contract. */
-  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
+  static async ensureShardTable(this: Pick<RotationHost, 'computeAndRecordTenantField' | 'createAuditTimestampColumn' | 'createColumn' | 'dialectName' | 'knex' | 'resolveTenantField' | 'syncDeclaredIndexes' | 'warnBuiltinColumnCollisions'>, shardName: string, obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] }, baseTable: string = shardName): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -180,13 +238,16 @@ export class RotationFacet {
     } else {
       const columnInfo = await this.knex(shardName).columnInfo();
       const existingColumns = Object.keys(columnInfo);
-      await this.knex.schema.alterTable(shardName, (table) => {
+      // [#37258] Same question as the managed path below.
+      const sqlite = this.dialectName === 'sqlite';
+      const populated = await addsRowSensitiveColumnToPopulatedTable(this.knex, shardName, obj.fields, existingColumns, sqlite);
+      await addColumnsThenBackfill(this.knex, shardName, (table) => {
         for (const [name, field] of Object.entries(obj.fields ?? {})) {
           if (!existingColumns.includes(name)) {
-            this.createColumn(table, name, field, keyedColumns.get(name));
+            this.createColumn(table, name, field, keyedColumns.get(name), false, populated);
           }
         }
-      });
+      }, obj.fields, existingColumns, populated && sqlite);
     }
 
     // Declared indexes per shard. Auto-derived names already embed the shard
@@ -592,16 +653,23 @@ export class RotationFacet {
         const addedColumns = Object.keys(obj.fields ?? {}).filter(
           (name) => !builtinColumns.has(name) && !existingColumns.includes(name),
         );
+        // [#37258] A `storage.notNull` column added to a table that already
+        // holds rows is added nullable (unless a DEFAULT fills those rows) and
+        // left to the `tighten_not_null` ceremony — see `createColumn`. Asked
+        // only when an added column declares the constraint, so no other sync
+        // pays the read.
+        const sqlite = this.dialectName === 'sqlite';
+        const populated = await addsRowSensitiveColumnToPopulatedTable(this.knex, tableName, obj.fields, existingColumns, sqlite);
         try {
-          await this.knex.schema.alterTable(tableName, (table) => {
+          await addColumnsThenBackfill(this.knex, tableName, (table) => {
             if (obj.fields) {
               for (const [name, field] of Object.entries(obj.fields)) {
                 if (!existingColumns.includes(name)) {
-                  this.createColumn(table, name, field, keyedColumns.get(name));
+                  this.createColumn(table, name, field, keyedColumns.get(name), false, populated);
                 }
               }
             }
-          });
+          }, obj.fields, existingColumns, populated && sqlite);
         } catch (e: any) {
           await this.rethrowWithRowSizeExplanation(tableName, obj.fields, keyedColumns, addedColumns, e);
         }

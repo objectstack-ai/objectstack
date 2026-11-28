@@ -176,7 +176,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Ban User",
-        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.",
+        description: "Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.",
         successMessage: "User banned",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
             helpText: "The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Remove Manager",
+        confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+        successMessage: "Manager removed"
       },
       list_platform_admins: {
         label: "Platform Administrators",
@@ -490,7 +495,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, sso_provider_deleted, …)."
+      },
+      sso_provider_id: {
+        label: "SSO Provider",
+        help: "The SSO provider this session was signed in through, if any. Deleting that provider ends the session. System-managed."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -4496,6 +4505,42 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "Working Calendar",
     pluralLabel: "Working Calendars",
@@ -4616,6 +4661,91 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           title: "No calendar exceptions yet",
           message: "Add one row per holiday or make-up workday, or import a year of them from a file."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "Task",
+    pluralLabel: "Tasks",
+    description: "Things to do, with an assignee and a due time.",
+    fields: {
+      title: {
+        label: "Title"
+      },
+      description: {
+        label: "Description"
+      },
+      status: {
+        label: "Status",
+        options: {
+          todo: "To Do",
+          in_progress: "In Progress",
+          done: "Done"
+        }
+      },
+      due_at: {
+        label: "Due"
+      },
+      assignee_id: {
+        label: "Assignee"
+      },
+      completed_at: {
+        label: "Completed At",
+        help: "Written by the platform when the status becomes Done, and cleared when it leaves Done."
+      },
+      owner_id: {
+        label: "Owner"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Assigned to Me",
+        emptyState: {
+          title: "Nothing assigned to you",
+          message: "Open tasks assigned to you appear here."
+        }
+      },
+      created_by_me: {
+        label: "Created by Me",
+        emptyState: {
+          title: "No tasks yet",
+          message: "Tasks you create appear here."
+        }
+      },
+      all: {
+        label: "All Tasks"
+      }
+    }
+  },
+  sys_note: {
+    label: "Note",
+    pluralLabel: "Notes",
+    description: "Notes: a title and a formatted body.",
+    fields: {
+      title: {
+        label: "Title"
+      },
+      body: {
+        label: "Body"
+      },
+      heading: {
+        label: "Heading",
+        help: "The title, or the first line of the body when the title is empty. Kept by the platform."
+      },
+      owner_id: {
+        label: "Owner"
+      }
+    },
+    _views: {
+      mine: {
+        label: "My Notes",
+        emptyState: {
+          title: "No notes yet",
+          message: "Notes you write appear here."
+        }
+      },
+      all: {
+        label: "All Notes"
       }
     }
   }

@@ -8,7 +8,7 @@
 
 /**
  * `data-table`'s per-cell save in the select-first model (objectstack#35685),
- * behind the `GridCellSelection` a host mounts.
+ * behind the `GridCellSelectionProvider` a host mounts.
  *
  *   1. A committed cell sends its record's update at once: one call, that
  *      cell only; no save bar, no row Save/Cancel column, no amber row; the
@@ -20,10 +20,15 @@
  *   4. A commit made while the record's save runs is sent after it, alone.
  *   5. A refusal naming a field the list cannot edit offers to open the record.
  *   6. A client-sorted row a save updated stays where it is until the rows load.
- *   7. Control: without the provider the save bar model is unchanged.
+ *   7. No staged fallback (objectstack#35827): without the provider, or
+ *      without `onRowSave`, an editable table renders read-only and warns once.
  *   8. A commit the host asks to confirm (`confirmCommit`, slice S3) is held
  *      with nothing staged: No leaves the cell as it was, Yes writes it; a
  *      paste is asked too, an unchanged value is not.
+ *   9. objectstack#35689: a save is said in the table's one live region,
+ *      there from the first render; a refusal is said once, by the cell's
+ *      alert. With rows checked, a cell edit writes that one cell, and the
+ *      checks stay.
  */
 import React from 'react';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -36,6 +41,7 @@ import '../renderers';
 // at collection, never inside a case's clocked window (`check:test-source-alias`).
 import '@object-ui/react-runtime';
 import { GridCellSelectionProvider } from '../context/gridCellSelection';
+import { I18nProvider } from '@object-ui/i18n';
 
 afterEach(cleanup);
 
@@ -75,11 +81,14 @@ function schemaOf(onRowSave: Save, extra: Record<string, unknown> = {}) {
   };
 }
 
-function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withProvider = true) {
+function renderTable(onRowSave: Save, extra: Record<string, unknown> = {}, withProvider = true, language?: string) {
   const DataTable = ComponentRegistry.get('data-table')!;
-  const tree = (schema: any) => (withProvider
+  const table = (schema: Record<string, unknown>) => (withProvider
     ? <GridCellSelectionProvider value={{}}><DataTable schema={schema} /></GridCellSelectionProvider>
     : <DataTable schema={schema} />);
+  const tree = (schema: any) => (language
+    ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>{table(schema)}</I18nProvider>
+    : table(schema));
   const utils = render(tree(schemaOf(onRowSave, extra)));
   const cell = (row: number, col: number) =>
     utils.container.querySelectorAll('tbody tr')[row].querySelectorAll('td[data-grid-cell]')[col] as HTMLElement;
@@ -106,7 +115,7 @@ function deferredSave() {
 }
 
 describe('data-table autosave — a committed cell saves at once (objectstack#35685)', () => {
-  it('sends one update with that cell only, draws no save bar, no edit column and no amber row', async () => {
+  it('sends one update with that cell only, draws no save bar, no row Save button and no amber row', async () => {
     const { onRowSave, calls } = deferredSave();
     const t = renderTable(onRowSave);
     t.typeAndEnter(0, 0, 'Alpha 2');
@@ -118,7 +127,6 @@ describe('data-table autosave — a committed cell saves at once (objectstack#35
     expect(screen.queryByText(/Save All/)).toBeNull();
     expect(screen.queryByText(/row modified/)).toBeNull();
     expect(t.container.querySelector('button[title="Save row"]')).toBeNull();
-    expect(t.container.querySelector('[data-testid="data-table-edit-column-header"]')).toBeNull();
     const firstRow = t.container.querySelectorAll('tbody tr')[0] as HTMLElement;
     expect(firstRow.className).not.toContain('bg-amber-50');
     expect(t.cell(0, 0).className).not.toContain('text-amber-700');
@@ -260,36 +268,47 @@ describe('data-table autosave — a saved row keeps its place until the rows loa
   });
 });
 
-describe('data-table autosave — control: without the provider the save bar stays', () => {
-  it('a commit stages, the bar shows, and nothing is sent until Save', async () => {
-    const onRowSave = vi.fn(async () => {});
-    const t = renderTable(onRowSave, { singleClickEdit: true }, false);
+describe('data-table autosave — no staged fallback: a table that cannot save renders read-only (objectstack#35827)', () => {
+  // The staged model (pending changes behind a "Save All" bar) is retired, so
+  // an editable table missing either half of the per-cell save edits nothing
+  // and says why once in the console, instead of staging edits it cannot send.
+  afterEach(() => vi.restoreAllMocks());
+  const opensNoEditor = (t: ReturnType<typeof renderTable>) => {
     const cell = t.container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[0] as HTMLElement;
     fireEvent.click(cell);
-    const input = cell.querySelector('input')!;
-    fireEvent.change(input, { target: { value: 'Alpha 2' } });
-    fireEvent.blur(input);
-    await act(async () => {});
-    expect(onRowSave).not.toHaveBeenCalled();
-    expect(screen.getByText(/row modified/)).toBeInTheDocument();
-  });
-});
+    fireEvent.doubleClick(cell);
+    expect(t.container.querySelector('td[data-editing-cell]')).toBeNull();
+    expect(t.container.querySelector('td input:not([type="checkbox"]):not([data-slot="cell-type-catcher"])')).toBeNull();
+    expect(screen.queryByText(/Save All/)).toBeNull();
+  };
 
-describe('data-table autosave — a select-first table with no row save keeps the save bar', () => {
-  // Under the provider the per-cell save needs `onRowSave` to call; a table
-  // wired with `onBatchSave` alone stages as before, so an edit is never held
-  // where nothing can send it.
-  it('a commit stages, the bar and the row buttons show, and Save All sends it', async () => {
-    const onBatchSave = vi.fn(async (_changes: unknown[]) => {});
-    const t = renderTable(undefined as unknown as Save, { onBatchSave });
-    t.typeAndEnter(0, 0, 'Alpha 2');
-    await act(async () => {});
-    expect(onBatchSave).not.toHaveBeenCalled();
-    expect(screen.getByText(/row modified/)).toBeInTheDocument();
-    expect(t.container.querySelector('[data-slot="cell-save-state"]')).toBeNull();
-    fireEvent.click(screen.getByText(/Save All/));
-    await waitFor(() => expect(onBatchSave).toHaveBeenCalledTimes(1));
-    expect((onBatchSave.mock.calls[0][0] as Array<{ changes: unknown }>)[0].changes).toEqual({ name: 'Alpha 2' });
+  it('without the provider: no editor opens, no save bar, one console warning naming the select-first host', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onRowSave = vi.fn(async () => {});
+    const t = renderTable(onRowSave, {}, false);
+    opensNoEditor(t);
+    expect(onRowSave).not.toHaveBeenCalled();
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'));
+    expect(lines).toHaveLength(1);
+    // The component a host mounts is the provider; `GridCellSelection` is the
+    // context's value type, which cannot be mounted.
+    expect(lines[0].match(/`GridCellSelectionProvider`/g)).toHaveLength(2);
+    expect(lines[0]).not.toContain('`GridCellSelection`');
+  });
+
+  it('under the provider with no onRowSave: no editor opens, no save bar, one console warning naming onRowSave', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = renderTable(undefined as unknown as Save);
+    opensNoEditor(t);
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/onRowSave/);
+  });
+
+  it('a read-only table warns nothing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    renderTable(undefined as unknown as Save, { editable: false }, false);
+    expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'))).toEqual([]);
   });
 });
 
@@ -401,5 +420,96 @@ describe('data-table autosave — a commit the host asks to confirm first (objec
     await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
     expect(t.confirmCommit).toHaveBeenCalledTimes(1);
     expect(onRowSave.mock.calls[0][1]).toEqual({ name: 'Alpha 2' });
+  });
+});
+
+describe('data-table autosave — the result is said to assistive tech (objectstack#35689)', () => {
+  const region = (c: HTMLElement) => c.querySelector<HTMLElement>('[data-slot="cell-save-announcer"]');
+
+  it('a saved cell is said in the one live region; the same words again are a new saying', async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave);
+    // There, and silent, before anything is saved.
+    expect(region(t.container)).toHaveAttribute('aria-live', 'polite');
+    expect(region(t.container)).toHaveClass('sr-only');
+    expect(region(t.container)!.textContent).toBe('');
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    // Saving is not said, and the cell's mark is no live region of its own.
+    expect(region(t.container)!.textContent).toBe('');
+    expect(t.cell(0, 0).querySelector('[data-slot="cell-save-state"]')).not.toHaveAttribute('role', 'status');
+    expect(t.container.querySelectorAll('[aria-live], [role="status"], [role="alert"]')).toHaveLength(1);
+    await act(async () => { calls[0].resolve(); });
+    expect(region(t.container)).toHaveTextContent('Saved: Name');
+    const first = region(t.container)!.firstElementChild;
+    t.typeAndEnter(0, 0, 'Alpha 3');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(2));
+    await act(async () => { calls[1].resolve(); });
+    expect(region(t.container)).toHaveTextContent('Saved: Name');
+    expect(region(t.container)!.firstElementChild).not.toBe(first);
+  });
+
+  it("a refused save is said by the cell's alert alone; the region drops the words it held", async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave);
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    await act(async () => { calls[0].resolve(); });
+    expect(region(t.container)).toHaveTextContent('Saved: Name');
+    t.typeAndEnter(0, 1, 'won');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(2));
+    await act(async () => { calls[1].reject(fieldRefusal([{ field: 'stage', message: 'Stage cannot move to won' }])); });
+    expect(screen.getByTestId('cell-save-failure')).toHaveAttribute('role', 'alert');
+    expect(screen.getByTestId('cell-save-failure')).toHaveTextContent('Stage cannot move to won');
+    expect(region(t.container)!.textContent).toBe('');
+  });
+
+  it("cells saved together are named in the locale's list punctuation", async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave, {}, true, 'zh');
+    // A refused cell stays pending and travels with the next commit on its row.
+    t.typeAndEnter(0, 1, 'won');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    await act(async () => { calls[0].reject(fieldRefusal([{ field: 'stage', message: 'Stage cannot move to won' }])); });
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(2));
+    expect(Object.keys(calls[1].changes)).toEqual(['stage', 'name']);
+    await act(async () => { calls[1].resolve(); });
+    expect(region(t.container)!.textContent).toBe('已保存：Stage、Name');
+  });
+
+  it('a column with no header is not named by its key', async () => {
+    const { onRowSave, calls } = deferredSave();
+    const t = renderTable(onRowSave, { columns: [{ header: '', accessorKey: 'name' }] });
+    t.typeAndEnter(0, 0, 'Alpha 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    await act(async () => { calls[0].resolve(); });
+    expect(region(t.container)!.textContent).toBe('Saved');
+  });
+
+  it('CONTROL: a table that does not save per cell draws no region', () => {
+    const t = renderTable(vi.fn(async () => {}), {}, false);
+    expect(region(t.container)).toBeNull();
+  });
+});
+
+describe('data-table autosave — checked rows and a cell edit (objectstack#35689)', () => {
+  it('with two rows checked, a cell edit writes that one cell of that one row, and both checks stay', async () => {
+    const onRowSave = vi.fn(async (_i: number, _changes: Record<string, unknown>, _row?: unknown) => {});
+    const onSelectionChange = vi.fn();
+    const t = renderTable(onRowSave, { selectable: 'multiple', onSelectionChange });
+    const rowChecks = () => [...t.container.querySelectorAll('tbody tr')].map((tr) => tr.querySelector<HTMLElement>('[role="checkbox"]')!);
+    fireEvent.click(rowChecks()[0]);
+    fireEvent.click(rowChecks()[1]);
+    expect(onSelectionChange).toHaveBeenLastCalledWith([ROWS[0], ROWS[1]]);
+    const selectionCalls = onSelectionChange.mock.calls.length;
+    t.typeAndEnter(1, 0, 'Beta 2');
+    await waitFor(() => expect(onRowSave).toHaveBeenCalledTimes(1));
+    expect(onRowSave.mock.calls[0][0]).toBe(1);
+    expect(onRowSave.mock.calls[0][1]).toEqual({ name: 'Beta 2' });
+    expect(t.cell(0, 0)).toHaveTextContent('Alpha');
+    await act(async () => {});
+    for (const check of rowChecks()) expect(check).toHaveAttribute('aria-checked', 'true');
+    expect(onSelectionChange).toHaveBeenCalledTimes(selectionCalls);
   });
 });

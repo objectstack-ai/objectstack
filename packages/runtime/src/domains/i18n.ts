@@ -9,7 +9,7 @@
  * dispatcher-owned (moving it into one provider would 404 the other).
  *
  * Routes (path is the sub-path after `/i18n`):
- *   GET /locales                    → getLocales
+ *   GET /locales                    → getLocales (+ the source locale)
  *   GET /translations/:locale       → getTranslations (locale from path)
  *   GET /translations?locale=xx     → getTranslations (locale from query)
  *   GET /labels/:object/:locale     → getFieldLabels  (both from path)
@@ -44,6 +44,7 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 // [#23214] The repo's one sentence for a repeated single-valued parameter.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /**
  * [#23214] `?locale=` on the two arms whose PATH names no locale
@@ -222,7 +223,7 @@ export async function handleI18nRequest(
     // `degraded` (#4058 step 1 — `createMemoryI18n`, which plugin-dev also
     // wraps) and `handlerReady` defaults to `true` for them: they keep serving.
     // This gate is for an occupant that would answer with invented strings.
-    if (!isServiceServeable(i18nService)) return { handled: true, response: deps.error('i18n service not available', 501) };
+    if (!isServiceServeable(i18nService)) return catalogNotImplemented(deps, context, 'i18n_service_unavailable');
 
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
@@ -237,11 +238,34 @@ export async function handleI18nRequest(
         // array through made one endpoint answer in two shapes depending on
         // which provider mounted it, the dispatcher's contradicting the SDK's
         // own `GetLocalesResponse` type.
-        const locales = toLocaleDescriptors(
-            i18nService.getLocales(),
-            typeof i18nService.getDefaultLocale === 'function' ? i18nService.getDefaultLocale() : undefined,
-        );
-        return { handled: true, response: deps.success({ locales }) };
+        const defaultLocale = typeof i18nService.getDefaultLocale === 'function' ? i18nService.getDefaultLocale() : undefined;
+        const locales = toLocaleDescriptors(i18nService.getLocales(), defaultLocale);
+        // [#36504] The language the app's own text is authored in: the
+        // declared `i18n.sourceLocale`, else the default locale — the
+        // collapse every metadata-document translator makes, and the CALLER's
+        // to make (`II18nService.getSourceLocale` reports only what was
+        // declared). A client that edits labels reads it to tell an edit of
+        // the source text from a translation. Absent when neither is known.
+        const declaredSource = typeof i18nService.getSourceLocale === 'function' ? i18nService.getSourceLocale() : undefined;
+        const sourceLocale = declaredSource || defaultLocale || undefined;
+        // [objectstack#36809] The deployment's DECLARED fallback chain — the
+        // `getFallbackLocale()` the server's own metadata translations hand
+        // the spec resolvers as `fallbackChain` (`metaTranslateOptions`,
+        // `@objectstack/rest`), read by the same feature-detected accessor
+        // under the same condition (a non-empty string), so a client that
+        // resolves translated metadata itself walks the locales the server
+        // walks. Absent when the service declares none: the server threads a
+        // declaration, it never invents one.
+        const declaredFallback = typeof i18nService.getFallbackLocale === 'function' ? i18nService.getFallbackLocale() : undefined;
+        const fallbackChain = typeof declaredFallback === 'string' && declaredFallback.length > 0 ? [declaredFallback] : undefined;
+        return {
+            handled: true,
+            response: deps.success({
+                locales,
+                ...(sourceLocale ? { sourceLocale } : {}),
+                ...(fallbackChain ? { fallbackChain } : {}),
+            }),
+        };
     }
 
     // GET /i18n/translations/:locale  OR  /i18n/translations?locale=xx

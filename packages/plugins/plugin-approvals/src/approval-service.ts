@@ -107,6 +107,7 @@ import {
 // decision methods' slot test and `can_act` alike (`approver-address.ts`).
 import {
   actingAddresses,
+  actorAddresses,
   addressedPosition,
   equivalentApproverAddresses,
   heldSlot,
@@ -122,13 +123,14 @@ import {
   type ActingCaller,
 } from './approver-address.js';
 import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
-import { flowRoute, type RouteFlowGraph } from './approval-route.js';
+import { flowHostsChildRuns, flowRoute, type RouteFlowGraph } from './approval-route.js';
 import {
   ADMIN_RESCUE_NOTE_SNAPSHOT_KEY,
   adminRescueNoteOf,
   adminRescueNoteText,
   adminRescuePositions,
   adminRescueReason,
+  slatePositions,
   type AdminRescueNote,
 } from './admin-rescue-note.js';
 import {
@@ -142,11 +144,17 @@ import {
   namesNoOneBut,
   noApproverNoteOf,
   noApproverNoteText,
-  noApproverSentence,
+  noApproverNotice,
+  noApproverPositions,
+  noApproverSlots,
   noApproverWho,
+  submitterRefusalUserMessage,
   type NoApproverNote,
+  type SubmitterApprovalRefusal,
 } from './no-approver-note.js';
+import { RECORD_DELETED_CANCEL_REASON, recordDeletedCancelNoteText } from './record-deleted-cancel-note.js';
 import {
+  flowNameOfProcess,
   localizeRequestLabels,
   negotiatedReaderLocale,
   readerLabelsFor,
@@ -154,17 +162,21 @@ import {
   type ReaderLabels,
 } from './reader-locale-labels.js';
 import type { SlotLabelSource } from './display-label-backfill.js';
+import { recordsHeldByLockingApproval } from './lifecycle-hooks.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
   type FieldVisibilitySource,
 } from './payload-redaction.js';
 import { APPROVAL_REQUEST_CHILD_OBJECTS, type RequestVisibilitySource } from './request-read-gate.js';
-import { nodeConfigLocksRecord, recordHeldByLockingApproval } from './lifecycle-hooks.js';
+import {
+  detailRowHeldByLockingApproval, detailRowsHeldByLockingApproval, nodeConfigLocksRecord, recordHeldByLockingApproval,
+} from './lifecycle-hooks.js';
 import { PendingApproverReadGrantSource, type PendingApproverReadGrants } from './pending-approver-read-grant.js';
 // The ADR-0043 pages — the ONE copy of their text, rendered by the plugin's
 // self-hosted mount and by `handleActionPage` alike.
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { consolePageLink, type ConsolePageComposer } from './public-base-url.js';
 import { APPROVAL_EMAIL_CHANNELS, EMAILED_APPROVAL_TOPICS } from './approval-email-templates.js';
 import { enMessages } from './translations/messages.js';
 import {
@@ -304,6 +316,15 @@ export interface ApprovalResumeSurface {
   getFlowSlot?(packageId: string | null, name: string): any | null;
   getRunFlow?(run: { flowName: string }): any | null;
   /**
+   * [#35863] A flow name's registrations, oldest first: each body and when it
+   * was registered. Read by {@link ApprovalService.attachFlowRoute} to tell
+   * whether a run ran the body armed now (`ranArmedBody`). ⚠️ Declares a
+   * method `AutomationEngine` ALREADY implements publicly
+   * (`getFlowVersionHistory`); it widens no engine surface. Optional: absent,
+   * no request is served "ended".
+   */
+  getFlowVersionHistory?(name: string): ReadonlyArray<{ version?: number; definition: unknown; createdAt: string }>;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -321,7 +342,7 @@ export interface ApprovalResumeSurface {
    * `null` — unknown run, evicted log, no durable store, no automation engine —
    * as "still alive".
    */
-  getRun?(runId: string): Promise<{ status?: string; flowName?: string } | null>;
+  getRun?(runId: string): Promise<{ status?: string; flowName?: string; startedAt?: string } | null>;
   /**
    * Whether a suspension still exists for `runId` — the pre-flight that keeps
    * a decision from being recorded against a run that can never advance
@@ -572,7 +593,8 @@ type ApprovalNotificationPayload = {
   readonly actionUrl: string;
   /**
    * [#30509] The same request page as `actionUrl`, prefixed with the
-   * deployment's public origin when one resolves (`publicBaseUrl`), for a
+   * deployment's public origin when one resolves (`publicBaseUrl`) and
+   * [#34862] the Console's mount (`consolePageLink`), for a
    * channel read outside the Console: the approval e-mail's link
    * (`approval-email-templates.ts`). Set by `notify()` beside the
    * deep-linked `actionUrl` on the notices that go by e-mail
@@ -1155,14 +1177,59 @@ export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 const ACTION_PAGE_PATH = '/api/v1/approvals/act';
 
 /** An action page, answered the way the self-hosted mount answers it. */
-function actionPageResponse(html: string): Response {
-  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+function actionPageResponse(html: string, status = 200): Response {
+  return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 /** Outcome of redeeming (or peeking) an actionable-link token. */
 export type ActionTokenOutcome =
   | { ok: true; action: 'approve' | 'reject'; request: ApprovalRequestRow; approverId: string }
-  | { ok: false; reason: 'invalid' | 'expired' | 'consumed' | 'not_pending' | 'not_approver'; request?: ApprovalRequestRow };
+  | { ok: false; reason: 'invalid' | 'expired' | 'consumed' | 'not_pending' | 'not_approver'; request?: ApprovalRequestRow }
+  // A reject link's form came back with no reason. The link is still live —
+  // nothing was consumed or decided — so the page asks again.
+  | { ok: false; reason: 'reason_required'; action: 'reject'; request: ApprovalRequestRow; approverId: string };
+
+/**
+ * The issues a reject's reason raises — empty when it may be recorded. The ONE
+ * judge for every door that records a reject: {@link ApprovalService.decide}
+ * and the action link's {@link ApprovalService.redeemActionToken} both ask it,
+ * by the rules the `approval_reject` action door applies to its required
+ * `textarea` param (`validateActionParams`): missing, blank, or not a string
+ * is refused.
+ */
+function rejectReasonIssues(comment: unknown) {
+  return validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment });
+}
+
+/**
+ * The page a POST to the ADR-0043 action page answers, from its redemption
+ * outcome — built once, so the plugin's self-hosted mount and
+ * {@link ApprovalService.handleActionPage} answer the same status and bytes.
+ *
+ *  - decided: the result page, `200`;
+ *  - a dead link: its explanatory result page, `200` (ADR-0043 tells a dead
+ *    link on the page, never as an error status);
+ *  - a reject sent with no reason: the same confirm page again, carrying the
+ *    refusal, `400` — the link is live, and what was refused is the input.
+ */
+export function actionRedemptionPage(
+  out: ActionTokenOutcome,
+  page: { token: string; actPath: string; inboxHref: string },
+): { status: number; html: string } {
+  if (out.ok) {
+    return { status: 200, html: renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, page.inboxHref) };
+  }
+  if (out.reason === 'reason_required') {
+    return {
+      status: 400,
+      html: renderConfirmPage({
+        request: out.request, action: out.action, approverId: out.approverId,
+        token: page.token, actPath: page.actPath, refusal: 'reason_required',
+      }),
+    };
+  }
+  return { status: 200, html: renderResultPage(out.reason, out.request, page.inboxHref) };
+}
 
 /**
  * System-elevated context for this service's own metadata reads and writes.
@@ -1642,6 +1709,38 @@ export interface ApproverExpressionContext {
 }
 
 /**
+ * [ADR-0162 Execution item 7] The root run of a run, as the automation service
+ * hands it to a node (`AutomationEngine.rootRunOf`, its `RootRun`): mirrored
+ * here because this plugin deliberately does not depend on service-automation.
+ * A request records the id and the start ({@link ApprovalService.openNodeRequest}).
+ */
+export interface ApprovalRootRun {
+  /** The root run's id; the request's own `flow_run_id` when its run is the root. */
+  runId: string;
+  /** The key the automation service files the root run's flow under. */
+  flowName: string;
+  /** The object the root run was started on (with or without a record id); `null` for a root run that names none. */
+  object: string | null;
+  /** When the root run started (ISO 8601). */
+  startedAt: string;
+}
+
+/**
+ * [ADR-0162 Execution item 7] The run that carries a run's record, as the
+ * automation service hands it (`AutomationEngine.recordRunOf`, its
+ * `RecordRun`): the root run, or a `map` item run whose item is a record.
+ * Mirrored for the reason {@link ApprovalRootRun} is.
+ */
+export interface ApprovalRecordRun {
+  /** The record run's id. */
+  runId: string;
+  /** The object the record run names (with or without a record id); `null` when it names none. */
+  object: string | null;
+  /** The id of the record it carries; `null` for a run on no record. */
+  recordId: string | null;
+}
+
+/**
  * Non-request outcome of {@link ApprovalService.openNodeRequest}: the node
  * resolved an empty approver slate and its `onEmptyApprovers: 'auto_approve'`
  * policy waved it through (#3447 P2). No `sys_approval_request` row exists —
@@ -2022,6 +2121,14 @@ export interface ApprovalServiceOptions {
    */
   publicBaseUrl?: string;
   /**
+   * [#34862] The auth service's Console page composer (`getConsoleUrl`,
+   * `${origin}${uiBasePath}${path}`), read for the Console's MOUNT only: the
+   * approval e-mail's link and the action-link pages' inbox link open a
+   * Console page under {@link publicBaseUrl} plus that mount
+   * (`consolePageLink`). Absent, or answering nothing, they carry no mount.
+   */
+  getConsoleUrl?: ConsolePageComposer;
+  /**
    * [ADR-0105 D9] The tenancy posture in force. Cross-organization approver
    * targeting is a `group`-posture capability; the resolver refuses the
    * declaration under any other posture rather than silently ignoring it.
@@ -2168,6 +2275,23 @@ async function findChildRequestId(
 const REQUEST_VISIBILITY = new WeakMap<ApprovalService, RequestVisibilitySource>();
 
 /**
+ * The answer both record-lock doors give a readable row
+ * (`IApprovalService.getRecordLock` / `getRecordLocks`, ruling 7148480184):
+ * which approval holds it, the master's winning when both do — a line of a held
+ * master refuses delete as well as edit, while a record held by its own request
+ * may be deleted, which cancels the request. One spelling, so the two doors
+ * cannot answer a row differently.
+ */
+function recordLockAnswer(
+  heldByMaster: boolean,
+  heldItself: boolean,
+): { locked: boolean; lockSource?: 'record' | 'master' } {
+  if (heldByMaster) return { locked: true, lockSource: 'master' };
+  if (heldItself) return { locked: true, lockSource: 'record' };
+  return { locked: false };
+}
+
+/**
  * [#23889] Each service's own slot labeller — the one its live writers label
  * `pending_approver_labels` / `acted_as_label` with — for the boot backfills
  * (`display-label-backfill.ts`, `action-slot-backfill.ts`). In-package only, by
@@ -2211,6 +2335,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   private automation?: ApprovalResumeSurface;
   private messaging?: ApprovalMessagingSurface;
   private publicBaseUrl: string;
+  /**
+   * [#37808] Where {@link inspectStrandedRequests}'s walk over every decided
+   * request resumes: the last request id the previous sweep read, `null` to
+   * start from the first. Per process, never persisted: a restart starts the
+   * walk again, which costs a repeat, never a miss.
+   */
+  private strandScanCursor: string | null = null;
+  private readonly getConsoleUrl?: ConsolePageComposer;
   private tenancyPosture?: () => string | undefined;
   private fieldVisibility?: FieldVisibilitySource;
   /** [#23637] Lazily-resolved object-level read admission ({@link attachObjectReadAdmission}). */
@@ -2265,6 +2397,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     this.automation = opts.automation;
     this.messaging = opts.messaging;
     this.publicBaseUrl = (opts.publicBaseUrl ?? '').replace(/\/$/, '');
+    this.getConsoleUrl = opts.getConsoleUrl;
     this.tenancyPosture = opts.tenancyPosture;
     this.fieldVisibility = opts.fieldVisibility;
     this.messageTranslator = opts.messageTranslator;
@@ -2557,7 +2690,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           ...payload,
           actionUrl,
           // [#30509] The e-mail's link: only the notices that go by e-mail carry it.
-          ...(EMAILED_APPROVAL_TOPICS.has(event.topic) ? { approvalUrl: `${this.publicBaseUrl}${actionUrl}` } : {}),
+          // [#34862] A Console page, so under the Console's mount as well.
+          ...(EMAILED_APPROVAL_TOPICS.has(event.topic)
+            ? { approvalUrl: consolePageLink(this.publicBaseUrl, this.getConsoleUrl, actionUrl) }
+            : {}),
         };
       }
       // A dedup key names ONE event: a notice split per name keys each part by
@@ -3000,8 +3136,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     pending: readonly string[],
     actorId: string,
     context: ExecutionContext,
+    caller?: ActingCaller | null,
   ): Promise<string | undefined> {
-    return heldSlot(pending, actorId, await this.actingCaller(context));
+    // `caller`: the {@link actingCaller} a method already resolved for this
+    // context, so a method that reads it twice (reassign) asks once.
+    return heldSlot(pending, actorId, caller !== undefined ? caller : await this.actingCaller(context));
   }
 
   /**
@@ -5053,6 +5192,32 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * the flow's key, the body whose origin {@link flowPackageOf} answers.
        */
       node?: unknown;
+      /**
+       * [#35863] Whether `runId` is a root run (`true`) or a child of another
+       * run, a `subflow` body or a `map` item (`false`), as the approval
+       * executor reads the run's context. Stamped on the config snapshot
+       * (`__runRoot`, precedent: `__round`) for {@link attachFlowRoute}: only
+       * a root run's end is the end of the record's approval. Absent (a
+       * caller that does not say) stamps nothing, which reads as "not known
+       * to be a root run".
+       */
+      runRoot?: boolean;
+      /**
+       * [ADR-0162 Execution item 7] The root run of the run that opens this
+       * request: the run its tree was started on, as the automation service
+       * hands it (`rootRunOf`). Its id and its start are recorded in columns
+       * of their own (`root_run_id`, `root_run_started_at`), which the store
+       * can be asked for: they place the request in its approval. `null` or
+       * absent records none (an engine that hands no root run).
+       */
+      rootRun?: ApprovalRootRun | null;
+      /**
+       * [ADR-0162 Execution item 7] The run that carries this request's
+       * record (`recordRunOf`): the root run, or the `map` item run whose
+       * item is the record. Its id is recorded in `record_run_id`, which the
+       * store can be asked for. `null` or absent records none.
+       */
+      recordRun?: ApprovalRecordRun | null;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5352,8 +5517,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           slateSource = 'administrators';
         } else {
           slateSource = 'no_one';
-          const who = noApproverWho(approvers);
-          noApproverNote = { action_id: uid('aact'), ...(who ? { who } : {}) };
+          const slots = noApproverSlots(approvers);
+          noApproverNote = { action_id: uid('aact'), ...(slots ? { slots } : {}) };
           // Break-glass stays break-glass (#3424): an organization whose
           // administrators' slate resolves to nobody opens the request on the
           // slate that names no one — the only option that neither waves the
@@ -5420,6 +5585,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       : undefined;
     if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
     if (noApproverNote) configSnapshot[NO_APPROVER_NOTE_SNAPSHOT_KEY] = noApproverNote;
+    // [#35863] Root run or child run, as the executor said; nothing when it
+    // did not say ({@link attachFlowRoute} reads absence as "not known").
+    if (typeof input.runRoot === 'boolean') configSnapshot.__runRoot = input.runRoot;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -5456,6 +5624,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       payload_json: input.record != null ? JSON.stringify(this.snapshotRecord(input.object, input.record)) : null,
       flow_run_id: input.runId,
       flow_node_id: input.nodeId,
+      // [ADR-0162 Execution item 7] The request's approval: its root run.
+      root_run_id: input.rootRun?.runId ?? null,
+      root_run_started_at: input.rootRun?.startedAt ?? null,
+      record_run_id: input.recordRun?.runId ?? null,
       node_config_json: JSON.stringify(configSnapshot),
       organization_id: requestOrg,
       created_at: now,
@@ -5636,8 +5808,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // an organization administrator does about it. Under the thread's own
     // topic, since the note is a comment on the request's thread; no actor,
     // as no person wrote it.
+    //
+    // [#36308] A position is named as the timeline note names it: the
+    // recipient's pack label (resolved per recipient, at delivery, from the
+    // key the notice carries), else its declared label, else its name. The
+    // declared half is read here, once, through the timeline's resolver.
     if (noApproverNote && submitterId) {
-      const { id: body, params } = noApproverSentence(noApproverNote);
+      const declared = await this.notePositionLabels(noApproverPositions(noApproverNote), undefined);
+      const { id: body, params } = noApproverNotice(noApproverNote, (name) => declared.get(name));
       await this.notify({
         topic: 'approval.comment',
         organizationId: requestOrg,
@@ -5880,18 +6058,38 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // When no one but the submitter is on the slate, both refusals below name
     // the remedy the request's timeline note names (`no-approver-note.ts`)
     // instead of an approver who does not exist.
+    // [#36308] Composed only when it is said, naming a position as the
+    // timeline note does: the decider's pack label, else the declared label,
+    // else its name. The sentence stays the English the note stores.
+    // [#36463] Beside it, the end user's half: the same refusal in the
+    // decider's language, as the error's `userMessage`
+    // (`submitterRefusalUserMessage`), which the REST door carries to the
+    // wire. The `message` is unchanged byte for byte.
     const noOneElse = namesNoOneBut(pendingApprovers, String(raw.submitter_id ?? ''));
-    const noApproverRemedy = noApproverNoteText({ who: noApproverWho(pendingApprovers) });
+    const refuseOwnApproval = async (
+      refusal: SubmitterApprovalRefusal,
+      message: (remedy: string | undefined) => string,
+    ): Promise<never> => {
+      const reader = this.readerLabels(context);
+      const labels = noOneElse
+        ? await this.notePositionLabels(slatePositions(pendingApprovers), reader)
+        : undefined;
+      const labelOf = (name: string): string | undefined => labels?.get(name);
+      const remedy = noOneElse ? noApproverNoteText({ who: noApproverWho(pendingApprovers, labelOf) }) : undefined;
+      const err = new Error(message(remedy)) as Error & { userMessage?: string };
+      err.userMessage = submitterRefusalUserMessage(
+        refusal, noOneElse ? pendingApprovers : undefined, reader?.sentence, labelOf,
+      );
+      throw err;
+    };
     if (
       input.decision === 'approve' && config.excludeSubmitter === true
       && raw.submitter_id && decider && decider === String(raw.submitter_id)
     ) {
-      throw new Error(
+      await refuseOwnApproval('excludeSubmitter', (remedy) =>
         `FORBIDDEN: '${decider}' submitted this request, and its approval step sets excludeSubmitter, so they `
-        + `cannot approve it. ${noOneElse
-          ? noApproverRemedy
-          : 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`,
-      );
+        + `cannot approve it. ${remedy
+          ?? 'Another approver on the step decides it; if the submitter holds the only slot, reassign it to someone else.'}`);
     }
     // [Maintainer ruling 2026-11-17, option B] The #3424 override never
     // approves a request its actor submitted, whatever `excludeSubmitter`
@@ -5903,13 +6101,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // `attachViewers` computes `viewer.can_override_approve` from the same
     // predicate, so the Approve control is not offered where this refuses.
     if (input.decision === 'approve' && viaOverride && overrideApprovesOwnRequest(raw, decider)) {
-      throw new Error(
+      await refuseOwnApproval('override', (remedy) =>
         `FORBIDDEN: '${decider}' submitted this request and holds no slot on it, so they cannot approve it `
-        + `through the administrator override. ${noOneElse
-          ? `${noApproverRemedy} To withdraw it instead, reject it or recall it.`
+        + `through the administrator override. ${remedy !== undefined
+          ? `${remedy} To withdraw it instead, reject it or recall it.`
           : 'An approver on the step decides it. To move it, reassign it to someone else, reject it, or recall '
-            + 'it and send the record for approval again.'}`,
-      );
+            + 'it and send the record for approval again.'}`);
     }
 
     // #3447 P2: decision outputs — validated BEFORE any write (audit included)
@@ -6579,7 +6776,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * answers, judged by the same rules (`validateActionParams` over the
    * `textarea` param that action declares). Every human door reaches this
    * member (the REST route, the SDK, the action door that forwards to the
-   * route, the action link with its fixed text). The SLA sweep's auto-reject
+   * route, the action link with the reason its confirm page asks for). The SLA sweep's auto-reject
    * calls `decideAndResume` and the revision-limit reject writes its own row,
    * so neither passes through here. An approve keeps its comment optional.
    */
@@ -6589,7 +6786,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
     if (input?.decision === 'reject') {
-      const issues = validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment: input.comment });
+      const issues = rejectReasonIssues(input.comment);
       if (issues.length > 0) {
         throw Object.assign(
           new Error(`Invalid action params: ${issues.map((i) => i.message).join('; ')}`),
@@ -6708,9 +6905,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * Told nothing:
    *  - a submitter who made the decision themselves — they already know;
    *  - anyone, when the decision ENDS A STEP and not the process: a resume that
-   *    opened a further approval step on the same run (the next approval node
-   *    down the edge this decision took) leaves the outcome to that step's
-   *    decision. Measured after the resume, never read off the graph, because a
+   *    opened a further approval step on the run that carries the request's
+   *    record (the next approval node down the edge this decision took, in the
+   *    same run or, past a `subflow` child, in its parent; #37806) leaves the
+   *    outcome to that step's decision. Measured after the resume, never read off the graph, because a
    *    decision gateway can skip a later step and only the run knows whether it
    *    did. A co-sign vote that leaves the request pending never gets here;
    *  - anyone, for the SLA sweep's auto-decision ({@link ApprovalService.decideAndResume}).
@@ -6729,8 +6927,24 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.flow_run_id) {
       let nextStepOpened: boolean;
       try {
+        // [#37806] Across the run that carries the record (ADR-0162 Execution
+        // item 7), never the decided request's own run alone: a step decided
+        // in a `subflow` child hands the next step to its parent, which opens
+        // it under the PARENT's run id. The child inherits the parent's record
+        // run, so one probe sees both. A `map` item whose item is a record
+        // carries its own, so its outcome does not wait for the next item: "over"
+        // is judged for each record. The served row does not carry the column,
+        // so it is read off the stored row; a request opened before requests
+        // recorded it falls back to its own run, as before.
+        const own = await this.engine.find('sys_approval_request', {
+          where: { id: request.id }, fields: ['record_run_id'], limit: 1, context: SYSTEM_CTX,
+        });
+        const recordRunId = Array.isArray(own) ? own[0]?.record_run_id : undefined;
+        const where = recordRunId
+          ? { record_run_id: String(recordRunId), status: 'pending' }
+          : { flow_run_id: request.flow_run_id, status: 'pending' };
         const next = await this.engine.find('sys_approval_request', {
-          where: { flow_run_id: request.flow_run_id, status: 'pending' }, limit: 1, context: SYSTEM_CTX,
+          where, fields: ['id'], limit: 1, context: SYSTEM_CTX,
         });
         nextStepOpened = Array.isArray(next) && next.length > 0;
       } catch (err: any) {
@@ -7204,14 +7418,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
           id: uid('aact'), request_id: requestId, organization_id: org,
           step_name: nodeId, step_index: 0, action: 'cancel',
           actor_id: null,
-          comment: `Auto-cancelled: the ${object} record '${record}' this request is about was deleted`,
+          // [#37531] The catalog's English; a reader with a locale is served it
+          // re-composed from the request's columns (`localizeActionRows`).
+          comment: recordDeletedCancelNoteText({ object, record }),
           created_at: now,
         }), { context: SYSTEM_CTX });
 
         await this.engine.update('sys_approval_request', {
           id: requestId,
           status: 'cancelled',
-          cancel_reason: 'record_deleted',
+          cancel_reason: RECORD_DELETED_CANCEL_REASON,
           pending_approvers: null, pending_approver_labels: null,
           completed_at: now,
           updated_at: now,
@@ -7589,9 +7805,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       throw new Error(`VALIDATION_FAILED: '${to}' is already a pending approver`);
     }
     const isOverride = this.isOverrideActor(context, raw.organization_id ?? null, pending);
+    // The caller, resolved once: the slot test below and the own-slot test in
+    // the hand-off branch read the same answer.
+    const caller = await this.actingCaller(context);
     // The slot the actor takes (`takenSlot`) — and, when `from` is not named,
     // the slot being handed over.
-    const slot = await this.takenSlot(pending, actorId, context);
+    const slot = await this.takenSlot(pending, actorId, context, caller);
     const from = String(input.from ?? slot ?? actorId).trim();
     // #4466 — same rule as `decideNode`: the marker records that the actor was
     // admitted only by the privileged branch, holding no slot themselves. A
@@ -7613,6 +7832,17 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         throw new Error(
           `FORBIDDEN: actor '${actorId}' may not move the platform administrators' slot: it moves only for a `
           + `platform administrator, or the system`,
+        );
+      }
+      // The call moves only a slot held by the actor it names: `from` must be
+      // one of that actor's addresses (`actorAddresses`, the same set the
+      // slot test reads; an omitted `actorId` names the caller). Moving any
+      // other slot is the system's or the override's (`isOverride` admits the
+      // system), never a fellow approver's.
+      if (!isOverride && !actorAddresses(actorId, caller).includes(from)) {
+        throw new Error(
+          `FORBIDDEN: actor '${actorId}' may move only a slot it holds, and does not hold '${from}': `
+          + `that slot moves only for its holder, an administrator, or the system`,
         );
       }
       next = pending.map(a => (a === from ? to : a));
@@ -8035,10 +8265,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   /**
    * POST redemption: consume the token FIRST (a failed decide still burns
    * it — replay-safe), then decide as the bound approver.
+   *
+   * A reject records the reason the approver typed on the confirm page
+   * (`input.comment`), judged as every reject door judges it
+   * ({@link rejectReasonIssues}). A missing or blank one is answered
+   * `reason_required` BEFORE the token is consumed: nothing was decided, so
+   * the link stays live and the page asks again. An approve keeps its fixed
+   * comment and reads no field.
    */
-  async redeemActionToken(rawToken: string): Promise<ActionTokenOutcome> {
+  async redeemActionToken(rawToken: string, input?: { comment?: unknown }): Promise<ActionTokenOutcome> {
     const res = await this.resolveActionToken(rawToken);
     if (!res.ok) return res;
+    const rejecting = res.token.action === 'reject';
+    if (rejecting && rejectReasonIssues(input?.comment).length > 0) {
+      return { ok: false, reason: 'reason_required', action: 'reject', request: res.request, approverId: res.token.approver_id };
+    }
     await this.engine.update('sys_approval_token', {
       id: res.token.id, consumed_at: this.clock.now().toISOString(),
     }, { context: SYSTEM_CTX });
@@ -8055,7 +8296,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const out = await this.decide(res.token.request_id, {
       decision: res.token.action,
       actorId: res.token.approver_id,
-      comment: 'Via action link',
+      comment: rejecting ? (input!.comment as string) : 'Via action link',
     }, person ? { ...SYSTEM_CTX, userId: person } : SYSTEM_CTX);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
   }
@@ -8077,8 +8318,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    *
    *  - `GET` renders: the token comes from the `token` query parameter, and it
    *    never decides (mail gateways prefetch every link in a message).
-   *  - `POST` redeems: the token comes from the `token` field of the form body.
-   *    A body that is not a form carries no token, and is told "invalid".
+   *  - `POST` redeems: the token comes from the `token` field of the form body,
+   *    and a reject's reason from its `comment` field (the last of each, as
+   *    the mount reads a repeated field). A body that is not a form carries no
+   *    token, and is told "invalid". A reject with no reason is answered the
+   *    confirm page again, with `400` ({@link actionRedemptionPage}).
    *  - A dead link is told on the page, with `200`, never as an error status.
    *  - Any other method: `405` with `Allow: GET, POST`. The contract and
    *    ADR-0043 name only these two methods, and answering a third as either
@@ -8092,7 +8336,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (request.method === 'GET') {
       const token = new URL(request.url).searchParams.get('token') ?? '';
       const peek = await this.peekActionToken(token);
-      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request));
+      if (!peek.ok) return actionPageResponse(renderResultPage(peek.reason, peek.request, this.approvalsInboxLink()));
       return actionPageResponse(renderConfirmPage({
         request: peek.request, action: peek.action, approverId: peek.approverId,
         token, actPath: ACTION_PAGE_PATH,
@@ -8100,17 +8344,31 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     }
     if (request.method === 'POST') {
       let token = '';
+      let comment: unknown;
       try {
-        // The LAST `token` field, as the self-hosted mount's body parser reads
-        // a repeated field — so the two doors agree on every body.
-        const fields = (await request.formData()).getAll('token');
-        token = String(fields[fields.length - 1] ?? '');
+        // The LAST `token` / `comment` field, as the self-hosted mount's body
+        // parser reads a repeated field — so the two doors agree on every body.
+        const form = await request.formData();
+        const tokens = form.getAll('token');
+        token = String(tokens[tokens.length - 1] ?? '');
+        const comments = form.getAll('comment');
+        comment = comments[comments.length - 1];
       } catch { /* not a form body: no token, told "invalid" below */ }
-      const out = await this.redeemActionToken(token);
-      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request));
-      return actionPageResponse(renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+      const out = await this.redeemActionToken(token, { comment });
+      const page = actionRedemptionPage(out, { token, actPath: ACTION_PAGE_PATH, inboxHref: this.approvalsInboxLink() });
+      return actionPageResponse(page.html, page.status);
     }
     return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
+  }
+
+  /**
+   * [#34862] The action-link pages' "Open the Approvals Inbox" link: the
+   * Console's inbox under the approval links' base and the Console's mount,
+   * built as the plugin's raw-app mount builds it (`consolePageLink`), so the
+   * two doors still answer the same bytes.
+   */
+  private approvalsInboxLink(): string {
+    return consolePageLink(this.publicBaseUrl, this.getConsoleUrl, APPROVALS_INBOX_PATH);
   }
 
   /**
@@ -8515,6 +8773,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * at which step, and what the mirrored status field on the business record
    * still says. Whether to re-run the downstream actions or re-open the
    * approval is a judgement call this cannot make.
+   *
+   * **Which rows one sweep reads (#37808).** Two ordered windows of at most
+   * `limit` (default 500) each: the newest decisions, and the next page of a
+   * walk over every decided request by id (`strandScanCursor`). `scanned`
+   * counts the distinct rows of both. See the body for why that misses no row.
    */
   async inspectStrandedRequests(options?: { limit?: number }): Promise<{
     scanned: number;
@@ -8538,12 +8801,37 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     if (typeof this.automation?.hasSuspendedRun !== 'function') return empty;
     if (typeof this.automation?.getRun !== 'function') return empty;
 
+    // [#37808] Two windows of at most `limit` rows each, both ordered by the
+    // store, never an unordered page of every decided request (which, past
+    // `limit` rows, is an arbitrary page a new strand may never fall into):
+    //  - the NEWEST decisions, by `updated_at` (the `status, updated_at`
+    //    index): a decision whose run could not advance is reported on the
+    //    next sweep;
+    //  - the next page of a WALK over every decided request by id, resumed
+    //    from where the previous sweep stopped and restarted once it runs
+    //    out. A keyset on the primary key skips no row (an id never changes,
+    //    and a row that leaves the set moves no other), so every decided
+    //    request is read at least once every ceil(decided / limit) sweeps,
+    //    whatever the newest window misses: more than `limit` decisions
+    //    between two sweeps, or a run that failed after its decision.
     const limit = options?.limit ?? 500;
+    const strandable = { $in: [...STRANDABLE_REQUEST_STATUSES] };
     let rows: any[] = [];
     try {
-      rows = await this.engine.find('sys_approval_request', {
-        where: { status: { $in: [...STRANDABLE_REQUEST_STATUSES] } }, limit, context: SYSTEM_CTX,
+      const newest: any[] = await this.engine.find('sys_approval_request', {
+        where: { status: strandable },
+        orderBy: [{ field: 'updated_at', order: 'desc' }, { field: 'id', order: 'desc' }],
+        limit, context: SYSTEM_CTX,
       }) ?? [];
+      const cursor = this.strandScanCursor;
+      const walked: any[] = await this.engine.find('sys_approval_request', {
+        where: cursor ? { status: strandable, id: { $gt: cursor } } : { status: strandable },
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit, context: SYSTEM_CTX,
+      }) ?? [];
+      this.strandScanCursor = walked.length < limit ? null : String(walked[walked.length - 1].id);
+      const seen = new Set(newest.map((r) => String(r?.id)));
+      rows = [...newest, ...walked.filter((r) => !seen.has(String(r?.id)))];
     } catch (err: any) {
       this.logger?.warn?.('[approvals] stranded-request scan failed to list requests', {
         error: err?.message ?? String(err),
@@ -9522,11 +9810,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return undefined;
   }
 
-  private static pickTitle(rec: any, displayField?: string): string | undefined {
-    const candidates = displayField
+  /**
+   * The fields {@link pickTitle} names a record by, in order: the declared
+   * display field, then the common title-ish names. The one list, read also by
+   * the free-text search's title arm ({@link recordsTitledWith}).
+   */
+  private static titleCandidates(displayField?: string): string[] {
+    return displayField
       ? [displayField, 'name', 'title', 'subject', 'label']
       : ['name', 'title', 'subject', 'label'];
-    for (const f of candidates) {
+  }
+
+  private static pickTitle(rec: any, displayField?: string): string | undefined {
+    for (const f of ApprovalService.titleCandidates(displayField)) {
       const v = rec?.[f];
       if (v != null && String(v).trim() && f !== 'id') return String(v);
     }
@@ -10309,7 +10605,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * anything is served — so for a caller whose view of the snapshot is masked,
    * row membership answers questions about contents that caller may not read.
    * The other four arms are columns of `sys_approval_request` itself, which
-   * every caller who can see the row reads whole; they are untouched.
+   * every caller who can see the row reads whole; they are untouched. The
+   * served-text arms (`servedTextArms`) are decided per object by the same
+   * seam, so a record's title is searched only where it is served.
    *
    * ## The invariant this method exists to hold
    *
@@ -10394,6 +10692,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // `organizationId` is not on the envelope — see isOverrideActor().
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
     if (tenantOrg) f.organization_id = tenantOrg;
+    // Status pushes down whole: `$in` for arrays (all bundled drivers
+    // support it), equality for a single value. Set before the free-text arms
+    // below, whose scope read is this same filter.
+    if (Array.isArray(filter?.status)) {
+      const statuses = (filter!.status as ApprovalStatus[]).filter(Boolean);
+      if (statuses.length === 1) f.status = statuses[0];
+      else if (statuses.length > 1) f.status = { $in: statuses };
+    } else if (filter?.status) {
+      f.status = filter.status;
+    }
     // Free-text search, pushed down. `$contains` is the driver's escaped-LIKE
     // operator. These four are columns of `sys_approval_request` itself, read
     // whole by anyone who can see the row, and are always present — the `$or`
@@ -10414,18 +10722,194 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (await this.freeTextMayMatchSnapshot(filter?.object, context)) {
         arms.push({ payload_json: { $contains: q } });
       }
+      // The text the row SHOWS this caller — title, process label, object
+      // label, requester name — each resolved to the machine values it names
+      // first, as this caller is served it. See `servedTextArms`.
+      arms.push(...await this.servedTextArms(q, { ...f }, context));
       f.$or = arms;
     }
-    // Status pushes down whole: `$in` for arrays (all bundled drivers
-    // support it), equality for a single value.
-    if (Array.isArray(filter?.status)) {
-      const statuses = (filter!.status as ApprovalStatus[]).filter(Boolean);
-      if (statuses.length === 1) f.status = statuses[0];
-      else if (statuses.length > 1) f.status = { $in: statuses };
-    } else if (filter?.status) {
-      f.status = filter.status;
-    }
     return { where: f, tenantOrg };
+  }
+
+  /**
+   * Window of the free-text scope read ({@link servedTextArms}), newest first.
+   * A scope past it searches its newest requests' labels only, said at `warn`.
+   */
+  private static readonly SERVED_TEXT_SCOPE_CAP = 5_000;
+
+  /**
+   * The free-text arms over what an inbox row SHOWS the caller: the record's
+   * title, the process label, the object label and the requester's name. None
+   * of them is a column the predicate can test as served — each is resolved
+   * when the row is served ({@link enrichRows}, `localizeRequestLabels`) — so
+   * each is resolved here FIRST, as THIS caller is served it, to the machine
+   * values that name it, and the arm is an `$in` over those values:
+   *
+   *  - **process label** — the reader's-locale translation where
+   *    `readerLabels` picks one for the flow (`process_name $in` the flows
+   *    whose picked label holds the term), else the stored `process_label`
+   *    column, which is what such a row serves (`process_label $contains`,
+   *    narrowed to the flows nothing is picked for, so a reader served a
+   *    translation is never found by the stored text they are not shown);
+   *  - **object label** — `readerLabels`' pick, else the schema label: the pair
+   *    the row's `object_label` is set from;
+   *  - **requester name** — {@link resolveUserNames}, the row's
+   *    `submitter_name` resolver, over the scope's submitters;
+   *  - **record title** — {@link recordsTitledWith}, per subject object.
+   *
+   * ## The invariant
+   *
+   * A request is never found by text the same caller is not served for it.
+   * Every label is computed by the function the serve path computes it with,
+   * for the same caller; the title is narrowed by
+   * `resolveReadableSnapshotFields`, asked as the CALLER, the answer
+   * {@link redactPayloads} and the served `record_title` read. A label this
+   * cannot resolve for the caller adds no arm: narrowing, never widening.
+   *
+   * ## The scope read
+   *
+   * Which flows, objects, records and submitters there are to resolve comes
+   * from one read of the requests under the query's own non-text filter
+   * (`scope`: tenant, object, record, submitter, status), under the system
+   * context like the list read itself; the participant narrowing is applied
+   * to the whole predicate afterwards, as before. It returns machine values
+   * only and is never served. Past {@link SERVED_TEXT_SCOPE_CAP} it keeps the
+   * newest requests and says so at `warn`; a failed read adds no arm.
+   *
+   * Every arm carries a non-empty value set, so no arm is an empty `$in`.
+   */
+  private async servedTextArms(
+    q: string,
+    scope: Record<string, unknown>,
+    context: ExecutionContext,
+  ): Promise<any[]> {
+    let rows: any[];
+    try {
+      const found = await this.engine.find('sys_approval_request', {
+        where: scope,
+        fields: ['object_name', 'process_name', 'record_id', 'submitter_id'],
+        orderBy: [{ field: 'created_at', order: 'desc' }],
+        limit: ApprovalService.SERVED_TEXT_SCOPE_CAP,
+        context: SYSTEM_CTX,
+      });
+      rows = Array.isArray(found) ? found : [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] free-text search could not read its scope — matching machine columns only', {
+        error: err?.message ?? String(err),
+      });
+      return [];
+    }
+    if (rows.length >= ApprovalService.SERVED_TEXT_SCOPE_CAP) {
+      this.logger?.warn?.('[approvals] free-text search scope hit its window — labels of older requests are not searched', {
+        cap: ApprovalService.SERVED_TEXT_SCOPE_CAP,
+      });
+    }
+    const processes = new Set<string>();
+    const records = new Map<string, Set<string>>();
+    const submitters = new Set<string>();
+    for (const r of rows) {
+      if (r?.process_name) processes.add(String(r.process_name));
+      if (r?.submitter_id) submitters.add(String(r.submitter_id));
+      if (r?.object_name && r?.record_id) {
+        const object = String(r.object_name);
+        let set = records.get(object);
+        if (!set) { set = new Set(); records.set(object, set); }
+        set.add(String(r.record_id));
+      }
+    }
+    const oneOf = (values: string[]) => (values.length === 1 ? values[0] : { $in: values });
+    const arms: any[] = [];
+    const labels = this.readerLabels(context);
+
+    // Process label: the picked translation, else the stored column.
+    const pickedMatch: string[] = [];
+    const unpicked: string[] = [];
+    for (const process of processes) {
+      const flow = flowNameOfProcess(process);
+      const picked = flow && labels ? labels.flowLabel(flow) : undefined;
+      if (picked === undefined) unpicked.push(process);
+      else if (picked.includes(q)) pickedMatch.push(process);
+    }
+    if (pickedMatch.length) arms.push({ process_name: oneOf(pickedMatch) });
+    if (unpicked.length) arms.push({ process_label: { $contains: q }, process_name: oneOf(unpicked) });
+
+    // Object label: the picked translation, else the schema label.
+    const objects = Array.from(records.keys()).filter((object) =>
+      (labels?.objectLabel(object) ?? this.objectLabelOf(object))?.includes(q));
+    if (objects.length) arms.push({ object_name: oneOf(objects) });
+
+    // Requester name: the resolver `submitter_name` is served from.
+    if (submitters.size) {
+      const names = await this.resolveUserNames(Array.from(submitters));
+      const named = Array.from(submitters).filter((s) => names.get(s)?.includes(q));
+      if (named.length) arms.push({ submitter_id: oneOf(named) });
+    }
+
+    // Record title: as served to this caller, per subject object.
+    const served = new Map<string, string[] | undefined>();
+    for (const [object, ids] of records) {
+      const readable = (await this.servedFields([object], context, served)).get(object);
+      const titled = await this.recordsTitledWith(object, ids, readable, q);
+      if (titled.length) arms.push({ object_name: object, record_id: oneOf(titled) });
+    }
+    return arms;
+  }
+
+  /**
+   * The `ids` of `object` whose title AS SERVED to the reader holds `q`:
+   * {@link titleAsServed} over the reader's served fields (`readable`,
+   * `undefined` the seam's pass-through), the function the served
+   * `record_title` is picked by ({@link titlesAsServed}). So a title field the
+   * reader may not read, or reads masked, finds nothing, exactly as it names
+   * nothing on serve.
+   *
+   * With the object's schema known, the read is narrowed in the driver to the
+   * records where one of the title fields the reader is served holds `q` (a
+   * superset of the answer); the served title is still what decides. Without
+   * a schema every record is read and decided the same way. A record whose
+   * title comes only from the request's snapshot (a deleted record) is not
+   * searched here. A failed read finds nothing (at `warn`).
+   */
+  private async recordsTitledWith(
+    object: string,
+    ids: ReadonlySet<string>,
+    readable: string[] | undefined,
+    q: string,
+  ): Promise<string[]> {
+    const list = Array.from(ids);
+    if (!list.length) return [];
+    const displayField = this.resolveDisplayField(object);
+    const served = readable === undefined ? undefined : new Set(readable.map(String));
+    const candidates = ApprovalService.titleCandidates(displayField)
+      .filter((f) => f !== 'id' && (served === undefined || served.has(f)));
+    if (!candidates.length) return [];
+    const where: any = { id: list.length === 1 ? list[0] : { $in: list } };
+    let fields: Record<string, unknown> | undefined;
+    try {
+      const schema: any = this.engine.getSchema?.(object);
+      fields = schema?.fields && typeof schema.fields === 'object' ? schema.fields : undefined;
+    } catch { /* schema unavailable — decided on the records alone */ }
+    if (fields) {
+      const declared = candidates.filter((f) => Object.prototype.hasOwnProperty.call(fields, f));
+      if (!declared.length) return [];
+      where.$or = declared.map((f) => ({ [f]: { $contains: q } }));
+    }
+    let recs: any[];
+    try {
+      const found = await this.engine.find(object, { where, limit: list.length, context: SYSTEM_CTX });
+      recs = Array.isArray(found) ? found : [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] free-text search could not read record titles — they are not searched', {
+        object, error: err?.message ?? String(err),
+      });
+      return [];
+    }
+    const out: string[] = [];
+    for (const rec of recs) {
+      if (rec?.id == null) continue;
+      if (ApprovalService.titleAsServed(rec, displayField, readable)?.includes(q)) out.push(String(rec.id));
+    }
+    return out;
   }
 
   /** Window the approver-index probe — pending queues live far below this. */
@@ -10875,6 +11359,10 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * a reader: the list ({@link listRequests}: the inbox and the record's
    * approval panel), and the get and a decision's echo ({@link loadRequest}),
    * whose step progress ({@link attachFlowSteps}) names its steps the same way.
+   *
+   * [#35384] The engine is where an object's label is served from: its served
+   * definition and its packaged base, so a renamed object is named by its
+   * rename, as `/meta` names it.
    */
   private readerLabels(context: ExecutionContext): ReaderLabels | undefined {
     let service: ReaderLabelI18n | undefined;
@@ -10884,7 +11372,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // The i18n service is optional and late-bound: the stored labels stand.
       return undefined;
     }
-    return readerLabelsFor(service, context?.locale);
+    return readerLabelsFor(service, context?.locale, this.engine);
   }
 
   async countRequests(
@@ -10961,6 +11449,60 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       );
     }
     return fresh;
+  }
+
+  /**
+   * `IApprovalService.getRecordLocks` — {@link getRecordLock} for a page of
+   * rows, in a bounded number of reads whatever the page size: the caller's
+   * read of the ids (the same #8652 anchor, one `$in` read AS THE CALLER, so an
+   * unreadable row and a missing one both answer `null` and stay
+   * indistinguishable), one pending-request lookup judged by the record-lock
+   * hook's own judgement ({@link recordsHeldByLockingApproval}) and — on a
+   * detail object only — the detail-row lock's batch form
+   * ({@link detailRowsHeldByLockingApproval}: one FK read plus one lookup per
+   * `master_detail` edge), so a line of a held master answers `true` here as
+   * it does at {@link getRecordLock}, with the same `lockSource`. Entry `i`
+   * answers `recordIds[i]`.
+   *
+   * ## Which rows count as readable — the row whose id IS the asked id
+   *
+   * A row is readable here when the caller's read hands back a row whose id
+   * IS the asked id, spelled as asked: one `$in` read cannot say which asked
+   * id a row the engine spells differently answers (a case-insensitive
+   * collation, a numeric id asked as `'07'`), so such an id answers `null`
+   * here. {@link getRecordLock} counts any row its read hands back, so for
+   * such an id the two doors differ, deliberately: the two doors keep
+   * different readability anchors on purpose, and aligning them would narrow
+   * a published answer (seat ruling 7152650156 on #37151). For an id spelled as the
+   * engine spells it — what a list holds — entry `i` is exactly the single
+   * door's answer.
+   *
+   * The cap is the door's to refuse loudly; here a blank id answers `null`.
+   */
+  async getRecordLocks(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean; lockSource?: 'record' | 'master' } | null>> {
+    const objectName = String(object ?? '').trim();
+    const ids = recordIds.map((recordId) => String(recordId ?? '').trim());
+    const asked = Array.from(new Set(ids.filter((id) => id !== '')));
+    if (!objectName || asked.length === 0) return ids.map(() => null);
+    // The anchor. As the CALLER — see getRecordLock's doc block.
+    const readable = await this.engine.find(objectName, {
+      where: { id: { $in: asked } }, fields: ['id'], limit: asked.length, context,
+    });
+    const readableIds = new Set((Array.isArray(readable) ? readable : []).map((row: any) => String(row?.id)));
+    const readableAsked = asked.filter((id) => readableIds.has(id));
+    const held = readableAsked.length > 0
+      ? await recordsHeldByLockingApproval(this.engine, objectName, readableAsked)
+      : new Set<string>();
+    // The single door's second half, asked of every readable row: a line held
+    // by its own request under a held master answers `'master'` there too.
+    const heldByMaster = readableAsked.length > 0
+      ? await detailRowsHeldByLockingApproval(this.engine, objectName, readableAsked)
+      : new Set<string>();
+    return ids.map((id) => (readableIds.has(id) ? recordLockAnswer(heldByMaster.has(id), held.has(id)) : null));
   }
 
   async getRequest(requestId: string, context: ExecutionContext): Promise<ApprovalRequestRow | null> {
@@ -11058,18 +11600,35 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * id, existing or not. ⚠️ Probing with {@link SYSTEM_CTX} here would admit
    * every authenticated user in the tenant.
    *
-   * ## What is answered — the lock, and nothing about the request
+   * Any row the read hands back counts, whatever spelling of the id the
+   * engine hands back (a case-insensitive collation, a numeric id asked as
+   * `'07'`); {@link getRecordLocks} counts only the row whose id IS the asked
+   * id. The two doors keep different readability anchors on purpose:
+   * aligning them would narrow a published answer (seat ruling 7152650156 on #37151).
+   * For such an id the master half below reads the row the engine found, but
+   * the row's own request is looked up by the id as asked
+   * ({@link recordHeldByLockingApproval}), so a record held by its own request
+   * may answer `{ locked: false }` under another spelling.
    *
-   * `{ locked }` only: no request id, node, participants or `pending`. Request
-   * content stays behind `approvalsVisibleToReaders` (#8652 ruling 5299823744,
-   * untouched). The judgement is the record-lock hook's own
-   * ({@link recordHeldByLockingApproval}), never a second copy of it.
+   * ## What is answered — the lock and its kind, nothing about the request
+   *
+   * `{ locked, lockSource }` (ruling 7148480184, option A): no request id,
+   * node, participants or `pending`. Request content stays behind
+   * `approvalsVisibleToReaders` (#8652 ruling 5299823744, untouched);
+   * `lockSource` is one kind bit. The judgement is the record-lock hook's own
+   * ({@link recordHeldByLockingApproval}), never a second copy of it —
+   * `lockSource: 'record'` — and, for a master-detail line, the detail-row
+   * lock's ({@link detailRowHeldByLockingApproval}): a locked record's lines
+   * are locked with it, so the read answers `true` for a line whose write the
+   * hook refuses — `lockSource: 'master'`, asked first because it wins when
+   * both hold: a line of a held master refuses delete too, a record held by
+   * its own request may be deleted (the delete cancels the request).
    */
   async getRecordLock(
     object: string,
     recordId: string,
     context: ExecutionContext,
-  ): Promise<{ locked: boolean } | null> {
+  ): Promise<{ locked: boolean; lockSource?: 'record' | 'master' } | null> {
     const objectName = String(object ?? '').trim();
     const id = String(recordId ?? '').trim();
     if (!objectName || !id) return null;
@@ -11078,7 +11637,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       where: { id }, fields: ['id'], limit: 1, context,
     });
     if (!Array.isArray(readable) || readable.length === 0) return null;
-    return { locked: await recordHeldByLockingApproval(this.engine, objectName, id) };
+    if (await detailRowHeldByLockingApproval(this.engine, objectName, id)) return recordLockAnswer(true, false);
+    return recordLockAnswer(false, await recordHeldByLockingApproval(this.engine, objectName, id));
   }
 
   private async loadRequest(
@@ -11237,7 +11797,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
-      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels, raw);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -11277,6 +11837,34 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * A step is named as `flow_steps` names it ([#24863]): the reader's label,
    * else the node's authored label; a node no longer in the graph by the
    * label its request stored. Display-only and best-effort.
+   *
+   * [#35863] A decided request's route carries `outcome`, where the record's
+   * approval stands now, off the same system read. So that read now serves
+   * more than the step labels `flow_steps` serves: for the run's latest later
+   * request, its step (node id and label) and its status, and whether the
+   * record's approval has ended. It serves that to every reader of THIS
+   * request, including one who cannot read the later request: within the
+   * request-visibility bound of ruling record 5299823744 (request content
+   * stays behind the read-visibility tier), as the seat ruled on PR #37148,
+   * because it tells only where the same approval went. The later request's
+   * id, approvers, comments and field values are never served here; a reader
+   * gets those only through that request's own read gate.
+   *
+   * "Ended" is asked of the run itself ({@link runHasEnded}, the dead-run
+   * sweep's {@link TERMINAL_RUN_STATUSES}), and only for a request its
+   * snapshot names a root run's (`__runRoot`, stamped at open): a `subflow`
+   * body or a `map` item is a child run, and its end is not the end of the
+   * record's approval, since the parent run goes on. Nor for a root run whose
+   * flow starts a child run anywhere ({@link flowHostsChildRuns}): a request
+   * a child run opened, after this one included, is filed under the child's
+   * run id and is not among the rows read here, so neither "ended here" nor
+   * "the last decision" can be known. "Its flow" is the body the run ran,
+   * and the read holds only the body armed NOW, so "ended" is also refused
+   * unless the run provably ran that body ({@link ranArmedBody}): a flow
+   * edited after the run, to drop its `subflow` say, is not judged by the
+   * edit. A request opened before the stamp, a child run's, a run of such a
+   * flow, a run not known to have run the armed body, or a run that cannot be
+   * read is never "ended": `ended: false` means "not known to have stopped".
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11284,6 +11872,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     flow: RouteFlowGraph,
     nodesById: Map<string, any>,
     labels: ReaderLabels | undefined,
+    raw: any,
   ): Promise<void> {
     try {
       if (!row.flow_run_id || !row.flow_node_id) return;
@@ -11302,9 +11891,55 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
-      const route = flowRoute(row, flow, rows, label);
+      const runRoot = parseJson<any>(raw?.node_config_json, undefined)?.__runRoot === true;
+      const ended = row.status !== 'pending' && runRoot && !flowHostsChildRuns(flow)
+        && await this.runHasEnded(row.flow_run_id, flowName, flow);
+      const route = flowRoute(row, flow, rows, label, ended);
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
+  }
+
+  /**
+   * [#35863] Whether the flow run `runId` has stopped for good, having run
+   * `flow`: its status is one of {@link TERMINAL_RUN_STATUSES} and
+   * {@link ranArmedBody} holds for it. `false` when there is no `getRun`, no
+   * such run, or a read throws: display-only, so an unreadable run is only
+   * ever "not known to have ended", never a failed read.
+   */
+  private async runHasEnded(runId: string, flowName: string, flow: unknown): Promise<boolean> {
+    if (typeof this.automation?.getRun !== 'function') return false;
+    try {
+      const run = await this.automation.getRun(runId);
+      const status = run?.status;
+      return !!status && TERMINAL_RUN_STATUSES.has(status) && this.ranArmedBody(run?.startedAt, flowName, flow);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * [#35863] Whether a run that started at `startedAt` provably ran `flow`,
+   * the body of `flowName` armed now: `flow` is the engine's NEWEST
+   * registration of the name (`getFlowVersionHistory`, the very object), and
+   * was registered strictly before the run started. A run starts on the body
+   * armed at its start and resumes pinned to it, so with nothing registered
+   * since, that body is `flow`.
+   *
+   * Every other case is "not known", never a guess: a body registered after
+   * the run started (an edit, or the registration a restart makes), a body
+   * armed without being the newest registration (a rollback re-arms an older
+   * one), no history for the name, or no start time. The run's `flowVersion`
+   * is not the witness: it is the author's number and an edit need not change
+   * it.
+   */
+  private ranArmedBody(startedAt: unknown, flowName: string, flow: unknown): boolean {
+    if (typeof startedAt !== 'string' || typeof this.automation?.getFlowVersionHistory !== 'function') return false;
+    const history = this.automation.getFlowVersionHistory(flowName);
+    const newest = Array.isArray(history) && history.length > 0 ? history[history.length - 1] : undefined;
+    if (!newest || newest.definition !== flow) return false;
+    const registered = Date.parse(newest.createdAt);
+    const started = Date.parse(startedAt);
+    return Number.isFinite(registered) && Number.isFinite(started) && registered < started;
   }
 
   async listActions(requestId: string, context: ExecutionContext): Promise<ApprovalActionRow[]> {
@@ -11341,51 +11976,102 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const toName = a.reassign_to ? names.get(String(a.reassign_to)) : undefined;
       if (toName) a.reassign_to_name = toName;
     }
-    await this.localizeRoutingNotes(requestId, actions, context);
+    await this.localizeActionRows(actions as unknown as Array<Record<string, unknown>>, context);
     return actions;
   }
 
   /**
-   * [#25576] The administrators' routing note, in the reader's language —
-   * and [#25573] its sibling, the submitter exclusion note
-   * (`submitter-exclusion-note.ts`), read the same way.
+   * The text a reader reads on an approval action row, in the reader's
+   * language: the ONE render both doors serve an action row by — the
+   * approvals door's timeline ({@link listActions}) and [#37531] the generic
+   * data door (`action-locale-middleware.ts`: Setup's Approval Actions list,
+   * the action's record page, the export).
    *
-   * The note's code and parameters ride the request's node-config snapshot,
-   * naming the timeline row they explain (`admin-rescue-note.ts`); that row's
-   * `comment` is overlaid, in place, with the note as the reader's locale
-   * renders it — the shape {@link readerLabels} gives the request's own labels.
-   * A read, never a write. Nothing is overlaid, and the stored English stands,
-   * when the read carries no locale or no `i18n` service is registered, when
-   * the request carries no note (a request that never routed to its
-   * administrators, or one opened before the note was stored as data), or
-   * when the pack holds no note sentence.
+   *  - `step_label`, where the row carries the column: the step's label from
+   *    the reader's pack (`flows.<flow>.approvals.<step_name>.label`, the key
+   *    the request's own labels are picked by), the flow named by the parent
+   *    request's `process_name`;
+   *  - the `comment` of a system row (no actor) that is a note the platform
+   *    wrote: [#25576] the administrators' routing note, [#25573] the
+   *    submitter exclusion note and the no-approver note, each stored as data
+   *    on the request's node-config snapshot and naming the row it explains;
+   *    [#37531] the record-deleted cancellation, re-composed from the
+   *    request's `cancel_reason`, `object_name` and `record_id`
+   *    (`record-deleted-cancel-note.ts`).
+   *
+   * In place, a read, never a write. A text nothing is picked for keeps the
+   * stored value: no locale or no `i18n` service, a parent request that is
+   * gone, a row the request carries no note for (a comment a person wrote is
+   * never one), or a pack without the sentence. The parent requests are read
+   * as the system for their label facts alone; the rows were already narrowed
+   * to the reader by the door that read them.
    */
-  private async localizeRoutingNotes(
-    requestId: string,
-    actions: ApprovalActionRow[],
-    context: ExecutionContext,
-  ): Promise<void> {
-    // Only a system comment can be the note: no read for any other timeline.
-    if (!actions.some((a) => a.action === 'comment' && !a.actor_id)) return;
+  async localizeActionRows(rows: Array<Record<string, unknown>>, context: ExecutionContext): Promise<void> {
+    const isSystemRow = (row: Record<string, unknown>): boolean => row.actor_id == null || row.actor_id === '';
+    const wantsStep = (row: Record<string, unknown>): boolean =>
+      'step_label' in row && typeof row.step_name === 'string' && row.step_name !== '';
+    const wantsNote = (row: Record<string, unknown>): boolean =>
+      isSystemRow(row) && (row.action === 'comment' || row.action === 'cancel') && typeof row.id === 'string';
+    const targets = rows.filter((row) => row && typeof row === 'object'
+      && typeof row.request_id === 'string' && row.request_id !== '' && (wantsStep(row) || wantsNote(row)));
+    if (targets.length === 0) return;
     const labels = this.readerLabels(context);
     if (!labels) return;
-    const tenantOrg = (context as any)?.organizationId ?? context?.tenantId;
-    const raw = await findRequestRow(this.engine, requestId, tenantOrg ?? null);
-    const snapshot = parseJson<unknown>(raw?.node_config_json, undefined);
-    const overlay = (actionId: string, render: () => string | undefined): void => {
-      const row = actions.find((a) => a.id === actionId && a.action === 'comment' && !a.actor_id);
-      const text = row ? render() : undefined;
-      if (row && text) row.comment = text;
-    };
-    const rescue = adminRescueNoteOf(snapshot);
-    if (rescue) {
-      const positionLabels = await this.notePositionLabels(adminRescuePositions(rescue), labels);
-      overlay(rescue.action_id, () => adminRescueNoteText(rescue, labels.sentence, (name) => positionLabels.get(name)));
+
+    const requestIds = [...new Set(targets.map((row) => String(row.request_id)))];
+    const found = await this.engine.find('sys_approval_request', {
+      where: { id: requestIds.length === 1 ? requestIds[0] : { $in: requestIds } },
+      fields: ['id', 'process_name', 'node_config_json', 'cancel_reason', 'object_name', 'record_id'],
+      limit: requestIds.length,
+      context: SYSTEM_CTX,
+    });
+    const requests = new Map<string, any>();
+    for (const r of Array.isArray(found) ? found : []) if (r?.id != null) requests.set(String(r.id), r);
+
+    /** Each request's notes, keyed by the action row each one explains. */
+    const notes = new Map<string, (positionLabel: (name: string) => string | undefined) => string | undefined>();
+    const positions = new Set<string>();
+    for (const r of requests.values()) {
+      const snapshot = parseJson<unknown>(r.node_config_json, undefined);
+      const rescue = adminRescueNoteOf(snapshot);
+      if (rescue) {
+        for (const name of adminRescuePositions(rescue)) positions.add(name);
+        notes.set(rescue.action_id, (label) => adminRescueNoteText(rescue, labels.sentence, label));
+      }
+      const exclusion = submitterExclusionNoteOf(snapshot);
+      if (exclusion) notes.set(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
+      const noApprover = noApproverNoteOf(snapshot);
+      if (noApprover) {
+        for (const name of noApproverPositions(noApprover)) positions.add(name);
+        notes.set(noApprover.action_id, (label) => noApproverNoteText(noApprover, labels.sentence, label));
+      }
     }
-    const exclusion = submitterExclusionNoteOf(snapshot);
-    if (exclusion) overlay(exclusion.action_id, () => submitterExclusionNoteText(exclusion, labels.sentence));
-    const noApprover = noApproverNoteOf(snapshot);
-    if (noApprover) overlay(noApprover.action_id, () => noApproverNoteText(noApprover, labels.sentence));
+    const positionLabels = positions.size > 0 ? await this.notePositionLabels([...positions], labels) : new Map<string, string>();
+    const positionLabel = (name: string): string | undefined => positionLabels.get(name);
+
+    for (const row of targets) {
+      const request = requests.get(String(row.request_id));
+      if (!request) continue;
+      if (wantsStep(row)) {
+        const flow = flowNameOfProcess(request.process_name);
+        const stepLabel = flow ? labels.stepLabel(flow, String(row.step_name)) : undefined;
+        if (stepLabel) row.step_label = stepLabel;
+      }
+      if (!wantsNote(row)) continue;
+      let text: string | undefined;
+      if (row.action === 'comment') {
+        text = notes.get(String(row.id))?.(positionLabel);
+      } else if (request.cancel_reason === RECORD_DELETED_CANCEL_REASON
+        && typeof request.object_name === 'string' && request.object_name
+        && request.record_id != null && request.record_id !== '') {
+        const object = String(request.object_name);
+        text = recordDeletedCancelNoteText(
+          { object: labels.objectLabel(object) ?? object, record: String(request.record_id) },
+          labels.sentence,
+        );
+      }
+      if (text) row.comment = text;
+    }
   }
 
   /**
@@ -11394,14 +12080,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * `label` ({@link ApprovalServiceOptions.positionLabelSource}). A position
    * neither answers is left out, and the note names it by its name. Display
    * only: a failed read leaves the name standing, never fails the read.
+   *
+   * [#36308] With no `labels` (a caller who asked in no language, or the
+   * submitter's notice, whose pack half is rendered per recipient at
+   * delivery) only the declared label is read. The one resolver for every
+   * door that names a no-approver slot.
    */
   private async notePositionLabels(
     positions: readonly string[],
-    labels: ReaderLabels,
+    labels: ReaderLabels | undefined,
   ): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     for (const name of positions) {
-      let label = labels.positionLabel(name);
+      let label = labels?.positionLabel(name);
       if (!label && this.positionLabelSource) {
         try {
           const declared = await this.positionLabelSource(name);

@@ -37,6 +37,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RECORD_TIMELINE_FOLDED_ACTIVITY_TYPES, RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
+// The server reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { RECORD_PAGE_PARAMS } from './record-page-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
 
@@ -496,7 +500,7 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
         });
         expect(data.activity).toEqual({ total: 9, records: [{ id: 'act1', type: 'updated' }] });
 
-        // The attachments: the newest `top` rows with their count.
+        // The attachments: the newest `top` rows with their count, the uploader expanded.
         expect(reads).toContainEqual({
             object: 'sys_attachment',
             query: {
@@ -505,6 +509,7 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
                 orderBy: [{ field: 'created_at', order: 'desc' }],
                 limit: 100,
                 count: true,
+                expand: { uploaded_by: { object: 'uploaded_by' } },
             },
             context: CTX,
         });

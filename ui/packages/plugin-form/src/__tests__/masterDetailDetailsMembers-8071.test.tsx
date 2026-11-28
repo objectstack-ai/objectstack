@@ -119,19 +119,31 @@ import { MasterDetailForm, type MasterDetailDetailConfig } from '../MasterDetail
 
 /**
  * Every prop object `MasterDetailForm` hands the line grid, captured on the
- * way in. The REAL `LineItemsField` still renders, so the cells rows 4 and 5
- * fill are the product's own.
+ * way in, and the LATEST props of each mounted grid, keyed by a per-instance id
+ * that the grid also writes into its section as a hidden sentinel. The REAL
+ * `LineItemsField` still renders, so the cells rows 4 and 5 fill are the
+ * product's own.
  */
-const { gridProps } = vi.hoisted(() => ({ gridProps: [] as Array<Record<string, any>> }));
+const { gridProps, latestGridProps } = vi.hoisted(() => ({
+  gridProps: [] as Array<Record<string, any>>,
+  latestGridProps: new Map<string, Record<string, any>>(),
+}));
 vi.mock('@object-ui/fields', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@object-ui/fields')>();
-  const { createElement } = await import('react');
+  const { createElement, Fragment, useId } = await import('react');
   const RealLineItemsField = actual.LineItemsField;
   return {
     ...actual,
     LineItemsField: (props: Record<string, any>) => {
+      const captureId = useId();
       gridProps.push(props);
-      return createElement(RealLineItemsField as any, props);
+      latestGridProps.set(captureId, props);
+      return createElement(
+        Fragment,
+        null,
+        createElement('span', { hidden: true, 'data-grid-capture': captureId }),
+        createElement(RealLineItemsField as any, props),
+      );
     },
   };
 });
@@ -199,16 +211,22 @@ async function mount(schema: Record<string, unknown>, dataSource = makeDataSourc
   return { ...view, dataSource };
 }
 
-/** The props the grid of the section headed `heading` received LAST. */
+/**
+ * The props the grid of the section headed `heading` received LAST. A heading
+ * draws before its columns load, so a section can exist with no grid in it yet:
+ * that throws, and a caller inside `waitFor` retries until the grid is
+ * captured. The section is found by its heading and its grid by the sentinel
+ * inside it, so a render pass that re-renders only some grids cannot hand back
+ * another section's props.
+ */
 function gridOf(heading: string): Record<string, any> {
   const section = screen.getByRole('heading', { name: heading }).closest('section');
   if (!section) throw new Error(`no section headed ${heading}`);
-  const index = Array.from(document.querySelectorAll('section')).indexOf(section);
-  // One grid per section, mounted in section order, so the Nth section's
-  // props are every Nth capture of the latest render pass.
-  const sections = document.querySelectorAll('section').length;
-  const latest = gridProps.slice(-sections);
-  return latest[index];
+  const sentinels = section.querySelectorAll('[data-grid-capture]');
+  if (sentinels.length !== 1) throw new Error(`section ${heading} holds ${sentinels.length} captured grids, not one`);
+  const props = latestGridProps.get(sentinels[0].getAttribute('data-grid-capture')!);
+  if (!props) throw new Error(`no props captured for the grid of section ${heading}`);
+  return props;
 }
 
 const headings = (container: HTMLElement) =>
@@ -245,6 +263,7 @@ async function fillQty(n: number, value: string) {
 describe('`object-master-detail-form` — the member shape of `details`', () => {
   beforeEach(() => {
     gridProps.length = 0;
+    latestGridProps.clear();
   });
 
   it('1. each member is its own section, in AUTHORED order, headed by `title` (or `Line Items`), with `columns` in authored order', async () => {
@@ -255,11 +274,13 @@ describe('`object-master-detail-form` — the member shape of `details`', () => 
       ],
     });
     await waitFor(() => expect(headings(container)).toEqual(['Lines', 'Line Items']));
-    expect(
-      gridOf('Lines').field.columns.map((c: { name: string }) => c.name),
-      'the authored column order, not the child object’s field order',
-    ).toEqual(['price', 'qty']);
-    expect(gridOf('Line Items').field.columns.map((c: { name: string }) => c.name)).toEqual(['note']);
+    await waitFor(() => {
+      expect(
+        gridOf('Lines').field.columns.map((c: { name: string }) => c.name),
+        'the authored column order, not the child object’s field order',
+      ).toEqual(['price', 'qty']);
+      expect(gridOf('Line Items').field.columns.map((c: { name: string }) => c.name)).toEqual(['note']);
+    });
   });
 
   it('2. four members reach the grid under its keys, as exactly eight keys, and off-list members are not forwarded', async () => {
@@ -367,7 +388,8 @@ describe('`object-master-detail-form` — the member shape of `details`', () => 
       return f;
     });
     expect(written.sortField, 'the detail’s written `sortField` is read by nothing').toBe('position');
-    expect(gridOf('Steps, configured').field.sortField, 'nothing derived, and the written one not read').toBeUndefined();
+    const configured = await waitFor(() => gridOf('Steps, configured').field);
+    expect(configured.sortField, 'nothing derived, and the written one not read').toBeUndefined();
   });
 
   it('3. `inlineMode` and `formFields` choose the form factor, each arm the other’s control', async () => {
@@ -390,13 +412,13 @@ describe('`object-master-detail-form` — the member shape of `details`', () => 
     expect(typeof list.onRowExpand, 'list mode edits through the full form').toBe('function');
     expect(list.field.addLabel, 'list mode names its Add action even when the detail’s `addLabel` is unset').toBe('Add');
 
-    const wider = gridOf('Wider form');
+    const wider = await waitFor(() => gridOf('Wider form'));
     expect(wider.displayMode).toBe('grid');
     expect(typeof wider.onRowExpand, '`formFields` wider than `columns` offers the row form').toBe('function');
     expect(wider.onAdd).toBeUndefined();
     expect(wider.field.addLabel, 'grid mode leaves the label to the grid').toBeUndefined();
 
-    const cells = gridOf('Cells only');
+    const cells = await waitFor(() => gridOf('Cells only'));
     expect(cells.displayMode).toBe('grid');
     expect(cells.onRowExpand, 'a form no wider than the cells adds nothing to open').toBeUndefined();
   });
@@ -493,7 +515,7 @@ describe('`object-master-detail-form` — the member shape of `details`', () => 
     const distinct = () => [...new Set(find.mock.calls.map((call) => JSON.stringify(call)))].sort();
     await waitFor(() => expect(distinct()).toEqual(expected));
     await waitFor(() => expect(gridOf('Lines').value).toEqual([{ id: 'l1', po: 'po1', qty: 4 }]));
-    expect(gridOf('Notes').value).toEqual([]);
+    await waitFor(() => expect(gridOf('Notes').value).toEqual([]));
   });
 
   it('7. control: `details: []` renders no section and mounts no grid, and the batch is the parent leg alone', async () => {

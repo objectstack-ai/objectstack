@@ -8,7 +8,7 @@
 
 import { ObjectStackClient, type QueryOptions as ObjectStackQueryOptions } from '@objectstack/client';
 import type { DroppedFieldsEvent, EngineAggregateOptions } from '@objectstack/spec/data';
-import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset } from '@objectstack/spec/ui';
 // objectui#11013 — a VALUE import: the keys `listViews` carries off a stored
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
@@ -79,6 +79,7 @@ import type {
   ImportJobSummaryInfo,
   ImportJobUndoResult,
   ListImportJobsOptions,
+  ListViewGroupHeaderAnswer,
 } from '@object-ui/types';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import {
@@ -3435,6 +3436,19 @@ export function narrowPersonalizationOverlay<T>(row: T): T {
  * (ADR-0034 seam); the two live apart because the seam sits above this
  * adapter, not beside it.
  */
+/**
+ * objectstack#36350 — the pin `updateView`'s draft write is sent with, from
+ * its strict draft read (`MetadataClient.getDraft`'s answer): `null` (no draft
+ * pending) asserts "no draft" (`If-None-Match: *`); an envelope's `version`
+ * token pins `If-Match`; an envelope with no token pins nothing, and the write
+ * goes unpinned as it did before the read served one.
+ */
+function draftWritePin(answer: unknown): { ifMatch: string } | { ifNoneMatch: '*' } | Record<string, never> {
+  if (answer === null || answer === undefined) return { ifNoneMatch: '*' };
+  const version = (answer as { version?: unknown }).version;
+  return typeof version === 'string' && version.length > 0 ? { ifMatch: version } : {};
+}
+
 function unwrapViewDraft(resp: unknown): Record<string, any> | null {
   if (!resp || typeof resp !== 'object') return null;
   const env = resp as Record<string, any>;
@@ -3700,7 +3714,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // Subscribers registered via onMutation(). Emitted after each successful
   // create/update/delete so data-bound views (ListView, ObjectView, kanban,
   // calendar) auto-refresh — the interface ListView relies on to reflect
-  // inline-edit "Save All" writes without a manual reload.
+  // inline-edit cell saves without a manual reload.
   private mutationListeners = new Set<(event: DataSourceMutationEvent<T>) => void>();
   // objectui#13442 — how many `batchMutationEvents` scopes are open, and the
   // events held back while any is. Keyed by type + resource, so a 100-row run
@@ -4369,7 +4383,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   /**
    * Subscribe to create/update/delete events on any resource. Returns an
    * unsubscribe function. Data-bound views use this to auto-refresh after a
-   * mutation (e.g. inline-edit "Save All", which writes through `update` and
+   * mutation (e.g. an inline-edit cell save, which writes through `update` and
    * must repaint the list without a manual reload).
    */
   onMutation(callback: (event: DataSourceMutationEvent<T>) => void): () => void {
@@ -6520,6 +6534,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             if (spec[key] !== undefined) row[key] = spec[key];
           }
           row.isDefault = !!spec.isDefault;
+          // objectstack#36011 — the record's override declaration (ADR-0146
+          // D2, on the record's top level), so the list can tell a view a
+          // package's customization overrides from the package's own.
+          if (spec.overrides !== undefined) row.overrides = spec.overrides;
           if (isDraft) row._draft = true;
           if (packageId !== undefined) row._packageId = packageId;
           return row;
@@ -6904,10 +6922,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // `MetadataClient.get` answers `null` on 404 (no draft pending) and throws
     // on anything else, so a transport failure here is NOT read as "published".
     const metaClient = this.metadataClient();
-    const [servedDraft, layers] = await Promise.all([
-      metaClient.get('view', viewName, { state: 'draft' }).then(unwrapViewDraft),
-      metaClient.layered('view', viewName),
-    ]);
+    // objectstack#36350 — the draft write below is pinned to the draft this
+    // read saw: the strict draft read's envelope (`getDraft`) carries its
+    // `version`. Read BEFORE the layers the body is merged from, so a draft
+    // write landing between the two leaves the pin older than the body and the
+    // write is refused, never the other way round (a pin newer than the body
+    // would let a merge onto the older body through). No draft pending at this
+    // read pins "no draft" (`If-None-Match: *`); an envelope that carries no
+    // version (a server from before the read served one) pins nothing.
+    const draftAnswer = await metaClient.getDraft('view', viewName);
+    const layers = await metaClient.layered('view', viewName);
+    const servedDraft = unwrapViewDraft(draftAnswer);
     const authored = authoredBuffer('view', layers, servedDraft);
     if (authored.kind === 'unserved') {
       throw new Error(
@@ -6923,7 +6948,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         throw new Error(`updateView: the pending draft of view "${viewName}" is empty. Nothing was written.`);
       }
       const mergedDraft = mergeViewPatch(stored, partial, viewName, objectName);
-      await metaClient.save('view', viewName, mergedDraft, { mode: 'draft' });
+      // A draft that moved since the read (another author's edit, or a
+      // "Save to this view" in flight) is refused `409 METADATA_CONFLICT` and
+      // this throws: the edit is not merged over a body it never read.
+      await metaClient.save('view', viewName, mergedDraft, { mode: 'draft', ...draftWritePin(draftAnswer) });
       this.invalidateViewKeys(objectName, viewName);
       return mergedDraft;
     }
@@ -7152,6 +7180,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
   }
 
+  /**
+   * Restore the factory version of a view a read-only package ships: remove
+   * the override its customization pair holds (ADR-0146 D2, "Restore package
+   * original" = delete the overriding item from `.custom`), so every user of
+   * the view is served the package's own view again.
+   *
+   * The override is the one {@link updateView} writes
+   * ({@link viewCustomizationHome}): the served read names the shipping
+   * package (`_packageId`) and carries the declaration (`overrides` naming
+   * that package). The pair is the ensure door's answer for that package, the
+   * same home `updateView` wrote into; the pair's draft of the view, then its
+   * row, are deleted there (`DELETE /meta/view/NAME?package=PAIR`, the door
+   * Studio's restore takes). Nothing is deleted at the package that ships the
+   * view, and the pair package itself stays.
+   *
+   * @throws when the served view is not an override of the package it is
+   *   served under (nothing is sent); when a delete is refused, with the
+   *   server's reason on the message's next line (`formatMetadataError`);
+   *   and when the pair held no row of the view, so nothing was restored.
+   */
+  async restoreFactoryView(
+    objectName: string,
+    viewName: string,
+  ): Promise<DeleteViewResult> {
+    await this.connect();
+    const read: any = await this.client.meta.getItem('view', viewName);
+    const current: Record<string, any> = (read && (read.item || read)) || {};
+    const base = current._packageId;
+    const declared = current.overrides;
+    if (typeof base !== 'string' || base === '' || !declared || declared.package !== base) {
+      throw new Error(
+        `restoreFactoryView: view "${viewName}" on object "${objectName}" is not a customization of a package's view,` +
+          ' so it has no factory version to restore. Nothing was removed.',
+      );
+    }
+    const pair = (await this.client.packages.ensureCustomization(base)).packageId;
+    const metaClient = this.metadataClient();
+    try {
+      let draft: ViewHomeDeleteOutcome;
+      let published: ViewHomeDeleteOutcome;
+      try {
+        draft = readViewDeleteReceipt(await metaClient.reset('view', viewName, { state: 'draft', packageId: pair }));
+        published = readViewDeleteReceipt(await metaClient.reset('view', viewName, { packageId: pair }));
+      } catch (err) {
+        throw Object.assign(
+          new Error(
+            `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+              ` removing its customization from "${pair}" failed.\n` +
+              formatMetadataError(err),
+          ),
+          { cause: err },
+        );
+      }
+      if (!published.removed) {
+        throw new Error(
+          `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+            ` "${pair}" holds no customization of it, so nothing was removed.`,
+        );
+      }
+      return { deleted: true, draft, published };
+    } finally {
+      this.invalidateViewKeys(objectName, viewName);
+    }
+  }
+
 
   /**
    * Get an application definition by name or ID.
@@ -7321,6 +7414,42 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // Server doesn't support page metadata — return null to fall back to static config
       return null;
     }
+  }
+
+  /**
+   * Get a semantic-layer dataset definition (`DataSource.getDataset`).
+   *
+   * Reads `GET /api/v1/meta/dataset/:name` through the client's
+   * `meta.getItem`, with the reader's package as `callerPackage` when the
+   * caller names one (ADR-0150 D3), so the name resolves the way the
+   * dataset query that follows resolves it.
+   *
+   * No such dataset is `null`, in both answers a server gives for it: the
+   * envelope with no `item` ({@link metaEnvelopeCarriesItem}) and the `404`
+   * ({@link is404Error}). Every other failure rejects, unlike {@link getPage}:
+   * the dashboard reports a definition it could not read, and a swallowed
+   * failure would read as "no dataset".
+   *
+   * Cached per name and reader package; `invalidateCache` / `clearCache`
+   * drop it like every other metadata read here.
+   */
+  async getDataset(datasetName: string, options?: { callerPackage?: string }): Promise<Dataset | null> {
+    await this.connect();
+    const callerPackage = options?.callerPackage;
+    const cacheKey = `dataset:${datasetName}${callerPackage ? `@${callerPackage}` : ''}`;
+    return this.metadataCache.get(cacheKey, async () => {
+      try {
+        const envelope: unknown = await this.client.meta.getItem(
+          'dataset',
+          datasetName,
+          callerPackage ? { callerPackage } : undefined,
+        );
+        return metaEnvelopeCarriesItem(envelope) ? ((envelope as { item: Dataset }).item) : null;
+      } catch (error: unknown) {
+        if (is404Error(error)) return null;
+        throw error;
+      }
+    });
   }
 
   /**
@@ -7591,11 +7720,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * that promises the query's own numbers, which is the defect this member
    * exists to end. A failure is thrown to the caller, and a body without a
    * `records` array is refused rather than read as "no groups".
+   *
+   * The door answers `hasMore` beside `records`: a grouped read with no
+   * `limit` is cut to the deployment's default page size, and `hasMore: true`
+   * says groups were dropped. It is handed on as the answer's `hasMore`
+   * (objectstack#36870), so a caller that folds the groups into a total can
+   * tell a cut answer from a whole one.
    */
   async queryGroupHeaders(
     resource: string,
     query: EngineAggregateOptions,
-  ): Promise<ListViewGroupHeaderRow[]> {
+  ): Promise<ListViewGroupHeaderAnswer> {
     await this.connect();
     const result: unknown = await this.client.data.query(resource, query as any);
     const records = (result as { records?: unknown } | null)?.records;
@@ -7606,7 +7741,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         + 'sent verbatim; nothing was approximated from a page of rows.',
       );
     }
-    return records as ListViewGroupHeaderRow[];
+    const answer = records as ListViewGroupHeaderAnswer;
+    if ((result as { hasMore?: unknown }).hasMore === true) answer.hasMore = true;
+    return answer;
   }
 
   /**

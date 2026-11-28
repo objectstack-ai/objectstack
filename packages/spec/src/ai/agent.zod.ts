@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { ROUTER_ADDRESSABLE_NAME_MESSAGE, ROUTER_ADDRESSABLE_NAME_PATTERN } from '../kernel/address-grammar';
-import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import { acceptRetiredDefaultResidue, enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { lazySchema } from '../shared/lazy-schema';
@@ -21,10 +21,54 @@ const AGENT_HISTORY =
   'Until this shape was closed these were dropped silently — the agent still registered '
   + 'and still answered, minus whatever the key was meant to configure or constrain.';
 
+// ── Retired `model.provider` (ADR-0049 enforce-or-remove, #37712) ───────────
+//
+// The block once declared which provider served the agent — an enum of
+// `openai`, `azure_openai`, `anthropic` and `local`. No runtime ever read it:
+// the cloud AI runtime, the one runtime that executes agents, applies the
+// model name, `temperature` and `maxTokens` and nothing else from this block,
+// and the providers a deployment can turn on are its own AI settings
+// (`AI_PROVIDERS` in service-settings: `gateway`, `openai`, `anthropic`,
+// `google`, …), a list the enum neither matched nor could follow — two of its
+// four values name no provider a deployment has. The model name is the one
+// choice an agent makes; the deployment resolves it among the providers it
+// has turned on. Tombstoned with `retiredKey()`: `tsc` refuses the key and the
+// parse answers with this prescription; the ADR-0087 conversion
+// `agent-model-provider-removed` deletes it from stored rows and existing
+// sources. Module-private and written with `//`: prose the refusal consumes.
+const MODEL_PROVIDER_RETIRED =
+  '`agent.model.provider` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — '
+  + 'it never had an effect: no runtime read it, and the provider that serves an agent is chosen by '
+  + 'the deployment\'s AI settings, never by the agent. Delete the key. To pin a model, name it in '
+  + '`agent.model.model`; the deployment resolves that name among the providers it has turned on, '
+  + 'and an agent that names no model runs on the deployment\'s default model. '
+  + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+// The wrong-layer spelling: `provider` written at the agent's top level. It
+// used to point at `model.provider`; with that key retired, it carries the
+// same answer (the `memory.longTerm` spellings' precedent below).
+const AGENT_PROVIDER_SPELLING_RETIRED =
+  'there is no provider key on an agent, at the top level or under `model` — the provider that '
+  + 'serves an agent is chosen by the deployment\'s AI settings (`agent.model.provider` was '
+  + 'removed in @objectstack/spec 19.0.0, ADR-0049 enforce-or-remove). Delete the key; to pin a '
+  + 'model, name it in `agent.model.model`.';
+
+// [#37712] The default the retired `provider` emitted, captured as a literal
+// at retirement (`acceptRetiredDefaultResidue`, the #12840 rule for a retired
+// DEFAULTED key). Every agent a released 18.x toolchain parsed with a `model`
+// block carries `provider: 'openai'` written out although no author wrote it;
+// that residue is accepted and stripped, and every other value (the ones an
+// author did write) keeps the tombstone's refusal.
+const MODEL_PROVIDER_RETIRED_KEY_RESIDUE = { provider: 'openai' } as const;
+
 /**
  * AI Model Configuration
+ *
+ * The model an agent runs on and its sampling settings. Which provider serves
+ * the model is the deployment's choice: `provider` was retired (#37712,
+ * ADR-0049) because no runtime ever read it.
  */
-export const AIModelConfigSchema = lazySchema(() => strictObject({
+export const AIModelConfigSchema = lazySchema(() => acceptRetiredDefaultResidue(strictObject({
   surface: 'this model configuration',
   history: AGENT_HISTORY,
   aliases: {
@@ -34,19 +78,35 @@ export const AIModelConfigSchema = lazySchema(() => strictObject({
     top_p: 'topP', nucleus: 'topP',
   },
 }, {
-  provider: z.enum(['openai', 'azure_openai', 'anthropic', 'local']).default('openai'),
-  model: z.string().describe('Model name (e.g. gpt-4, claude-3-opus)'),
+  /**
+   * REMOVED (#37712, ADR-0049) — the provider is the deployment's choice, never
+   * the agent's; see `MODEL_PROVIDER_RETIRED` above. A tombstone, not a bare
+   * delete, so authoring it is a `tsc` error and a parse error that carries
+   * the prescription instead of an anonymous unrecognized-key refusal.
+   */
+  provider: retiredKey(MODEL_PROVIDER_RETIRED),
+  model: z.string().optional().describe(
+    'Model name (e.g. gpt-4, claude-3-opus). Optional: when absent, the agent runs on the '
+    + 'host\'s default model for this environment, so an agent that only tunes sampling '
+    + '(e.g. `temperature`) need not name a model.',
+  ),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().optional(),
   topP: z.number().optional(),
-}));
+}), MODEL_PROVIDER_RETIRED_KEY_RESIDUE));
 
 /*
  * REMOVED — `AIKnowledgeSchema` / `AIKnowledge` (#3896 audit close-out). It
- * typed `agent.knowledge`, tombstoned below: the RAG path never read the
- * agent record, so the whole block was a grounding claim nothing enforced.
- * The protocol-17 `agent-knowledge-topics-to-sources` conversion remains in
- * the chain (it rewrites historical SOURCES and imports nothing from here).
+ * typed `agent.knowledge`, which no key below declares any more: the RAG
+ * path never read the agent record, so the whole block was a grounding claim
+ * nothing enforced. The key's tombstone aged out at protocol 18, so the
+ * strict `AgentSchema` refuses it as an unknown key naming the upgrade guide.
+ * No conversion for the block's old `topics` spelling is in the chain: the
+ * protocol-17 `agent-knowledge-topics-to-sources` rename was absorbed before
+ * release into the removal of the whole block (the ABSORBED note in
+ * `conversions/entries/17/sharing-rule-access-level-full-to-edit.ts`), so no
+ * registry or entry module carries that id and `retired-after.census.json`
+ * has no row for it.
  */
 
 // ── Retired structured-output members (ADR-0049 enforce-or-remove) ──────────
@@ -323,7 +383,10 @@ export const AgentSchema = lazySchema(() => strictObject({
       + 'with `access` / `permissions`.',
     // ── Wrong-layer pointers ──────────────────────────────────────────────
     temperature: 'model settings live under `model` — write `model: { temperature: … }`',
-    provider: 'model settings live under `model` — write `model: { provider: … }`',
+    // Not a wrong-layer pointer any more (#37712): `model.provider` was retired,
+    // so this answers with the retirement's fact instead of steering an author
+    // onto the tombstone.
+    provider: AGENT_PROVIDER_SPELLING_RETIRED,
     maxTokens:
       'ambiguous at this level — per-request model output is `model.maxTokens`; a budget '
       + 'ceiling for the whole invocation is `guardrails.maxTokensPerInvocation`',
@@ -414,8 +477,18 @@ export const AgentSchema = lazySchema(() => strictObject({
     history: AGENT_HISTORY,
     aliases: { maxSteps: 'maxIterations', maxLoops: 'maxIterations', iterations: 'maxIterations', maxTurns: 'maxIterations' },
   }, {
-    /** Maximum reasoning iterations before stopping */
-    maxIterations: z.number().int().min(1).max(100).default(10).describe('Maximum planning loop iterations'),
+    /**
+     * Runaway fuse for the agent's reasoning loop, counted in model calls: one
+     * iteration is one model call plus the batch of tool calls it requests. It
+     * stops a loop that would otherwise never end; it is not a quality knob, and
+     * raising it does not make the agent reason better.
+     *
+     * Any whole number from 1 to 1000 (default 10). The ceiling is 1000 so a
+     * long-running agent can declare a fuse of a few hundred rounds (300, say)
+     * while no value can switch the fuse off.
+     */
+    maxIterations: z.number().int().min(1).max(1000).default(10)
+      .describe('Runaway fuse counted in model calls (one call plus its tool batch), 1 to 1000; not a quality knob'),
   }).optional().describe('Autonomous reasoning and planning configuration'),
 
   /** Memory Management */

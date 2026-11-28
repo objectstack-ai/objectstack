@@ -171,6 +171,15 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // and its child object against the deployment's names; the door
       // controls are in the roll-up describe below.
       'lintSummaryRollups',
+      // [#35143] The card names this door for the Data model family: a
+      // `reference` on a type that reads none (error) and a count-named
+      // relationship (warning), judged on the written object's own fields.
+      'lintFieldReferenceShapes',
+      // [#37435] An advisory join, the card's own: an option `color` the
+      // option badge renders neutral (`field/option-color-renders-neutral`),
+      // judged on the written object's own options. Not a fenced rule: it
+      // fires on none of the platform's or the examples' option colours.
+      'lintOptionColors',
       // Joins as the card's ruling names it (error at the author door): two
       // visible fields an object serves under one label. The door cases are
       // in the duplicate-label describe below.
@@ -200,6 +209,10 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // in the runtime's wrapper is refused here as at the `action` door. Its
       // door cases are in `validate-action-body-compiles.test.ts`.
       'validateActionBodyCompiles',
+      // [#35143] The same reading, one question over: an inline action body that
+      // writes through `ctx.api` with no `api.write` grant. Door cases in
+      // `validate-action-body-capabilities.test.ts`.
+      'validateActionBodyCapabilities',
       'validateRuleSchemaFormats',
     ]);
   });
@@ -570,6 +583,8 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateInertObjectDeclarations', // see the roster pin above
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
+      'lintFieldReferenceShapes', // [#35143] — see the roster pin above
+      'lintOptionColors', // [#37435] — see the roster pin above
       'lintDuplicateFieldLabels', // see the roster pin above
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above
@@ -577,6 +592,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateMembershipKeyDeclarations', // [#25234]
       'validateRuleCompilability',
       'validateActionBodyCompiles', // see the roster pin above
+      'validateActionBodyCapabilities', // [#35143] — see the roster pin above
       'validateRuleSchemaFormats',
     ]);
   });

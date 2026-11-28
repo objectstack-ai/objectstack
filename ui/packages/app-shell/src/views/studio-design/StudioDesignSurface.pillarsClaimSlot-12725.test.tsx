@@ -7,23 +7,22 @@
  * right slot, through the seam the Interfaces pillar uses
  * (`useStudioRightSlot`), instead of an aside of their own.
  *
- *  - Data: selecting a field switches the slot to 属性 and shows the field
- *    inspector in it; no `data-field-inspector` beside the canvas. The pillar
- *    has no properties of its own with nothing selected, so Esc or a click on
- *    empty canvas hands the slot back to the copilot.
+ *  - Data: selecting a field opens the slot and shows the field inspector in
+ *    it; no `data-field-inspector` beside the canvas. The pillar has no
+ *    properties of its own with nothing selected, so Esc or a click on empty
+ *    canvas closes the slot again.
  *  - Automations: the Configuration is in the slot from the start (its empty
  *    sentence while nothing is selected, as the aside had); selecting a node
- *    switches the slot to 属性, and Esc or the canvas's background press
+ *    shows its configuration, and Esc or the canvas's background press
  *    returns it to the flow's Configuration. A row too narrow for the classic
  *    aside opens no drawer (objectui#11795's fold is the classic layout's).
- *  - While 属性 shows, the copilot strip stays at the slot's foot.
  *  - A hidden slot unfolds on a new selection (objectstack#26737); hidden again
  *    over the same selection, it stays hidden.
- *  - CONTROL: the Access pillar claims nothing — the slot shows the copilot
- *    alone; the Interfaces pillar's own pins live in `rightSlot-12725`.
+ *  - CONTROL: the sharing overview (objectstack#36905; the Access pillar before
+ *    it) claims nothing — the slot stays closed.
  *
- * The copilot, the flow canvas and both inspectors are stubs: the canvas
- * reports a node selection, or a background press, as `onSelectionChange`.
+ * The flow canvas and both inspectors are stubs: the canvas reports a node
+ * selection, or a background press, as `onSelectionChange`.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -102,26 +101,23 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-/** What the copilot stub reports, per test. */
-const copilot = vi.hoisted(() => ({ available: true }));
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: ({ onStatusChange }: { onStatusChange?: (s: { available: boolean; planPendingCount: number }) => void }) => {
-    React.useEffect(() => {
-      onStatusChange?.({ available: copilot.available, planPendingCount: 0 });
-    }, [onStatusChange]);
-    return copilot.available ? <div data-testid="copilot-body">conversation</div> : null;
-  },
-}));
-
 // The source loads `@objectstack/lint` lazily; paid here, at collection, not
 // inside a case's clock (check:test-source-alias).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid at collection too.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { DOCK_STUDIO_EXPANDED_STORAGE_KEY } from '../../layout/chatDockState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -168,7 +164,6 @@ registerMetadataPreview('flow', StubFlowPreview as never);
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
-  copilot.available = true;
   window.sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
@@ -199,20 +194,22 @@ function renderAt(tab: string) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 const SLOW = { timeout: 4000 };
+/** objectstack#36904 — the Task object's designer, on its own address. */
+const TASK_DESIGNER = 'metadata/object/acme_task';
 const slot = () => screen.getByTestId('studio-right-slot');
 const slotProps = () => screen.getByTestId('studio-slot-props');
 
 /** Data: open the object's Form tab and click its one field's card. */
 async function selectDataField() {
-  renderAt('data');
-  fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+  renderAt(TASK_DESIGNER);
   fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
   const card = (await screen.findByText('Title', undefined, SLOW)).closest('[role="button"]') as HTMLElement;
   fireEvent.click(card);
@@ -220,40 +217,34 @@ async function selectDataField() {
   return card;
 }
 
-/** Automations: open the flow; its canvas is the stub above. */
+/** The flow designer on the flow's address (objectstack#36903); its canvas is the stub above. */
 async function openFlow() {
-  renderAt('automations');
-  fireEvent.click(await screen.findByRole('button', { name: /Notify owner/ }, SLOW));
+  renderAt('metadata/flow/notify_owner');
   await screen.findByTestId('pick-node', undefined, SLOW);
 }
 
 describe('Data: the field inspector is in the right slot (objectui#12725)', () => {
-  it('claims nothing while no field is selected: the slot shows the copilot alone', async () => {
-    renderAt('data');
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+  it('claims nothing while no field is selected: the slot stays closed', async () => {
+    renderAt(TASK_DESIGNER);
     fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
     await screen.findByText('Title', undefined, SLOW);
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
-    expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
+    await act(async () => {});
+    expect(slot()).not.toBeVisible();
     expect(screen.queryByTestId('data-field-inspector')).toBeNull();
   });
 
-  it("selecting a field switches the slot to 属性 with that field's inspector, the copilot behind the header switch", async () => {
+  it("selecting a field opens the slot with that field's inspector", async () => {
     await selectDataField();
 
-    expect(slot()).toHaveAttribute('data-mode', 'props');
-    expect(within(slot()).getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
+    expect(slot()).toBeVisible();
+    expect(within(slot()).getByTestId('studio-slot-title')).toHaveTextContent(t('engine.studio.inspector.props', 'en'));
     // The one field inspector is the slot's: none beside the canvas.
     expect(screen.getAllByTestId('data-field-inspector')).toHaveLength(1);
     expect(slotProps().contains(screen.getByTestId('data-field-inspector'))).toBe(true);
     expect(within(slotProps()).getByTestId('stub-field-inspector')).toBeVisible();
-    expect(screen.getByTestId('copilot-body')).not.toBeVisible();
-    // objectstack#35018 — no strip at the slot's foot: the header's 属性 | AI 助手 switch leads back.
-    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
-    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
   });
 
-  it('Esc drops the selection and hands the slot back; an Escape another layer took does not', async () => {
+  it('Esc drops the selection and closes the slot; an Escape another layer took does not', async () => {
     await selectDataField();
 
     const answer = (e: KeyboardEvent) => e.preventDefault();
@@ -265,8 +256,7 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
     // Pressed inside the slot's inspector: the pillar's, though outside its DOM.
     fireEvent.keyDown(within(slotProps()).getByLabelText('Field title'), { key: 'Escape' });
     await waitFor(() => expect(screen.queryByTestId('data-field-inspector')).toBeNull());
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-    expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
+    expect(slot()).not.toBeVisible();
   });
 
   it('a click on empty canvas drops it too; a click on the field does not', async () => {
@@ -277,30 +267,11 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
 
     fireEvent.click(screen.getByTestId('data-canvas-main'));
     await waitFor(() => expect(screen.queryByTestId('data-field-inspector')).toBeNull());
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
+    expect(slot()).not.toBeVisible();
   });
 
-  it('a second field selected while the copilot shows asks for the properties again', async () => {
-    await selectDataField();
-    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-    // The selection stands: the copilot stays chosen.
-    expect(within(slotProps()).getByTestId('stub-field-inspector')).toBeInTheDocument();
-
-    // The same field again is no new selection: the copilot stays chosen.
-    // objectstack#35018 — the rail's header names the field too: the canvas card is the one pressed.
-    fireEvent.click(within(screen.getByTestId('data-canvas-main')).getByText('Title').closest('[role="button"]') as HTMLElement);
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-
-    fireEvent.click(screen.getByText('Due').closest('[role="button"]') as HTMLElement);
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
-    expect(within(slotProps()).getByLabelText('Field due')).toBeInTheDocument();
-  });
-
-  it('no copilot served: a selection shows the slot with the properties alone', async () => {
-    copilot.available = false;
-    renderAt('data');
-    fireEvent.click(await screen.findByRole('button', { name: /Task/ }, SLOW));
+  it('a selection shows the slot with the properties', async () => {
+    renderAt(TASK_DESIGNER);
     fireEvent.click(await screen.findByRole('button', { name: t('engine.studio.data.tab.form', 'en') }, SLOW));
     const card = (await screen.findByText('Title', undefined, SLOW)).closest('[role="button"]') as HTMLElement;
     await act(async () => {});
@@ -308,8 +279,6 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
 
     fireEvent.click(card);
     await waitFor(() => expect(slot()).toBeVisible());
-    expect(slot()).toHaveAttribute('data-mode', 'props');
-    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
     expect(within(slotProps()).getByTestId('stub-field-inspector')).toBeVisible();
   });
 });
@@ -317,24 +286,19 @@ describe('Data: the field inspector is in the right slot (objectui#12725)', () =
 describe('Automations: the Configuration is in the right slot (objectui#12725)', () => {
   it("holds the slot with the flow's Configuration while nothing is selected; no aside beside the canvas", async () => {
     await openFlow();
-    await waitFor(() => expect(within(slot()).getAllByRole('tab')).toHaveLength(2));
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
+    await waitFor(() => expect(slot()).toBeVisible());
     expect(screen.getAllByTestId('auto-config-aside')).toHaveLength(1);
     expect(slotProps().contains(screen.getByTestId('auto-config-aside'))).toBe(true);
     expect(slotProps()).toHaveTextContent(t('engine.studio.auto.emptyLine1', 'en'));
   });
 
-  it("selecting a node switches the slot to 属性 with that node's configuration, the copilot behind the header switch", async () => {
+  it("selecting a node shows that node's configuration in the slot", async () => {
     await openFlow();
     fireEvent.click(screen.getByTestId('pick-node'));
 
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
-    expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible();
+    await waitFor(() => expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible());
     expect(screen.getAllByTestId('auto-config-aside')).toHaveLength(1);
     expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
-    expect(screen.getByTestId('copilot-body')).not.toBeVisible();
-    expect(screen.queryByTestId('studio-slot-copilot-strip')).toBeNull();
-    expect(within(slot()).getByTestId('studio-slot-tab-copilot')).toHaveAttribute('aria-selected', 'false');
   });
 
   it("Esc returns to the flow's own Configuration; an Escape typed in the inspector is the field's", async () => {
@@ -347,7 +311,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
 
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => expect(within(slotProps()).queryByTestId('stub-flow-inspector')).toBeNull());
-    expect(slot()).toHaveAttribute('data-mode', 'props');
+    expect(slot()).toBeVisible();
     expect(slotProps()).toHaveTextContent(t('engine.studio.auto.emptyLine1', 'en'));
   });
 
@@ -359,18 +323,6 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     fireEvent.click(screen.getByTestId('flow-background'));
     await waitFor(() => expect(within(slotProps()).queryByTestId('stub-flow-inspector')).toBeNull());
     expect(slotProps()).toHaveTextContent(t('engine.studio.auto.emptyLine1', 'en'));
-  });
-
-  it('a second node selected while the copilot shows asks for the properties again', async () => {
-    await openFlow();
-    fireEvent.click(screen.getByTestId('pick-node'));
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
-    fireEvent.click(screen.getByTestId('studio-slot-tab-copilot'));
-    expect(slot()).toHaveAttribute('data-mode', 'copilot');
-
-    fireEvent.click(screen.getByTestId('pick-other-node'));
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'props'));
-    expect(within(slotProps()).getByLabelText('Node end')).toBeInTheDocument();
   });
 
   it('a row too narrow for the classic aside opens no drawer: the Configuration is in the slot, outside the row', async () => {
@@ -394,15 +346,14 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
   // while the panel is hidden unfolds it on that node's configuration.
   it('a hidden slot unfolds on a selection, on the selected node’s configuration', async () => {
     await openFlow();
-    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    fireEvent.click(await screen.findByTestId('studio-slot-toggle'));
     expect(slot()).not.toBeVisible();
     expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('0');
 
     fireEvent.click(screen.getByTestId('pick-node'));
     await waitFor(() => expect(slot()).toBeVisible());
-    expect(slot()).toHaveAttribute('data-mode', 'props');
     expect(within(slotProps()).getByLabelText('Node start')).toBeVisible();
-    expect(screen.getByTestId('topbar-ai-assistant')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('studio-slot-toggle')).toHaveAttribute('aria-pressed', 'true');
     expect(window.sessionStorage.getItem(DOCK_STUDIO_EXPANDED_STORAGE_KEY)).toBe('1');
     expect(screen.queryByTestId('auto-config-drawer')).toBeNull();
   });
@@ -412,7 +363,7 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
     fireEvent.click(screen.getByTestId('pick-node'));
     await waitFor(() => expect(within(slotProps()).getByTestId('stub-flow-inspector')).toBeVisible());
 
-    fireEvent.click(screen.getByTestId('topbar-ai-assistant'));
+    fireEvent.click(screen.getByTestId('studio-slot-toggle'));
     await act(async () => {});
     expect(slot()).not.toBeVisible();
     // The same node again is no new selection.
@@ -427,10 +378,47 @@ describe('Automations: the Configuration is in the right slot (objectui#12725)',
 });
 
 describe('CONTROL — a pillar that claims nothing (objectui#12725)', () => {
-  it('Access keeps its own layout: the slot shows the copilot alone, with no properties half', async () => {
-    renderAt('access');
-    await waitFor(() => expect(slot()).toHaveAttribute('data-mode', 'copilot'));
-    expect(within(slot()).queryAllByRole('tab')).toHaveLength(0);
+  it('the sharing overview keeps its own layout: the slot stays closed and empty', async () => {
+    renderAt('owd');
+    await screen.findByTestId('owd-item-header');
+    await act(async () => {});
+    expect(slot()).not.toBeVisible();
     expect(slotProps()).toBeEmptyDOMElement();
+  });
+});
+
+// objectstack#37520 (S1) — the title row's right-most icon is the slot's show /
+// hide toggle. objectstack#37455 moved it from the top bar to the end of the
+// open page's title row; the flow designer claims the slot from the start (its
+// Configuration), so the toggle is drawn there with nothing selected.
+describe('the slot\'s toggle ends the page\'s title row (objectstack#37520)', () => {
+  const toggle = () => screen.getByTestId('studio-slot-toggle');
+
+  it('in the page\'s title row, behind a hairline, not in the top bar; it hides and shows the slot', async () => {
+    await openFlow();
+    await waitFor(() => expect(slot()).toBeVisible());
+
+    const button = await screen.findByTestId('studio-slot-toggle');
+    expect(screen.getAllByTestId('studio-slot-toggle')).toHaveLength(1);
+    // objectstack#37456 — there is no top bar to hold it, and the left column does not either.
+    expect(screen.queryByTestId('studio-shell-header')).toBeNull();
+    expect(screen.getByTestId('studio-top-left')).not.toContainElement(button);
+    expect(screen.getByTestId('studio-pillars-host')).toContainElement(button);
+    expect(slot().contains(button)).toBe(false);
+    // The last control of its row, the hairline right before it.
+    expect(button.parentElement?.lastElementChild).toBe(button);
+    expect(button.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
+
+    expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(button).toHaveAccessibleName(t('engine.studio.slot.collapse', 'en'));
+    fireEvent.click(button);
+    expect(slot()).not.toBeVisible();
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle()).toHaveAccessibleName(t('engine.studio.slot.expand', 'en'));
+
+    fireEvent.click(toggle());
+    expect(slot()).toBeVisible();
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true');
   });
 });

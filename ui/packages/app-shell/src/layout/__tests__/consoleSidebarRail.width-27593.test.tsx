@@ -1,25 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * consoleSidebarRail — the fold width is derived from what covers the content
- * and from the sidebar it folds (objectstack#27593, re-derived on
- * objectstack#29109 once the split pane retired). `CONSOLE_EXPANDED_SIDEBAR_WIDTH`
- * restates the sidebar primitive's `--sidebar-width` and `RECORD_DRAWER_WIDTH`
- * restates plugin-view's default drawer width, so this reads both off their
- * owners and holds them equal: a wider or narrower sidebar or drawer moves the
- * fold width with it, or this goes red.
+ * consoleSidebarRail — the threshold and what it costs (objectstack#27593,
+ * objectstack#29109, objectstack#36112). The threshold was derived from the
+ * record drawer, the list beside it and the expanded sidebar (1416 px); the
+ * ruling on objectstack#36112 (7069868269) moved it to 1280 px and accepted
+ * the cost. `CONSOLE_EXPANDED_SIDEBAR_WIDTH` restates the sidebar primitive's
+ * default `--sidebar-width` (256; the reader may drag it, objectstack#36227) and
+ * `RECORD_DRAWER_WIDTH` the side preview's default width (objectstack#36149),
+ * so this reads both off their owners and holds them equal, and the cost the
+ * code pays is the one stated beside the threshold.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { render } from '@testing-library/react';
 import { SidebarProvider } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view';
+import { RECORD_PREVIEW_DEFAULT_WIDTH } from '../../views/recordDrawerContext';
 import { describe, expect, it } from 'vitest';
 import {
   CONSOLE_EXPANDED_SIDEBAR_WIDTH,
   CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH,
   LIST_MIN_COLUMNS_WIDTH,
-  RECORD_DRAWER_MIN_CONTENT_WIDTH,
   RECORD_DRAWER_WIDTH,
 } from '../consoleSidebarRail';
 
@@ -49,41 +50,32 @@ function listBesideDrawer(width: number, sidebar: number): number {
   return width - sidebar - RECORD_DRAWER_WIDTH;
 }
 
-describe('the console sidebar fold width (objectstack#27593, #29109)', () => {
-  it('restates the primitive’s expanded sidebar width', () => {
+describe('the console sidebar threshold (objectstack#27593, #29109, #36112)', () => {
+  it('restates the primitive’s expanded sidebar width, fixed at 256', () => {
     expect(primitiveSidebarWidths().expanded).toBe(CONSOLE_EXPANDED_SIDEBAR_WIDTH);
+    expect(CONSOLE_EXPANDED_SIDEBAR_WIDTH).toBe(256);
   });
 
-  it('restates the drawer a list record opens in (plugin-view’s md bucket)', () => {
-    // `min(92vw, 720px)`: the px term is the drawer's width on any window the fold applies to.
-    const match = /^min\(92vw, (\d+)px\)$/.exec(overlayWidthFor('md', {}));
-    expect(match, 'overlayWidthFor answers min(92vw, Npx)').not.toBeNull();
+  it('restates the drawer a list record opens in (the side preview’s default, objectstack#36149)', () => {
+    // `min(92vw, 460px)`: the px term is the drawer's width on any desktop window.
+    const match = /^min\(92vw, (\d+)px\)$/.exec(RECORD_PREVIEW_DEFAULT_WIDTH);
+    expect(match, 'the default answers min(92vw, Npx)').not.toBeNull();
     expect(Number(match![1])).toBe(RECORD_DRAWER_WIDTH);
   });
 
-  it('is the drawer beside the narrowest list that draws its columns, plus the expanded sidebar', () => {
-    expect(RECORD_DRAWER_MIN_CONTENT_WIDTH).toBe(LIST_MIN_COLUMNS_WIDTH + RECORD_DRAWER_WIDTH);
-    expect(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH).toBe(RECORD_DRAWER_MIN_CONTENT_WIDTH + CONSOLE_EXPANDED_SIDEBAR_WIDTH);
-    // The value the maintainer kept when the split pane retired: 440 + 720 + 256.
-    expect(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH).toBe(1416);
-    // At the threshold the expanded sidebar leaves exactly the list's floor beside the drawer.
-    expect(listBesideDrawer(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, CONSOLE_EXPANDED_SIDEBAR_WIDTH)).toBe(
-      LIST_MIN_COLUMNS_WIDTH,
-    );
+  it('is 1280 px, the ruling’s number (7069868269)', () => {
+    expect(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH).toBe(1280);
   });
 
-  it('folds a 1280 px and a 1366 px window, whose hidden sidebar leaves the list its columns beside the drawer', () => {
+  it('at 1280 px the expanded sidebar leaves the list 564 px beside the 460 px preview, the collapsed one 820: the cost the ruling accepted at 720 is gone', () => {
     const { expanded } = primitiveSidebarWidths();
-    for (const width of [1280, 1366]) {
-      expect(width).toBeLessThan(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH);
-      expect(listBesideDrawer(width, expanded)).toBeLessThan(LIST_MIN_COLUMNS_WIDTH);
-      // Folded, the sidebar is hidden and takes no width (objectstack#35062).
-      expect(listBesideDrawer(width, 0)).toBeGreaterThanOrEqual(LIST_MIN_COLUMNS_WIDTH);
-    }
+    expect(listBesideDrawer(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, expanded)).toBe(564);
+    expect(listBesideDrawer(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, expanded)).toBeGreaterThanOrEqual(LIST_MIN_COLUMNS_WIDTH);
+    // Collapsed, the sidebar is hidden and takes no width (objectstack#35062).
+    expect(listBesideDrawer(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH, 0)).toBe(820);
   });
 
-  it('leaves a 1440 px window’s sidebar expanded', () => {
-    expect(1440).toBeGreaterThanOrEqual(CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH);
+  it('a 1440 px window’s expanded sidebar still leaves the list its columns beside the drawer', () => {
     expect(listBesideDrawer(1440, CONSOLE_EXPANDED_SIDEBAR_WIDTH)).toBeGreaterThanOrEqual(LIST_MIN_COLUMNS_WIDTH);
   });
 });

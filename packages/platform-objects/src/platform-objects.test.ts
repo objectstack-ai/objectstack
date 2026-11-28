@@ -37,7 +37,7 @@ import {
   SysMetadata,
   SysMetadataHistoryObject,
 } from './metadata/index.js';
-import { SysExchangeRate, SysSecret, SysSetting, SysUnit, SysWorkCalendar, SysWorkCalendarException } from './system/index.js';
+import { SysExchangeRate, SysSecret, SysSetting, SysStandardUnitSetting, SysUnit, SysWorkCalendar, SysWorkCalendarException } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
 import { resolveEffectiveApiMethods, isApiOperationAllowed, canServeApiOperation } from '@objectstack/spec/data';
@@ -334,16 +334,16 @@ describe('@objectstack/platform-objects', () => {
       // An admin viewing an open user record must be able to run the same
       // account-management actions available from the Users list row menu —
       // otherwise they have to navigate back to the list. Each admin action is
-      // therefore declared on BOTH `list_item` and `record_header` (the detail
-      // header overflows extras into the ⋯ "More" menu). `record_header` is the
-      // only detail-surface location objectui consumes (it does NOT read
-      // `record_more`), so these must use `record_header` specifically.
+      // therefore declared on `record` — the row menu AND the detail header
+      // (objectstack#36495; the header overflows extras into the ⋯ "More"
+      // menu) — and NOT folded (`component: 'action:menu'`), which would send
+      // each straight into the ⋯.
       const adminActions = ['ban_user', 'unban_user', 'unlock_user', 'set_user_password', 'impersonate_user'];
       for (const name of adminActions) {
         const a = (SysUser.actions ?? []).find((x) => x.name === name);
         expect(a, `${name} action must exist`).toBeTruthy();
-        expect(a?.locations, `${name} locations`).toContain('list_item');
-        expect(a?.locations, `${name} must also surface on the detail header`).toContain('record_header');
+        expect(a?.locations, `${name} must surface on the row menu and the detail header`).toContain('record');
+        expect((a as { component?: string } | undefined)?.component, `${name} is not folded`).not.toBe('action:menu');
       }
     });
 
@@ -436,7 +436,7 @@ describe('@objectstack/platform-objects', () => {
       const revoke = (SysSession.actions ?? []).find((a) => a.name === 'revoke_session');
       expect(revoke).toBeDefined();
       expect(revoke?.type).toBe('api');
-      expect(revoke?.locations).toEqual(['list_item']);
+      expect(revoke?.locations).toEqual(['record_row']);
       expect(revoke?.target).toBe('/api/v1/auth/sys-session/revoke');
       expect(revoke?.recordIdParam).toBe('sessionId');
       // The row field that seeds `recordIdParam` defaults to `id` — the one
@@ -606,6 +606,7 @@ describe('@objectstack/platform-objects', () => {
         sys_oauth_application: SysOauthApplication,
         sys_organization: SysOrganization,
         sys_session: SysSession,
+        sys_standard_unit_setting: SysStandardUnitSetting,
         sys_team: SysTeam,
         sys_unit: SysUnit,
         sys_user: SysUser,

@@ -12,7 +12,8 @@ import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, usePara
 import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { LazyModalForm } from '../views/lazyFormSurfaces.js';
-import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
+import { ConsoleFormOwnerLine } from '../views/consoleFormOwnerLine.js';
+import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState, cn } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useActionRunner, useGlobalUndo, useMutationInvalidationBridge, notifyDataChanged, FilterScopeProvider, resolveApprovalLock, claimAnswerWarnings, toastRecordSave, type AnswerWarningClaim, type AnsweredLoadFailure, type RecordSaveFeedback } from '@object-ui/react';
 import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.js';
@@ -25,16 +26,14 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { usePreviewFormDataSource } from '../utils/previewFormDataSource.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
-import {
-  ExpressionProvider,
-  isObjectFieldListed,
-} from '../providers/ExpressionProvider.js';
+import { ExpressionProvider } from '../providers/ExpressionProvider.js';
 import { buildExpressionUser } from '../providers/expressionUser.js';
 import { useTrackRouteAsRecent } from '../hooks/useTrackRouteAsRecent.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { readItemPreferLocal, useReadItemsByName } from '../hooks/useObjectPresence.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveFormViewChrome, selectRecordFormView, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
+import { recordFormFieldNames } from '../utils/recordFormFields.js';
+import { resolveRecordFormTarget, resolveRecordFormModalLayout, resolveRecordFormChrome, resolveNavigateCreateUrl, resolveNavigateEditUrl, resolvePostCreateTarget, recordFormCreateValues, readRecordFormCreateValues, RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.js';
 import { deriveRecordSurface, deriveRecordFlowSurface } from '@object-ui/plugin-view/core';
 import { isPhoneViewportNow, usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PhoneAppHome } from '../layout/PhoneAppHome.js';
@@ -46,9 +45,11 @@ import type { NavigationItem } from '@object-ui/types';
 
 // Components (eagerly loaded — always needed)
 import { ConsoleLayout } from '../layout/ConsoleLayout.js';
+import { CONSOLE_FULL_HEIGHT } from '../layout/chromeBannerHost.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
+import { ConsoleBootShell, RouteMetadataSkeleton } from './ConsoleBootShell.js';
 import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 // `ObjectNotFoundState` from its own module, not through `ObjectView`: the
@@ -67,7 +68,10 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
-import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
+import { isLandingPath, useSetupFirstPageSlot } from './setupFirstPageSlot.js';
+import { useInSetupApp } from './setupApp.js';
+import { useSetupAliasApprovalsTarget } from './setupAliasApprovals.js';
+import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import {
@@ -76,8 +80,10 @@ import {
   setupMetadataRest,
   setupMetadataStudioPath,
 } from '../views/studio-design/setupMetadataRedirect.js';
+import { usePermissions } from '@object-ui/permissions';
+import { holdsSetupAccess } from '../views/setup/accessDirectoryRef.js';
 import { NO_RECORD_DRAWERS_OPENING, NO_RECORD_PAGE_DRAWERS_OPEN, RecordDrawerOpeningProvider, RecordPageDrawerOpenProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening, type RecordPageDrawersOpen } from '../views/recordDrawerStack.js';
-import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
+import { SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
 //
@@ -138,7 +144,10 @@ const DashboardView = routeChunk.lazy(() => import('../views/DashboardView.js').
 const PageView = routeChunk.lazy(() => import('../views/PageView.js').then(m => m.PageView));
 const ReportView = routeChunk.lazy(() => import('../views/ReportView.js').then(m => m.ReportView));
 const AppReportIndexView = routeChunk.lazy(() => import('../views/AppReportIndexView.js').then(m => m.AppReportIndexView));
+const ReportNewPage = routeChunk.lazy(() => import('../views/ReportNewPage.js').then(m => m.ReportNewPage));
 const SearchResultsPage = routeChunk.lazy(() => import('../views/SearchResultsPage.js').then(m => m.SearchResultsPage));
+// objectstack#36741 — the full-page inbox the sidebar's bell opens from 768 px up.
+const InboxPage = routeChunk.lazy(() => import('../views/inbox/InboxPage.js').then(m => m.InboxPage));
 const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js').then(m => m.RecordFormPage));
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
 const ObjectDataPage = routeChunk.lazy(() => import('../views/ObjectDataPage.js').then(m => m.ObjectDataPage));
@@ -183,10 +192,13 @@ const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Pr
   { path: 'dashboard/:dashboardName', chunk: DashboardView },
   { path: 'report/:reportName', chunk: ReportView },
   { path: 'reports', chunk: AppReportIndexView },
+  { path: 'reports/new', chunk: ReportNewPage },
   { path: 'page/:pageName', chunk: PageView },
   { path: 'component/:ns/:name/*', chunk: ComponentNavView },
   { path: 'design/dashboard/:dashboardName', chunk: DashboardDesignPage },
   { path: 'search', chunk: SearchResultsPage },
+  { path: 'inbox', chunk: InboxPage },
+  { path: 'inbox/:inboxTab', chunk: InboxPage },
   { path: 'create-app', chunk: CreateAppPage },
   { path: 'edit-app/:editAppName', chunk: EditAppPage },
   { path: 'system/marketplace', chunk: MarketplacePage },
@@ -269,13 +281,15 @@ function DraftReviewNavigator({ appName }: { appName: string | undefined }) {
   const { reviewSeq, reviewTarget } = useAssistant();
   const navigate = useNavigate();
   const lastSeq = useRef(reviewSeq);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
   useEffect(() => {
     if (reviewSeq === lastSeq.current || !reviewTarget || !appName) return;
     lastSeq.current = reviewSeq;
     const { type, name } = reviewTarget;
     const item = `${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
-    navigate(setupMetadataStudioPath(item, 'review=1') ?? `/apps/${appName}/metadata/${item}?review=1`);
-  }, [reviewSeq, reviewTarget, appName, navigate]);
+    navigate(setupMetadataStudioPath(item, 'review=1', '', setupAccess) ?? `/apps/${appName}/metadata/${item}?review=1`);
+  }, [reviewSeq, reviewTarget, appName, navigate, setupAccess]);
   return null;
 }
 
@@ -317,9 +331,17 @@ export { buildExpressionUser };
  */
 export const RECORD_NAMED_PAGE_ROUTE = ':objectName/record/:recordId/page/:pageName';
 
+/** The `data` the console's expression scope binds: none, one object for every render (objectstack#37575). */
+const NO_EXPRESSION_DATA: Record<string, unknown> = {};
 export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = {}) {
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const { user, getAuthConfig, activeOrganization } = useAuth();
+  // objectstack#37575 — built once per signed-in user, not once per render:
+  // `ExpressionProvider` rebuilds its evaluator whenever `user` or `data` is a
+  // new object, and every navigation row, action and field predicate under it
+  // re-evaluates against the new evaluator. On a list page's first load this
+  // component re-renders about ten times as boot reads land.
+  const expressionUser = useMemo(() => buildExpressionUser(user), [user]);
   // objectui#4473 — read at the top (hooks are unconditional); consumed by the
   // no-app guard far below, where the comment explains what it decides.
   const { isAdmin: isWorkspaceAdmin, isResolved: isWorkspaceAdminResolved } = useWorkspaceAdminStatus();
@@ -331,15 +353,29 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // it empty until the fetch resolves so predicates default to "visible"
   // and we don't briefly hide UI on slow networks.
   const [features, setFeatures] = useState<Record<string, any>>({});
+  // objectstack#35981 — whether that answer (or its failure) is in. The
+  // readiness gate below holds the chrome on it: the chrome's navigation
+  // gates bind `features`, and a navigation predicate that names a flag not
+  // bound yet FAULTS and withholds its entry (objectui#12700), so a chrome
+  // mounted before the answer would hide a flag-gated entry and then draw it.
+  // Until the chrome stopped waiting for the route's own reads, that answer
+  // was in first only by timing.
+  const [featuresSettled, setFeaturesSettled] = useState(false);
   useEffect(() => {
     let cancelled = false;
+    if (typeof getAuthConfig !== 'function') {
+      setFeaturesSettled(true);
+      return;
+    }
     getAuthConfig()
       .then((cfg) => {
         if (cancelled) return;
         setFeatures((cfg?.features as Record<string, any>) ?? {});
+        setFeaturesSettled(true);
       })
       .catch(() => {
         /* leave empty — predicates default to visible */
+        if (!cancelled) setFeaturesSettled(true);
       });
     return () => {
       cancelled = true;
@@ -453,13 +489,17 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // so Back never returns to the alias. An effect rather than a `<Navigate>`
   // return, so a layout already on screen is not unmounted for the swap.
   const canonicalPathname = canonicalAppPathname(apps, appName, location.pathname);
+  // objectstack#35505 — the inbox under the `setup` alias names no source app:
+  // it moves to the reader's approvals host below instead of onto Setup's
+  // address (`setupAliasApprovals.ts`).
+  const setupAliasApprovalsTarget = useSetupAliasApprovalsTarget();
   useEffect(() => {
-    if (!canonicalPathname) return;
+    if (!canonicalPathname || setupAliasApprovalsTarget !== undefined) return;
     navigate(`${canonicalPathname}${location.search}${location.hash}`, {
       replace: true,
       state: location.state,
     });
-  }, [canonicalPathname, location.search, location.hash, location.state, navigate]);
+  }, [canonicalPathname, setupAliasApprovalsTarget, location.search, location.hash, location.state, navigate]);
 
   // objectui#12809 — the lazy metadata buckets the CURRENT route reads at
   // render (`appRouteMetadataReads.ts` declares them per route). This used to
@@ -486,7 +526,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // app whose served item carries its package; the whole registry everywhere
   // else, as before (that module says why). A page route reads the objects
   // its page binds (objectui#12980), resolved as `PageView` resolves the page,
-  // and a record route those of its declared record page (objectui#13046).
+  // and a record route those of its declared record page (objectui#13046),
+  // on the desktop only: on a phone the view draws the standard page, whose
+  // related lists read every object that points at the record's
+  // (objectstack#36150), so the scope follows the width as the view does.
+  const phoneViewport = usePhoneViewport();
   const {
     candidate: scopeCandidate,
     scope: objectScope,
@@ -546,6 +590,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
       const appName = typeof activeApp?.name === 'string' ? activeApp.name : undefined;
       return bundledReads && appName ? bundledReads.objectsReferencing(appName, objectName) : BUNDLE_MISS;
     },
+    phoneViewport,
   );
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
@@ -604,10 +649,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     if (!viewReadObject || !viewReadReady || !bundleAppName || previewDrafts) return;
     prefetchObjectViewRows(dataSource, viewReadObject);
   }, [dataSource, viewReadObject, viewReadReady, bundleAppName, previewDrafts]);
-  // Set once the first frame past the splash has rendered. After it, a route
-  // waiting on its buckets draws its skeleton inside the console chrome rather
-  // than taking the whole console back to the splash.
-  const firstPaintDone = useRef(false);
+  // objectstack#35981 — set once this page load's first route has drawn. Until
+  // then the route slot's skeleton is the boot wait (`RouteMetadataSkeleton`'s
+  // `boot`), so what waits for the first paint past the splash still waits for
+  // the route (objectui#12980), while the chrome is already on screen.
+  const firstRouteDrawn = useRef(false);
 
   // A normal app was requested but isn't present in the loaded metadata — the
   // post-publish readiness lag, or a genuinely-missing app. Applies in BOTH
@@ -632,11 +678,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // probe change nothing.
   //
   // ⛔ Not the rest of the Setup subtree. `/system/*` links forward onto
-  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`), the server's
-  // approval links (`/system/approvals?request=`) among them, and that inbox
-  // opens records at `/apps/setup/OBJECT/record/ID` (`ApprovalsInboxPage`'s
-  // `recordHref`). A member reaches both under the Setup segment, so whether
-  // they wait on Setup's verdict is a product decision, left open on
+  // `/apps/setup/system/*` (`SystemRedirect`, `ConsoleShell.tsx`). The server's
+  // approval links (`/system/approvals?request=`) among them move on from there
+  // to the reader's own app (`setupAliasApprovals.ts`, objectstack#35505), but
+  // an older record link may still name `/apps/setup/OBJECT/record/ID`, so
+  // whether those wait on Setup's verdict is a product decision, left open on
   // objectui#12706.
   //
   // objectstack#27507 — two more wait on it: the settings pages
@@ -828,17 +874,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the URL means Back closes the overlay and a refresh reopens it still
   // correctly parent-linked — no transient component state to lose.
   const formObjectParam = searchParams.get(RECORD_FORM_OBJECT_PARAM);
-  const formLinkParam = searchParams.get(RECORD_FORM_LINK_PARAM);
+  // objectstack#37246 — `formLink` repeats: the parent pair first, then the
+  // values it seeds beside it (the relationship lookup's `dependsOn` fields).
+  // Keyed on the pairs' JSON text, a primitive, so the values keep their identity
+  // while the URL does (AGENTS.md #10).
+  const formLinkKey = JSON.stringify(searchParams.getAll(RECORD_FORM_LINK_PARAM));
   const editingRecord = useMemo(
     () => (recordFormParam && recordFormParam !== 'new' ? { id: recordFormParam } : null),
     [recordFormParam],
   );
   const formLinkValues = useMemo(() => {
-    if (!formLinkParam) return undefined;
-    const i = formLinkParam.indexOf(':');
-    if (i <= 0) return undefined;
-    return { [formLinkParam.slice(0, i)]: formLinkParam.slice(i + 1) };
-  }, [formLinkParam]);
+    const values: Record<string, string> = {};
+    for (const pair of JSON.parse(formLinkKey) as string[]) {
+      const i = pair.indexOf(':');
+      const field = pair.slice(0, i);
+      if (i <= 0 || field in values) continue;
+      values[field] = pair.slice(i + 1);
+    }
+    return Object.keys(values).length > 0 ? values : undefined;
+  }, [formLinkKey]);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isDialogOpen = !!recordFormParam;
@@ -1070,13 +1124,22 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // the drawer over the still-intact list; a heavy one is the detail route.
   // `replace: true` swaps out the transient `?form=…` entry so Back returns
   // to the pre-create origin.
-  const handleRecordFormSuccess = useCallback(async (saved: any) => {
+  const handleRecordFormSuccess = useCallback(async (saved: any, outcome?: { createMore?: boolean }) => {
     // Child task (objectstack-ai/objectstack#2604 D3): the parent detail must stay EXACTLY as it was —
     // active tab, scroll, everything. So do NOT go through crud_success;
     // the child's open related lists refetch on their own via the
     // invalidation bus (#2269): the dataSource write already emitted a
     // MutationEvent that the bridge fans out — no manual notify needed.
     const feedback = answerWarningClaim.current?.take(saved);
+    // 「Create more」 (objectstack-ai/objectstack#35980): the dialog stays open
+    // on an empty form for the next record. Say the save landed and refresh
+    // the list behind (a child task's related lists refetch on the bus), but
+    // neither close the form nor leave for the new record.
+    if (outcome?.createMore) {
+      toastRecordSave(toast, recordSaveMessage(saved), feedback);
+      if (!isChildFormTask) setRefreshKey(k => k + 1);
+      return;
+    }
     if (isChildFormTask) {
       toastRecordSave(toast, recordSaveMessage(saved), feedback);
       closeRecordForm();
@@ -1200,17 +1263,25 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // `positions[]` leg, which is every admin on a session minted with an active
   // organization stamped) waits exactly zero extra frames. What does wait is
   // the viewer whose verdict genuinely is not known yet — and for them a
-  // LoadingScreen is the honest frame, not a screen built on a guess.
+  // frame that decides nothing is the honest one, not a screen built on a guess.
   //
-  // objectui#12809 — of the lazy metadata, the splash waits only for what the
-  // current route reads (`routeReadsSettled`), and only until the first paint.
-  if (
-    !dataSource ||
-    metadataLoading ||
-    !isWorkspaceAdminResolved ||
-    (!firstPaintDone.current && !routeReadsSettled)
-  ) return <LoadingScreen />;
-  firstPaintDone.current = true;
+  // objectui#12809 — the lazy metadata the current route reads does not hold
+  // the gate at all (objectstack#35981): the chrome decides nothing from it,
+  // so it mounts once the inputs above are in, and the route slot draws the
+  // route's skeleton until its reads land (`routeReadsSettled`, below).
+  //
+  // objectstack#35981 — while the gate holds, the console chrome's empty frame
+  // (`ConsoleBootShell`), not the full-screen splash: it names no app and draws
+  // no navigation entry, which is exactly what the inputs above decide.
+  //
+  // objectstack#35981 — and the deployment flags (`featuresSettled`, above):
+  // the chrome's navigation gates read them.
+  if (!dataSource || metadataLoading || !isWorkspaceAdminResolved || !featuresSettled) return <ConsoleBootShell />;
+  // objectstack#35505 — before any app's chrome mounts (which would record
+  // Setup as the reader's last app), the alias inbox moves to its host.
+  if (setupAliasApprovalsTarget === 'waiting') return <ConsoleBootShell />;
+  if (setupAliasApprovalsTarget) return <Navigate to={setupAliasApprovalsTarget} replace state={location.state} />;
+  if (routeReadsSettled) firstRouteDrawn.current = true;
 
   // ADR-0037 — preview mode renders its OWN empty/error states and never
   // falls through to the generic "No Apps Configured" guard below: inside a
@@ -1260,7 +1331,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
 
   // One screen for both branches that draw a `denied` verdict below.
   const renderAppAccessDenied = () => (
-    <div className="h-screen flex items-center justify-center">
+    <div className={cn(CONSOLE_FULL_HEIGHT.screen, 'flex items-center justify-center')}>
       <Empty data-testid="app-access-denied">
         <EmptyTitle>
           {t('empty.appAccessDenied', { defaultValue: "You don't have access to this app" })}
@@ -1282,7 +1353,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // page; `denied` is the screen above, and every other verdict falls through
   // to the pseudo-route rendering below, unchanged.
   if (appSurfaceAwaitsVerdict && !previewDrafts) {
-    if (accessVerdict === null) return <LoadingScreen />;
+    if (accessVerdict === null) return <ConsoleBootShell />;
     if (accessVerdict === 'denied') return renderAppAccessDenied();
   }
 
@@ -1291,7 +1362,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // different app, and don't show the misleading "no apps configured" screen
   // below (there ARE apps). requestedAppMissing already excludes pseudo-routes.
   if (requestedAppMissing) {
-    if (missingRecheck !== 'done' || accessVerdict === null) return <LoadingScreen />;
+    if (missingRecheck !== 'done' || accessVerdict === null) return <ConsoleBootShell />;
     if (accessVerdict === 'denied') return renderAppAccessDenied();
     // objectui#9262 — the remaining verdicts, each saying only what the probe
     // obtained. The screen this replaced asserted ONE transient deploy state
@@ -1340,7 +1411,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     return (
       <NotFoundState
         testId={verdictScreen.testId}
-        className="h-screen p-0"
+        className={cn(CONSOLE_FULL_HEIGHT.screen, 'p-0')}
         title={verdictScreen.title}
         description={verdictScreen.description}
         actions={
@@ -1402,7 +1473,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // guard reads only the per-user-filtered list that ships today.
   if (!activeApp && !isCreateAppRoute && !isSystemRoute && !isMetadataRoute && !isWorkspaceAdmin) {
     // `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378 / #6507).
-    // Every readiness gate above this branch renders `LoadingScreen`, and the
+    // Every readiness gate above this branch renders a boot frame, and the
     // branch returns ABOVE the single `ConsoleLayout` mount — so a bare
     // redirect, which renders null, hands the WHOLE viewport back to the page
     // background while `/home` renders at transition priority. Measured on the
@@ -1416,7 +1487,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   }
 
   if (!activeApp && !isCreateAppRoute && !isSystemRoute && !isMetadataRoute) return (
-    <div className="h-screen flex items-center justify-center">
+    <div className={cn(CONSOLE_FULL_HEIGHT.screen, 'flex items-center justify-center')}>
       <Empty>
         <EmptyTitle>{t('empty.noAppsConfigured')}</EmptyTitle>
         <EmptyDescription>
@@ -1520,10 +1591,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     );
   }
 
-  const expressionUser = buildExpressionUser(user);
-
   return (
-    <ExpressionProvider user={expressionUser} app={activeApp} data={{}} features={features}>
+    <ExpressionProvider user={expressionUser} app={activeApp} data={NO_EXPRESSION_DATA} features={features}>
       {/* Session scope for `{current_user_id}` / `{current_org_id}` filter
           placeholders. Mounted here rather than folded into the expression
           scope above: that one is the predicate evaluation context (it carries
@@ -1557,11 +1626,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         <OnboardingWalkthrough />
         <DraftReviewNavigator appName={appName} />
           <ErrorBoundary>
-            <Suspense fallback={<LoadingScreen />}>
+            {/* objectstack#35981 — a route element whose chunk is still loading
+                draws the route's skeleton in the slot, not the full-screen
+                splash inside the chrome. It is the boot wait as that splash
+                was (`data-boot-splash`), whenever it shows. */}
+            <Suspense fallback={<RouteMetadataSkeleton reads={routeReadsKey || 'object'} boot />}>
               <RouteFader className="h-full">
                 {/* objectui#12809 — the route's metadata has not landed: its
                     skeleton, never its empty or "not found" state. */}
-                {!routeReadsSettled ? <RouteMetadataSkeleton reads={routeReadsKey || 'object'} /> : objectScope && routeObjectReadsFailed.length > 0 ? (
+                {!routeReadsSettled ? <RouteMetadataSkeleton reads={routeReadsKey || 'object'} boot={!firstRouteDrawn.current} /> : objectScope && routeObjectReadsFailed.length > 0 ? (
                   // objectui#13052 — the route's object read failed (a 5xx, a
                   // network drop, a code this build does not know): say so in
                   // the shell, and let Retry ask those names once more.
@@ -1578,6 +1651,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   // view, with the sentence that says so.
                   <ObjectNotFoundState objectName={routeObjectRefusal.objectName} packageDisabled />
                 ) : (
+                <SetupFirstPageTop app={activeApp} ctx={{ currentUserId: user?.id ?? null }}>
                 <Routes>
                 <Route
                   path="/"
@@ -1638,6 +1712,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="report/:reportName" element={<ReportView dataSource={dataSource} />} />
                 {/* objectui#13020: the app's report index, linked from the sidebar. */}
                 <Route path="reports" element={<AppReportIndexView />} />
+                {/* objectstack#36374 — the report builder for a new report. */}
+                <Route path="reports/new" element={<ReportNewPage dataSource={dataSource} />} />
                 <Route path="page/:pageName" element={<PageView />} />
                 {/* objectstack ADR-0146 D11 — the retired Setup › Packaged
                     automation page (`automation:packaged`): a bookmark opens
@@ -1656,6 +1732,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="component/metadata/resource/*" element={<LegacyMetadataRedirect mode="resource" />} />
                 <Route path="design/dashboard/:dashboardName" element={<DashboardDesignPage />} />
                 <Route path="search" element={<SearchResultsPage />} />
+                <Route path="inbox" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
+                <Route path="inbox/:inboxTab" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
                 <Route path="create-app" element={<CreateAppPage />} />
                 <Route path="edit-app/:editAppName" element={<EditAppPage />} />
                 <Route path="system/marketplace" element={<MarketplacePage />} />
@@ -1675,6 +1753,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                     page so users always know when a URL didn't resolve. */}
                 <Route path="*" element={<RouteNotFound />} />
               </Routes>
+                </SetupFirstPageTop>
                 )}
                 {/* objectstack#32685 — after the route's element in the same
                     boundary: shown in the commit that shows the route, never
@@ -1684,6 +1763,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             </Suspense>
           </ErrorBoundary>
           {formObjectDef && (
+            // objectstack#35403 — an edit draws the record's owner read-only,
+            // with Change Owner beside it where the caller may transfer it.
+            <ConsoleFormOwnerLine>
             <LazyModalForm
               key={`${formObjectDef.name}:${editingRecord?.id || 'new'}`}
               lockedBy={formApprovalLocked ? 'approval' : undefined}
@@ -1700,30 +1782,21 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 // history entry carries. Each is handed as the object it is,
                 // never a merge rebuilt per render: the form re-seeds whenever
                 // `initialValues` is a new object.
-                // Honor the object's DEFAULT FORM VIEW: curated sections (field
-                // selection + order + grouping), `contentLayout: 'tabbed'` when the
-                // view is tabbed, inline child collections (master-detail), and its
-                // authored `modalSize`. When the view declares sections they drive
-                // the modal layout and win over the flat `fields` list below;
-                // otherwise `fields` (every field, raw schema order) is used as
-                // before. `formType` stays 'modal' (the container).
-                // (objectstack-ai/objectstack#1890 / ADR-0050.)
+                // objectstack-ai/objectstack#36425 — the dialog lays out by the
+                // object's field groups and follows its fields' rules. No
+                // internal form view is read: not its sections, tabs, subforms,
+                // `modalSize`, buttons, layout or `defaults`. What the layout
+                // carries is the field groups' inline child collections
+                // (master-detail) and the derived phone size.
                 //
                 // The size: objectstack-ai/objectstack#2604 D1 — create/edit follow
                 // the flow-surface derivation. This host calls it with no
                 // `viewport`, so it gets the desktop answer, a bounded modal
                 // (`size: 'auto'`) for field-heavy and light objects alike
                 // (objectstack-ai/objectstack#23734, objectui#12592); a phone gets
-                // ModalForm's full-screen sheet below `sm`. objectui#12803: an
-                // authored `FormView.modalSize` wins over that derived default on
-                // desktop, and a derived `'full'` (the phone posture) stays full.
-                // The precedence lives in `resolveRecordFormModalLayout`, not in
-                // spread order. Child tasks size to the CHILD object's def.
-                //
-                // The form view: a create uses the object's `create` form view
-                // when it declares one (objectui#13099), an edit its default.
-                // The flow is the same `editingRecord` test the `mode` above
-                // reads, so the selected view always matches the form's mode.
+                // ModalForm's full-screen sheet below `sm`. A derived `'full'`
+                // stays full (`resolveRecordFormModalLayout`). Child tasks size
+                // to the CHILD object's def.
                 ...resolveRecordFormModalLayout(
                   formObjectDef as any,
                   deriveRecordFlowSurface(
@@ -1732,55 +1805,49 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                       ? (editingRecord ? 'child-edit' : 'child-create')
                       : (editingRecord ? 'edit' : 'create'),
                   ).size,
-                  editingRecord ? 'edit' : 'create',
                 ),
                 title: editingRecord
                   ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
                 open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
-                // The list the form may draw: `isObjectFieldListed`, the same
+                // The list the form may draw: `recordFormFieldNames`, the same
                 // gate `RecordFormPage` runs. It reads the static `hidden` only
                 // (objectui#6514's declared keys; the refused `visible` is not
                 // read). A field's `visibleWhen` is evaluated by the form, where
                 // the record is bound — evaluated here, with no record, a
                 // `has()`-guarded predicate dropped the field before the form
                 // could draw it, and a form laid out from `fieldGroups` draws
-                // only listed fields.
-                fields: formObjectDef.fields
-                  ? (Array.isArray(formObjectDef.fields)
-                      ? formObjectDef.fields
-                          .filter((f: any) => typeof f === 'string' || isObjectFieldListed(f))
-                          .map((f: any) => typeof f === 'string' ? f : f.name)
-                      : Object.entries(formObjectDef.fields)
-                          .filter(([_, f]: [string, any]) => isObjectFieldListed(f))
-                          .map(([key]: [string, any]) => key))
-                  : [],
+                // only listed fields. A create leaves out a field declaring
+                // `showOnCreate: false` (`isFieldAskedOnFlow`,
+                // objectstack-ai/objectstack#36425); an edit lists it.
+                fields: recordFormFieldNames(formObjectDef.fields, editingRecord ? 'edit' : 'create'),
                 onSuccess: handleRecordFormSuccess,
                 onCancel: handleDialogCancel,
-                // objectstack-ai/objectstack#26843 — the selected form view's
-                // `buttons`, `layout` and `defaults` over this dialog's own
-                // defaults (`resolveFormViewChrome` states the precedence). A
-                // create's opening values: the `formLink` pre-link
-                // (objectstack-ai/objectstack#2604 D3, refresh-safe), else the
-                // values its opener's history entry carries (objectui#12291),
-                // over the form view's `defaults`; each handed on as the object
-                // it is, as the form re-seeds on a new `initialValues`.
-                ...resolveFormViewChrome(
-                  selectRecordFormView(formObjectDef as any, editingRecord ? 'edit' : 'create'),
-                  {
-                    flow: editingRecord ? 'edit' : 'create',
-                    language,
-                    submitText: editingRecord
-                      ? t('form.update', { defaultValue: 'Update' })
-                      : t('form.create', { defaultValue: 'Create' }),
-                    cancelText: t('common.cancel'),
-                    createValues: editingRecord ? undefined : formLinkValues ?? overlayCreateValues,
-                  },
-                ),
+                // The footer's 「Create more」 switch on a create, for the
+                // list's 「New」 and a related list's child create alike
+                // (objectstack-ai/objectstack#35980). ModalForm shows it on a
+                // create only.
+                createMore: true,
+                // The dialog's own buttons and labels (`resolveRecordFormChrome`,
+                // objectstack-ai/objectstack#36425: no form view's `buttons`,
+                // `layout` or `defaults`). A create's opening values: the
+                // `formLink` pre-link (objectstack-ai/objectstack#2604 D3,
+                // refresh-safe), else the values its opener's history entry
+                // carries (objectui#12291); each handed on as the object it is,
+                // as the form re-seeds on a new `initialValues`.
+                ...resolveRecordFormChrome({
+                  flow: editingRecord ? 'edit' : 'create',
+                  submitText: editingRecord
+                    ? t('form.update', { defaultValue: 'Update' })
+                    : t('form.create', { defaultValue: 'Create' }),
+                  cancelText: t('common.cancel'),
+                  createValues: editingRecord ? undefined : formLinkValues ?? overlayCreateValues,
+                }),
               }}
               dataSource={formDataSource ?? undefined}
             />
+            </ConsoleFormOwnerLine>
           )}
       </ConsoleLayout>
       </RecordPageDrawerOpenProvider>
@@ -1927,6 +1994,55 @@ function carryQueryOntoLanding(target: string, search: string, hash: string): st
   for (const key of new Set(arriving.keys())) params.delete(key);
   arriving.forEach((value, key) => params.append(key, value));
   return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
+ * The route an app's root lands on for this member: `resolveLandingRoute` over
+ * the trees the member is shown, as `AppRootLanding` asks it once the reads
+ * are decided.
+ */
+function memberLandingRoute(app: any, gates: ReturnType<typeof useNavMemberGates>, ctx: NavTemplateContext): string {
+  const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
+  const trees = [
+    navEntriesShownToMember(app?.navigation || [], gates),
+    ...areas.map((area) => navEntriesShownToMember(area?.navigation || [], gates)),
+  ];
+  return resolveLandingRoute(app, trees, gates.evaluateVisibility, ctx);
+}
+
+/**
+ * objectstack#36732 (item 5, option A) — the host's element above the Setup
+ * app's first page (`setupFirstPageSlot.ts`): the page Setup's root lands on
+ * for this member, asked the way `AppRootLanding` asks it, over the trees the
+ * member is shown. Drawn from 768 px up only (a phone is unchanged), and only
+ * in Setup. Where it is drawn, the page scrolls as one
+ * column: the element first, the route's page at its full height below it.
+ */
+function SetupFirstPageTop({
+  app,
+  ctx,
+  children,
+}: {
+  app: any;
+  ctx: NavTemplateContext;
+  children: ReactNode;
+}) {
+  const slot = useSetupFirstPageSlot();
+  const inSetup = useInSetupApp();
+  const phone = usePhoneViewport();
+  const gates = useNavMemberGates();
+  const location = useLocation();
+  // The path below `/apps/SEGMENT/`, the base every landing route is relative to.
+  const inAppPath = location.pathname.split('/').slice(3).join('/');
+  const onFirstPage = Boolean(slot) && inSetup && !phone && isLandingPath(inAppPath, memberLandingRoute(app, gates, ctx));
+  // The same two wrappers on every route, the slot's place held by `null`
+  // elsewhere, so moving onto or off the first page never remounts the routes.
+  return (
+    <div className={onFirstPage ? 'h-full overflow-y-auto' : 'h-full'}>
+      {onFirstPage && slot ? <div data-testid="setup-first-page">{slot()}</div> : null}
+      <div className="h-full">{children}</div>
+    </div>
+  );
 }
 
 /**
@@ -2087,7 +2203,9 @@ function looksLikeRecordId(segment: string | undefined): boolean {
 function SetupMetadataRoute({ children }: { children?: ReactNode }) {
   const location = useLocation();
   const rest = setupMetadataRest(location.pathname) ?? '';
-  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash, setupAccess);
   if (target === null) return <>{children ?? <RouteNotFound />}</>;
   return <Navigate to={target} replace />;
 }
@@ -2130,7 +2248,9 @@ function LegacyMetadataRedirect({ mode }: { mode: 'directory' | 'resource' }) {
     ? (location.pathname.match(/\/component\/metadata\/resource(\/.*)?$/)?.[1] ?? '').replace(/^\/+/, '')
     : '';
   const rest = type ? [encodeURIComponent(type), tail].filter(Boolean).join('/') : '';
-  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash);
+  // objectstack#37565 — the environment directory is Setup's page only for whoever may open Setup.
+  const setupAccess = holdsSetupAccess(usePermissions().systemPermissions);
+  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash, setupAccess);
   if (target === null) {
     return <Navigate to={`${appBase}/metadata/${rest}${location.hash}`} replace />;
   }
@@ -2309,12 +2429,3 @@ function useLazyMetadataSettled(
   return settled;
 }
 
-/** The route slot while its metadata loads, shaped like what will land there. */
-function RouteMetadataSkeleton({ reads }: { reads: string }) {
-  const types = reads.split(',') as LazyMetadataType[];
-  return (
-    <div data-testid="route-metadata-skeleton" className="h-full">
-      {types[0] === 'dashboard' ? <SkeletonDashboard /> : types.includes('page') ? <SkeletonDetail /> : <SkeletonGrid />}
-    </div>
-  );
-}

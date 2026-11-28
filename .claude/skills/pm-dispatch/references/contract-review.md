@@ -1,11 +1,11 @@
 # L2 契约审核细则(按面)
 
-## L2 归属与资格(按面;L2 席章程见 `lanes/l2-review.md`)
+## L2 归属与资格
 
 - 欠不欠按面判 ⛔ 不按车道:diff 或认领申报碰下列任一面即欠达档 L2,交付后当轮完成。
 - L2 面 = 契约四面:`Clause-②: yes` 申报、收窄申报、已发布 schema(`packages/spec/src/**` 非测
   试)、governed 规则文本(统一定义见 SKILL.md);`.changeset`/CHANGELOG、`content/docs/**`、`apps/docs/**` 散
-  文面 ⛔ 不在其列:派发席按本席档在 ACCEPT 逐句对照 diff 核,ACCEPT 点名所核句。
+  文面 ⛔ 不在其列。
 - 档随面定:已发布 schema 或 governed 规则文本 ⇒ `CONTRACT_REVIEW_TIER`,混合 diff 一处命中即此
   档;PR 正文与 changeset 行首 `Clause-②: no (narrowing)` 申报的收窄亦此档,范围为散文面外全
   diff;仅凭 `Clause-②: yes` 申报而欠 ⇒ `TIER_DEFAULT`;档恰等不作下限。
@@ -16,6 +16,7 @@
 - 已发布面以包的 `exports` 映射为准:从入口类型图不可达、且 `exports` 不可寻址的 `.d.ts` 是
   出货字节,⛔ 不是已发布接受集,改它不触发 `Clause-②: yes`;legacy node10 深引用在契约之外。
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,档经子代理或卡线程取。
+- p1 卡线程卡交回且欠 L2 ⇒ L1 线程起隔离 L2 子代理,与其 L1 并行,两份意见同回席。
 - 送审路由只住此处:车道能取 `CONTRACT_REVIEW_TIER` 才自审;取不到(账号够不到、配额拒 429、
   维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔请 L2 席(请谁照 `lanes/l2-review.md`);
   无 L2 席在座改点能取该档的兄弟席,皆无则挂等 L2 标记留欠审表待 (a)(b)(c)。交接行:
@@ -44,7 +45,7 @@
 - 简报从 `record-recognisers.mjs --brief-template` 起稿:只读条款与输入集内建,⛔ 不删 ⛔ 行。
 - 独立性对、`Security-touching:`、`Rule-change-verified:` 行取值见 `--template`;子代理记采纳席位。
 - ④ 恒由起草者之外的 agent 达档跑,起草已达档不免;喂入同上,⛔ 不喂起草者的结论。
-- 卡线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
+- 卡线程或 L1 线程隔离子代理照上落现 head 记录并贴简报 ⇒ 席核简报、`Scope:` 与独立性对后采纳,
   ACCEPT 点名其评论 id;`Scope:` 窄于 `hits` 不采纳;席的补缺记录只管缺口,⛔ 不单充 head 记录。
 - 轮次报告设 L2 清单专节,与呈裁清单同为强制审计。
 - 请审/求批与落地前检,过则 S 入队、H 等人批:① 现 head 末条同形达档 PASS,无未闭前两级。

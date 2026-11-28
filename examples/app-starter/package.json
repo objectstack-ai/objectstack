@@ -1,0 +1,33 @@
+{
+  "name": "@objectstack/example-starter",
+  "version": "0.1.1-next.2",
+  "description": "Starter app: companies and their contacts, with the platform's tasks and notes in the menu",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "./objectstack.config.ts",
+  "types": "./objectstack.config.ts",
+  "exports": {
+    ".": "./objectstack.config.ts",
+    "./objectstack.config": "./objectstack.config.ts"
+  },
+  "scripts": {
+    "dev": "objectstack dev",
+    "start": "objectstack start",
+    "build": "objectstack build",
+    "validate": "objectstack validate",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/runtime": "workspace:*",
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/cli": "workspace:*",
+    "@objectstack/cloud-connection": "workspace:*",
+    "@objectstack/verify": "workspace:*",
+    "@types/node": "^26.6.5",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  }
+}

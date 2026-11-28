@@ -18,15 +18,22 @@
  * whose `_packageId` equals it, and the unscoped list returns every row. Each
  * package-less case has its packaged control (the read-only package below
  * stays read-only, as objectui#11124 pins at the pillar).
+ *
+ * objectstack#36903 — the scope's flows live in its own leg of the "All
+ * metadata" area: the list at `/studio/~org/metadata/flow?source=runtime`, a
+ * flow full-screen at `/studio/~org/metadata/flow/<name>?source=runtime`; the
+ * old `/studio/~org/automations` addresses redirect there.
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const SHOWCASE = 'com.example.showcase';
+/** objectstack#36903 — the showcase's paired customization package, listed only where a case says so. */
+const PAIR = 'com.example.showcase.custom';
 const NODES = [
   { id: 'start', type: 'start', label: 'Start' },
   { id: 'end', type: 'end', label: 'End' },
@@ -89,11 +96,13 @@ const mockClient = vi.hoisted(() => ({
   reset: vi.fn(async () => ({})),
 }));
 
+/** Whether the package list serves the showcase's pair (objectstack#36903, the pair's bookmarks). */
+const listing = vi.hoisted(() => ({ pair: false }));
+
 /** What the surface handed the pending-changes sheet, last render. */
 const panel = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 /** Read through a call, so a reset between renders does not narrow it away. */
 const panelProps = (): Record<string, unknown> | null => panel.props;
-const chatDock = vi.hoisted(() => ({ mounts: 0 }));
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
@@ -106,6 +115,17 @@ vi.mock('./packages-io', async (importOriginal) => {
     ...mod,
     // The stock showcase: its one installed package is read-only.
     fetchPackages: vi.fn(async () => [{ id: SHOWCASE, name: 'Showcase', writable: false, namespace: 'showcase' }]),
+    // objectstack#36903 — the same answer as the area reads it: a flow opens
+    // in the area now, whose courtesy gate reads the listed manifests.
+    fetchListedPackageManifests: vi.fn(
+      async () =>
+        new Map([
+          [SHOWCASE, { id: SHOWCASE, name: 'Showcase', writable: false, manifest: { scope: 'installed', version: '1.0.0' } }],
+          ...(listing.pair
+            ? [[PAIR, { id: PAIR, name: 'Showcase customizations', writable: true, manifest: { namespace: 'showcase_custom' } }] as const]
+            : []),
+        ]),
+    ),
   };
 });
 
@@ -114,19 +134,22 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({
-  StudioChatDock: () => {
-    chatDock.mounts += 1;
-    return null;
-  },
-}));
-
-vi.mock('../../preview/DraftChangesPanel', () => ({
-  DraftChangesPanel: (props: Record<string, unknown>) => {
-    panel.props = props;
-    return null;
-  },
-}));
+vi.mock('../../preview/DraftChangesPanel', async () => {
+  const { createElement } = await import('react');
+  const { useSurfaceNavigator } = await import('./surfaceDeepLinkChannel');
+  return {
+    DraftChangesPanel: (props: Record<string, unknown>) => {
+      panel.props = props;
+      // objectstack#36903 — an entry asks the host to open the flow a draft names.
+      const openSurface = useSurfaceNavigator();
+      return createElement(
+        'button',
+        { type: 'button', onClick: () => openSurface?.({ type: 'flow', name: 'qa_urgent_alert_clone' }) },
+        'Pending flow/qa_urgent_alert_clone',
+      );
+    },
+  };
+});
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
@@ -134,12 +157,17 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -192,7 +220,7 @@ beforeEach(() => {
   server.publishedByRef.length = 0;
   server.packageBatches.length = 0;
   panel.props = null;
-  chatDock.mounts = 0;
+  listing.pair = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   // Two packaged flows on the read-only showcase, and the clone, which names no package.
   seed(flow('showcase_urgent_task_alert', 'Urgent task alert', SHOWCASE));
@@ -207,18 +235,30 @@ function LocationProbe() {
   return <div data-testid="location">{`${pathname}${search}`}</div>;
 }
 
+/** A route change into the package-less scope, the surface left mounted. */
+function OrgScopeDoor() {
+  const navigate = useNavigate();
+  return <button type="button" aria-label="test door: package-less scope" data-testid="org-scope-door" onClick={() => navigate(ORG_CLONE)} />;
+}
+
 function renderAt(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <LocationProbe />
+      <OrgScopeDoor />
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 const location = () => screen.getByTestId('location').textContent ?? '';
+
+/** objectstack#36903 — the scope's list and the clone's designer, on the scope's leg of the area. */
+const ORG_LIST = '/studio/~org/metadata/flow?source=runtime';
+const ORG_CLONE = '/studio/~org/metadata/flow/qa_urgent_alert_clone?source=runtime';
 
 /**
  * The canvas's own status pill. With the `_status` probe answered "absent" it
@@ -234,20 +274,43 @@ async function openedFlow(name: string): Promise<void> {
 }
 
 describe('the package-less scope lists a package-less flow and opens it editable (objectui#11553)', () => {
-  it('lists the clone and none of the packaged flows', async () => {
-    renderAt('/studio/~org/automations');
+  it('opens the clone on its address, read unscoped: a package-scoped read cannot see a package-less row', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
-    expect(screen.getByRole('button', { name: /QA urgent alert clone/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Urgent task alert/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Daily digest/ })).not.toBeInTheDocument();
-    // The unscoped reads: a package-scoped one cannot see a package-less row.
     expect(mockClient.list).toHaveBeenCalledWith('flow');
     expect(mockClient.list).not.toHaveBeenCalledWith('flow', expect.objectContaining({ packageId: expect.anything() }));
   });
 
-  it('opens it editable, and an edit saves a draft bound to no package', async () => {
+  it('the old scope address lands on the scope\'s flow list', async () => {
     renderAt('/studio/~org/automations');
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
+  });
+
+  it('its flow list names its flows and offers no create: authoring stays package-first', async () => {
+    renderAt(ORG_LIST);
+    // Positive leg: the list rendered, with the scope's flow on it.
+    expect(await screen.findByText('qa_urgent_alert_clone', {}, { timeout: 8000 })).toBeInTheDocument();
+    // objectstack#36903 — the rail's New went to the list's create, which the
+    // scope's read-only area does not offer.
+    expect(screen.queryByRole('button', { name: /^(New|Create)$/ })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
+    // A list with a flow on it says nothing of the empty scope's guidance.
+    expect(document.body.textContent).not.toContain(t('engine.studio.org.none', 'en'));
+  });
+
+  // objectstack#36903 — the empty scope's list keeps its pillar's guidance
+  // (ADR-0146 D11): a packaged flow is changed in its package, with New similar.
+  it('its empty flow list says how a packaged flow is changed instead', async () => {
+    server.active.delete('flow/qa_urgent_alert_clone');
+    renderAt(ORG_LIST);
+    expect(await screen.findByText(t('engine.studio.org.none', 'en'), {}, { timeout: 8000 })).toBeInTheDocument();
+    // It reads as an empty list, not as a search that matched nothing.
+    expect(screen.queryByText(/No matches for/)).toBeNull();
+  });
+
+  it('opens it editable, and an edit saves a draft bound to no package', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const toggle = screen.getByRole('switch');
@@ -263,28 +326,40 @@ describe('the package-less scope lists a package-less flow and opens it editable
     expect(saved!.options?.packageId).toBeUndefined();
   });
 
-  it('offers its one pillar, no Create app, no package copilot, and names itself in the switcher', async () => {
-    renderAt('/studio/~org/automations');
+  it('offers its one page, no Create app, no right slot, and names the scope beside the way back', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
-    expect(screen.getByRole('link', { name: /Automations/ })).toHaveAttribute('href', '/studio/~org/automations');
-    expect(screen.queryByRole('link', { name: /^Data$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Interfaces/ })).not.toBeInTheDocument();
-    // objectui#12452 — Access is a package pillar segment now, not a More entry.
-    expect(screen.queryByRole('link', { name: /Access/ })).not.toBeInTheDocument();
-    // objectstack#28561 — nor the "All metadata" area: a package's, beside its pillars.
-    expect(screen.queryByRole('link', { name: /All metadata/ })).not.toBeInTheDocument();
+    // objectstack#36899 — the left menu: the scope's flows are its current
+    // entry; no package pillar, area or Interfaces page is offered.
+    const menu = within(screen.getByTestId('studio-menu'));
+    const flows = menu.getByTestId('studio-menu-entry-orgFlows');
+    expect(flows).toHaveAttribute('href', ORG_LIST);
+    expect(flows).toHaveAttribute('aria-current', 'page');
+    for (const a of menu.getAllByRole('link')) {
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/(data|access|interfaces|automations)/);
+      expect(a.getAttribute('href')).not.toMatch(/^\/studio\/~org\/metadata\/(?!flow)/);
+    }
+    expect(menu.queryByTestId('studio-menu-entry-owd')).toBeNull();
+    expect(menu.queryByTestId('studio-menu-entry-diagnostics')).toBeNull();
     expect(screen.queryByRole('button', { name: /Create app/ })).not.toBeInTheDocument();
-    expect(chatDock.mounts).toBe(0);
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Organization flows');
+    expect(screen.queryByTestId('studio-right-slot')).toBeNull();
+    // objectstack#36501, decision 5 (objectstack#36899) — no app owns the
+    // scope, so it is named, as a package with no app is: objectstack#37456 —
+    // by the package row's switcher, beside the way back to the apps home.
+    const row = within(screen.getByTestId('studio-package-row'));
+    // Named for what it holds, not after its one flow entry (the menu row keeps that name).
+    expect(row.getByTestId('studio-pkg-switcher-name')).toHaveTextContent(/^Organization metadata$/);
+    expect(screen.getByTestId('studio-menu-entry-orgFlows')).toHaveTextContent('Organization flows');
+    expect(row.getByTestId('studio-package-back')).toHaveAccessibleName('Leave Studio and go back to your apps');
+    expect(screen.getByTestId('studio-brand-name')).toHaveTextContent(/^App Studio$/);
     // No "New" flow here: authoring stays package-first.
     expect(screen.queryByTitle('New automation')).not.toBeInTheDocument();
   });
 
-  it('a package-less scope URL on another pillar lands on its one pillar', async () => {
+  it('a package-less scope URL on another pillar lands on its flow list', async () => {
     renderAt('/studio/~org/data');
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations'));
-    await openedFlow('qa_urgent_alert_clone');
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
   });
 });
 
@@ -295,59 +370,64 @@ describe('the deep link to a package-less flow opens that flow, not another (obj
 
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.queryByTitle('API name: aa_first_org_flow')).not.toBeInTheDocument();
-    expect(location()).toBe('/studio/~org/automations?surface=flow%3Aqa_urgent_alert_clone');
+    expect(location()).toBe(ORG_CLONE);
   });
 
   it('the measured link, through the showcase pillar: lands on the package-less scope, the clone open and editable', async () => {
     renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Aqa_urgent_alert_clone`);
 
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations?surface=flow%3Aqa_urgent_alert_clone'), {
-      timeout: 8000,
-    });
+    await waitFor(() => expect(location()).toBe(ORG_CLONE), { timeout: 8000 });
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.getByRole('switch')).toBeEnabled();
     // The defect's own signature: the package's first flow was opened instead.
     expect(mockClient.layered).not.toHaveBeenCalledWith('flow', 'showcase_urgent_task_alert');
   });
 
-  it('a link naming a flow no rail holds opens no other flow, and says so', async () => {
+  it('a link naming a flow nowhere held opens no other flow, and says so', async () => {
     renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Anobody_has_this`);
 
     await screen.findByText('The link names flow “nobody_has_this”, which is not here.', undefined, { timeout: 8000 });
-    expect(location()).toBe(`/studio/${SHOWCASE}/automations?surface=flow%3Anobody_has_this`);
+    expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/nobody_has_this?package=${SHOWCASE}`);
     expect(mockClient.layered).not.toHaveBeenCalled();
-    // The rail still lists the package's flows to pick from.
-    expect(screen.getByRole('button', { name: /Urgent task alert/ })).toBeInTheDocument();
   });
 });
 
 describe('the packaged control: a read-only package stays read-only (objectui#11124)', () => {
-  it('lists the package’s flows, not the clone, and offers no edit', async () => {
-    renderAt(`/studio/${SHOWCASE}/automations`);
+  it('opens the package’s flow and offers no edit', async () => {
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
 
-    expect(screen.queryByRole('button', { name: /QA urgent alert clone/ })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
     expect(screen.queryAllByRole('button', { name: 'Add connected node' })).toHaveLength(0);
   });
 
-  it('from that read-only package, the switcher’s entry opens the package-less scope editable', async () => {
+  it('from that read-only package, a switch into the package-less scope opens it editable', async () => {
     // The surface stays mounted across the switch, so the read-only answer the
-    // showcase got is still in hand when the package-less scope renders.
-    renderAt(`/studio/${SHOWCASE}/automations`);
+    // showcase got is still in hand when the package-less scope renders. The
+    // switch used to be the package switcher's entry, removed by
+    // objectstack#36501; the route change is the same without it.
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
     await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
 
-    fireEvent.click(screen.getByTestId('studio-pkg-chip'));
-    fireEvent.click(await screen.findByTestId('studio-org-scope-entry'));
+    fireEvent.click(screen.getByTestId('org-scope-door'));
 
-    await waitFor(() => expect(location()).toBe('/studio/~org/automations'));
+    await waitFor(() => expect(location()).toBe(ORG_CLONE));
     await openedFlow('qa_urgent_alert_clone');
     expect(screen.getByRole('switch')).toBeEnabled();
   });
 });
 
 describe('the package-less scope reviews and publishes exactly its own drafts (objectui#11553)', () => {
+  // objectstack#36903 — the sheet's flow request lands on the scope's own address.
+  it('a Pending changes request for a scope flow opens it on the scope’s address', async () => {
+    renderAt(ORG_LIST);
+    expect(await screen.findByText('qa_urgent_alert_clone', {}, { timeout: 8000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pending flow/qa_urgent_alert_clone' }));
+    await waitFor(() => expect(location()).toBe(ORG_CLONE), { timeout: 8000 });
+    await openedFlow('qa_urgent_alert_clone');
+  });
+
   beforeEach(() => {
     server.drafts.push(
       { type: 'flow', name: 'qa_urgent_alert_clone', packageId: null },
@@ -356,14 +436,34 @@ describe('the package-less scope reviews and publishes exactly its own drafts (o
     );
   });
 
-  it('counts only package-less flow drafts', async () => {
-    renderAt('/studio/~org/automations');
+  // objectstack#37456 — the top bar's Changes moved to 概览's Pending tab, and
+  // the scope has no 概览: its Changes is a row of the left column's top.
+  it('counts only package-less flow drafts, in the left column\'s Changes row', async () => {
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
-    await waitFor(() => expect(screen.getByRole('button', { name: /Changes · 1$/ })).toBeInTheDocument());
+    const changes = await screen.findByRole('button', { name: /Changes · 1$/ }, { timeout: 8000 });
+    expect(screen.getByTestId('studio-top-left')).toContainElement(changes);
+  });
+
+  it('the Changes row opens the sheet, to review, and the sheet carries the scope\'s Publish', async () => {
+    renderAt(ORG_CLONE);
+    await openedFlow('qa_urgent_alert_clone');
+    fireEvent.click(await screen.findByTestId('studio-scope-changes', undefined, { timeout: 8000 }));
+    await waitFor(() => expect(panelProps()?.open).toBe(true));
+    // To review: no door sets the confirm posture any more (objectstack#37456).
+    expect(panelProps()?.posture).not.toBe('confirm');
+    expect(panelProps()?.onPublish).toBeTypeOf('function');
+  });
+
+  it('CONTROL: a package draws no Changes row; its count is 概览\'s badge', async () => {
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
+    await openedFlow('showcase_urgent_task_alert');
+    await waitFor(() => expect(screen.getByTestId('studio-menu-overview-pending')).toHaveTextContent('1'));
+    expect(screen.queryByTestId('studio-scope-changes')).toBeNull();
   });
 
   it('hands the sheet a filter that keeps only package-less flow drafts', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const include = panelProps()?.include as ((e: { type: string; name: string; packageId: string | null }) => boolean) | undefined;
@@ -372,13 +472,13 @@ describe('the package-less scope reviews and publishes exactly its own drafts (o
     // Control: a package's sheet is not narrowed.
     cleanup();
     panel.props = null;
-    renderAt(`/studio/${SHOWCASE}/automations`);
+    renderAt(`/studio/${SHOWCASE}/metadata/flow/showcase_urgent_task_alert`);
     await openedFlow('showcase_urgent_task_alert');
     expect(panelProps()?.include).toBeUndefined();
   });
 
   it('publishes each package-less flow draft by reference, and nothing through the package batch door', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     const onPublish = panelProps()?.onPublish as (() => Promise<void>) | undefined;
@@ -416,7 +516,6 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
     expect(screen.getByText('Visual orchestration · click a node to configure')).toBeInTheDocument();
     // No flow was opened in the missing one's place.
     expect(mockClient.layered).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /QA urgent alert clone/ })).toBeInTheDocument();
   });
 
   it('a package page’s miss, too', async () => {
@@ -427,30 +526,84 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
   });
 
-  it('an empty list shows the rail’s own empty state — no miss, no "no designers" notice', async () => {
+  it('an empty scope lands on its list — no miss, no "no designers" notice, no flow read', async () => {
     server.active.delete('flow/qa_urgent_alert_clone');
     renderAt('/studio/~org/automations');
 
-    // ADR-0146 D11 — the sentence names Studio's New similar, not the
-    // retired Setup › Packaged automation page.
-    await screen.findByText(
-      'No flows outside a package. To change a packaged flow, open its package and use New similar.',
-      undefined,
-      { timeout: 8000 },
-    );
-    // objectui#12514 — the sentence is the content column's one block now.
-    expect(screen.getByTestId('auto-empty')).toHaveTextContent('No flows outside a package.');
-    expect(getMetadataPreview('flow')).toBe(FlowPreview);
+    await waitFor(() => expect(location()).toBe(ORG_LIST), { timeout: 8000 });
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
     expect(document.body.textContent).not.toContain('The link names flow');
     expect(mockClient.layered).not.toHaveBeenCalled();
   });
 
   it('control: an open flow on the same page reads the same chip', async () => {
-    renderAt('/studio/~org/automations');
+    renderAt(ORG_CLONE);
     await openedFlow('qa_urgent_alert_clone');
 
     expect(screen.getByText('Visual orchestration · click a node to configure')).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
+  });
+});
+
+/**
+ * objectstack#36903 — the retired Automations pillar's bookmarks, opened
+ * through the REAL surface: each lands on the flow's own address with the
+ * designer open on that flow. A read-only base's pair-added flow opens at the
+ * base's address, writable at the pair (the designer reads the pair's flows
+ * with the base's); the pair's own old address — where New similar sent the
+ * author before this card — lands on the pair's own area.
+ */
+describe('an old Automations bookmark lands on the flow’s address, the designer open on it (objectstack#36903)', () => {
+  const pairChip = () => screen.queryByTestId('studio-pair-item-chip');
+
+  it('a package’s flow: its address on the package, the designer open read-only', async () => {
+    renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_daily_digest`);
+
+    await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_daily_digest?package=${SHOWCASE}`), {
+      timeout: 8000,
+    });
+    await openedFlow('showcase_daily_digest');
+    await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
+    expect(mockClient.layered).not.toHaveBeenCalledWith('flow', 'showcase_urgent_task_alert');
+  });
+
+  describe('a read-only base with a pair', () => {
+    beforeEach(() => {
+      listing.pair = true;
+      seed(flow('showcase_alert_copy', 'Alert copy', PAIR));
+    });
+
+    it('the base’s old address naming a pair-added flow: the base’s address, open writable, with the pair chip', async () => {
+      renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_alert_copy`);
+
+      await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_alert_copy?package=${SHOWCASE}`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_alert_copy');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeEnabled(), { timeout: 8000 });
+      expect(pairChip()).toBeInTheDocument();
+    });
+
+    it('the pair’s old address: the pair’s own address, the copy open writable', async () => {
+      renderAt(`/studio/${PAIR}/automations?surface=flow%3Ashowcase_alert_copy`);
+
+      await waitFor(() => expect(location().split('?')[0]).toBe(`/studio/${PAIR}/metadata/flow/showcase_alert_copy`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_alert_copy');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeEnabled(), { timeout: 8000 });
+    });
+
+    // CONTROL: with the pair listed, the base's own flow stays read-only on the base.
+    it('CONTROL: the base’s own flow, through the same old address, stays read-only and carries no pair chip', async () => {
+      renderAt(`/studio/${SHOWCASE}/automations?surface=flow%3Ashowcase_daily_digest`);
+
+      await waitFor(() => expect(location()).toBe(`/studio/${SHOWCASE}/metadata/flow/showcase_daily_digest?package=${SHOWCASE}`), {
+        timeout: 8000,
+      });
+      await openedFlow('showcase_daily_digest');
+      await waitFor(() => expect(screen.getByRole('switch')).toBeDisabled());
+      expect(pairChip()).toBeNull();
+    });
   });
 });

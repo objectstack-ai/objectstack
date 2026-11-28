@@ -3198,10 +3198,10 @@
     },
     {
       "id": "identity-auth.ai-service-account-lifecycle",
-      "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, and an owner leaving the organization suspends the account",
+      "title": "An AI service account is suspended, resumed, re-owned, retired, and has a key revoked and restored, each by the right holder: the owner may suspend but not resume, retire ends the membership and revokes every key, an owner leaving the organization suspends the account, and an owner banned by an administrator suspends it too and cannot be named or resumed under",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3220,7 +3220,8 @@
         "as the owner: POST /api/v1/auth/service-account/suspend {\"userId\": ID}; call a read with each key; then as the owner POST …/resume; then as the administrator POST …/resume; call a read with each key",
         "as the administrator: POST …/revoke-key {\"keyId\": K1}; call a read with each key; as the owner POST …/restore-key {\"keyId\": K1}; then as the administrator",
         "as the administrator: remove the owner from the organization; read the account's ban fields; POST …/resume; then POST …/set-owner {\"userId\": ID, \"ownerId\": THIRD} and POST …/resume",
-        "as the administrator: POST …/retire; call a read with each key; POST …/restore-key {\"keyId\": K2}; POST …/retire again; POST …/create-key"
+        "as the administrator: POST …/retire; call a read with each key; POST …/restore-key {\"keyId\": K2}; POST …/retire again; POST …/create-key",
+        "as a platform administrator: POST /api/v1/auth/admin/ban-user {\"userId\": THIRD}; read the account's ban fields; call a read with each key; POST …/resume; POST …/set-owner naming THIRD on a second account, and POST …/register with ownerId THIRD; then POST /api/v1/auth/admin/unban-user {\"userId\": THIRD}; read the account's ban fields; POST …/resume"
       ],
       "acceptance": [
         {
@@ -3246,11 +3247,18 @@
           "oracle": "api",
           "verify": "both keys are refused; the account has no sys_member row; restore of K2 answers 403; a second retire answers 409; create-key answers 409 (packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runRetireServiceAccount)",
           "evidence": "the reads, the membership read and the three refusals"
+        },
+        {
+          "clause": "an administrator's ban of the accountable owner suspends the account with its own reason; register, set-owner and resume refuse an owner disabled by any door (a ban, a directory deactivation); an unban resumes none",
+          "oracle": "api",
+          "verify": "the ban answers data.revoked.serviceAccounts at least 1; the account's ban reason is the banned-owner reason (packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#SERVICE_ACCOUNT_OWNER_BANNED_REASON) and both reads are refused; resume answers 409 RESOURCE_CONFLICT; set-owner and register naming THIRD answer 400 VALIDATION_FAILED at ownerId (packages/plugins/plugin-auth/src/service-account-doors.ts#isAccountableOwnerActive); after the unban the ban reason is unchanged, and only then does resume answer 200",
+          "evidence": "the ban answer, the ban fields before and after the unban, and the five door answers"
         }
       ],
       "negative": [
         "the owner resuming its own account is a FAIL: suspension by the owner is lifted by an administrator",
-        "a retired account whose key is restored, or a new key minted, is a FAIL"
+        "a retired account whose key is restored, or a new key minted, is a FAIL",
+        "an account still running after its owner's ban, or resumed by the unban alone, is a FAIL: an account runs only while its owner's account is active"
       ],
       "traps": ["wrong-persona", "auth-state-leak", "cache-staleness"],
       "automated": {
@@ -3260,6 +3268,7 @@
       "source": [
         "packages/plugins/plugin-auth/src/service-account-lifecycle.ts#runSuspendServiceAccount, #runResumeServiceAccount, #runSetServiceAccountOwner, #runRetireServiceAccount, #runRevokeServiceAccountKey, #runRestoreServiceAccountKey",
         "packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#suspendAccountsOfDepartedOwner",
+        "packages/plugins/plugin-auth/src/service-account-owner-leaves.ts#suspendAccountsOfBannedOwner; packages/plugins/plugin-auth/src/service-account-doors.ts#isAccountableOwnerActive; packages/plugins/plugin-auth/src/admin-ban-endpoints.ts#runAdminBanUser",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts (the six lifecycle rows: who may call each and every refusal)",
         "docs/adr/0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md D6",
         "#31981"
@@ -3276,6 +3285,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[0] names the grant (stale spec, QA run #33092, comment 6850793622; ledger row 231 of #32908). Under ADR-0151 D3 a fresh account's key answers 403 to every data read, so acceptance[0] and [2]'s 'reads answer 200' need a ceiling-safe set assigned first; a ceiling set is refused as a grant (agent-account-grant-refusal.ts). The clauses are unchanged. Read at base 82838e83",
           "ref": "#33328"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-21",
+          "change": "acceptance[4], steps[4] and a negative added: an account runs only while its owner's account is active. An administrator's ban of the owner suspends the account with its own reason, register, set-owner and resume refuse an owner disabled by any door (one shared check), and an unban resumes none (maintainer ruling 2026-11-21, option A). Read from source on branch claude/sec2-account-removal; no live run made",
+          "ref": "claude/sec2-account-removal"
         }
       ]
     },
@@ -3603,10 +3618,10 @@
     },
     {
       "id": "identity-auth.console-sign-out-and-ended-session",
-      "title": "Sign-out leaves none of the signed-out user's browser state and no return link, while a session that ended on the server sends the next in-app navigation to sign-in with its return link",
+      "title": "Sign-out leaves none of the signed-out user's browser state but their list layout, and no return link, while a session that ended on the server sends the next in-app navigation to sign-in with its return link",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -3622,8 +3637,10 @@
       },
       "steps": [
         "sign in as the admin; open a showcase list and one record; in the page's devtools write localStorage 'qa-probe-<run>' and sessionStorage 'qa-probe-<run>'; list both stores' keys",
-        "sign out from the user menu; on the login page list both stores' keys again and read the URL",
-        "sign in as the org member; read where the Console lands",
+        "on that list drag one column's width and pick another row height; open the record page's related tab and drag one of its column widths; read the value of every list-layout:* and grid-columns-* key",
+        "sign out from the user menu; on the login page list both stores' keys again with the value of every list-layout:* and grid-columns-* key, and read the URL",
+        "sign in as the admin again; reopen the list and the record's related tab; read the column widths and row height",
+        "sign out; sign in as the org member; read where the Console lands; list localStorage's keys; open the same list",
         "sign out; sign in as the admin in the tab and open a showcase record; from the second client, signed in as the admin, POST /api/v1/auth/revoke-other-sessions",
         "in the tab, click another app navigation entry (no reload); read the network log and the URL"
       ],
@@ -3631,8 +3648,14 @@
         {
           "clause": "sign-out sweeps both stores down to the device keys before the sign-in page shows",
           "oracle": "dom",
-          "verify": "after sign-out no key the signed-out user's session wrote survives in either store (the same test as negative[1]): every key left is in the kept set (SIGNED_OUT_KEPT_KEYS: auth-session-token, auth-session-user-id, vite-ui-theme, objectui-locale, objectui-locale-seed and objectui:auth:signed-out-via-provider) or is anonymous-shell state that a never-signed-in visit to /_console/login writes too, which today is exactly flow-palette-recents holding [] (the unscoped key ui/packages/app-shell/src/context/FlowPaletteRecentsProvider.tsx#FlowPaletteRecentsProvider writes when it re-hydrates with no user after the sweep); qa-probe-<run>, every objectui:metadata:* key and every user-scoped :u:<id> key are gone from both, and flow-palette-recents holding anything but [] is the signed-out user's. A key outside both lists is judged against a fresh never-signed-in context opening /_console/login: written there with the same value, it is anonymous-shell state to name in the run record for this verify to list; otherwise it is a FAIL (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState, run by ui/packages/auth/src/AuthProvider.tsx#AuthProvider on every sign-out path)",
+          "verify": "after sign-out no key the signed-out user's session wrote survives in either store (the same test as negative[1]): every key left is in the kept set (SIGNED_OUT_KEPT_KEYS: auth-session-token, auth-session-user-id, vite-ui-theme, objectui-locale, objectui-locale-seed and objectui:auth:signed-out-via-provider), is the signed-out user's list layout (a list-layout:<user>:<object> key holding only viewOrder and perView widths / rowHeight, or a grid-columns-<object>[-<view>] key holding only order and widths: SIGNED_OUT_KEPT_LAYOUT_FAMILIES, #36110) or is anonymous-shell state that a never-signed-in visit to /_console/login writes too, which today is exactly flow-palette-recents holding [] (the unscoped key ui/packages/app-shell/src/context/FlowPaletteRecentsProvider.tsx#FlowPaletteRecentsProvider writes when it re-hydrates with no user after the sweep); qa-probe-<run>, every objectui:metadata:* key and every user-scoped :u:<id> key are gone from both, and flow-palette-recents holding anything but [] is the signed-out user's. A key outside both lists is judged against a fresh never-signed-in context opening /_console/login: written there with the same value, it is anonymous-shell state to name in the run record for this verify to list; otherwise it is a FAIL (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState, run by ui/packages/auth/src/AuthProvider.tsx#AuthProvider on every sign-out path)",
           "evidence": "the two key lists before and after, with the value of every key outside the kept set"
+        },
+        {
+          "clause": "the list layout stays for the same person across a sign-out and goes for the next person",
+          "oracle": "dom",
+          "verify": "after the admin signs back in, the list shows the dragged width and the picked row height and the related tab its dragged width, as before the sign-out; a list-layout:* or grid-columns-* value holding anything but view ids, field names, widths and a row height (a filter, a search term, record data) is a FAIL, named by key. After the org member signs in, no list-layout:<admin id>:* key and no grid-columns-* key the admin's session wrote remains, and the list opens at its view's own widths and row height (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState keeps them; #purgePreviousUserClientState, run by SessionUserScope.adopt on a change of user, does not; maintainer ruling on #35955, point 1)",
+          "evidence": "the layout keys with their values before sign-out, after sign-out and after the member's sign-in, and the widths and row height read on the list"
         },
         {
           "clause": "an explicit sign-out carries no return link, so the next person lands on their own home",
@@ -3649,7 +3672,8 @@
       ],
       "negative": [
         "a 401 taken as the verdict, signing the tab out while get-session still answers the session, is a FAIL: one endpoint may refuse for its own reasons (session-end-events.ts); this item cannot provoke such a 401 on stock, so score it from the pins",
-        "after sign-out, any key the signed-out user's session wrote that survives outside the kept set is a FAIL, named by key"
+        "after sign-out, any key the signed-out user's session wrote that survives outside the kept set and the kept list layout is a FAIL, named by key",
+        "after a different person signs in on that browser, any list-layout:* or grid-columns-* key the previous person's session wrote is a FAIL, named by key"
       ],
       "traps": [
         "stale-console-bundle",
@@ -3658,7 +3682,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/auth/src/__tests__/signOut-client-cache-purge-5198.test.tsx, ui/packages/auth/src/__tests__/sessionUserChangePurge-5664.test.tsx, ui/packages/auth/src/__tests__/AuthProvider.test.tsx, ui/packages/auth/src/__tests__/createAuthenticatedFetch.test.tsx and ui/apps/console/src/components/ProtectedRoute.signOutListState-29174.test.tsx; no live spec signs out and revokes"
+        "ref": "ui/packages/auth/src/__tests__/signOut-client-cache-purge-5198.test.tsx, ui/packages/auth/src/__tests__/sessionUserChangePurge-5664.test.tsx, ui/packages/app-shell/src/context/__tests__/signOutPurge.test.tsx (the list layout kept for the same person and cleared for the next), ui/packages/auth/src/__tests__/AuthProvider.test.tsx, ui/packages/auth/src/__tests__/createAuthenticatedFetch.test.tsx and ui/apps/console/src/components/ProtectedRoute.signOutListState-29174.test.tsx; no live spec signs out and revokes"
       },
       "source": [
         "ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState",
@@ -3666,7 +3690,7 @@
         "ui/packages/auth/src/session-end-events.ts#sessionEndEvents and ui/packages/auth/src/createAuthenticatedFetch.ts#createAuthenticatedFetch",
         "ui/apps/console/src/components/ProtectedRoute.tsx#LoginRedirect",
         "ui/packages/auth/src/beforeSignOut.ts#runBeforeSignOut (steps that run under the ending session)",
-        "#30490 (no return link after sign-out), #32048 (every sign-out clears the user's browser storage), #32207 (a session ended on the server returns to sign-in)"
+        "#30490 (no return link after sign-out), #32048 (every sign-out clears the user's browser storage), #32207 (a session ended on the server returns to sign-in), #36110 (sign-out keeps the list layout for the same person)"
       ],
       "history": [
         {
@@ -3686,6 +3710,12 @@
           "date": "2026-11-15",
           "change": "acceptance[0].verify re-pointed (stale spec, QA run #33853, card #33859). The verify listed the kept keys as the only keys allowed after sign-out, but the anonymous login page writes its own flow-palette-recents = [] (FlowPaletteRecentsProvider re-hydrates with no user after the purge and saves the unscoped key); a never-signed-in visit writes the same. The verify now judges keys the signed-out user's session wrote, as negative[1] does, names that anonymous-shell key with its value, adds objectui:auth:signed-out-via-provider to the kept list as SIGNED_OUT_KEPT_KEYS has it, and has the runner diff any other unlisted key against a fresh anonymous visit. What the clause tests, no signed-out user's state left behind, is unchanged. Read at base 895783a1",
           "ref": "#33936"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "the list layout now survives a sign-out for the same person (#36110, maintainer ruling on #35955 point 1: after #35955 there is no server copy of column widths, row height and tab order). Title, acceptance[0].verify and negative[1] admit the kept layout families (list-layout:*, grid-columns-*) holding layout only; new acceptance[1] and negative[2] check that the same person gets it back and the next person does not; steps add the layout drag, the re-sign-in and the member's key list. Read at base f46ce5b4a",
+          "ref": "#36110"
         }
       ]
     },

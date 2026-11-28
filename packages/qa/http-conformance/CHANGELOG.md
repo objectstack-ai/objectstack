@@ -1,5 +1,63 @@
 # @objectstack/http-conformance
 
+## 0.1.15-next.2
+
+### Patch Changes
+
+- Updated dependencies [abf1eeb]
+- Updated dependencies [dbe0716]
+  - @objectstack/core@19.0.0-next.2
+
+## 0.1.15-next.1
+
+### Patch Changes
+
+- Updated dependencies [eb683b8]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [87af66e]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [6b7b305]
+- Updated dependencies [520cf3f]
+- Updated dependencies [8071f35]
+- Updated dependencies [709a087]
+  - @objectstack/core@19.0.0-next.1
+
+## 0.1.15-next.0
+
+### Patch Changes
+
+- Updated dependencies [89364b4]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [8856afc]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [16a96ac]
+- Updated dependencies [7c122ff]
+- Updated dependencies [d7c257e]
+- Updated dependencies [78437e2]
+- Updated dependencies [81eae2b]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [422df61]
+- Updated dependencies [0439a04]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [d15e439]
+- Updated dependencies [efaafe3]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [ebac615]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+  - @objectstack/core@19.0.0-next.0
+
 ## 0.1.14
 
 ### Patch Changes

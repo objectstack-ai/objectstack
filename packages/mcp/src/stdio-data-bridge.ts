@@ -131,8 +131,11 @@ import {
   redactStoredMetadataRow,
   STORED_METADATA_BODY_COLUMN,
   STORED_METADATA_TYPE_COLUMN,
+  // [ADR-0160 D4] The read path's own decorations, removed from the
+  // context-pack listing before the record-context executor parses it.
+  stripReadDecorations,
 } from '@objectstack/spec/kernel';
-import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
+import type { IDataEngine, IMetadataService, ISecurityService } from '@objectstack/spec/contracts';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
@@ -151,6 +154,9 @@ import { recordNotFoundError, userTextLocalesOf } from '@objectstack/core';
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+// [#36689] The disabled-package question `callData` asks of every caller, and
+// the data plane's one refusal for it: ⛔ never a second copy of either.
+import { objectPackageDisabledError, registryObjectPackageDisabled } from '@objectstack/core';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
 import { declaresOptions } from '@objectstack/formula';
@@ -169,7 +175,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { resolveQueryReadPageCap, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0149 D2] The `/meta` list translation and its locale parse, the pair
 // the HTTP door's `loadDatasets` runs — imported, never restated, so both
 // transports localize a saved dataset with one function.
@@ -220,6 +226,59 @@ export interface StdioObjectReads {
    * verdict the rest of the boot can still contradict.
    */
   protocol?: () => StdioProtocolObjectReads | undefined;
+  /**
+   * [#36689] Whether `object`'s owning package is disabled: the engine
+   * registry's `isObjectPackageDisabled`, read through
+   * `registryObjectPackageDisabled` (`@objectstack/core`), the one predicate
+   * `callData` asks and the data plane asks before it refuses `404
+   * OBJECT_PACKAGE_DISABLED`. Asked of EVERY caller, a system context included,
+   * by {@link enforceApiExposure}; build it with {@link engineObjectPackageDisabled}.
+   * Absent, or a registry without the member, disables nothing, as on the data
+   * route.
+   */
+  isObjectPackageDisabled?: (object: string) => boolean;
+  /**
+   * [#36689 S1] An object's definition as the engine registry holds it, the
+   * field map `callData`'s relation walk reads first
+   * (`resolveWriteResponseSchema`): the registry the engine lowers a
+   * nested-relation condition against, so a site the engine would lower is a
+   * site this walk finds, where the protocol and the metadata copy hold no
+   * definition (a package object registered during the boot of a kernel with
+   * an `environmentId`). Build it with {@link engineObjectDefinition}. Absent,
+   * or answering nothing, the walk reads {@link readObjectDeclaration}, as
+   * before.
+   */
+  engineObjectDefinition?: (object: string) => ObjectDef | undefined;
+}
+
+/**
+ * [#36689 S1] The {@link StdioObjectReads.engineObjectDefinition} read over the
+ * engine this transport reads through: `registry.getObject`, read at each use,
+ * as `callData`'s `resolveWriteResponseSchema` reads it. A registry that cannot
+ * answer, or throws, answers nothing.
+ */
+export function engineObjectDefinition(engine: unknown): (object: string) => ObjectDef | undefined {
+  return (object) => {
+    try {
+      const registry = (engine as { registry?: { getObject?: (name: string) => unknown } } | null | undefined)?.registry;
+      const def = typeof registry?.getObject === 'function' ? registry.getObject(object) : undefined;
+      return def !== null && typeof def === 'object' ? (def as ObjectDef) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/**
+ * [#36689] The {@link StdioObjectReads.isObjectPackageDisabled} predicate over
+ * the engine this transport reads through: its registry, read at each use (as
+ * `callData` reads it once per call), through `registryObjectPackageDisabled`.
+ * ⛔ Never a second copy of the predicate. An engine without a registry (a
+ * test double, a foreign engine) disables nothing, as on the data route.
+ */
+export function engineObjectPackageDisabled(engine: unknown): (object: string) => boolean {
+  return (object) =>
+    registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry)(object);
 }
 
 /** What {@link createStdioDataBridge} needs from the host plugin. */
@@ -247,8 +306,12 @@ export interface StdioDataBridgeDeps {
    * use and `undefined` when this host registers none — the deployment then
    * has no field-level posture, and the schema is served as declared, as on
    * every other object-schema exit.
+   *
+   * [ADR-0160 D3, second amendment] The same service answers the fields the
+   * principal may query on (`getQueryableFields`, feature-detected), which
+   * the record-context door hands its executor.
    */
-  security?: () => ObjectSchemaMaskSecuritySurface | undefined;
+  security?: () => (ObjectSchemaMaskSecuritySurface & Pick<Partial<ISecurityService>, 'getQueryableFields'>) | undefined;
   /**
    * [decision 6840464379] Where the object-schema mask finds an object's
    * declared `schemaReadDelegate` ({@link CallerObjectViewDeps.schemaReadDelegates}).
@@ -270,6 +333,22 @@ export interface StdioDataBridgeDeps {
    * dataset tool registers.
    */
   datasetTools?: StdioDatasetToolsService;
+  /**
+   * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+   * executor ({@link StdioKnowledgeToolsService}), resolved by the host once
+   * its services are registered. Present ⇒ the bridge carries
+   * `searchKnowledge` / `knowledgeToolDefinitions`; absent ⇒ neither, and
+   * `search_knowledge` does not register.
+   */
+  knowledgeTools?: StdioKnowledgeToolsService;
+  /**
+   * [ADR-0160 D4] The `record-context` service when it serves the
+   * `get_record_context` executor ({@link StdioRecordContextToolsService}),
+   * resolved by the host once its services are registered. Present ⇒ the
+   * bridge carries `getRecordContext` / `recordContextToolDefinitions`;
+   * absent ⇒ neither, and the tool does not register.
+   */
+  recordContextTools?: StdioRecordContextToolsService;
   /**
    * [ADR-0149 D2 · #34872] The `i18n` service the saved datasets and the
    * object tools' labels and descriptions are localized with, resolved at each
@@ -296,6 +375,33 @@ export interface StdioDatasetToolsService {
     readonly definitions: ReadonlyArray<{ name: string; description: string }>;
     listDatasets(input: unknown, context?: unknown): Promise<ListDatasetsOutput>;
     queryDataset(input: unknown, context?: unknown): Promise<QueryDatasetOutput>;
+  };
+}
+
+/**
+ * [ADR-0149 D2] The face of the `knowledge` service `search_knowledge` calls:
+ * `knowledgeTools()` binds the service-knowledge executor to the service
+ * itself. Named structurally so this package stays free of knowledge code.
+ * The executor refuses by throwing an ADR-0112 coded error.
+ */
+export interface StdioKnowledgeToolsService {
+  knowledgeTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
+    searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
+  };
+}
+
+/**
+ * [ADR-0160 D4] The face of the `record-context` service `get_record_context`
+ * calls: `recordContextTools()` hands the one executor, which reads through
+ * the door the bridge builds for the principal. Named structurally so this
+ * package stays free of the service's code. The executor refuses by throwing
+ * an ADR-0112 coded error.
+ */
+export interface StdioRecordContextToolsService {
+  recordContextTools(): {
+    readonly definitions: ReadonlyArray<{ name: string; description: string }>;
+    getRecordContext(input: unknown, door: unknown): Promise<unknown>;
   };
 }
 
@@ -365,6 +471,11 @@ async function stdioExpandMap(
       err.param = 'expand';
       throw err;
     }
+    // [#36689 M1] A target whose package is disabled serves nothing: withheld,
+    // on the engine registry's word, for every caller and on every host — the
+    // by-name read below cannot refuse where the host has no protocol service.
+    // `callData`'s expansion gate withholds the same target the same way.
+    if (reads.isObjectPackageDisabled?.(target) === true) continue;
     let declared: ObjectDef | undefined;
     try {
       declared = await readObjectDeclaration(reads, target);
@@ -828,8 +939,17 @@ export function servedLocaleObjectView(view: McpObjectView, sources: ServedLocal
  *
  * Three behaviours are matched to the HTTP path deliberately, not by accident:
  *
- *  - **`isSystem` bypasses.** These flags govern API *exposure*, so an internal
- *    engine self-write is not subject to them (`callData`'s first condition).
+ *  - **`isSystem` bypasses the exposure question, never the package one.**
+ *    These flags govern API *exposure*, so an internal engine self-write is not
+ *    subject to them (`callData`'s `exposureGated`). [#36689] The
+ *    disabled-package question is asked FIRST, of every caller, a system
+ *    context included (the #35526 ruling, 「系统身份也一律拒绝」, extended to this
+ *    door by the #36689 ruling, letter A): the engine registry's
+ *    `isObjectPackageDisabled` ({@link StdioObjectReads.isObjectPackageDisabled}),
+ *    the predicate `callData` asks, refused with the data plane's own
+ *    `objectPackageDisabledError`. Asked of the registry, not of the
+ *    protocol's by-name read, so a host with no `protocol` service, whose
+ *    copy read below cannot refuse, refuses too.
  *  - **Unresolvable metadata FAILS OPEN.** A definition that cannot be read
  *    ({@link readObjectDeclaration} throwing past its own fallback to the copy)
  *    or that resolves nothing falls back to the schema defaults (`apiEnabled`
@@ -864,6 +984,12 @@ export async function enforceApiExposure(
   context: ExecutionContext,
   condition?: string,
 ): Promise<void> {
+  // [#36689] Every caller, before the exposure bypass: `callData`'s order.
+  // A relation-condition target carries its position as `param`, as there.
+  if (reads.isObjectPackageDisabled?.(object) === true) {
+    const refusal = objectPackageDisabledError(object);
+    throw condition === undefined ? refusal : Object.assign(refusal, { param: condition });
+  }
   if (context?.isSystem) return;
 
   let def: ObjectDef | null | undefined;
@@ -916,28 +1042,52 @@ export async function enforceApiExposure(
  * performs — and an unserved target REFUSES the call: dropping the condition
  * would widen the result. The data door asks the same of the same sites
  * (`refuseUnservedRelationTarget`), found by the one walk both doors import
- * (`relationConditionSites`). One hop, as the engine serves one: a relation
- * beneath a condition is refused by the engine before anything is read.
+ * (`relationConditionSites`).
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only: the engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up to
+ * `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn. So each site's own condition is walked
+ * against its target's field map, and every target on the way is asked the
+ * whole of {@link enforceApiExposure} (disabled package first, then exposure)
+ * at its full position (`where.c_ref.b_ref`), the order the data door's walk
+ * asks in. [#36689] A system context is asked the disabled-package question
+ * at every hop and the exposure question at none: {@link enforceApiExposure}
+ * owns both, and this walk only reaches it. `depth` is a backstop against a self-referential
+ * in-process `where`, never the hop limit.
  */
 async function enforceRelationTargetExposure(
   reads: StdioObjectReads,
   object: string,
   where: unknown,
   context: ExecutionContext,
+  prefix = 'where',
+  depth = 0,
 ): Promise<void> {
-  if (where == null) return;
-  let def: ObjectDef | null | undefined;
-  try {
-    // [#25138] The field map from the definition the gate judged, so a
-    // package object's relation conditions are found where it has no copy.
-    def = await readObjectDeclaration(reads, object);
-  } catch {
-    def = undefined; // no field map, no site: the gate above falls open the same way
+  if (where == null || depth > RELATION_CONDITION_WALK_DEPTH) return;
+  // [#36689 S1] The field map the engine lowers the condition against, first,
+  // as `callData`'s walk reads it: a site the engine would lower is a site
+  // found here, where neither the protocol nor the metadata copy holds the
+  // definition.
+  let def: ObjectDef | null | undefined = reads.engineObjectDefinition?.(object);
+  if (!def) {
+    try {
+      // [#25138] The field map from the definition the gate judged, so a
+      // package object's relation conditions are found where it has no copy.
+      def = await readObjectDeclaration(reads, object);
+    } catch {
+      def = undefined; // no field map, no site: the gate above falls open the same way
+    }
   }
   for (const site of relationConditionSites(def?.fields, where)) {
-    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
+    const position = `${prefix}.${site.field}`;
+    await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, position);
+    await enforceRelationTargetExposure(reads, site.target, site.condition, context, position, depth + 1);
   }
 }
+
+/** [#36393] The relation walk's backstop depth, the data door's and the engine evaluate gate's. */
+const RELATION_CONDITION_WALK_DEPTH = 8;
 
 // ---------------------------------------------------------------------------
 // [#21207] The stored-metadata-body family, at this engine-only reader
@@ -1355,11 +1505,36 @@ function droppedFieldsMember(dropped: DroppedFieldsEvent[]): { droppedFields?: D
  * bridge produces — the graceful-degradation contract `McpDataBridge` declares,
  * honoured rather than re-decided.
  */
+/**
+ * [ADR-0150 D2/D6, addendum 2026-11-25] The manifest namespace of the package
+ * `packageId` names, from the engine's registry (`getPackage`), or `undefined`:
+ * an engine with no registry, or an id with no package record. A pack whose
+ * package cannot be placed is then spelt by its bare name.
+ */
+function installedPackageNamespaceOf(engine: unknown, packageId: string): string | undefined {
+  let manifest: { namespace?: unknown } | undefined;
+  try {
+    const registry = (engine as { registry?: { getPackage?(id: string): unknown } } | undefined)?.registry;
+    manifest = (registry?.getPackage?.(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest;
+  } catch {
+    return undefined;
+  }
+  return typeof manifest?.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
+}
+
 export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge {
   const { engine, metadataService, protocol, resolvePrincipal, keyedDigest, security, schemaReadDelegates } = deps;
   // [#25138] One definition source for the gate, the relation-target gate and
   // the write-response strip, and one listing for discovery.
-  const reads: StdioObjectReads = { metadataService, protocol };
+  // [#36689] …and the disabled-package question, asked of the engine's
+  // registry for every caller ({@link engineObjectPackageDisabled}).
+  const reads: StdioObjectReads = {
+    metadataService,
+    protocol,
+    isObjectPackageDisabled: engineObjectPackageDisabled(engine),
+    // [#36689 S1] …and the field map the relation walk finds sites in.
+    engineObjectDefinition: engineObjectDefinition(engine),
+  };
   // [#25245] …and that listing is the view the object resources read too.
   const objectView = stdioObjectView(reads);
   // [ADR-0106 D1/D5] …served to the principal through the object-schema mask:
@@ -1787,6 +1962,73 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     bridge.listDatasets = async (input) => executor().listDatasets(input, await resolvePrincipal());
     bridge.queryDataset = async (input, opts) => executor(opts.maxRows).queryDataset(input, await resolvePrincipal());
     bridge.datasetToolDefinitions = () => executor().definitions;
+  }
+
+  // [ADR-0149 D2] The knowledge members, only where the host handed the
+  // knowledge service's executor over. Each call runs AS the principal this
+  // transport resolves per call, so the service re-checks every object-source
+  // hit against that principal's row-level security.
+  if (deps.knowledgeTools) {
+    const service = deps.knowledgeTools;
+    bridge.searchKnowledge = async (input) => service.knowledgeTools().searchKnowledge(input, await resolvePrincipal());
+    bridge.knowledgeToolDefinitions = () => service.knowledgeTools().definitions;
+  }
+
+  // [ADR-0160 D3/D4] The record-context members, only where the host handed
+  // the record-context service's executor over. The door is this bridge's own
+  // read members, as the principal: `get` and `query` (each behind
+  // `enforceApiExposure`, as the record tools read), the object as the
+  // principal is served it in this transport's locale, the declaration whole
+  // (metadata only, to tell a hidden entry from an author defect), and the
+  // published packs. The tool layer hands its read guard over. No delegation
+  // probe: an API key is not delegated, so no narrowing is stated.
+  if (deps.recordContextTools) {
+    const service = deps.recordContextTools;
+    const self = bridge;
+    bridge.getRecordContext = async (input, opts) => service.recordContextTools().getRecordContext(input, {
+      readGuard: opts.readGuard,
+      assertApiExposed: async (object: string, action: 'get' | 'query') =>
+        enforceApiExposure(reads, object, action === 'get' ? GATED_ACTIONS.get : GATED_ACTIONS.query, await resolvePrincipal()),
+      servedObjectDefinitionOf: async (name: string) =>
+        ((await localizedView.getObject(name)) as Record<string, unknown> | undefined) ?? null,
+      publishedObjectDefinitionOf: async (name: string) =>
+        ((await readObjectDeclaration(reads, name)) as Record<string, unknown> | undefined) ?? null,
+      // The authored packs, not the serving envelope: the protocol's served
+      // listing stamps every item with `_diagnostics`, which the executor's
+      // closed `AiContextSchema` refuses, dropping every pack. The read
+      // decorations go (`stripReadDecorations`); the protection envelope the
+      // schema declares stays.
+      listContextPacks: async () => {
+        const protocolService = protocol?.();
+        if (protocolService && typeof protocolService.getMetaItems === 'function') {
+          return metaItemsArray(await protocolService.getMetaItems({ type: 'ai_context' })).map(stripReadDecorations);
+        }
+        return ((await metadataService.list('ai_context')) ?? []).map(stripReadDecorations);
+      },
+      // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by its
+      // face `NS-NAME`, as a package-held skill's prompt name is: the engine
+      // here is the `objectql` service, whose registry places the package.
+      packageNamespace: (packageId: string) => installedPackageNamespaceOf(engine, packageId),
+      get: (object: string, id: string) => self.get(object, id),
+      query: (object: string, o: Parameters<McpDataBridge['query']>[1]) => self.query(object, o),
+      fieldVisibilityOf: (object: string) => self.fieldVisibilityOf!(object),
+      // [ADR-0160 D3, second amendment] The fields the principal may query
+      // on: the security service's own answer (`getQueryableFields`), judged
+      // on the map its engine guard refuses a filter or sort with, so a
+      // related list's `where` or `orderBy` the guard would refuse is dropped
+      // and stated before the read. No security service, or one predating the
+      // method: `undefined`, and the executor takes the contract's fallback.
+      queryableFieldsOf: async (object: string) => {
+        const surface = security?.();
+        if (typeof surface?.getQueryableFields !== 'function') return undefined;
+        return await surface.getQueryableFields(object, await resolvePrincipal());
+      },
+      // [ADR-0160 D3] The deployment's page cap (`resolveQueryReadPageCap`), the
+      // same value the `/mcp` door answers.
+      pageCap: () => resolveQueryReadPageCap(),
+      userTextLocales: () => self.userTextLocales!(),
+    });
+    bridge.recordContextToolDefinitions = () => service.recordContextTools().definitions;
   }
 
   if (typeof engine.aggregate === 'function') {

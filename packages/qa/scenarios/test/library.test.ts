@@ -14,7 +14,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas, type Truth } from '../src/index.js';
+import { SelectOptionSchema } from '@objectstack/spec/data';
+
+import { formatRefusal, loadScenarios, readCapabilityAreas, truthsOver, type Truth } from '../src/index.js';
 import { promptLanguageGaps } from '../src/runner/prompts.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -144,6 +146,8 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
       // A Chinese title is Chinese: at least one CJK ideograph, not the English one copied over.
       expect(card.title.zh, card.id).toMatch(/[\u4e00-\u9fff]/);
       expect(card.title.zh, card.id).not.toBe(card.title.en);
+      // The exporter writes title.en as the manifest displayName, which package.zod caps at 128.
+      expect(card.title.en.length, card.id).toBeLessThanOrEqual(128);
     }
   });
 
@@ -159,6 +163,96 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
       expect(new Set(loaded!.card.run.guardrails.map((g) => g.check)).size).toBe(5);
     });
   }
+
+  it('every seed value of a single-choice field the card asks for is a valid option value', () => {
+    // An option value is a lowercase machine identifier (`SelectOptionSchema.value`), so a build
+    // can only declare options the platform accepts; a seed value no option can hold is refused,
+    // with every row that looks it up (requisition_to_receipt's `supplier.rating` "A"/"B"/"C").
+    const invalid: string[] = [];
+    for (const { card } of result.cards) {
+      for (const { object, field } of card.expect.selectFields ?? []) {
+        for (const row of card.run.seed[object] ?? []) {
+          const v = row[field];
+          if (v === null || v === undefined) continue;
+          if (!SelectOptionSchema.safeParse({ label: String(v), value: v }).success) invalid.push(`${card.id}: ${object}.${field} = ${JSON.stringify(v)}`);
+        }
+      }
+    }
+    expect(invalid).toEqual([]);
+  });
+
+  it('a seed row dated after the card\'s asOf is a plan (a due, start, end or expected date), never a fact the card treats as done', () => {
+    // travel_expense's step `as_118_2` was decided 2026-11-02, after its asOf 2026-10-31: the agent
+    // rightly refused to pay a claim over a future-dated approval. Each card's future-dated fields, pinned.
+    const future: Record<string, string[]> = {};
+    for (const { card } of result.cards) {
+      if (card.asOf === undefined) continue;
+      const fields = new Set<string>();
+      for (const [object, rows] of Object.entries(card.run.seed)) {
+        for (const row of rows) {
+          for (const [field, v] of Object.entries(row)) {
+            if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) && v.slice(0, 10) > card.asOf) fields.add(`${object}.${field}`);
+          }
+        }
+      }
+      if (fields.size > 0) future[card.id] = [...fields].sort();
+    }
+    expect(future).toEqual({
+      asset_lifecycle: ['checkout.due_on'],
+      leave_balances: ['leave_day.leave_date', 'leave_request.end_date', 'leave_request.start_date'],
+      order_to_cash: ['invoice.due_date'],
+      requisition_to_receipt: ['purchase_order.expected_date'],
+      travel_expense: ['trip_request.end_date', 'trip_request.start_date'],
+    });
+  });
+
+  it('a last-N-days truth counts no row on the extra day the platform\'s preset adds (last_30_days spans 31 days ending on asOf)', () => {
+    // The card's `last_days` window is the N days ending on asOf; the platform's
+    // `last_N_days` preset runs from N days before asOf, one day more. A row on that
+    // day makes an app that uses the preset answer differently from the card.
+    const ambiguous: string[] = [];
+    for (const loaded of result.cards) {
+      const widened = structuredClone(loaded.card);
+      const ids: string[] = [];
+      for (const q of widened.run.questions) {
+        for (const f of 'filter' in q.truth ? (q.truth.filter ?? []) : []) {
+          if (f.op === 'in_window' && typeof f.value === 'object' && f.value !== null && 'kind' in f.value && f.value.kind === 'last_days') {
+            f.value = { kind: 'last_days', days: f.value.days + 1 };
+            ids.push(q.id);
+          }
+        }
+      }
+      if (ids.length === 0) continue;
+      const wide = truthsOver(widened, loaded.card.run.seed);
+      for (const id of [...new Set(ids)]) {
+        if (JSON.stringify([wide.truths[id], wide.personaTruths[id]]) !== JSON.stringify([loaded.truths[id], loaded.personaTruths[id]])) ambiguous.push(`${loaded.card.id}/${id}`);
+      }
+    }
+    expect(ambiguous).toEqual([]);
+  });
+
+  it('names its decide action as the route (`via`) of each manager approval the card decides through it, and only those', () => {
+    // The Build grant check leaves these writes to the run when the set withholds the verb and the build
+    // declares the action. asset_lifecycle manager_approves_scrap and order_to_cash approve_discount have
+    // the same shape but no measured run behind them, so they stay measured until one exists.
+    const routed = result.cards.flatMap(({ card }) =>
+      card.run.operations.filter((o) => o.via !== undefined).map((o) => `${card.id}/${o.id} via ${o.via}`),
+    );
+    expect(routed.sort()).toEqual([
+      'leave_balances/manager_approves_step_one via decide_approval_step',
+      'requisition_to_receipt/manager_approves_level_one via decide_approval_step',
+      'travel_expense/manager_approves_step_one via decide_approval_step',
+    ]);
+  });
+
+  it('every card tagged for a report asks for one in its detailed prompt, in both languages', () => {
+    // The Build check `dashboards.report` grades a report the prompt never asked for otherwise.
+    const silent = result.cards
+      .filter(({ card }) => card.capabilities.includes('dashboards.report'))
+      .filter(({ card }) => !/\breport\b/i.test(card.prompt.detailed.en ?? '') || !/报表/.test(card.prompt.detailed.zh ?? ''))
+      .map(({ card }) => card.id);
+    expect(silent).toEqual([]);
+  });
 
   it('reads the capability areas from the checklist tree', () => {
     // A closed set read from disk, not a list kept here: the assertion is only

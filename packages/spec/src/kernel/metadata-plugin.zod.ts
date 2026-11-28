@@ -96,6 +96,7 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
 
   // UI Protocol
   'view',        // List/form views (ViewSchema)
+  'form',        // Data-entry forms bound to one object (FormSchema, ADR-0159) — the anonymous intake reads them
   'page',        // Standalone pages (PageSchema)
   'dashboard',   // Dashboard layouts (DashboardSchema)
   'app',         // Application shell (AppSchema)
@@ -203,6 +204,15 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'agent',       // AI agent definitions (AgentSchema)
   'tool',        // AI tool definitions (ToolSchema)
   'skill',       // AI skill definitions (SkillSchema)
+  // [ADR-0160 D1] A context pack: which of one record's fields, related lists
+  // and body text are handed to a model. Its reader is the render service
+  // behind `get_record_context` (`@objectstack/service-record-context`).
+  'ai_context',  // AI context packs (AiContextSchema, ADR-0160 D1)
+  // [ADR-0161 K4] A knowledge source: which object's records the knowledge
+  // service indexes, which fields leave the row store as content, and which
+  // adapter holds the index. Its reader is the knowledge service's loader
+  // (`@objectstack/service-knowledge`), which lands with the type.
+  'knowledge_source',  // Knowledge sources (KnowledgeSourceSchema, ADR-0161 K4)
 ]));
 
 export type MetadataType = z.input<typeof MetadataTypeSchema>;
@@ -960,6 +970,14 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // MATERIALIZED into `sys_metadata` (DB-only provenance), which rides the
   // `allowRuntimeCreate` tier, not this flag.
   { type: 'view', label: 'View', filePatterns: ['**/*.view.ts', '**/*.view.yml', '**/*.view.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
+  // [ADR-0159 D1] `form` carries page's flags exactly. An environment does not
+  // overlay a packaged form in place (`allowEnvironmentOverlay: false`, the
+  // ADR-0005 default for a new type): it customizes one through the override
+  // package (ADR-0146 D2), where `form: listed`. No organization layer exists
+  // to write either: an organization-scoped write is refused for every type
+  // (ADR-0131 D6). Runtime-creatable, versioned, unpinned, loaded with the UI
+  // tier.
+  { type: 'form', label: 'Form', filePatterns: ['**/*.form.ts', '**/*.form.yml', '**/*.form.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'page', label: 'Page', filePatterns: ['**/*.page.ts', '**/*.page.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 50, domain: 'ui' },
   { type: 'dashboard', label: 'Dashboard', filePatterns: ['**/*.dashboard.ts', '**/*.dashboard.yml', '**/*.dashboard.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   { type: 'app', label: 'Application', filePatterns: ['**/*.app.ts', '**/*.app.yml', '**/*.app.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 70, domain: 'ui' },
@@ -970,7 +988,12 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   { type: 'report', label: 'Report', filePatterns: ['**/*.report.ts', '**/*.report.yml'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 60, domain: 'ui' },
   // ADR-0021: dataset is the analytics semantic layer that report/dashboard bind to.
   // loadOrder 55 < report/dashboard (60) so datasets register before their consumers.
-  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'ui' },
+  // ADR-0084 (amended 2026-11-26, "Placements, and what moves to Setup"): a
+  // dataset is a `data` type — the semantic layer that charts and an AI's data
+  // questions both read — so its `domain` is `data` and Studio lists it under
+  // 数据 Data, directly after `object`. The row stays in this block because the
+  // overlay notes above name it, and its schema still lives in `ui/dataset.zod.ts`.
+  { type: 'dataset', label: 'Dataset', description: 'Analytics semantic layer — dimensions & measures', filePatterns: ['**/*.dataset.ts', '**/*.dataset.yml', '**/*.dataset.json'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 55, domain: 'data' },
 
   // Automation Protocol — flow is executionPinned (ADR-0009).
   // ADR-0019: there is no `approval` metadata type — approvals are Approval
@@ -1378,6 +1401,15 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // type in-repo at rollback; zero production write sites found.
   { type: 'tool', label: 'AI Tool', filePatterns: ['**/*.tool.ts', '**/*.tool.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'ai' },
   { type: 'skill', label: 'AI Skill', filePatterns: ['**/*.skill.ts', '**/*.skill.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 88, domain: 'ai' },
+  // [ADR-0160 D1] `ai_context` takes the `skill` row's flags, for the `skill`
+  // row's reason: a behavioural contract an author ships or creates at run
+  // time, and never overlaid per environment (ADR-0005's ai row).
+  { type: 'ai_context', label: 'AI Context Pack', filePatterns: ['**/*.ai-context.ts', '**/*.ai-context.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 89, domain: 'ai' },
+  // [ADR-0161 K4, clause 2] `knowledge_source` ships in a package or is
+  // created at run time, is versioned, and takes no environment overlay until
+  // a ruling opens that channel (ADR-0005). The `ai_context` row's flags, with
+  // version history on, as the clause says.
+  { type: 'knowledge_source', label: 'Knowledge Source', filePatterns: ['**/*.knowledge-source.ts', '**/*.knowledge-source.yml'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 90, domain: 'ai' },
 ];
 
 // ==========================================

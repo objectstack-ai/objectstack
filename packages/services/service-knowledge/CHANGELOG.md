@@ -1,5 +1,756 @@
 # @objectstack/service-knowledge
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+
+### Patch Changes
+
+- 73d0240: fix(service-knowledge): a source naming an unmounted adapter is logged once at boot, not twice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  At boot, a knowledge source whose `adapter` names a store nothing mounted was named twice: once at `error` by the boot's reading of unmounted adapters, and once more at `warn` by the first-build pass ("is not built at boot: what the adapter holds could not be read"). The first-build pass now skips such a source without a line, so the one boot line is the `error` that names the source, the adapter and the mounted choices. Nothing else changes: indexing and searching the source still answer `SERVICE_UNAVAILABLE`, and a source loaded while the process runs is still named at `warn` by its reload build, since no boot reading runs then.
+- 724d6f3: feat(service-knowledge): a scheduled reconcile keeps every knowledge index equal to its source, daily and soon after a predicate write
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Record events keep an index fresh; the reconcile now keeps it correct (ADR-0161 K1). `KnowledgeService.reconcileSources()` walks every source whose store lists its documents with the complete build the boot and `os knowledge rebuild` already run — same cluster lease and fence, same skip, same purge, same `completeBuild`, trigger `reconcile` — so the documents of rows inserted or changed without an event are written, those of rows deleted or moved out of `where` by a predicate write, or built from an insert that rolled back, are purged, and nothing is embedded again for a row that did not change.
+  
+  - `KnowledgeServicePlugin` schedules one job, `knowledge:reconcile`, on the platform's job service, daily at 03:00 UTC. The new plugin option `reconcile` moves it (`{ cron, timezone }`) or turns it off (`false`). A run that could not finish a source is `degraded` in the job's run history, naming the source. With no job service composed, the plugin says so once at boot.
+  - A `data.records.updated` / `data.records.deleted` event (a `multi: true` write) now asks for a reconcile of every source over the object, started once the object has had no further predicate write for two minutes, at the latest ten minutes after the first; its warning says so. A source on an adapter without `listDocuments` is never reconciled: the reconcile says so once at `warn`, and the predicate-write warning keeps its old text for it.
+  - A source whose index fingerprint or recipe moved while the server runs (a split or embedder setting saved) is built as a new generation by the next reconcile instead of at the next restart.
+  - `KnowledgeBuildTrigger` gains `'reconcile'`; new exports `KnowledgeReconcileReport`, `KnowledgeReconcileEntry`, `KnowledgeReconcileRequest`, `RECONCILE_JOB`, `RECONCILE_DEFAULT_CRON`, `RECONCILE_QUIET_MS` and `RECONCILE_MAX_WAIT_MS`; `KnowledgeService.requestReconcile(object)`.
+  
+  No migration: nothing an author writes changes, and a deployment that wants no scheduled walk sets `reconcile: false`.
+- 58be677: feat(service-knowledge): record changes sync through the queue service — a save does not wait for the embedder, a failed sync is retried, a rolled-back write is never indexed
+  
+  Clause-②: yes (widening) — `KnowledgeServicePluginOptions` gains the optional `recordSyncRetry`; `KnowledgeService` gains `routeRecordSyncs`, `recordSyncQueued`, `enqueueRecordSync` and `processRecordSync`; the package exports `KNOWLEDGE_RECORD_SYNC_QUEUE`, `RECORD_SYNC_RETRY_DEFAULTS` and the `KnowledgeRecordSync*` types
+  Metadata-protocol: none
+  
+  A save of a record a knowledge source indexes used to sync its document inside the write: with a realtime service composed, the save waited for the re-read, the split, the embedding call and the store write, all before the write's unit of work committed. A failed sync was one `warn` line and was never retried, and a write that then rolled back could leave a document built from a row that never committed, or delete the document of a row that still matched.
+  
+  Where the kernel composes a durable `queue` service (the platform's `QueueServicePlugin` over a data engine, which the standard runtime mounts on every preset but `minimal`) and a data engine is bound, the sync now runs through the `knowledge-record-sync` queue:
+  
+  - **A save publishes and returns.** Either trigger — the realtime subscription, or the after-write hooks on a kernel without one — publishes one message per source that indexes the object on record change: the source's index key, the object, the record id and the reason (`event`, or `freshness` for the repair a search starts). Never a field value. The save does not wait for the embedder.
+  - **After the commit, and never for a rollback.** The message is published through the engine's `runAfterOpenUnitsCommit`, once the write's own unit or a caller's `engine.transaction()` commits, and not at all when it rolls back. So nothing is processed before the write commits, and after a rollback the index equals the committed database.
+  - **Retried, then a dead letter.** The worker re-reads the row and writes or removes its document; a failure is thrown to the queue, which runs it up to eight times, 5 s doubling to a 2 min cap between attempts (`recordSyncRetry` changes it). Then the message is a dead letter `listFailed` lists, naming the source and the record, logged once at `error`; the reconcile repairs it. A source no longer registered, or no longer indexing the object on record change, completes its message with no write and no retry; a source whose adapter is not mounted is retried like a failure.
+  - **One queue row per source per save**, no idempotency key: a keyed message would suppress a save made while the record's sync runs, and every later save for a day after one completed.
+  - **The freshness repair** a search starts is a `freshness` message too, so it survives a restart and is retried.
+  
+  With only the kernel's in-memory fallback queue, a queue with no dead-letter surface (`listFailed`), or no data engine, the sync runs inline as before, and the boot says so once at `warn`. A host that mounts the service by hand adds `new QueueServicePlugin()` from `@objectstack/service-queue` to get the queued sync. `enableEventSync: false` and `refresh.onRecordChange: false` publish nothing. Nothing to migrate.
+- 8d598aa: fix(service-knowledge): record changes reach the knowledge index on a kernel with no realtime service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a kernel that composes no `realtime` service (every hosted kernel), the knowledge index was built once at boot and then never saw a later create, update or user delete: the engine publishes no `data.record.*` event there, so `KnowledgeServicePlugin` only warned "event sync disabled". It now registers the data engine's `afterInsert` / `afterUpdate` / `afterDelete` hooks on every object a record-change source indexes, and each hook calls the same `handleRecordUpsert` / `handleRecordDelete` the realtime subscription calls. A new record is searchable without a rebuild, an updated one is found by its new text, and a deleted one is gone.
+  
+  - **One trigger per kernel.** With a `realtime` service the subscription stays the trigger and no hook is registered, so each write is synced once.
+  - **Off the write's response.** The hook only hands the sync off: the re-read, the split and the embed run after the write has answered, so a slow embedding provider no longer slows the write.
+  - **After the commit.** The sync starts through the engine's `runAfterOpenUnitsCommit`: once the unit of work open at the write commits, and never when it rolls back.
+  - **Predicate writes** (`multi: true`) are synced row by row, since an object with an `afterUpdate` / `afterDelete` hook gets one dispatch per matched row. Such a write is then held to the engine's per-row hook ceiling (10,000 matched rows), as on every object that already carries a per-row hook such as the audit plugin's: on a kernel with neither a `realtime` service nor the audit plugin, a predicate write over more than 10,000 rows of an indexed object is now refused, with nothing written. Narrow the write's `where` to stay under it.
+  - **A source added later** for a new object gets its hooks when it arrives; the plugin's teardown removes them.
+  - A recycle-bin restore runs no hooks, so on such a kernel a restored row is not re-indexed by itself; `reindexSource` brings it back.
+- 0ea3093: feat(service-knowledge): `embedderSettings: false` keeps the embedder section off the ai settings page
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `KnowledgeServicePluginOptions` gains `embedderSettings` (default `true`). A host that provides the embedder itself (it registers the `embedder` service, which the plugin keeps) sets it to `false`: the `ai` settings page then carries no `embedder_*` fields, `ai/test_embedder` has no handler and answers like any undeclared action, and the boot warning about the embedder settings not being offered is not logged. The knowledge settings page, its actions and its Setup entry are unchanged. `contributeKnowledgeSettings` takes the same switch as an optional fourth argument (`KnowledgeSettingsContributionOptions`). Omitted or `true`, nothing changes. Nothing to migrate.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/embedder-openai@19.0.0-next.2
+  - @objectstack/service-settings@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+
+### Patch Changes
+
+- 9ed54cb: fix(service-knowledge, knowledge-pgvector): a build that loses its lease stops at the next page, and a build that stalls is cancelled
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A build that loses its cluster lease stops.** Before each page, a build checks that it still holds its cluster lease. The lease counts as lost when the lock says so, or when no renewal has succeeded within the 60-second lease (the lock store is unreachable, or a renewal hangs). The build then stops before reading or embedding another page. It neither purges nor completes, and its record (`buildRecord`, `os knowledge status`) reads the new status `lease-lost`. Before this change the build only logged a warning and went on, so a second node could build the same source and the embedding spend doubled.
+  - **A build that stalls is cancelled.** A build that finishes no page for 15 minutes (a fixed ceiling, not a setting) is cancelled, for example when an embedding call never answers. The walk stops waiting on that call and the lease is released. The record reads the new status `timed-out`, and a new rebuild can usually start without a restart; a purge deletion that never answers is the exception, since the store still lists that document and every later build waits on it in its purge until the deletion answers or the process restarts. The limit applies to the time between two pages (or two purge deletions), not to the whole build, so a large source that keeps making progress is never cut short. The completion (on pgvector, the switch to the new index and the removal of the replaced one) is not bounded: once it has begun the build waits for it, so a switch that began before the limit passed still commits and the record reads `done` or `failed`, and no other build of the source starts on that node until it settles.
+  - **pgvector: a build that lost its builder lock writes and completes nothing.** Each write and removal of a build checks, on the lock's own session, that the source's session advisory lock is still held. Once the lock is gone (freed after `buildLockIdleMs`, or its session ended), the write is refused `LOCK_CONFLICT` (409) before anything is embedded. `completeBuild` completes only the build this adapter began, and only the generation that build began. Otherwise it is refused `LOCK_CONFLICT` and switches, records and deletes nothing, so a build that lost its lock can no longer switch a generation another build has taken up since. A lock kept from an earlier build is re-checked at the next `beginBuild`, so a session that ended is never taken for a lock that is still held. **Behind a transaction-mode connection pooler** (PgBouncer transaction pooling, or a hosted provider's pooled URL), a deployment the store already did not support, the advisory lock does not stay with the session that took it. The check therefore reads a held lock as lost, and every complete build is now refused `LOCK_CONFLICT` at its first page, where before it ran with a release warning. Point the store's `url` at a direct or session-mode endpoint; the refusal's remedy says so.
+  - **pgvector: a search whose source's index was switched under it three times** is now refused `CONCURRENT_MODIFICATION` (409) instead of throwing an error with no code.
+  
+  Widening: the exported `KnowledgeBuildRecord.status` type gains `lease-lost` and `timed-out`. A consumer that switches over it should handle both the way it handles `failed`. No other export changes: the fence and its 15-minute limit are internal to the service.
+  
+  `os knowledge rebuild` and `os knowledge status` know the two new statuses: a followed rebuild that ends `lease-lost` or `timed-out` exits 1 with the build's message, as a `failed` one does.
+- 1490855: fix(service-knowledge): a build checks its lease before `beginBuild` and before each purge deletion
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **A build cancelled or lease-lost while it waits its turn no longer begins.** A build queued behind another walk of the same source used to call the adapter's `beginBuild` once that walk ended, even when the build had meanwhile been cancelled (`timed-out`) or had lost its cluster lease. On pgvector that call takes the store's builder lock, which then stayed held until it went idle. The build now checks its lease first: it calls neither `beginBuild` nor anything after it, writes nothing, and its record ends `timed-out` or `lease-lost` as before, with a message that says it stopped before its build began.
+  - **A build that loses its lease during its purge stops at the next deletion.** Before, a lost lease was noticed only once the whole purge had run, just before the completion. Each purge deletion now checks the lease first, so the purge stops before the next one, nothing is completed, and the record reads `lease-lost` with the number of deletions made. A build cancelled during its purge likewise deletes nothing further once the deletion it stopped waiting on answers.
+  
+  No export or adapter contract changes.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [9f9db81]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [ff63b02]
+- Updated dependencies [5d37374]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/service-settings@19.0.0-next.1
+  - @objectstack/embedder-openai@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Patch Changes
+
+- a73edb3: fix(settings)!: the knowledge settings page and the AI page's embedder section appear only where the knowledge service is mounted
+  
+  Clause-②: no (narrowing) — narrowed: on a deployment that does not mount `KnowledgeServicePlugin` (every stock boot), `GET` / `PUT /api/settings/knowledge` and `POST /api/settings/knowledge/test` now answer `404 UNKNOWN_NAMESPACE`, where they served the Knowledge page; a write of an `ai.embedder_*` key (`embedder_provider`, `embedder_api_key`, `embedder_model`, `embedder_base_url`, `embedder_dimensions`, `embedder_batch_size`) now answers `400 UNKNOWN_KEY`, and `POST /api/settings/ai/test_embedder` answers that no handler is registered; the hub list no longer carries `knowledge`, and the Setup sidebar no longer carries `nav_settings_knowledge`. `builtinSettingsManifests` drops `knowledgeSettingsManifest`, and `aiSettingsManifest` drops its embedder section.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the knowledge settings page or the `ai.embedder_*` keys; `skills/objectstack-ai` teaches wiring `KnowledgeServicePlugin`, which is unchanged.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: settings manifests are runtime registrations, not authorable metadata. The moved answers are settings doors that a deployment without the knowledge service no longer serves; a deployment that mounts it serves them exactly as before, and stored rows are untouched, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a deployment that does not mount the knowledge service: the knowledge base is not a default capability, so its settings are no longer offered by default. The Knowledge page, the AI page's Embedder section, their "Test connection" / "Test embedder" buttons and the Setup entry are now contributed by `@objectstack/service-knowledge` when `KnowledgeServicePlugin` is mounted beside `SettingsServicePlugin`, and only then. Values already stored under `knowledge.*` or `ai.embedder_*` stay in the database and are served again as soon as the service is mounted.
+  
+  The AI page's description no longer names the knowledge base, in every bundled locale.
+  
+  `@objectstack/service-settings` now exports `knowledgeSettingsManifest`, `knowledgeTestActionHandler`, `aiSettingsManifest`, `aiEmbedderSettingsSpecifiers`, `withAiEmbedderSection` and `aiTestEmbedderActionHandler` from its package entry, and its default `actionHandlers` map no longer registers `knowledge.test` or `ai.test_embedder`. `@objectstack/service-knowledge` depends on `@objectstack/service-settings` and declares the settings plugin in `optionalDependencies`, so the kernel inits it first.
+  
+  What to do: nothing, unless you configure an embedder or a knowledge backend from Setup. Then mount `KnowledgeServicePlugin` from `@objectstack/service-knowledge` (with a knowledge adapter plugin) beside `SettingsServicePlugin`; the page, the embedder section and the Setup entry come back with it. A host that passed its own `ai` manifest to `SettingsServicePlugin({ manifests })` adds `aiEmbedderSettingsSpecifiers` to it (or wraps it with `withAiEmbedderSection`) to keep the embedder keys. The embedder section joins only the bundled `ai` page, recognised as that very declaration; a host's own `ai` page (or one served through an option source) is left as it is, and the plugin logs a warning saying so. A host that passes its own `actionHandlers` to `SettingsServicePlugin` keeps a `knowledge` entry there only beside the knowledge manifest: without it the settings plugin refuses to register the handler for an unknown namespace at boot.
+  
+  Stored credentials: on a deployment that does not mount the knowledge service, `ai.embedder_api_key`, `knowledge.turso_auth_token` and `knowledge.ragflow_api_key` stay stored (as `sys_secret` handles) but no settings door serves, edits or clears them, and the AI page's reset clears declared keys only. To remove them, mount `KnowledgeServicePlugin` once and clear the keys from Setup, or delete their rows from `sys_platform_setting` (the `knowledge` namespace and the `ai.embedder_*` keys) and the `sys_secret` rows whose `id` those rows hold in `value_enc` (a `sec_` handle); until then the `sys_secret` orphan report may list them.
+- 8aecf6d: feat(mcp,service-knowledge): the MCP door serves `search_knowledge`, and a skill MCP withholds is no longer withheld in silence
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  **`search_knowledge` over MCP.** An app that mounts the knowledge service (`KnowledgeServicePlugin`) now has its knowledge sources searchable from any MCP client: `tools/list` lists `search_knowledge` wherever the kernel holds a `knowledge` service and the connection's grant reaches the read family (`data:read`, or an API key or session, which carry no OAuth grant). Before, no MCP connection served a knowledge tool, so a BYO-AI client could not reach an app's knowledge base at all, and every skill whose `tools` named `search_knowledge` was dropped from `prompts/list`.
+  
+  - **One definition, one executor (ADR-0149 D2).** `@objectstack/service-knowledge` exports the tool's `AIToolDefinition` (`getKnowledgeToolDefinitions`) and its executor (`createKnowledgeTools`, also `KnowledgeService.knowledgeTools()`). The MCP door registers the definition as the service hands it over, on HTTP and on stdio, and holds no copy of its description or argument schema. Arguments: `query` (required), `sourceIds` (at least one id; omit it to search every source, and an empty list is refused `VALIDATION_ERROR` rather than answered with no passage), `topK` (1 to 20, default 5); any other key is refused before the search runs.
+  - **As the caller.** Each call runs with the caller's execution context, and the knowledge service re-checks every passage indexed from a record against the caller's row-level security; on an OAuth connection that is the delegating person's own reach.
+  - **Only `aiExposed` sources.** The tool searches only the sources whose `aiExposed` is not `false`, and refuses a `sourceIds` entry naming any other source with `NOT_FOUND` and the sentence an unknown id gets, so an agent never learns a withheld source exists. `IKnowledgeService.search` itself is unchanged: it still searches a source its caller names explicitly, because it also serves platform callers that are not agents.
+  - `MCP_DOOR_TOOL_NAMES` (`@objectstack/spec/system`) lists `search_knowledge`, so `os lint` resolves it for a skill offered over MCP, as it already did through the platform registry.
+  
+  **A withheld skill is said, twice.**
+  
+  - **Authoring time.** The `ai-skill-tool-unresolved` rule gains a verdict for a skill MCP would offer as a prompt (`instructions`, not `mcpPrompt: false`, not `active: false`) whose `tools` names one of the `ask` product's data tools no MCP connection serves (`aggregate_data`, `query_data`, `visualize_data`): the name resolves, but MCP withholds the skill from every `prompts/list`, and the warning names the tool. Fix: bind tools both doors serve, or set `mcpPrompt: false` on a skill written for the in-product agents.
+  - **Runtime.** On the HTTP door, each `prompts/list` that withholds a skill logs one `debug` line naming the skill and each bound tool the connection does not serve.
+- 7abf25f: fix(service-knowledge): knowledge search asks the object's API exposure and the caller's field-level read rules before it searches a source
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A knowledge passage is built at index time, under a system context, from every `contentFields` member of its source, the record `title` and the source's `metadataFields`. Knowledge search re-checked only that the caller may read each hit's row, so a caller who could read a row but not one of those fields was served that field's text, and an object the API does not serve was served as passages. `KnowledgeService.search` now decides, for a non-system caller and once per object per search, whether each `object` source may be searched at all:
+  
+  - the object's owning package is not disabled;
+  - the spec's exposure decision serves the object for the `search` operation (`enable.apiEnabled: false`, or an `enable.apiMethods` whitelist that does not grant `search`, refuses);
+  - a `sys_*` object declares `enable.aiReadable: true`;
+  - every field the source serves (each `contentFields` member, `'*'` meaning every declared field except `id`; each `metadataFields` member; `title`), less the credential-class and `internal` fields an index never carries, is one the caller may query, per the `security` service's `getQueryableFields` (absent it, `getReadableFields` less every field declaring a `maskingRule`; with no `security` service, every field except those declaring a `maskingRule`).
+  
+  A source that fails any gate is not searched for that caller. Every gate fails closed: a lookup that throws, or a `security` service that answers neither field question, keeps the source out. `KnowledgeServicePlugin` wires the `security` service, resolved per search: a missing answer or the kernel's not-registered refusal reads as "no security service"; any other throw from that lookup (a registration that cannot be used) refuses the sources, reported at `error` once per object per search. A host constructing `KnowledgeService` directly passes it as the new optional `resolveSecurity` option. The system context bypasses the gates, as it bypasses the row re-check.
+  
+  Three adjacent holes close with it. A caller with no execution context, or a service with no data engine bound, is now searched no `object` source at all, where before an object-source hit carrying no `sourceRecordId` was served to it. An admitted object source's hit with no `sourceRecordId` cannot be re-checked and is dropped. `KnowledgeService.search` drops a hit whose reported `sourceId` names another source than the one searched; it sees only what an adapter reports.
+  
+  **Narrowing for restricted callers.** A caller who may read a source's rows but not one of the fields the source serves now gets no hits from that source, where before it got passages carrying that field's text. A caller of an `apiEnabled: false` object, of an object whose `apiMethods` do not grant `search`, of a disabled package's object, or of a `sys_*` object without `enable.aiReadable: true` now gets no hits from its sources. No metadata key changes. To keep a source searchable for restricted callers, declare its `contentFields` / `metadataFields` from fields every intended reader may query and move sensitive fields into a separate source.
+- eec6fb3: fix(service-knowledge): record-change sync honours the source `where`, and a restored record re-enters the index
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An `object` knowledge source's `where` (for example `{ status: 'published' }`) was applied only by `reindexSource`. On a record change the sync built the document straight from the event payload, so a draft was indexed, a record that stopped matching stayed searchable with its old text, and a record restored from the recycle bin never came back into the index.
+  
+  - **The database decides membership on the event path too.** For a created, updated or restored record, with a data engine bound, each source now re-reads the row under the system context with `where AND id`, one row. A row comes back: the document is built from that row, through the same field rules as a reindex (the fields the source lists and the record `title`, never a credential-class or `internal` field). No row comes back: the record's document is deleted. A write result that omits a field no longer leaves the document short.
+  - **`data.record.restored` is synced** through the same path, so a restored record is searchable again only if it matches the source.
+  - **No data engine bound:** a source without `where` still builds from the event payload; a source with `where` is not synced, and the service says so once per source at `warn`.
+  - **One document at a time.** Syncs of the same document run one after another in the process, so two opposite events for one record end with the index agreeing with the database. A write's sync can wait behind an earlier in-flight sync of the same document.
+  - The sync runs before the write's unit of work commits (it re-reads inside the same transaction). A rolled-back write leaves the index wrong until the record's next event or a `reindexSource`, in one of two ways: if the uncommitted row matched, the document stays built from a row that never committed; if it did not match, the document was deleted, so the committed row, which may still match, is missing from the index. Bulk `data.records.*` events are still not synced. `content/docs/protocol/knowledge.mdx` states both.
+  
+  Nothing to change in an app: the same `where` now holds on both paths.
+- bee9b68: fix(service-knowledge): `reindexSource` reads and indexes an object source one page at a time
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `reindexSource` read the whole object in one `find` with no `limit` and pushed every document to the adapter in one `upsert`, so reindexing a large object could exhaust memory or exceed the adapter's request budget.
+  
+  - **Paged by id.** The walk reads at most 100 rows per `find`, ordered by `id`, each page continuing after the last id of the one before (`where AND id > cursor`), and upserts each page in its own adapter call before reading the next. Every `find` now carries a `limit`, and no `upsert` holds more than one page. Each row goes through the same field rules as the record-change sync. Only an empty page ends the walk: a page that comes back short (an `afterFind` hook may drop rows) is followed by the next one.
+  - **`limit` still caps the total** number of rows a reindex takes; the last page is shortened to it. A fractional `limit` is rounded down; a negative or non-finite one is refused with `ok: false` and nothing is read.
+  - **`dryRun` asks `count`** under the source's `where` instead of reading rows, and reports that count, capped by `limit`.
+  - **A failed page ends the run with `ok: false`** instead of a thrown error. The `message` names the page and the id it continued after; `discovered` and `indexed` count the pages done before it, which stay in the index. A page whose last row has no id, or an engine that does not honour the id condition, also ends the run with `ok: false` instead of looping.
+  - **Reindexes of one source wait for each other** in a process: a second `reindexSource` of the same source starts only after the first has finished, so the two never interleave. Different sources still reindex concurrently. Record-change syncs do not wait for a reindex: a record updated or deleted between a page's read and that page's upsert is written back from the older read, and a deleted record's document then stays until the index purge (#37096).
+  - A reindex removes no documents: those of records that no longer exist or no longer match stay until the index purge (#37096). The bulk-write warning and `content/docs/protocol/knowledge.mdx` now say so instead of recommending a reindex to repair a predicate delete.
+  
+  Nothing to change in an app. A caller that caught a thrown error from `reindexSource` should read `ok` and `message` on the result instead.
+- 039b288: fix(service-knowledge): search refills after the permission filter, and a hit's title is the object's display field
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Search refills after the permission filter.** The permission re-check runs after ranking, so a caller who may read few of the matching rows used to get a short or empty answer. For a caller who is not the system identity, each `object` source is now asked for `topK × 5` hits; when the hits that survive the re-check name fewer than `topK` records (several passages of one record count once), each `object` source that answered as many as it was asked is asked once more, for `topK × 20` (the cap). At most two rounds; an adapter that answers fewer than it was asked is not asked again. A `file` / `http` source, and every source for the system identity, is asked for `topK` once. The answer is still at most `topK` hits; how many the re-check removed is logged at `debug`, never returned.
+  - **A hit's title is the object's display field** (ADR-0161 K5; ADR-0079 `resolveDisplayField`: `nameField`, else the derived title field), not a field that happens to be named `title`. A credential-class or `internal` display field, an empty value, or an object with no display field gives no title; a source over an object with no registered definition still reads `title`. The source admission's field gate asks about the same field: a source whose object's display field the caller may not query is not searched for that caller at all. A declared field named `title` still gates the source too, because documents indexed before this change carry its value until a complete reindex writes them again.
+  - The title enters `docHash`, so the next complete reindex rewrites the documents whose title changed.
+- c349576: fix(settings)!: `@objectstack/knowledge-ragflow` is retired, and the Knowledge settings page no longer offers the RAGFlow adapter
+  
+  Clause-②: no (narrowing) — narrowed: `PUT /api/settings/knowledge` refuses `adapter: 'ragflow'` (`400 SETTINGS_VALIDATION`, field code `invalid_option`) and refuses `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` (`400 UNKNOWN_KEY`), where it stored all four; `POST /api/settings/knowledge/test` answers `adapter = ragflow` as an unknown adapter (`400 SETTINGS_ACTION_FAILED`), where it answered a form check
+  Metadata-protocol: none
+  Skills-docs: updated here — `skills/objectstack-ai/SKILL.md` and its eval case 3 teach the `pgvector` adapter where they taught `ragflow`; `content/docs/protocol/knowledge.mdx`, `content/docs/ai/knowledge-rag.mdx` and `content/docs/ai/index.mdx` name the adapters this repository builds.
+  
+  <!-- adr-0087: not-required (runtime-export-retired @objectstack/knowledge-ragflow#*) the package is deleted whole: what it published (`KnowledgeRagflowPlugin`, `KnowledgeRagflowAdapter` and their option types) is runtime code a host registers; no `packages/spec` schema, metadata type or stored shape names it, and `KnowledgeSource.adapter` stays a free string, so there is nothing for `objectstack migrate meta` to rewrite. The settings half has the same answer: a settings manifest is a runtime registration, not authorable metadata; the narrowed answers are doors of one settings namespace, and stored rows are untouched. -->
+  
+  **BREAKING** for a deployment that saved the RAGFlow adapter on the Knowledge settings page, or that registers `KnowledgeRagflowPlugin`.
+  
+  The package `@objectstack/knowledge-ragflow` is removed from this repository and gets no further release. Its requests did not match the RAGFlow HTTP API (it wrote and filtered on chunk metadata the API neither stores nor returns), so a knowledge source bound to it never retrieved anything, and nothing reported that. It is retired rather than repaired; the last published version stays on npm and will be marked deprecated.
+  
+  On the Knowledge settings page (`knowledge` namespace, manifest `version` 3):
+  
+  - The **Adapter** select offers `memory` and `turso`. The `ragflow` option, the RAGFlow group and its three keys (`ragflow_base_url`, `ragflow_api_key`, `ragflow_default_dataset`) are gone, with their strings in all eleven bundled locales.
+  - A stored `adapter = ragflow` is still served as stored, since the settings service never rewrites a stored value. The Console shows the Adapter select with nothing selected. Saving other keys works; saving `ragflow` again is refused; "Test connection" answers "Unknown adapter: ragflow". No code ever read this setting, so nothing else changes behaviour.
+  - Stored rows for the three removed keys are kept, never deleted. The page no longer serves them, and no settings door clears them, the encrypted `ragflow_api_key` included.
+  
+  What leaves, and what to write instead:
+  
+  - FROM `@objectstack/knowledge-ragflow` TO an adapter package this repository builds: `@objectstack/knowledge-pgvector` (`adapter: 'pgvector'`, PostgreSQL with pgvector), `@objectstack/knowledge-turso` (`adapter: 'turso'`, a libSQL file) or `@objectstack/knowledge-memory` (`adapter: 'memory'`, development and tests). Fix: stop registering `KnowledgeRagflowPlugin`, remove the dependency, and bind your sources to one of those; to keep an external engine, register your own `IKnowledgeAdapter` under an id of your choice.
+  
+  On a deployment that used it, also:
+  
+  - A knowledge source that still names `adapter: 'ragflow'` with no such adapter registered boots without an error: searches over it answer no hits and log `references unknown adapter`, and indexing it throws `unknown adapter 'ragflow'`. Change the source's `adapter`.
+  - Pick an adapter on the Knowledge settings page and save, which replaces the stored `ragflow` value.
+  - To remove the stored API key, delete the `knowledge` rows named `ragflow_base_url`, `ragflow_api_key` and `ragflow_default_dataset` from `sys_platform_setting`, and the `sys_secret` row whose `id` the `ragflow_api_key` row holds in `value_enc` (a `sec_` handle). Until then the `sys_secret` orphan report may list it. An earlier note in this release says mounting the knowledge service and clearing the key from Setup removes it; for `ragflow_api_key` that no longer applies, because the page no longer declares the key.
+  
+  Also in this change, text only: `@objectstack/spec` comments on `KnowledgeSource.adapter`, `KnowledgeSource.embedding`, `IKnowledgeAdapter` and `IKnowledgeService` name adapters that exist; the `@objectstack/service-knowledge` README and package description, and the `@objectstack/embedder-openai` README, name the adapters this repository builds (the embedder README now says which of them take an `embedder`).
+  
+  In `@objectstack/skills`, `skills/objectstack-ai/SKILL.md` (*Knowledge Sources (RAG)*, rewritten in place, 487 lines and 6798 tokens before and after):
+  
+  - The wiring paragraph names `@objectstack/knowledge-memory` (`'memory'`, dev/test), `@objectstack/knowledge-pgvector` (`'pgvector'`) and `@objectstack/knowledge-turso` (`'turso'`), where it named the retired package and `'ragflow'`.
+  - The example source uses `'pgvector'`. An agent following the old example wrote a source bound to an adapter that never retrieved anything. The `adapter` row no longer repeats example ids, and the `embedding` row no longer names engines no adapter here serves.
+  - The splitting paragraph says which adapters take the service's passages (`memory`, `pgvector`, `turso`); any other adapter receives whole documents.
+  - `evals/skills-tools-knowledge.json`, case 3: the prompt says the deployment runs PostgreSQL with pgvector, and the expected answer writes `adapter: 'pgvector'` and no `split` key, because the default `recursive` split fits article prose. The case keeps what it exercised (an object source with `where`, `metadataFields` and `refresh`, registered through `KnowledgeServicePlugin`); the in-memory adapter is already case 9.
+- b8c8c88: feat(service-knowledge): the open edition registers `EMBEDDER_SERVICE` from the `ai.embedder_*` settings when the knowledge service is mounted
+  
+  Clause-②: yes (widening) — `@objectstack/embedder-openai` gains one export, `documentedMaxBatchSize(model): number | undefined`
+  Metadata-protocol: none
+  
+  - **An embedder from the settings page.** `KnowledgeServicePlugin` reads the saved `ai.embedder_*` settings once, at `kernel:bootstrapped`, and registers an `@objectstack/embedder-openai` embedder as `EMBEDDER_SERVICE` (`'embedder'`) for the saved provider. The saved Base URL applies only to the custom and Azure providers; other providers use their preset endpoint. The boot line names the endpoint host. "Saved" means any layer but the manifest default, an `OS_*` override included; `ai.embedder_dimensions` and `ai.embedder_batch_size` are read as positive integers whether they arrive as numbers or as text (an `OS_AI_EMBEDDER_DIMENSIONS=256` override), and a value that is not one is refused with a `warn`, not dropped. Completeness is the Test embedder button's own check. `@objectstack/service-knowledge` now depends on `@objectstack/embedder-openai`.
+  - **An embedder already registered is kept.** One registered by ObjectOS Cloud or by a host's own plugin in `init()`, `start()` or a `kernel:ready` handler is kept, with one `info` line, and the settings are not applied.
+  - **The batch size is passed only when it was saved, and is held to the model's documented cap.** Unsaved (the form shows 64), the embedder batches at the model's documented cap. Saved, it is passed as `min(saved, documented cap)` when the saved model has a documented cap (DashScope `text-embedding-v3`: a saved 64 sends 10 per request), and as saved for a model with none.
+  - **No embedder configured: the boot succeeds, and every use of the embedder answers an error naming the missing settings.** With no provider saved, `none` saved, or incomplete settings, `EMBEDDER_SERVICE` is an embedder whose `embed()` and `dimensions` refuse with that reason and the restart it needs, so an adapter that embeds refuses indexing and search with it. Nothing is sent to a provider until one is saved, and the API key is never logged or put in an error.
+  - **A saved change waits for a restart, and the page says so** — help under the Embedder provider field (`@objectstack/service-settings`, all locales). There is no hot replacement.
+  - **New export `documentedMaxBatchSize(model)` from `@objectstack/embedder-openai`**: the provider-documented per-request input cap for a model, read from the same known-model table `OpenAIEmbedder` batches by, or `undefined` for a model the table does not document. Read-only. `OpenAIEmbedder` is unchanged: an explicit `maxBatchSize` passed to it directly is still used as given, above the documented cap included.
+  - If your own plugin registers `EMBEDDER_SERVICE` after `kernel:ready` (in `kernel:bootstrapped` or later, or after boot), move that registration into `init()`, `start()` or `kernel:ready`: the knowledge plugin has registered one by then, and a second registration of the name is refused.
+- d7f299c: feat(service-knowledge): adapters list their documents; a complete reindex skips unchanged documents and purges the ones its source no longer has; one adapter contract test suite
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/**` teaches `KnowledgeDocument`, the adapter contract or reindex; `skills/objectstack-ai/SKILL.md` teaches `KnowledgeSource` authoring only, which this change does not touch. `content/docs/protocol/knowledge.mdx` gains the members, the skip and the purge in this change.
+  
+  Knowledge adapters can now list the documents they hold, and a full reindex uses that list to skip unchanged documents and to remove documents whose record is gone.
+  
+  New, all optional, in `@objectstack/spec`:
+  
+  - `IKnowledgeAdapter.listDocuments?(ctx, { cursor?, limit })` returns `{ documents, nextCursor? }`, each entry `{ documentId, docHash? }`: the documents the adapter holds for a source, one page at a time. New exported types in `@objectstack/spec/contracts`: `AdapterListDocumentsOptions`, `AdapterListedDocument`, `AdapterListDocumentsPage`.
+  - `KnowledgeDocument.docHash?`: a hash of the document's content, title and metadata, prefixed `v1:`. The knowledge service sets it on every document it hands an adapter; the adapter stores it and returns it unchanged. `indexDocument` refuses a document that already carries a `docHash` (it throws, naming the field).
+  - `KnowledgeReindexResult.skipped?` and `purged?`.
+  
+  `KnowledgeService.reindexSource` for an `object` source, when the source's adapter implements `listDocuments`:
+  
+  - does not send a document to the adapter again when its hash is unchanged, and counts it in `skipped`;
+  - after a full run (no `limit`, no `dryRun`, every page read), deletes each listed document whose record no longer exists or no longer matches the source's `where`. Before each deletion it reads the record again; a record that exists at that moment keeps its document. A deletion never overlaps a sync of the same record. `purged` counts the deletions. Known limit: on driver-mongodb and driver-memory, a record stored under a caller-supplied numeric id is not found by that re-read, so if it was restored during the run its document is deleted until the record's next change or the next full reindex.
+  
+  `purged` is `null` when nothing was deleted because no removal ran: the adapter has no `listDocuments`, the run had a `limit` or `dryRun`, a page failed or answered no list of rows, the source sets `refresh.onRecordChange: false`, or the adapter's listing failed (the `message` says why). If a re-read or a deletion fails, the result is `ok: false` and `purged` counts the deletions made before it.
+  
+  The record sync (on record create, update and restore) now leaves a document in place and logs a warning when the data engine answers its re-read with something other than a list of rows; it used to delete the document.
+  
+  `@objectstack/service-knowledge/testing` (new, test-only, ESM only; it imports `vitest`) exports `runKnowledgeAdapterContract({ name, makeAdapter, implements: { listDocuments } })`, a test suite any adapter package runs with its own factory: upsert, search and delete; `listDocuments` paging and `docHash` round-trips; and the skip and the removal through a real `KnowledgeService`. `@objectstack/knowledge-memory` implements `listDocuments` and runs the suite.
+  
+  What to do: nothing. An adapter without `listDocuments` keeps working; its reindex sends every document, as before, and reports `purged: null`. An adapter package adds `listDocuments` (storing `docHash` as given) to get the skip and the removal, and runs the suite from `@objectstack/service-knowledge/testing` with its own factory. A caller of `indexDocument` stops setting `docHash`.
+- f9fda2a: feat(service-knowledge): knowledge documents carry their organization, and a search hands the adapter the caller's organizations so it ranks only their documents
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: none — no skill under `skills/**` teaches `KnowledgeDocument`, `AdapterSearchOptions` or the adapter contract suite; `skills/objectstack-ai/SKILL.md` teaches `KnowledgeSource` authoring only, which this change does not touch. `content/docs/protocol/knowledge.mdx` gains the members and an "Organization scope" section in this change.
+  
+  In a deployment with more than one organization, a knowledge search now ranks only the documents of the caller's organizations, so another organization's documents no longer take the top places. Which hits the caller gets back is still decided by re-reading each record as the caller, as before.
+  
+  New, both optional, in `@objectstack/spec`:
+  
+  - `KnowledgeDocument.organizationId?`: the organization of the record a document was built from. The knowledge service sets it from the record's `organization_id` under the `group` and `isolated` tenancy postures. It is absent under `single`, for `file` and `http` sources, and for a record with no organization. `indexDocument` refuses a document that already carries one (it throws, naming the field).
+  - `AdapterSearchOptions.organizationIds?`: the caller's organizations. The knowledge service computes it from the caller's execution context and the deployment's tenancy posture: under `isolated` the active organization, under `group` every organization the caller is a member of. It is absent (no filter) under `single`, for the system identity, for `file` and `http` sources, and for an object outside the tenancy wall. `[]` means the caller has no organization behind a wall and must match nothing; it never means "no filter". An adapter that reads it ranks only the documents whose `organizationId` is in the set and filters before it ranks; a document with no `organizationId` is not ranked.
+  
+  `docHash` now covers `organizationId` when a document has one. A document without one hashes exactly as before, so nothing changes under `single`.
+  
+  `KnowledgeService` reads the deployment's effective tenancy posture from the kernel's `tenancy` service (`KnowledgeServicePlugin` wires it; new option `resolveTenancyPosture`). If the posture cannot be read, a search does not search any `object` source for that call and logs an error, and a reindex stops before writing and returns `ok: false` with the reason. `recordToDocument` takes the posture as an optional fifth argument. The `search_knowledge` tool refuses an `organizationIds` argument: the organizations are never taken from the caller.
+  
+  `@objectstack/knowledge-memory` stores `organizationId` and filters by `organizationIds` before ranking. `runKnowledgeAdapterContract` (from `@objectstack/service-knowledge/testing`) now requires `implements.organizationIds`. It adds organization-filter cases for the adapter alone, and cases run through a real `KnowledgeService` under `isolated`, `group` and `single`.
+  
+  What to do: under a `group` or `isolated` posture, run a complete reindex of each `object` source (`reindexSource` with no `limit`). Documents indexed before this change carry no organization, and a filtered search does not rank them until that reindex writes them again; their hash changes, so the reindex does not skip them. An adapter package reads `organizationIds` in its search, stores `organizationId` as given, and passes `implements: { listDocuments, organizationIds }` to the contract suite.
+- 91138ec: feat(service-knowledge)!: one splitter in the knowledge service (whole / recursive / markdown, aware of Chinese text), the chunk channel to adapters, and the `split` key on an object source; `KnowledgeChunk.metadata` and the Knowledge page's chunk overlap retired
+  
+  Clause-②: yes (narrowing) — widens the knowledge contract (the `split` key, `chunks`, `headingPath`, the adapter's `capabilities` and `embedding`, `IEmbedder.maxInputTokens`, the reindex `failed` / `failures`) and narrows two accept sets: `KnowledgeChunk.metadata` is refused, and `knowledge.chunk_overlap` is no longer a key of the `knowledge` settings namespace
+  Metadata-protocol: narrowed
+  Skills-docs: none in this change — `skills/objectstack-ai/SKILL.md` lists the object source's keys and does not yet name `split`, and names neither retired key; that file is a governed surface outside this change, so teaching the new key is left to its owner. `content/docs/protocol/knowledge.mdx` (new section 3.5) and `content/docs/ai/knowledge-rag.mdx` document the key, the strategies, the limits and the removals in this change.
+  
+  <!-- adr-0087: registered knowledge-chunk-metadata-retired -->
+  
+  **BREAKING** in two places, each with its fix:
+  
+  - `KnowledgeChunk.metadata` (`@objectstack/spec/ai`): FROM an optional `Record<string, unknown>` accepted and stripped TO a `retiredKey()` tombstone — `KnowledgeChunkSchema.parse()` (and a `KnowledgeDocument` whose `chunks` carry one) refuses it with the prescription, and `tsc` types the key `never`. Nothing ever wrote or read it: the knowledge service cuts the passages and sets no per-passage metadata, and no adapter consulted one. The fix: delete the key; a passage takes its document's `metadata` (`KnowledgeDocument.metadata`), which is what adapters filter on. D3 entry: `knowledge-chunk-metadata-retired`.
+  - `knowledge.chunk_overlap` (the Knowledge settings page's **Chunk overlap**): FROM a `number` key of the `knowledge` settings namespace (default 80) TO no key — the page no longer shows it, the service no longer resolves it, and a write naming it is refused `400 UNKNOWN_KEY`. Nothing ever read it and the splitter cuts without overlap, so a value set there never had an effect. A stored value is kept, never deleted. The fix: stop writing the key (a script or seed that sets it); there is nothing to replace it with. **Target chunk size** (`knowledge.chunk_target`) is the setting that now shapes passages.
+  
+  The knowledge service now cuts documents into passages itself, once, and hands the same passages to every adapter that accepts them, so one source gives the same passages on each adapter.
+  
+  New in `@objectstack/spec`, all optional:
+  
+  - `ObjectKnowledgeSource.split?`: `{ strategy: 'whole' | 'recursive' | 'markdown', maxChars?, minChars? }`. Omitted, documents are cut `recursive`. New exports `KnowledgeSplitSchema`, `KnowledgeSplitStrategySchema` and the types `KnowledgeSplit`, `KnowledgeSplitStrategy` (`@objectstack/spec/ai`).
+  - `KnowledgeDocument.chunks?`: the document's passages, set by the service. `KnowledgeChunk` gains `headingPath?` (the headings a passage sits under, outermost first); its `id` is set by the service to `documentId#index`.
+  - `IKnowledgeAdapter.capabilities?: { chunks?: boolean }`: an adapter that sets `chunks: true` receives every document with `chunks` and indexes those passages as given. An adapter that does not set it receives whole documents, without `chunks`, as before.
+  - `IKnowledgeAdapter.embedding?: { maxInputTokens? }` and `IEmbedder.maxInputTokens?`: the longest input the adapter's embedder accepts, in tokens. The service reads it each time it splits. New exported types `AdapterCapabilities`, `AdapterEmbeddingDescriptor` (`@objectstack/spec/contracts`).
+  - `KnowledgeReindexResult.failed?` and `failures?` (`[{ documentId, reason }]`, at most 20 named; `failed` counts all).
+  
+  How the service cuts (`@objectstack/service-knowledge`):
+  
+  - `recursive` cuts at blank lines, then line breaks, then sentence ends, then semicolons, then characters. `。？！` end a sentence anywhere; `. ? !` only before whitespace or the end of the text, so 「3.2 条」 and 「400.50 元」 stay whole; an end mark followed by a closing quote or bracket ends nothing. A Markdown table or list item is never cut while it fits; a table that does not fit is cut between rows, each piece repeating the header row. Adjacent pieces shorter than `minChars` (default 200) are merged.
+  - `markdown` cuts one section per heading; every passage begins with its heading path, which counts toward its length and is embedded, and carries it as `headingPath`.
+  - `whole` keeps one passage per document.
+  - A passage is at most `split.maxChars` characters, else the settings page's `knowledge.chunk_target`, else 800; and, when the adapter reports `embedding.maxInputTokens`, its `estimateTokens` is at most 80% of that limit.
+  - A `whole` document over that budget is removed from the index and reported, never truncated: `reindexSource` counts it in `failed` and names it in `failures`, the record event sync logs it at `error` (source, record id, estimate, limit), and `indexDocument` throws. With no limit known nothing is checked.
+  - `indexDocument` refuses a document that already carries `chunks` (it throws, naming the field), as it refuses `docHash`.
+  - Known limit: `docHash` does not cover the passages, so a changed `split`, `chunk_target` or embedder limit re-splits a document only when the document itself next changes. The index fingerprint (ADR-0161 K7) will rebuild a source when its split changes.
+  
+  `@objectstack/knowledge-memory` no longer splits documents itself: it declares `capabilities.chunks` and indexes the service's passages as given (a document handed to it directly without `chunks` is one passage of its whole text). Its hits are now the service's passages, with the service's `chunkId`s.
+  
+  `@objectstack/embedder-openai`: `OpenAIEmbedder.maxInputTokens` is now public (`IEmbedder.maxInputTokens`): the `maxInputTokens` option, else the model's documented limit from the known-model table, else absent.
+  
+  `@objectstack/service-settings`: the Knowledge page's **Target chunk size** (`knowledge.chunk_target`) is now read: it is the splitter's `maxChars` beneath a source's own `split.maxChars`, and it is shown for the in-memory adapter too. **Chunk overlap** (`knowledge.chunk_overlap`) is retired: nothing ever read it and the splitter cuts without overlap. The `knowledge` manifest is now `version: 2`. A stored value for it is kept, never deleted; it is no longer shown or resolved, and a write naming it is refused `400 UNKNOWN_KEY`.
+  
+  `@objectstack/service-knowledge/testing`: `runKnowledgeAdapterContract`'s `implements` gains a required `chunks: boolean` (whether the adapter sets `capabilities.chunks`), and the suite runs the chunk-channel cases for it.
+  
+  What to do:
+  
+  - An adapter package that runs `runKnowledgeAdapterContract`: add `chunks: false` to `implements` (or `chunks: true` once the adapter takes the service's passages).
+  - An adapter that wants the service's passages: set `capabilities: { chunks: true }`, index each `doc.chunks` entry as given, and report its embedder's limit as `embedding.maxInputTokens` (from `IEmbedder.maxInputTokens`), from a getter if the embedder resolves late.
+  - A caller of `indexDocument` stops setting `chunks`.
+  - A deployment that set **Chunk overlap**: nothing to do; the value had no effect and keeps having none. A script or seed that writes `knowledge.chunk_overlap` drops the key.
+  - Code or a test that builds a `KnowledgeChunk` with `metadata`: delete the key; filter on the document's `metadata`.
+  
+  The retirement kit: the `retiredKey()` tombstone on `KnowledgeChunkSchema.metadata` in `ai/knowledge-document.zod.ts`, `RETIRED_KEYS_BY_MAJOR[18]` row `ai/KnowledgeChunk:metadata`, D3 `knowledge-chunk-metadata-retired` with its step-18 rationale fragment (no D2 conversion: a chunk is a runtime contract shape, never stored in stack metadata, so `os migrate meta` has no source to rewrite — the `ActionDescriptor.isAsync` disposition), the `[RETIRED]` line in `authorable-surface/ai.json`, the regenerated `knowledge-document.mdx` reference, and the pin `ai/knowledge-document.test.ts`. The settings key follows the Localization format keys' retirement: the specifier removed from `knowledge.manifest.ts` and from the 11 translation packs, the manifest at `version: 2`, stored rows kept, and the manifest pins updated.
+- a7bf18f: feat(service-knowledge): a knowledge source that was never built is built after boot, and an administrator can rebuild one with `os knowledge rebuild`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **The first build.** After every boot, `KnowledgeServicePlugin` reads what each `object` source's adapter holds (`indexStatus`, else one entry of `listDocuments`) against the index fingerprint and recipe hash the service computes now (ADR-0161 K7, "What starts a rebuild"), and builds — once, in the background, one source at a time — every source the adapter holds nothing for, holds under another fingerprint, or holds under another recipe hash. A source already built is left alone; a source with `refresh.onRecordChange: false` is left to its external indexer; an adapter with neither `indexStatus` nor `listDocuments` is never built automatically, and the boot log says so once. `KnowledgeServicePlugin({ buildAtBoot: false })` turns it off.
+  - **One node builds a source.** A build runs under the `cluster` service's lock, key `knowledge:build:SOURCE`, renewed while it runs; a node that gets the lock after another built the source re-reads it and builds nothing, and a lock that does not answer starts no build. With no cluster service the composition is one node. Only a shared cluster lock driver (`redis`) makes this hold across nodes: the default `memory` driver's lock is per process, so with it every node builds.
+  - **The administrator's rebuild.** The `knowledge` settings namespace gains two actions, gated like every settings write on `manage_platform_settings`: `rebuild` (`{ "source": "ID" }`) starts one complete build in the background, and `index_status` (`{}` or `{ "source": "ID" }`) answers each source's index state and the last build the answering node ran — its progress while it runs, its result (written, unchanged, purged, cannot be indexed) once it ended. `os knowledge rebuild SOURCE` starts a build and follows its progress to its end (`--no-wait` exits 0 once it has started and reports no outcome; otherwise exit 1 when it did not run or did not finish); `os knowledge status [SOURCE]` prints the state.
+  - **What it costs.** A build sends the content fields of every matching row the index does not already hold unchanged to the embedding provider, which bills for them. The line that starts a build says so, the server logs its progress every ten seconds and its result, and `content/docs/ai/knowledge-rag.mdx` states it. The default `memory` adapter holds nothing after a restart, so with it every boot builds the whole source again, on every node.
+  - `KnowledgeService` gains `readIndexState`, `rebuildSource`, `buildRecord`, `buildSourcesAtBoot` and `stopBuilds`, and the option `resolveBuildLock`; `IKnowledgeService` is unchanged.
+- 9981f27: feat(knowledge): an open vector store on PostgreSQL with pgvector, and the index fingerprint every knowledge index is built under
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  ADR-0161 Execution row 8a and K8 item 8 (#37100).
+  
+  - **New package `@objectstack/knowledge-pgvector`.** `KnowledgePgvectorPlugin` registers a `PgvectorKnowledgeAdapter` (adapter id `pgvector`): passages and vectors in PostgreSQL with the pgvector extension, in a schema of its own (`os_knowledge`, option `schema`) — a generation table `knowledge_generation` and one passage table per vector width, `knowledge_vec_d<width>` — so no table collides with an object table or is read as schema drift. The database is the `url` option when given, else the platform's when `OS_DATABASE_URL` is PostgreSQL; the plugin keeps its own small pool (`poolMax`, default 4; `connectTimeoutMs`, default 5000, so an unreachable host does not hold boot), no pooled connection waits on the embedder, and the kernel's embedder is read at each call. Two deployments sharing one database set their own `schema`. Search is an exact cosine scan (a 3072-wide model works); the organization filter and the metadata `filter` run in the same `WHERE`, before ranking. A passage whose text is unchanged is not embedded again; one whose row a concurrent write removed is embedded and written, not lost. `queryPrefix` is put before every query before it is embedded. Without the `vector` extension, or the right to create it or the schema, the plugin still registers and boot goes on: it creates nothing, warns with the SQL to run, `healthCheck` answers `ok: false` with that SQL, and every call answers `503 SERVICE_UNAVAILABLE` until it has run; a database it cannot reach is reported as unreachable, with no SQL. A caller reads one sentence; the driver's text and the SQL travel in the error's `remedy`, for the operator. The store does not yet build a second generation beside the first: `beginBuild` under a new fingerprint is refused, and the reindex result carries the exact statements that clear the source (passages, then the generation row); a first generation never takes over passage rows left behind. An approximate (HNSW) index is an operator's step, documented with the package.
+  - **The index fingerprint (ADR-0161 K7).** The knowledge service computes, per source and adapter, a fingerprint over the embedding model and dimensions the adapter reports, the resolved split and the splitter's version, and the content recipe; and a recipe hash over `where`, `metadataFields`, the title rule and the withheld fields. New exports from `@objectstack/service-knowledge`: `computeIndexFingerprint`, `computeRecipeHash`, `indexExpectation`, `INDEX_FINGERPRINT_VERSION`, `RECIPE_HASH_VERSION`, `ASSEMBLY_RULE_VERSION`, `TITLE_RULE_VERSION`, `SPLIT_ALGORITHM_VERSION`. Every adapter call carries them: `AdapterContext.index` and `AdapterSearchOptions.index` (`@objectstack/spec/contracts`).
+  - **Adapter contract members (all optional).** `AdapterEmbeddingDescriptor` gains `model`, `dimensions` and `variant`; `IKnowledgeAdapter` gains `indexStatus`, and `beginBuild` / `completeBuild` as a pair: a complete reindex calls `beginBuild` before it lists or writes, and `completeBuild` once every row is written and the purge is done. `IEmbedder` gains `model`; `OpenAIEmbedder` reports the model it sends.
+  - **A refused source is named, never read as empty.** A write or a search under another fingerprint is refused `409 KNOWLEDGE_REBUILD_REQUIRED` (registered in the error-code ledger). `KnowledgeService.search` over several sources answers from the searchable ones and logs each refused one with the adapter's `remedy`; a source that refuses the refill round is refused for the whole search, its first-round hits dropped; it throws the refusal (code, status, and `refused` naming every source) only when none could be searched. A caller is given the code and the adapter's one-sentence message, never its `remedy`; a reindex result carries the `remedy`. `KnowledgeService.searchWithRefusals` returns both, and the `search_knowledge` tool adds `refused` to its output when a source is refused.
+  - **`knowledge-memory` is the reference.** It keeps an active generation and, while a build of another fingerprint runs, one under construction, switching at `completeBuild`.
+  - **Contract suite.** `runKnowledgeAdapterContract`'s `implements` gains `indexStatus`, `builds`, `refusesOtherFingerprint` and `generations`, with cases for each. `knowledge-pgvector` runs the suite, the card's acceptance cases and a complete reindex over a real ObjectQL + SqlDriver against a live PostgreSQL in the `Temporal Conformance` job.
+- 3801775: feat(service-knowledge): a search can answer records, not passages — `granularity` and `groupBy`, with a freshness check
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no page under `skills/**` teaches the knowledge search options or the hit's shape (the one knowledge eval asks about source authoring); `content/docs/ai/knowledge-rag.mdx` and `content/docs/protocol/knowledge.mdx` teach them, updated here.
+  
+  ADR-0161 K1 (record-level return), K8 items 3 and 14.
+  
+  - **`KnowledgeSearchOptions.granularity`** (`'chunk' | 'record'`, default `'chunk'`, which answers the same hits as before; on `knowledge-memory` each hit now also carries `docHash` and, when its passage has one, `headingPath`). Under `'record'` a search answers one hit per record, the record's best-scoring passage, and `topK` counts records. Every source is then asked for `topK × 5` passages, for every caller, and refilled once at `topK × 20` when fewer than `topK` records survive the permission re-check — the cap; fewer records within it answer fewer hits, logged at `debug`. A `file` / `http` hit is grouped by its document. The return type is still `KnowledgeHit[]`.
+  - **`KnowledgeSearchOptions.groupBy`** names a metadata field and groups by its value — "which policies", not "which clauses" — keeping the best hit of each group, the value in the hit's `metadata`. It implies record granularity and is refused with `granularity: 'chunk'`; that refusal, an empty `groupBy` and an unknown `granularity` carry `code: 'VALIDATION_ERROR'`, `status: 400`. Hits with the same value form one group whichever source they come from. An `object` source that does not list the field in its `metadataFields` is not searched for that search, and a record with no value for it is not answered: a hit is never answered ungrouped.
+  - **The freshness check.** Each record-level hit about to be answered is checked against its record as it reads now: one system-context read per source, of only those records, `{ $and: [where, { id: { $in } }] }`, projected to the fields assembly reads. A record that was deleted or left `where` since it was indexed, or whose recomputed `docHash` differs from the hit's, is not answered, and the next record moves up (at most three rounds; a hit still unchecked after them is not answered). Its document is repaired in the background through the event sync's path, single-flight, once per document until a later search finds its hash matching; the repair never throws into the search. A source with `refresh.onRecordChange: false` (an external indexer owns its index) is never repaired: its stale hit is only not answered. When the source names a field the object does not declare, that read takes the whole row instead, as assembly did. A hit whose adapter stores no hash is checked for membership only; a freshness read that fails answers none of that source's checked hits, reported at `warn`.
+  - **The live title.** Under record granularity the permission re-check — still one query, as the caller — also reads the object's display field, and a caller's hit carries the record's `title` as it reads now. The system identity is not re-checked, so its hits carry the indexed title (the same whenever the hash matched).
+  - **`KnowledgeHit.docHash?` and `KnowledgeHit.headingPath?`** (`@objectstack/spec/ai`): the stored hash of the hit's document, returned as stored, and the heading path of the passage the hit came from. `knowledge-memory` returns both. The adapter contract suite (`@objectstack/service-knowledge/testing`) now asks an adapter that implements `listDocuments` to return each hit's stored `docHash` (and pins the record-level freshness check through a real service), and an adapter that takes chunks to return each passage's `headingPath`.
+- 98b17fe: feat(service-knowledge): a knowledge search can be held to chosen records, or to the records under one parent, and the adapter filters before it ranks
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A knowledge search can now look only inside chosen records, for example only inside one policy, and every one of the `topK` hits comes from inside that scope. A scope only narrows what is searched; each hit is still re-read as the caller, as before.
+  
+  New, both optional, in `@objectstack/spec` (types only, no metadata key):
+  
+  - `KnowledgeSearchOptions.scope?: Array<{ object: string; ids: string[] }>`. An entry naming the object a source indexes holds that source to those records. An entry naming another object reaches a source that lists, in its `metadataFields`, a `lookup` or `master_detail` field pointing at that object, and holds it to the documents whose stored value of that field is one of the ids. Entries are a union. A source no entry reaches is not searched, and a `file` / `http` source answers nothing under a scope. `scope: []`, or an entry with no ids, answers no hits; it never means "no scope". At most 10 entries, each with at most 500 ids, every `object` and id a non-empty string, no other key on an entry; past those bounds `search` refuses before any adapter is called, with an error carrying `code: 'VALIDATION_ERROR'` and `status: 400` and naming the bound.
+  - `AdapterSearchOptions.scope?: AdapterScopeTerm[]`, and the exported type `AdapterScopeTerm` (`{ kind: 'record', ids }` or `{ kind: 'metadata', field, ids }`). The knowledge service builds it per source from `KnowledgeSearchOptions.scope`; an adapter that reads it ranks only the documents some term holds for, filtering before it ranks, comparing values as strings (a list value matches when any element does).
+  
+  `KnowledgeService` checks every hit after the adapter answers and drops a hit no term holds for, including a hit that does not carry the value, so an adapter returns the document's `metadata` on its hits. An adapter that ignores the member keeps working: its scoped searches may answer fewer than `topK`, and the service logs that once per adapter at `warn`. A source that lists two or more lookups to the scoped object is not reached by that entry, logged once at `warn` naming the fields. A `user` field is not a parent link, and a parent two hops away is not reached. How many hits the scope removed is logged, never returned.
+  
+  `@objectstack/knowledge-memory` applies `scope` before ranking, and `@objectstack/knowledge-pgvector` applies it in the same SQL `WHERE` as the organization filter, ids and field names as bound parameters. `runKnowledgeAdapterContract` (from `@objectstack/service-knowledge/testing`) now requires `implements.scope`. It adds scope cases for the adapter alone, for each term kind, and cases through a real `KnowledgeService`, including one over the adapter with the member stripped.
+  
+  What to do: an adapter package reads `scope` in its search, returns each document's `metadata` on its hits, and passes `implements.scope` to the contract suite. A source that should be searchable inside one parent record lists the lookup to that parent in `metadataFields`; documents indexed before the lookup was listed are in no parent scope until a complete reindex writes them again.
+- 8a3315a: feat(service-knowledge): `search_knowledge` takes `scope`, `granularity` and `groupBy`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  ADR-0161 K9, rule 2 (#37311): the one `search_knowledge` definition gains the three arguments its knowledge service already reads, so an MCP client (HTTP and stdio) and the in-product agent are offered them alike. No transport adds or edits an argument.
+  
+  - `granularity: "record"` answers one hit per record, its best passage; `groupBy` answers one hit per value of a field the source lists in `metadataFields`, the value carried as the hit's `groupValue` (as the index stores it); an object source that does not list the field answers nothing for that search, and a `file` / `http` source answers one hit per document with no `groupValue`; `scope` searches only inside the named records, or the records linking to the named parents. Each is handed to `IKnowledgeService.search` as its option of the same name.
+  - A hit also carries `headingPath` where its passage has headings. The hit stays a whitelist: no `chunkId`, `docHash` or `metadata`.
+  - The executor refuses each malformed argument `VALIDATION_ERROR` (400) naming it; over MCP, a shape the definition's schema states is refused first by the SDK's input validation (`-32602`). The tool is stricter than the service: an empty `scope` or an entry with no ids is refused (as an empty `sourceIds` is), and an object name, record id or field name over 255 characters or holding a NUL character is refused. A refusal quotes a caller's string and cuts it to 64 characters, and lists at most five.
+  - The executor searches only `aiExposed` sources, so a `scope` entry or `groupBy` field only a withheld source would answer gets the same empty answer as one no source answers. The answer carries no count of hits the permission re-check or the scope removed.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [37e7fdf]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [5ff858b]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [b8c8c88]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/service-settings@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/embedder-openai@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

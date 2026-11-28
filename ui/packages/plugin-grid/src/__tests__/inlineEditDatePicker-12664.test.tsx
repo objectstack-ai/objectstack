@@ -21,9 +21,11 @@
  *
  * The text cell at the bottom is the CONTROL: a widget that stages on every
  * keystroke commits exactly as before, with no focus and so no blur at all.
+ * Each commit is the cell's save (objectstack#35827), so the readout is the
+ * write itself.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, within, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -105,7 +107,6 @@ function renderGrid(ds: any, language?: string) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: COLUMNS,
     pagination: { pageSize: 50 },
   };
@@ -140,14 +141,19 @@ function cellOf(container: HTMLElement, column: 'name' | 'due' | 'remind_at'): H
   return row.querySelectorAll('td')[index] as HTMLElement;
 }
 
-/** Click the cell into edit mode and wait for the lazily loaded picker's text box. */
+/**
+ * Open the cell's editor the select-first way (a click selects, a double-click
+ * edits; objectstack#35827) and wait for the lazily loaded picker's text box,
+ * read once the editor's overlay layer (objectstack#35688) has settled.
+ */
 async function openPicker(container: HTMLElement, column: 'due' | 'remind_at'): Promise<HTMLInputElement> {
   fireEvent.click(cellOf(container, column));
-  return waitFor(() => {
-    const input = cellOf(container, column).querySelector('[data-slot="date-picker"] input');
-    if (!input) throw new Error('date picker not rendered');
-    return input as HTMLInputElement;
+  fireEvent.doubleClick(cellOf(container, column));
+  await waitFor(() => {
+    if (!cellOf(container, column).querySelector('[data-slot="date-picker"] input')) throw new Error('date picker not rendered');
   });
+  await act(async () => {});
+  return cellOf(container, column).querySelector('[data-slot="date-picker"] input') as HTMLInputElement;
 }
 
 /** What a user does: put the caret in the box and type. The picker stages nothing yet. */
@@ -155,20 +161,6 @@ function typeInto(input: HTMLInputElement, text: string) {
   input.focus();
   fireEvent.change(input, { target: { value: text } });
 }
-
-async function saveAll(container: HTMLElement) {
-  const btn = await waitFor(() => {
-    const el = Array.from(container.querySelectorAll('button')).find((b) =>
-      /Save All|全部保存/.test(b.textContent || ''),
-    ) as HTMLButtonElement | undefined;
-    if (!el) throw new Error('no Save All: nothing is staged');
-    return el;
-  });
-  fireEvent.click(btn);
-}
-
-const saveAllButton = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll('button')).find((b) => /Save All|全部保存/.test(b.textContent || ''));
 
 describe('ObjectGrid inline editor — date / datetime draw the platform picker (objectui#12664)', () => {
   it('a date cell edits with the picker, not input[type=date]', async () => {
@@ -191,7 +183,7 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     expect(input.value).toBe('2026/10/01');
   });
 
-  it('(a) typed day + Enter: the edit is staged with that day', async () => {
+  it('(a) typed day + Enter: the edit is saved with that day', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -199,11 +191,10 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     typeInto(input, '10/20/2026');
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(cellOf(container, 'due').querySelector('[data-slot="date-picker"]')).toBeNull());
-    await saveAll(container);
     await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 'r1', { due: '2026-10-20' }, undefined));
   });
 
-  it('(b) typed day + click outside: the edit is staged with that day', async () => {
+  it('(b) typed day + click outside: the edit is saved with that day', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -211,11 +202,10 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     typeInto(input, '10/20/2026');
     fireEvent.pointerDown(screen.getByTestId('outside'));
     await waitFor(() => expect(cellOf(container, 'due').querySelector('[data-slot="date-picker"]')).toBeNull());
-    await saveAll(container);
     await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 'r1', { due: '2026-10-20' }, undefined));
   });
 
-  it('(b) datetime: typed date and time + click outside stages that local instant', async () => {
+  it('(b) datetime: typed date and time + click outside saves that local instant', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -223,7 +213,6 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     typeInto(input, '10/20/2026 14:30');
     fireEvent.pointerDown(screen.getByTestId('outside'));
     await waitFor(() => expect(cellOf(container, 'remind_at').querySelector('[data-slot="date-picker"]')).toBeNull());
-    await saveAll(container);
     await waitFor(() =>
       expect(ds.update).toHaveBeenCalledWith(
         OBJECT,
@@ -234,7 +223,7 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     );
   });
 
-  it('(c) typed day + Escape: nothing is staged', async () => {
+  it('(c) typed day + Escape: nothing is saved', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
@@ -244,29 +233,24 @@ describe('ObjectGrid inline editor — date / datetime draw the platform picker 
     await waitFor(() => expect(cellOf(container, 'due').querySelector('[data-slot="date-picker"]')).toBeNull());
     // A pointer press elsewhere afterwards must not resurrect the discarded text.
     fireEvent.pointerDown(screen.getByTestId('outside'));
-    expect(saveAllButton(container)).toBeUndefined();
+    await act(async () => {});
     expect(ds.update).not.toHaveBeenCalled();
   });
 
-  it('(d) CONTROL: a text cell still stages per keystroke, with no focus and no blur', async () => {
+  it('(d) CONTROL: a text cell stages per keystroke, so a press outside commits it with no focus and no blur', async () => {
     const ds = makeDataSource();
     const { container } = renderGrid(ds);
     await waitFor(() => expect(screen.getByText('Row One')).toBeInTheDocument());
     const nameTd = cellOf(container, 'name');
     fireEvent.click(nameTd);
-    const input = await waitFor(() => {
-      const el = nameTd.querySelector('input') as HTMLInputElement | null;
-      if (!el) throw new Error('no text editor');
-      return el;
-    });
+    fireEvent.doubleClick(nameTd);
+    await waitFor(() => expect(nameTd.querySelector('[data-slot="cell-editor-overlay"] input')).toBeTruthy());
+    await act(async () => {});
+    const input = nameTd.querySelector('[data-slot="cell-editor-overlay"] input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Row One EDITED' } });
-    // Staged already, while the editor is still open: Save All is offered.
-    await waitFor(() => expect(saveAllButton(container)).toBeTruthy());
-    expect(nameTd.querySelector('input')).toBeTruthy();
     fireEvent.pointerDown(screen.getByTestId('outside'));
-    await waitFor(() => expect(nameTd.querySelector('input')).toBeNull());
-    expect(within(nameTd).getByText('Row One EDITED')).toBeInTheDocument();
-    await saveAll(container);
+    await waitFor(() => expect(nameTd.querySelector('[data-slot="cell-editor-overlay"]')).toBeNull());
     await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 'r1', { name: 'Row One EDITED' }, undefined));
+    expect(within(nameTd).getByText('Row One EDITED')).toBeInTheDocument();
   });
 });

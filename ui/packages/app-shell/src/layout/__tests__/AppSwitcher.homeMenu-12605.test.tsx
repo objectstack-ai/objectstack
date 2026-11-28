@@ -6,8 +6,14 @@
  *
  * - The 「Switch Application」 group lists the installed apps with the current
  *   one checked; the Setup app is not in it.
- * - After a divider: 「Back to home」 with the `⌘⇧H` keycaps, 「All apps」 and
- *   「Settings」 (the Setup app), in that order.
+ * - After a divider: 「Back to app start page」 with the `⌘⇧H` keycaps (the
+ *   platform home page is retired from 768 px up, objectstack#36732) and
+ *   「Settings」 (the Setup app), in that order. No 「All apps」 row
+ *   (objectstack#37163): a desktop has no page listing the apps, the row
+ *   opened the same app start page as the row above it, and the switch group
+ *   is the list. A phone's 「All apps」 is its drawer's, still opening its app
+ *   list at `/home` — pinned, as the CONTROL, in
+ *   `UnifiedSidebar.mobileAppHeader-12201.test.tsx`.
  * - For a viewer the top bar offers its Studio button to, 「Edit APP in
  *   Studio」 follows a second divider.
  * - Below `sm` the pill is the app's glyph alone, named in its tooltip.
@@ -64,6 +70,15 @@ vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({ apps }),
 }));
 
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
 import { AppSwitcher } from '../AppSwitcher';
 
 const HOTCRM = { name: 'hotcrm', label: 'HotCRM', icon: 'flame', _packageId: 'com.acme.hotcrm' };
@@ -99,7 +114,7 @@ beforeEach(() => {
 });
 
 describe('the app pill\'s menu (objectui#12605)', () => {
-  it('the switch group, then Back to home → All apps → Settings, then the Studio row after a second divider', () => {
+  it('the switch group, then Back to app start page → Settings, then the Studio row after a second divider', () => {
     renderSwitcher('hotcrm', '/studio/com.acme.hotcrm/data');
     expect(menuOutline()).toEqual([
       'label',
@@ -108,13 +123,11 @@ describe('the app pill\'s menu (objectui#12605)', () => {
       'app-switcher-row-hotcrm_service',
       'divider',
       'app-switcher-home',
-      'app-switcher-all-apps',
       'app-switcher-settings',
       'divider',
       'app-switcher-edit-in-studio',
     ]);
-    expect(menu().getByTestId('app-switcher-home')).toHaveTextContent('Back to home');
-    expect(menu().getByTestId('app-switcher-all-apps')).toHaveTextContent('All apps');
+    expect(menu().getByTestId('app-switcher-home')).toHaveTextContent('Back to app start page');
     // objectstack#27521 row 1 — the entry carries the Setup app's own label,
     // the name its header shows once it is open.
     expect(menu().getByTestId('app-switcher-settings')).toHaveTextContent('Setup');
@@ -127,6 +140,18 @@ describe('the app pill\'s menu (objectui#12605)', () => {
     expect(menu().getByTestId('app-switcher-settings')).not.toHaveTextContent('Settings');
   });
 
+  it('offers no 「All apps」 row: no row repeats the way home, and the switch group lists every app (objectstack#37163)', () => {
+    renderSwitcher('hotcrm');
+    expect(menu().queryByTestId('app-switcher-all-apps')).not.toBeInTheDocument();
+    expect(menuEl()).not.toHaveTextContent('All apps');
+    // One row leads to the app start page, under the name it is.
+    const home = menu().getByTestId('app-switcher-home');
+    expect(menuEl().querySelectorAll(`a[href="${home.getAttribute('href')}"]`)).toHaveLength(1);
+    // The apps the removed row promised are the switch group's rows.
+    expect(menu().getByTestId('app-switcher-row-hotcrm')).toBeInTheDocument();
+    expect(menu().getByTestId('app-switcher-row-hotcrm_service')).toBeInTheDocument();
+  });
+
   it('Setup is not in the switch group; the current app is checked', () => {
     renderSwitcher('hotcrm');
     expect(menu().queryByTestId('app-switcher-row-setup')).not.toBeInTheDocument();
@@ -135,10 +160,12 @@ describe('the app pill\'s menu (objectui#12605)', () => {
     expect(menu().getByTestId('app-switcher-row-hotcrm_service').querySelector('.text-primary')).toBeNull();
   });
 
-  it('「Back to home」 links to home and shows the ⌘⇧H keycaps', () => {
+  it('「Back to app start page」 links to where `/` lands and shows the ⌘⇧H keycaps', () => {
     renderSwitcher('hotcrm');
     const home = menu().getByTestId('app-switcher-home');
-    expect(home).toHaveAttribute('href', '/home');
+    // objectstack#36732 — from 768 px up home is where `/` lands (no last app
+    // here, nothing declared: the first product app), not the retired page.
+    expect(home).toHaveAttribute('href', '/apps/com.acme.hotcrm');
     expect(home.querySelector('kbd')).toHaveTextContent('⌘⇧H');
   });
 
@@ -187,14 +214,14 @@ describe('the Studio row follows the top bar\'s posture (#27356 row 12)', () => 
     renderSwitcher('hotcrm', PATH, 'view');
     const row = menu().getByTestId('app-switcher-view-in-studio');
     expect(row).toHaveAttribute('href', PATH);
-    expect(row).toHaveTextContent('Open HotCRM in Studio');
+    expect(row).toHaveTextContent('Open HotCRM in App Studio');
     expect(row.querySelector('svg.lucide-eye')).not.toBeNull();
     expect(menu().queryByTestId('app-switcher-edit-in-studio')).not.toBeInTheDocument();
   });
 
   it('CONTROL — edit keeps 「Edit APP in Studio」 with the pencil (the first case above passes no posture and reads the same row)', () => {
     renderSwitcher('hotcrm', PATH, 'edit');
-    expect(menu().getByTestId('app-switcher-edit-in-studio')).toHaveTextContent('Edit HotCRM in Studio');
+    expect(menu().getByTestId('app-switcher-edit-in-studio')).toHaveTextContent('Edit HotCRM in App Studio');
     expect(menu().getByTestId('app-switcher-edit-in-studio').querySelector('svg.lucide-pencil')).not.toBeNull();
     expect(menu().queryByTestId('app-switcher-view-in-studio')).not.toBeInTheDocument();
   });

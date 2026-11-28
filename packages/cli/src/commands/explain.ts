@@ -191,7 +191,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     ],
     optional: [
       { name: 'skills', type: 'string[]', description: 'Skill names to attach (Agent -> Skill -> Tool architecture, ADR-0064). This is where tool access comes from: a platform tool by its registered name, or `action_<name>` for one of your own AI-exposed Actions — declared inside the skill, not here.' },
-      { name: 'model', type: 'AIModelConfig', description: 'LLM configuration OBJECT — { provider, model, temperature, maxTokens, topP }. A bare model string is rejected, and model settings such as `temperature` live in HERE, never at the agent top level.' },
+      { name: 'model', type: 'AIModelConfig', description: 'LLM configuration OBJECT — { model, temperature, maxTokens, topP }; `model` is optional (absent = the deployment\'s default model). A bare model string is rejected, model settings such as `temperature` live in HERE, never at the agent top level, and there is no `provider` (removed: the deployment\'s AI settings choose it).' },
       { name: 'surface', type: '"ask" | "build"', description: 'Product surface this agent is for (default "ask")' },
       { name: 'avatar', type: 'string', description: 'Avatar image reference' },
       { name: 'access', type: 'string[]', description: 'Who can chat with this agent — enforced at the chat route' },
@@ -208,7 +208,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
   // tool inside a skill and attach the skill by name here.
   skills: ['knowledge_lookup'],
   // \`model\` is an object, and temperature belongs inside it.
-  model: { provider: 'openai', model: 'gpt-4o', temperature: 0.2 },
+  model: { model: 'gpt-4o', temperature: 0.2 },
 }`,
     related: ['object', 'flow', 'query'],
     docsPath: 'ai/agent',
@@ -289,7 +289,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
     ],
     optional: [
       { name: 'description', type: 'string', description: 'Dashboard description' },
-      { name: 'columns', type: 'number (1-24)', description: 'Number of grid columns (default 12)' },
+      { name: 'columns', type: 'number (1-24)', description: 'Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4' },
       { name: 'gap', type: 'number', description: 'Space between widgets, in steps of 0.25rem (4 = 1rem)' },
       // There is no dashboard-level `layout` template — the key is rejected by
       // name. Positioning is per-widget: `layout: { x, y, w, h }`, and a widget

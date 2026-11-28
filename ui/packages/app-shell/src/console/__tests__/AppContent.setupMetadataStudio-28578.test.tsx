@@ -30,7 +30,8 @@
  * Automations pillar for the package its `?package=` names, or the area's
  * cross-package flow list when it names none. And objectstack#34724: a
  * bookmark of Setup › Packaged Actions (`component/automation/packaged-actions`)
- * opens the named app's Data pillar, or the Studio landing.
+ * opens the named app's Data pillar, or, naming no package, Setup → Packages
+ * (objectstack#36908 removed the Studio home it opened before).
  *
  * The host's own aliases (`system/objects`, `system/metadata`,
  * `system/{roles,positions,permissions}`) are `apps/console`'s, pinned in
@@ -42,13 +43,35 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
+
+// objectstack#37565 — the viewer's capability set, as `usePermissions()` answers it: a holder of
+// Setup's entry capability unless a case says otherwise (`undefined`: no reported set).
+const HOLDER = ['studio.access', 'setup.access'];
+const held = vi.hoisted(() => ({ capabilities: ['studio.access', 'setup.access'] as string[] | undefined }));
+vi.mock('@object-ui/permissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@object-ui/permissions')>();
+  // One object per answer, as the hook's own identity is (objectui#6724).
+  const answers = new Map<string[] | undefined, ReturnType<typeof actual.usePermissions>>();
+  return {
+    ...actual,
+    usePermissions: () => {
+      const base = actual.usePermissions();
+      let answer = answers.get(held.capabilities);
+      if (!answer) answers.set(held.capabilities, (answer = { ...base, systemPermissions: held.capabilities }));
+      return answer;
+    },
+  };
+});
+afterEach(() => {
+  held.capabilities = HOLDER;
+});
 // The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
 // first load is paid here, at collection, never inside a case's clock
 // (`check:test-source-alias`).
 import '@objectstack/lint';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 
 vi.mock('../../views/metadata-admin', () => ({
@@ -152,7 +175,6 @@ beforeEach(() => {
 /** [Setup URL, the Studio URL it lands on in one hop] */
 const TO_STUDIO: Array<[string, string]> = [
   // canonical routes
-  ['/metadata', '/studio/~all/metadata'],
   ['/metadata/_diagnostics', '/studio/~all/metadata/_diagnostics'],
   ['/metadata/object', '/studio/~all/metadata/object'],
   ['/metadata/object/new', '/studio/~all/metadata/object/new'],
@@ -161,16 +183,40 @@ const TO_STUDIO: Array<[string, string]> = [
   // the query is carried, and names the leg
   ['/metadata/object/account?package=crm', '/studio/crm/metadata/object/account?package=crm'],
   ['/metadata/object?package=all', '/studio/~all/metadata/object?package=all'],
-  ['/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
-  ['/metadata/sharing_rule?scope=environment&package=crm', '/studio/~all/metadata/sharing_rule?scope=environment'],
+  ['/metadata/position/manager?scope=environment', '/studio/~all/metadata/position/manager?scope=environment'],
   ['/metadata/object/account?review=1', '/studio/~all/metadata/object/account?review=1'],
   ['/metadata/object/account?package=crm&review=1', '/studio/crm/metadata/object/account?package=crm&review=1'],
   ['/metadata/object/account#fields', '/studio/~all/metadata/object/account#fields'],
   // the pre-refactor aliases, straight to Studio (not via the canonical route)
-  ['/component/metadata/directory', '/studio/~all/metadata'],
   ['/component/metadata/resource?type=object', '/studio/~all/metadata/object'],
   ['/component/metadata/resource/account?type=object', '/studio/~all/metadata/object/account'],
   ['/component/metadata/resource/account?type=object&package=crm', '/studio/crm/metadata/object/account?package=crm'],
+];
+
+/**
+ * objectstack#37565 — [Setup URL, where it lands in one hop]: the environment
+ * directory and its lists, which left Studio's cross-package leg for Setup →
+ * Access control (ADR-0084, amended 2026-11-26). Before, each landed on the leg.
+ */
+const SETUP_DIRECTORY = '/apps/setup/component/security/access-directory';
+const TO_SETUP_DIRECTORY: Array<[string, string]> = [
+  ['/metadata', SETUP_DIRECTORY],
+  ['/metadata/position?scope=environment', `${SETUP_DIRECTORY}/position?scope=environment`],
+  ['/metadata/sharing_rule?scope=environment&package=crm', `${SETUP_DIRECTORY}/sharing_rule?scope=environment`],
+  ['/component/metadata/directory', SETUP_DIRECTORY],
+  ['/component/metadata/resource?type=position&scope=environment', `${SETUP_DIRECTORY}/position?scope=environment`],
+];
+
+/**
+ * objectstack#37565 — [Setup URL, Studio URL] for a principal who may not open
+ * Setup: the environment directory's addresses stay on Studio's cross-package
+ * leg, where they landed before it moved.
+ */
+const TO_STUDIO_WITHOUT_SETUP: Array<[string, string]> = [
+  ['/metadata', '/studio/~all/metadata'],
+  ['/metadata/position?scope=environment', '/studio/~all/metadata/position?scope=environment'],
+  ['/metadata/sharing_rule?scope=environment&package=crm', '/studio/~all/metadata/sharing_rule?scope=environment'],
+  ['/component/metadata/directory', '/studio/~all/metadata'],
   ['/component/metadata/resource?type=position&scope=environment', '/studio/~all/metadata/position?scope=environment'],
 ];
 
@@ -199,6 +245,32 @@ describe.each([
     expect(chain).toEqual([`${base}${from}`, to]);
     expect(screen.queryByTestId('metadata-resource-list-page')).not.toBeInTheDocument();
     expect(screen.queryByTestId('metadata-resource-edit-page')).not.toBeInTheDocument();
+  });
+
+  it.each(TO_SETUP_DIRECTORY)(`${base}%s → %s, in one hop`, async (from, to) => {
+    metadataApps = [...apps];
+    const chain = renderAt(`${base}${from}`);
+
+    // Two entries: one `<Navigate>`, no stop on Setup's canonical route or Studio's leg.
+    await waitFor(() => expect(chain).toEqual([`${base}${from}`, to]));
+    expect(chain.some((entry) => entry.startsWith('/studio'))).toBe(false);
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
+  });
+
+  // objectstack#37565 — without Setup's entry capability, or with no reported set, the leg keeps them.
+  describe.each([
+    ['holding studio.access only', ['studio.access']],
+    ['with no reported capability set', undefined],
+  ] as const)('%s', (_who, capabilities) => {
+    it.each(TO_STUDIO_WITHOUT_SETUP)(`${base}%s → %s, in one hop`, async (from, to) => {
+      held.capabilities = capabilities === undefined ? undefined : [...capabilities];
+      metadataApps = [...apps];
+      const chain = renderAt(`${base}${from}`);
+
+      expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+      expect(chain).toEqual([`${base}${from}`, to]);
+      expect(chain.some((entry) => entry.startsWith('/apps/setup/component/security'))).toBe(false);
+    });
   });
 
   it.each(STAYS)(`${base}%s stays in Setup on %s`, async (from, testid, settles) => {
@@ -235,14 +307,26 @@ describe('a bookmark of the retired Setup › Packaged automation page opens Stu
 
 describe('a bookmark of the retired Setup › Packaged Actions page opens Studio (objectstack#34724)', () => {
   it.each([
-    ['/apps/setup/component/automation/packaged-actions', '/studio'],
     ['/apps/setup/component/automation/packaged-actions?package=crm', '/studio/crm/data?package=crm'],
-    ['/apps/crm/component/automation/packaged-actions?package=all', '/studio?package=all'],
   ])('%s → %s, in one hop', async (from, to) => {
     const chain = renderAt(from);
 
     expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
     expect(chain).toEqual([from, to]);
+  });
+
+  // Naming no package (or `all`), it opened the Studio home, which listed every
+  // installed app; objectstack#36908 removed that home, so the bookmark opens
+  // Setup → Packages on its admin face, the package list, and not Studio.
+  it.each([
+    ['/apps/setup/component/automation/packaged-actions'],
+    ['/apps/crm/component/automation/packaged-actions?package=all'],
+  ])('%s → Setup → Packages, in one hop', async (from) => {
+    const chain = renderAt(from);
+
+    await waitFor(() => expect(chain).toEqual([from, '/apps/setup/component/developer/packages?face=admin']));
+    expect(await screen.findByTestId('console-layout')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-probe')).not.toBeInTheDocument();
   });
 });
 

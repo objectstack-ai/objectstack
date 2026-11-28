@@ -9,7 +9,7 @@
       "title": "The first-run authoring loop closes: package → object → record → app → publish → end-user, zero code, zero restarts",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 16,
       "priority": "P0",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai)", "end user (same account driving the published app)"],
@@ -20,18 +20,18 @@
         ],
         "knownGaps": [
           "SUPERSEDED (QA run #24571): publish is no longer one click with no confirmation. Publish opens the 'Pending changes' review sheet — every pending draft listed as New or Update, each expanding into the keys it changes, and a separate 'Publish all' confirm (objectui app-shell preview/DraftChangesPanel.tsx, mounted by StudioDesignSurface.tsx; the audit's finding 3 / ADR-0016 §3.6 step 4). A review step now exists; do not score its presence or absence here — this item scores the loop",
-          "SUPERSEDED (QA run #21056): a new app no longer scaffolds zero nav items — the Create-app dialog seeds the app's navigation from the package's objects behind a checkbox that defaults ON (objectui StudioDesignSurface appAddObjects, objectui#2262). With it on, step 5's nav item already exists and the Interfaces step confirms it rather than builds it; only with it unticked does the manual wiring remain the contract. Do not expect zero items",
+          "SUPERSEDED (QA run #21056): a new app no longer scaffolds zero nav items — the Create-app dialog seeds the app's navigation from the package's objects behind a checkbox that defaults ON (objectui StudioDesignSurface appAddObjects, objectui#2262). With it on, step 5's nav item already exists; with it unticked, the entry is wired by hand in the running app's design mode (the menu editor), since Studio's Interfaces pillar, where it was wired before, retired with #36502. Do not expect zero items",
           "mixed-language Studio chrome (audit finding 4) is asserted by i18n.studio-follows-app-locale — locale consistency is that item's business, not this one's",
           "FIXED, regression row, expected PASS on the zh-CN leg (#29673, closed by PR #29790, merged as 589049b0; pins packages/metadata-protocol/src/protocol-translated-echo.test.ts and packages/qa/dogfood/test/studio-zh-cn-echo-publish.dogfood.test.ts): an object saved back from a translated /meta read now stores its source labels, so an object first published from Studio in zh-CN reaches the data plane. QA run #29877 (W5-P0, at 589049b0) read the zh-CN leg passing acceptance[2] and [3]: publish answered published, the list served, the overlay carried no queue / owner_id, and an en read showed Owner / Queue. Score both legs normally; a zh-CN publish that answers published while the data read answers 404 OBJECT_NOT_FOUND is a regression of #29673. The failure as it was: The draft read serves the injected queue column with its translated label (队列), the autosave echoes it, the registry judges the echo byte for byte against the platform's definition (isInjectedColumnDefinition, packages/spec/src/data/injected-system-column-provenance.ts) and refuses it as an author's field named queue, and the failed registration is only a console.warn (the registerObject catch in packages/metadata-protocol/src/protocol.ts). Publish answers published while GET /api/v1/data/repairs_repair_ticket answers 404 OBJECT_NOT_FOUND. Re-read unchanged at base 339f63da30, before the fix"
         ]
       },
       "steps": [
         "boot the showcase example (objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db), sign in as admin@objectos.ai/admin123, and note the boot timestamp in the server log (the zero-restart clause reads it later). Run steps[0] to [8] once per locale leg (fixtures.requires[0]): the en leg, then the zh-CN leg, each switched with the avatar-menu language switcher right after sign-in",
-        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): with an agent catalog it reads 'Build an app' (data-testid home-build-app) and opens the Studio landing, where New package opens the wizard; with none it reads 'New in Studio' (home-build-in-studio) and opens Studio with the New package dialog already open, the form QA run #27481 met on the stock showcase. Record which",
-        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Form tab's button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
+        "Home → the build chip → create a NEW writable package (维修中心 / com.example.repairs, namespace repairs) via the new-package wizard. Type the identifier yourself: since #29734 a Chinese display name derives its id through pinyin (维修中心 gives com.ORG.weixiu-zhongxin, deriveCreatePackageId in ui/packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx), which is not the id the later steps name, and the namespace derives from the id you type. The build chip has two forms (ui/packages/app-shell/src/console/home/HomePage.tsx): where the agent catalog serves the build agent it reads 'Build an app' (data-testid home-build-app) and opens Studio on the last package you worked in, or Setup → Packages when there is none, where New package opens the wizard; otherwise it reads 'New blank app' (home-build-in-studio) and opens Setup → Packages with the New package dialog already open (the form QA run #27481 met on the stock showcase, then labelled 'New in Studio'). A sign-in without Setup access (setup.access + manage_platform_settings) is sent to Studio's All metadata area instead, which creates no package; use the dev admin. Either way the create lands in Studio on the new package. Record which",
+        "Data pillar → new object 'Repair Ticket' (the identifier auto-suggests repair_ticket from the display name, and the dialog PREFIXES it with the package namespace, so the object is named repairs_repair_ticket — the name every later step and clause uses (framework#2694, objectui StudioDesignSurface prefixObjectName). The dialog also carries an OWD (sharing model) choice, pre-selected to the platform's recommended baseline: confirm or change it, then click 'Save as draft', the dialog's confirm button (engine.studio.createDraft; no Studio create dialog has a button named Create)) → add a picklist field Status with 3 values. After a navigation the object surface opens on its Records tab (the Data pillar's default view, ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx); Add field is the Field layout tab's (字段布局, formerly Form) button (where QA run #28545 found it; the Records grid's add-column header carries it too). Each option's stored value derives from its label as you type it — 'In Repair' stores in_repair (ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx OptionsEditor) — so overwrite the value wherever the run wants a different one (a short code such as wip), and note the three stored values: acceptance[1] and acceptance[2] read them. There is no Save draft button: the designer autosaves, and a picklist field is held unsaved until it has at least one option (the status line reads 'Not saved yet: the field “Status” needs at least one option'), so add the field and fill its options, and the draft save fires",
         "open the Changes panel and Publish, then confirm with 'Publish all' in the review sheet; the toast names the count — 'Published N items in this package' (N = the drafts promoted), 'Published 1 item in this package' for one (engine.studio.publishedAllCount / publishedAllCountOne, objectui#11807; 'Published all drafts in this package' is the fallback when the count is unknown) — and, because the publish puts an object live, it adds 'Members can use it once a permission set grants them access.' with an 'Open Access' action (StudioDesignSurface.tsx)",
         "create a record in the runtime-faithful Records grid with a Status value chosen",
-        "Create app 'Repair Center' (identifier auto-suggested) → Interfaces pillar → add a nav item bound to repairs_repair_ticket → Publish",
+        "Create app 'Repair Center' (identifier auto-suggested), leaving 'Add this package's objects as menu items' on, so the app's navigation holds an entry bound to repairs_repair_ticket; the dialog stays on the Data pillar → Publish",
         "return to the console Home (/_console/home — the Studio header's house icon goes to the Studio landing, 'Studio home', and from the landing the console Home is its top bar's product mark, the link named 'PRODUCT home' (e.g. 'ObjectOS home'; data-testid app-bar-product-home, ui/packages/app-shell/src/layout/AppHeader.tsx ProductHomeMark), which goes to the deployment's home path, /_console/home on stock; no control on that bar is named plain 'Home'): the launcher must show Repair Center; open it and drive the end-user list",
         "verify server truth after each publish: GET /api/v1/meta/object/repairs_repair_ticket, GET /api/v1/data/repairs_repair_ticket, GET /api/v1/meta/app?id=<the new app NAME, e.g. repair_center> — ?id= matches the App document name, NOT the package id com.example.repairs; fetch /api/v1/meta/app with no query first to read the name the wizard actually minted",
         "negative probe: on the READ-ONLY com.example.showcase package there is no gesture to drive — the console HIDES New object and Add field there (objectui StudioDesignSurface gates them on !readOnly) — so the probe is a FORGED request: send the authoring write the gesture would have made straight to the metadata write door against that package, and capture the server response (QA run #21056 read 422 WRITABLE_PACKAGE_REQUIRED and 403 ITEM_LOCKED)"
@@ -99,7 +99,10 @@
         { "revision": 10, "date": "2026-11-01", "change": "QA run #28545 (W3-C1R) finding on steps[2]: the object surface opens on Records after a navigation, Add field is on the Form tab, and an option's stored value derives from its label ('In Repair' gives in_repair), so a run that wants wip must overwrite it. steps[2] now says so, read from source (StudioDesignSurface.tsx viewMode default 'grid'; OptionsEditor derives a new row's value with toFieldNameOrEmpty). The same card's steps[3] finding, the stale publish toast, was fixed upstream by revision 9 (#28526, after eeec88d1). No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054", "ref": "#28545" },
         { "revision": 11, "date": "2026-11-03", "change": "fixtures.requires[0], steps[0] and a new negative[2] name two locale legs, en and zh-CN, and a clause holds only on both; a new fixtures.knownGaps[3] records the zh-CN leg's open failure; steps[1]'s identifier note follows pinyin derivation. QA run #29672 found the item named no locale while steps[1] uses a Chinese display name: its en leg passed and its zh-CN leg failed acceptance[2] (#29673, extracted by the run), so a run that drove one locale could score the loop either way. Read at base 339f63da30: the registry judge and the swallowed registration are unchanged and #29673 is open; and since #29734 (11c4eb59dd) a Chinese display name derives a pinyin package id (deriveCreatePackageId), so steps[1]'s 'derives no package id' no longer held, while its instruction to type com.example.repairs stands. No clause text changed; each now holds per leg. Card #29679, from QA run #29672", "ref": "#29679" },
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[0].verify re-pointed: the Studio package switcher, which declares the studio-pkg-chip testid, moved unchanged from ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx to PackageSwitcher.tsx beside it (#29988 slice 2, a move-only split). Re-read at base f7aab8958. No clause changed", "ref": "#29988" },
-        { "revision": 13, "date": "2026-11-04", "change": "fixtures.knownGaps[3] corrected from QA run #29877 (W5-P0, at 589049b0; the list of record is comment 6600018008 on #27377): the zh-CN leg's acceptance[2] failure is fixed by PR #29790 (#29673 closed), and the run read that leg passing acceptance[2] and [3], so the instruction to score it FAIL citing #29673 is withdrawn and the row is a regression row. Read at base f68b47ca", "ref": "#29906" }
+        { "revision": 13, "date": "2026-11-04", "change": "fixtures.knownGaps[3] corrected from QA run #29877 (W5-P0, at 589049b0; the list of record is comment 6600018008 on #27377): the zh-CN leg's acceptance[2] failure is fixed by PR #29790 (#29673 closed), and the run read that leg passing acceptance[2] and [3], so the instruction to score it FAIL citing #29673 is withdrawn and the row is a regression row. Read at base f68b47ca", "ref": "#29906" },
+        { "revision":  14, "date":  "2026-11-24", "change":  "steps[5] and knownGaps[1] no longer route through Studio's Interfaces pillar, retired by #36502: the Create-app scaffold (box on) is the nav item, the dialog stays on the Data pillar, and a hand-wired entry is the running app's design-mode menu editor. No clause changed", "ref":  "#36502" },
+        { "revision": 15, "date": "2026-11-24", "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).", "ref": "#36505" },
+        { "revision": 16, "date": "2026-11-25", "change": "steps[1]: the Studio home is removed (#36908). 'Build an app' opens Studio on the last package, or Setup → Packages when there is none; the other chip reads 'New blank app' and opens Setup → Packages with New package open. There is no Studio landing. Read from source at PR head (HomePage.tsx, useNewPackageDoorPath, studioEntryPermissions.ts). No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -107,7 +110,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 13,
+      "revision": 14,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -126,7 +129,7 @@
         "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
         "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (objectui F4, as repaired at 0b36ffa, gives its picklist one real option first for this reason). Assert the empty-row half with real options present",
         "let the autosave land (Studio has no Save button; on the Data pillar the autosave shows as the PUT …?mode=draft answering 200 and the header chip 'Draft · N unpublished', engine.studio.itemDraftPending; QA run #29893 found no 'Saved HH:MM' status there), then Publish → the review sheet → 'Publish all'; GET /api/v1/meta/object/NS_repair_asset and record the full field list and its order",
-        "reopen the object in the Data pillar: rename one picklist value, then reorder the fields on the Form tab — the form designer is dnd-kit (ObjectFormDesigner.tsx: a PointerSensor with a 4 px activation distance and a KeyboardSensor), so drag with intermediate pointer moves past 4 px, or focus a field's drag handle and press Space, an arrow key, Space; a single synthetic jump does not start a drag (automation-input). Let the autosave land and Publish again",
+        "reopen the object in the Data pillar: rename one picklist value, then reorder the fields on the Field layout tab (字段布局, formerly Form) — the form designer is dnd-kit (ObjectFormDesigner.tsx: a PointerSensor with a 4 px activation distance and a KeyboardSensor), so drag with intermediate pointer moves past 4 px, or focus a field's drag handle and press Space, an arrow key, Space; a single synthetic jump does not start a drag (automation-input). Let the autosave land and Publish again",
         "GET /api/v1/meta/object/NS_repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
         "create a record via the Records tab and GET /api/v1/data/NS_repair_asset/<id> — the stored column key must be the derived API name (asset_code)"
       ],
@@ -150,7 +153,7 @@
           "evidence": "screenshot + input value read"
         },
         {
-          "clause": "an empty picklist option row does not trip spec validation (no developer-facing 'System identifier must be at least 2 characters' banner) — judged with the 3 real options already present, because a picklist holding only empty rows legitimately raises the select-needs-options banner — while the PUBLISHED picklist carries exactly the 3 authored options",
+          "clause": "an empty picklist option row does not trip spec validation (no developer-facing 'Option value must not be empty' banner) — judged with the 3 real options already present, because a picklist holding only empty rows legitimately raises the select-needs-options banner — while the PUBLISHED picklist carries exactly the 3 authored options",
           "oracle": "api",
           "verify": "with the 3 real options present, no metadata-validation-banner after the debounce once the empty row is added (F4's negative assertion corroborates the banner half under a different fixture: it seeds ONE real option, not the three this clause judges with, and never publishes, so it does not score this clause), and the meta read shows 3 options — the empty row was dropped, not persisted. A select-needs-options banner shown BEFORE any real option exists is correct and is not this clause's FAIL",
           "evidence": "banner-absence screenshot + the meta read"
@@ -232,6 +235,12 @@
           "date": "2026-11-04",
           "change": "steps[4] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the Data pillar shows no 'Saved HH:MM' line; the autosave is read as the draft PUT's 200 and the 'Draft · N unpublished' chip. Wording only. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
         }
       ]
     },
@@ -439,7 +448,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -456,7 +465,7 @@
       "steps": [
         "author a dashboard draft: PUT /api/v1/meta/dashboard/qa_lifecycle_probe?mode=draft with one dataset-bound widget (dataset: showcase_task_metrics, dimensions: ['status'], values: ['task_count']) — the same door areas/dashboards.json exercises. The writable package of steps[2] must declare the showcase as a dependency to query that dataset: create it with dependencies: { 'com.example.showcase': '^0' } on POST /api/v1/packages. Without it the widget renders its title over 'Dataset query failed: 409 Conflict — The dataset \"showcase_task_metrics\" is held outside the declared dependency closure of package …' (ADR-0141, ADR-0150 D3; QA runs #33861 and #33914)",
         "record the receipt: { success, version, seq, state: 'draft' }",
-        "BOTH sides pre-publish: GET /api/v1/meta/dashboard/qa_lifecycle_probe as the runtime read → 404 (never published) — the draft body must not be served; in Studio the item header shows the draft line 'Draft · N unpublished' (objectui#12725, studioItemDraftStatus.ts; N is the package's pending count) and a numbered pill on the Changes button (objectui#12459). The chip is per item: it shows only while the selected item itself has a draft (N still counts the package), so after the dashboard's own publish the chip goes while the pill keeps counting the app draft. A gone chip does not mean the package is clean; read the pill or GET /api/v1/meta/_drafts?package=PKG for that (QA run #33914). For the Studio half stage the draft in a WRITABLE package (?package=PKG on the draft PUT): the pill counts the pending drafts of the package in scope, and an env-wide, package-less draft is counted in no package scope, so it shows no pill. Open the item in Studio through that package: stage, in the same package, an app draft whose navigation names the dashboard (e.g. an entry of type dashboard, dashboardName qa_lifecycle_probe) and select that entry in the Interfaces pillar — a package with no app shows 'This package has no app yet' and no dashboard to select, so no chip can render; the pill then counts both drafts",
+        "BOTH sides pre-publish: GET /api/v1/meta/dashboard/qa_lifecycle_probe as the runtime read → 404 (never published) — the draft body must not be served; in Studio the item header shows the draft line 'Draft · N unpublished' (objectui#12725, studioItemDraftStatus.ts; N is the package's pending count) and a numbered pill on the Changes button (objectui#12459). The chip is per item: it shows only while the selected item itself has a draft (N still counts the package), so after the dashboard's own publish the chip goes while the pill keeps counting the app draft. A gone chip does not mean the package is clean; read the pill or GET /api/v1/meta/_drafts?package=PKG for that (QA run #33914). For the Studio half stage the draft in a WRITABLE package (?package=PKG on the draft PUT): the pill counts the pending drafts of the package in scope, and an env-wide, package-less draft is counted in no package scope, so it shows no pill. Open the item in Studio through that package: open its item page in the \"All metadata\" area, /_console/studio/PKG/metadata/dashboard/qa_lifecycle_probe (Studio's Interfaces pillar, which opened it through an app's navigation, retired with #36502; re-measure on the first run whether that page draws the item-header chip, and record what it draws instead if not); stage, in the same package, an app draft whose navigation names the dashboard (e.g. an entry of type dashboard, dashboardName qa_lifecycle_probe), so the pill counts both drafts",
         "publish per-ref: POST /api/v1/meta/dashboard/qa_lifecycle_probe/publish → 200; GET now serves the authored body",
         "author a SECOND draft revision on the same name and confirm the live read keeps serving revision 1 until that draft is published",
         "concurrency guard: re-PUT with the STALE version as If-Match and capture the 409",
@@ -574,7 +583,8 @@
         { "revision": 11, "date": "2026-11-02", "change": "acceptance[10] (clause, verify) re-pointed to #28355: revision 10 said a 422 INVALID_METADATA spec refusal writes no row, and #28355 now stamps one denied row per catalogued refusal at the four single-item doors (protocol-refusal-audit.ts, REFUSAL_AUDIT_CODES = NOT_OVERRIDABLE, NOT_CREATABLE, INVALID_METADATA, DESTRUCTIVE_CHANGE, stored lower-case). The clause names those four beside item_locked, metadata_conflict and the batch codes, and keeps NO_DRAFT, INVALID_REQUEST and 5xx as writing none; the verify asks for steps[7]'s 422 as exactly one denied invalid_metadata save row with the actor, and for no row from steps[12]'s 400 or a NO_DRAFT publish. acceptance[3] spells the wire code METADATA_CONFLICT and says the stale If-Match must be sent while a draft row exists. Measured at base 0a41075a through the real protocol doors with a throwaway probe (deleted): the stray-key dashboard draft save answered 422 INVALID_METADATA with one denied invalid_metadata row carrying the actor; a publish with no draft answered 404 NO_DRAFT and a rollback with no toVersion 400 INVALID_REQUEST, neither writing a row; a draft save carrying the published version as If-Match with no draft row answered 409 METADATA_CONFLICT (current is null). Stronger, not weaker: the 422 that scored a row as a FAIL now owes one. QA run #29002 clause FAIL", "ref": "#29013" },
         { "revision": 12, "date": "2026-11-04", "change": "acceptance[3].verify corrected from QA run #29890 (W5-FAIL, at 589049b0): a GET with ?mode=draft answers 400 (the read's parameters are closed; the draft read is ?state=draft), so the no-overwrite proof is the next publish serving the newer draft. Read at base f68b47ca", "ref": "#29906" },
         { "revision": 13, "date": "2026-11-13", "change": "acceptance[6].verify drops the expectation that a publish made outside Studio shows only after a reload: phase 1 of the #32592 ruling (6844196863) has usePendingDrafts read the ledger again when the tab becomes visible or gains focus, and on a poll while it stays visible, sending the tab's metadata-refresh pulse when the answer moved, so the item header line and the Changes pill follow an outside publish or draft without a reload. A hidden tab sends nothing (hiddenTabPollStop.ts). No other clause changed", "ref": "#32592" },
-        { "revision": 14, "date": "2026-11-15", "change": "steps[0] and steps[2] and fixtures.requires[1] re-pointed: the writable package needs a dependency on com.example.showcase to query showcase_task_metrics (else 409, dependency closure); the Draft chip is per item, so its absence does not mean a clean package; and a draft-only name is discarded through discard-drafts, not DELETE (QA run #33861, comment 6894395705, and QA run #33914, comment 6895723718; ledger 6896511848 of #33761 rows 163, 226 and 227; the record numbers the chip step 3). The clauses are unchanged. Read at base 895783a1", "ref": "#33981" }
+        { "revision": 14, "date": "2026-11-15", "change": "steps[0] and steps[2] and fixtures.requires[1] re-pointed: the writable package needs a dependency on com.example.showcase to query showcase_task_metrics (else 409, dependency closure); the Draft chip is per item, so its absence does not mean a clean package; and a draft-only name is discarded through discard-drafts, not DELETE (QA run #33861, comment 6894395705, and QA run #33914, comment 6895723718; ledger 6896511848 of #33761 rows 163, 226 and 227; the record numbers the chip step 3). The clauses are unchanged. Read at base 895783a1", "ref": "#33981" },
+        { "revision":  15, "date":  "2026-11-24", "change":  "steps[2] opens the dashboard's draft on its All-metadata item page instead of selecting it in Studio's Interfaces pillar, retired by #36502; the app draft stays, for the pill's two-draft count. Whether the generic item page draws the per-item chip is marked for re-measure on the first run. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -1306,7 +1316,7 @@
       "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1329,7 +1339,7 @@
         "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
         "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
         "both-sides gate: boot the launch entry showcase-react-pages-off-3779 (OS_PAGE_REACT_ENABLED=false), sign in as the seeded admin and re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If that entry cannot boot, record this clause blocked(environment)",
-        "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft IN A WRITABLE PACKAGE (?package=PKG) that also holds an app whose navigation references the page, and open it in Studio at /_console/studio/PKG/interfaces?surface=page:NAME, where the draft preview's 'HTML page failed to compile (N)' panel renders with the diagnostic messages. An env-wide (package-less) draft has no Studio surface, and the save gate keeps a faulting html page off the rendered route, so the panel cannot be met anywhere else (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
+        "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft IN A WRITABLE PACKAGE (?package=PKG) and open its item page in Studio's \"All metadata\" area, /_console/studio/PKG/metadata/page/NAME (Studio's Interfaces pillar, which opened it at /interfaces?surface=page:NAME through an app's navigation, retired with #36502), where the draft preview's 'HTML page failed to compile (N)' panel renders with the diagnostic messages. An env-wide (package-less) draft has no Studio surface, and the save gate keeps a faulting html page off the rendered route, so the panel cannot be met anywhere else (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
       ],
       "acceptance": [
         {
@@ -1394,7 +1404,8 @@
         { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" },
         { "revision": 4, "date": "2026-10-25", "change": "the react-pages tier defaults OFF (ADR-0081 amendment): fixtures.requires names the showcase's committed .env opt-in OS_PAGE_REACT_ENABLED=true, and the both-sides gate's off-state is a boot with OS_PAGE_REACT_ENABLED=false (steps[6], acceptance[4], negative[1], source rows). The clauses are unchanged", "ref": "claude/project-thread-80dotk" },
         { "revision": 5, "date": "2026-10-28", "change": "knownGaps/source re-pointed from ui/e2e/live/showcase-smoke.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B) as a duplicate: every surface it swept and each of its four assertions are in examples/app-showcase/e2e/showcase-smoke.spec.ts, which Nightly Tiers runs, with a wider surface list and stricter waits. That sweep includes the three html/react pages, which the old note said it did not; it pins render-clean only, so the item stays browser-driven. No clause changed", "ref": "#25914" },
-        { "revision": 6, "date": "2026-11-04", "change": "fixtures.requires[1] and steps[6] name the .claude/launch.json entry showcase-react-pages-off-3779 as the off-state boot of the both-sides gate. QA run #29672 could not flip the env, because a runner that starts servers only from launch.json had no such entry. No clause changed", "ref": "#29819" }
+        { "revision": 6, "date": "2026-11-04", "change": "fixtures.requires[1] and steps[6] name the .claude/launch.json entry showcase-react-pages-off-3779 as the off-state boot of the both-sides gate. QA run #29672 could not flip the env, because a runner that starts servers only from launch.json had no such entry. No clause changed", "ref": "#29819" },
+        { "revision":  7, "date":  "2026-11-24", "change":  "steps[7](a) opens the faulting draft on its All-metadata item page instead of Studio's Interfaces pillar, retired by #36502; the app that referenced the page is no longer needed to reach it. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -2260,7 +2271,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 10,
+      "revision": 12,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2270,7 +2281,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
-          "a writable package created from the Studio landing (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
+          "a writable package created from Setup → Packages (New package) holding one published object with a few fields, one flow, an app whose navigation names one dashboard, and one permission set"
         ]
       },
       "steps": [
@@ -2380,7 +2391,14 @@
           "date": "2026-11-15",
           "change": "steps[4]: departure (a) from the Automations pillar must use another pillar's link, since the Automations link is a no-op there (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 167; the record numbers it steps[2]). The clauses are unchanged. Read at base 895783a1",
           "ref": "#33981"
-        }
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
+        },
+        { "revision": 12, "date": "2026-11-25", "change": "fixtures.requires[1]: the writable package is created from Setup → Packages (New package); the Studio landing it named is removed (#36908). steps[2]'s studio-home departure is unchanged here. No clause changed", "ref": "#36908" }
       ]
     },
     {
@@ -2704,7 +2722,7 @@
       "title": "Flows outside any package have their own Studio scope: /studio/~org offers only the Automations pillar, lists only package-less flows, opens them editable, saves drafts bound to no package and publishes each by reference",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2718,7 +2736,7 @@
         ]
       },
       "steps": [
-        "with no package-less flow yet, open /_console/studio: the landing draws no 'Flows in no app' entry (it is drawn only when there is at least one such flow, with the count); open /_console/studio/~org/automations directly: it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
+        "with no package-less flow yet, open /_console/studio/~org/automations directly (the Studio left menu carries its entry under Automations since #36899; the Studio home that drew a 'Flows in no app' card was removed by #36908): it offers one pillar only, no Create app, and an empty state that names the way to change a packaged flow ('No flows outside a package. To change a packaged flow, open its package and use New similar.', engine.studio.org.none) with no action and no link out of Studio (StudioDesignSurface.tsx, the auto-empty state: since ADR-0146 D11 no Setup page copies into this scope)",
         "write the package-less flow (fixtures.requires[1]); reload: the rail lists qa_org_raw and none of the showcase's packaged flows; GET /api/v1/meta/flow?package=com.example.showcase omits it, the unscoped list includes it",
         "open it: the canvas and the Enabled switch are editable; change a node label; let the autosave land; read GET /api/v1/meta/_drafts?type=flow — the draft row carries no package",
         "Publish → the review sheet lists only package-less flow drafts → Publish all; capture the network trace",
@@ -2754,7 +2772,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door) + BuilderLanding.orgScope-11553.test.tsx: jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.packageLessFlows-11553.test.tsx (lists the clone only, opens it editable, one pillar, publishes by reference and nothing through the batch door): jsdom evidence for all three clauses at the component layer; the live server reads stay the run's"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly is false for the package-less scope, objectui#11553; doPublish promotes package-less flow drafts one by one through publishDraft)",
@@ -2776,7 +2794,8 @@
           "ref": "#28345"
         },
         { "revision": 3, "date": "2026-11-03", "change": "fixtures.requires[1] names a fixture that still makes a package-less flow, and steps[0], steps[1], steps[4], acceptance[0].verify and source[1] follow it. Since #28149 (ADR-0146 D4) the clone door lands its copy in the source's pair <base>.custom, so QA run #29672's clone of showcase_urgent_task_alert answered packageId com.example.showcase.custom and made no package-less flow; the run substituted PUT /api/v1/meta/flow/qa_org_raw naming no package (200) and passed every clause on it. Read at base 339f63da30: ADR-0146 D11 closes a package-less write only onto an item a code package ships (packagelessOverlayWriteRefusal), so a fresh name stays writable, and a PUT with no ?mode= is an active save (meta-save-request.ts). The same run found steps[0]'s empty state stale: it now reads engine.studio.org.none with no Open in Setup link (StudioDesignSurface.tsx). The clauses are unchanged. Card #29679, from QA run #29672", "ref": "#29679" },
-        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" }
+        { "revision": 4, "date": "2026-11-17", "change": "steps[0] no longer opens a landing entry when there is no package-less flow: since #34715 the Studio landing draws its 'Flows in no app' entry (formerly 'Organization flows') only when at least one such flow exists, with the count, so the step reads the entry's absence and opens the scope by its URL. The clauses are unchanged. Card #34715", "ref": "#34715" },
+        { "revision": 5, "date": "2026-11-24", "change": "steps[0] opens the scope by its URL alone and names its menu entry: the Studio home, whose 'Flows in no app' card it read, was removed (#36908), and the left menu carries the entry since #36899. automated.ref drops the deleted home pin. The clauses are unchanged. Card #36908", "ref": "#36908" }
       ]
     },
     {
@@ -3243,7 +3262,7 @@
       "title": "The Data pillar's API tab is a truthful REST reference: five endpoints under /api/v1/data/OBJECT, an example body built from the object's draft fields that the write path accepts, and copied cURL commands that succeed once a token is put in",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3259,7 +3278,7 @@
       },
       "steps": [
         "open /_console/studio/PKG/data → the object → API: list the endpoints the tab shows (method + path) and read the create example body",
-        "add a field in the Form tab WITHOUT publishing; return to API and re-read the example body (with the inspector panel open, the flat tabs, API among them, fold into 'Advanced' below about 1000 px of container width: reach API through Advanced or close the panel)",
+        "add a field in the Field layout tab (字段布局, formerly Form) WITHOUT publishing; return to API and re-read the example body (with the inspector panel open, the flat tabs, API among them, fold into 'Advanced' below about 1000 px of container width: reach API through Advanced or close the panel)",
         "publish; copy each endpoint's cURL (Copy cURL), replace <token> with the session token and each `<id of a TARGET record>` placeholder (a REQUIRED reference) with the id of an existing TARGET record, and run them in order: list, create (with the tab's example body), get, update, delete on the created id"
       ],
       "acceptance": [
@@ -3316,6 +3335,12 @@
           "date": "2026-11-04",
           "change": "steps[1] annotated from QA run #29893 (W5-STUDIO, at 589049b0): with the inspector open the tabs fold into 'Advanced' in a narrow container. Wording only. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "steps name the object page tab by its new name, Field layout (字段布局, formerly Form; card #36505).",
+          "ref": "#36505"
         }
       ]
     },
@@ -3515,8 +3540,9 @@
       "id": "studio-authoring.interfaces-create-dialogs",
       "title": "The Interfaces create dialogs work end to end: Create app derives its identifier and scaffolds one menu entry per package object (none when the box is cleared), New dashboard / report / page write spec-valid drafts linked from the menu, a report without a dataset or a measure and an identifier already taken are refused in the dialog, and everything opens in the published app",
       "since": "v18",
-      "status": "active",
-      "revision": 4,
+      "status": "retired",
+      "retiredReason": "The surface this item proved was removed by #36502: Studio's Interfaces pillar retired, and with it the dialogs this item drove from it — the 'Add to navigation' menu's New dashboard, New report and New page (doCreateSurface, interfaceCreate.tsx) and Create app's landing on that pillar. What stays is carried elsewhere: Create app's identifier derivation and its menu scaffold (box on and off) are studio-authoring.first-run-loop's (Create app still opens from Studio, and now stays on the Data pillar); a dashboard, report or page is created in the running app or through the API (studio-authoring.report-authoring-options, studio-authoring.authored-page-slots-and-variables), and the identifier-taken refusal is the create door's own. No single successor covers every clause, so no supersededBy.",
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3615,7 +3641,8 @@
           "date": "2026-11-14",
           "change": "steps[3] and steps[5] name where the create entries live (QA run #33048, comment 6846028996): the Interfaces rail's 'Add to navigation' menu (if-create-menu → if-create-dashboard / -report / -page, StudioDesignSurface.tsx) and the page dialog's 'Written in' select (ui/packages/i18n/src/namespaces/studio/en.ts). No clause changed. Read at base 87330e89",
           "ref": "#33329"
-        }
+        },
+        { "revision": 5, "date": "2026-11-24", "change": "Retired by #36502, which retired Studio's Interfaces pillar and the create dialogs it opened (New dashboard / report / page, interfaceCreate.tsx) together with their jsdom pins (StudioDesignSurface.interfacesCreate-11823, interfacesCreatePage-11823, createAppOpensInterfaces-11794). The clauses that outlive the pillar are carried as retiredReason lists. A retired item is not run. No clause text changed", "ref": "#36502" }
       ]
     },
     {
@@ -3623,7 +3650,7 @@
       "title": "A package dashboard renders every widget type the spec declares — those Studio offers and those written through the API — and every global-filter type renders its control and re-scopes the widgets bound to it; Studio's two widget-type entries offer the same set",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3638,7 +3665,7 @@
         ]
       },
       "steps": [
-        "open the dashboard in /_console/studio/PKG/interfaces; read the Add-widget menu's type list and, on one widget, the Type picker's list",
+        "open the dashboard in the running app's design mode (DashboardInPageEditor; Studio's Interfaces pillar, where this was read before, retired with #36502); read the Add-widget menu's type list and, on one widget, the Type picker's list. Re-measure on the first run whether the in-app editor offers the same lists, and record the difference if not",
         "add one widget of every type the Add menu offers, bound to the dataset (a dimension and a measure each); the menu offers every ChartTypeSchema member since #26967, so for any type it does not list, record the missing type and write that widget into the same dashboard draft with PUT /api/v1/meta/dashboard/NAME?mode=draft&package=PKG (keep the Studio-authored widgets in the body)",
         "global filters: add one filter of each type — text, select (with options or optionsFrom), date, number, lookup (with optionsFrom {object, valueField, labelField}: a lookup filter draws the same select control and, with no options or optionsFrom, offers no choices — ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx) — and bind each to at least one widget through that widget's filter mapping; leave one widget unbound, which means filterBindings { NAME: false } for EVERY filter on it. A widget with no filterBindings entry is not unbound: it inherits each filter on that filter's own field (ui/packages/core/src/utils/dashboard-filters.ts resolveBoundField: an explicit binding, then targetWidgets, then the filter's field; read from source, not driven live)",
         "publish; open the board in the app; screenshot it settled",
@@ -3673,7 +3700,7 @@
         {
           "clause": "Studio's global-filter editor never autosaves an incomplete filter: the item is held until complete, and no other edit is lost",
           "oracle": "network",
-          "verify": "no dashboard PUT carries the incomplete filter. Four cases, each judged: (a) the edits made BEFORE Add item survive a reload; (b) an edit made while the item is held is carried by the PUT that completes the item, answered 200 (ui/packages/app-shell/src/views/studio-design/InterfacesPillar.heldListItem-27459.test.tsx); (c) a reload while the item is held raises the browser's leave-site prompt, and Leave then discards the held item and the edits kept with it, by design (studio-authoring.held-edit-leave-guard) — a reload with no prompt that loses an edit is a FAIL; (d) the wave-4 shape, a Field filled with Options From begun, is held like any incomplete item: no PUT carries it and a later edit still saves (#29006, fixed by #29300)",
+          "verify": "no dashboard PUT carries the incomplete filter. Four cases, each judged: (a) the edits made BEFORE Add item survive a reload; (b) an edit made while the item is held is carried by the PUT that completes the item, answered 200 (its jsdom pin, InterfacesPillar.heldListItem-27459.test.tsx, retired with the Interfaces pillar in #36502: the held-item judgement itself stays pinned in metadataError.heldListItem-27459.test.ts); (c) a reload while the item is held raises the browser's leave-site prompt, and Leave then discards the held item and the edits kept with it, by design (studio-authoring.held-edit-leave-guard) — a reload with no prompt that loses an edit is a FAIL; (d) the wave-4 shape, a Field filled with Options From begun, is held like any incomplete item: no PUT carries it and a later edit still saves (#29006, fixed by #29300)",
           "evidence": "the trace + the post-reload read"
         }
       ],
@@ -3743,7 +3770,8 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[2]: the 'Studio has no dataset editor' parenthetical is stale, as #29906 found for interfaces-create-dialogs and report-authoring-options. Studio's New dataset entry (datasetCreate.tsx DatasetCreateEntry, objectstack#27518) sits beside the widget inspector's dataset picker (DashboardWidgetInspector.tsx) and the New report dialog's. The fixture stays API-written for a known shape. No clause changed. Read at base 232d3bb5ef",
           "ref": "#30129"
-        }
+        },
+        { "revision":  8, "date":  "2026-11-24", "change":  "steps[0] reads the widget lists in the running app's design mode, since Studio's Interfaces pillar retired with #36502 (marked for re-measure); acceptance[4](b)'s jsdom ref names the pin that retired with the pillar and the helper pin that stays. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -3751,7 +3779,7 @@
       "title": "Reports authored in Studio render every report type from the same dataset — tabular, summary, matrix and joined — and their runtimeFilter, order and chart take effect in the published app, while a joined report refuses a chart and a block with no dataset",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3766,7 +3794,7 @@
         ]
       },
       "steps": [
-        "in /_console/studio/PKG/interfaces create a report (New report: the dataset and a measure); on its canvas set the type to tabular, then summary with a row dimension, then matrix with a row and a column dimension; keep a copy of each as its own report",
+        "create a report in the running app (its New report page, ReportNewPage; Studio's Interfaces pillar and its New report dialog retired with #36502), or write it through the API (PUT /api/v1/meta/report/NAME?mode=draft&package=PKG), with the dataset and a measure; on its editor set the type to tabular, then summary with a row dimension, then matrix with a row and a column dimension; keep a copy of each as its own report",
         "on the summary report set runtimeFilter to narrow the rows (e.g. one category value), order by the measure descending, and an embedded chart",
         "author a joined report with two blocks, each bound to the dataset with its own rows and values (switching the Report type to Joined is held, and nothing saves, until the first block is added, #29022: a runner who switches the type and reloads before adding a block sees the previous type again)",
         "refusals: PUT a joined report carrying a chart, and one whose block has no dataset, with ?mode=draft&package=PKG; capture both",
@@ -3840,7 +3868,8 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[2] and steps[2] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the 'no dataset editor' parenthetical is stale (New dataset, datasetCreate.tsx), and a switch to Joined is held until a block is added (#29022). steps[0] names no Joined switch and is unchanged. Read at base f68b47ca",
           "ref": "#29906"
-        }
+        },
+        { "revision":  5, "date":  "2026-11-24", "change":  "steps[0] creates the report in the running app or through the API: Studio's Interfaces pillar and its New report dialog retired with #36502. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -3848,7 +3877,7 @@
       "title": "App and menu-entry keys reach the running app: branding, areas and context selectors render; an entry's viewName, recordId / recordMode, filters, badge, requiresObject and visible each change what the entry does or who sees it; hidden takes an app off the switcher and nothing else — and Studio's menu-entry inspector edits them",
       "since": "v18",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3871,7 +3900,7 @@
         "as admin and as the member (each in its own context, identity proved with GET /api/v1/auth/get-session), open the app (no dialog opens over it: a fresh organization's first-run checklist is a non-modal card on Home only, RUNNER environment facts) and read the chrome colours and logo, the areas switcher, the context selector, and click each entry",
         "GET /api/v1/meta/app?id=APP as each persona and list the entries each receives",
         "set hidden: true on a second app of the package (through the API) and publish; as the member read the App Switcher, the Home launcher, the avatar menu and GET /api/v1/meta/app?id=SECOND; open its URL directly",
-        "open the app in /_console/studio/PKG/interfaces, select each entry and read its inspector. Studio's Interfaces pillar opens only the package's FIRST app (the first app the package lists, else its first app draft) and draws only that app's top-level `navigation`: an entry that lives only inside `areas` has no rail row (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the Interfaces pillar's app load). So the app steps[0] writes must be the package's first, and its top-level navigation must hold at least one entry carrying each key acceptance[5] names; the area entries' runtime effect is read in acceptance[0]–[3], not here"
+        "open the app in the running console, turn on design mode, and open each entry in the menu editor (DesignModeMenu; Studio's Interfaces pillar and its nav-item inspector, where this was read before, retired with #36502). The app's top-level navigation must hold at least one entry carrying each key acceptance[5] names; re-measure on the first run which of those keys the in-app menu editor offers a control for, and record the rest as metadata-only (editable on the app's All-metadata item page, /_console/studio/PKG/metadata/app/NAME); the area entries' runtime effect is read in acceptance[0]–[3], not here"
       ],
       "acceptance": [
         {
@@ -3907,7 +3936,7 @@
         {
           "clause": "Studio's menu-entry inspector edits these keys — visible, viewName, recordId / recordMode, filters, badge / badgeVariant, requiresObject, order — as the metadata admin's app editor does",
           "oracle": "dom",
-          "verify": "each key has an editable control in the Studio inspector, and an edit there autosaves it into the app draft. The View picker offers the package's view items of the bound object and writes the qualified 'OBJECT.KEY' name (StudioNavItemInspector.tsx, e.g. gsixn_project.closed_projects), while steps[0]'s API write may name the bare list-view key the runtime also accepts: record which spelling each entry carries, and whether an entry carrying the qualified name opens that view (QA run #29893 did not drive it)",
+          "verify": "each key has an editable control in the running app's design-mode menu editor or, where it has none, on the app's All-metadata item page, and an edit there saves it into the app draft (the Studio nav-item inspector this read before, StudioNavItemInspector.tsx, retired with the Interfaces pillar in #36502; its View picker wrote the qualified 'OBJECT.KEY' name, e.g. gsixn_project.closed_projects); while steps[0]'s API write may name the bare list-view key the runtime also accepts: record which spelling each entry carries, and whether an entry carrying the qualified name opens that view (QA run #29893 did not drive it)",
           "evidence": "the inspector DOM per key + one autosave PUT"
         }
       ],
@@ -3923,7 +3952,7 @@
       "source": [
         "packages/spec/src/ui/app.zod.ts (branding: primaryColor / accentColor / logo / favicon; areas; contextSelectors; hidden — 'navigation only, never an access gate'; the nav item keys viewName, recordId, recordMode, filters, badge, badgeVariant, requiresObject, visible, order)",
         "packages/metadata-core/src/artifact-forward-conversion.ts (where the retired app-hidden-to-unpublished conversion stood; dbf7e04a removed it from packages/spec/src/conversions/registry.ts, so a stored hidden: true round-trips — #26712, closed as fixed)",
-        "ui/packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx (the Studio menu-entry inspector)",
+        "ui/packages/app-shell/src/layout/DesignModeMenu.tsx (the running app's design-mode menu editor; the Studio menu-entry inspector, StudioNavItemInspector.tsx, retired with the Interfaces pillar in #36502)",
         "cross-ref: the doc-type menu entry is studio-authoring.doc-on-app-menu; nav rendering on the stock showcase is platform-core.nav-surfaces-render"
       ],
       "history": [
@@ -3974,7 +4003,8 @@
           "date": "2026-11-06",
           "change": "steps[1] no longer tells the runner to dismiss the 'Set the default currency' prompt: PR #30868 (#30206) retired that boot-time dialog for a non-modal first-run checklist card on Home, which does not cover the app (RUNNER environment facts). No clause changed. Read at base 0e882086",
           "ref": "#30876"
-        }
+        },
+        { "revision":  9, "date":  "2026-11-24", "change":  "steps[4], acceptance[5] and source[2] read the menu-entry keys in the running app's design-mode menu editor (or the app's All-metadata item page where it offers no control): Studio's Interfaces pillar and its nav-item inspector retired with #36502. Which keys the in-app editor offers is marked for re-measure. The clause's subject (an editable control per key, saved into the app draft) is unchanged", "ref":  "#36502" }
       ]
     },
     {
@@ -3982,7 +4012,7 @@
       "title": "Pages authored in a package take the page model's full shape: a slotted record page renders its slot overrides on the object's records, and page variables of all six types drive visibleWhen on the rendered page — at first render and live as a writer changes them",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3997,7 +4027,7 @@
       },
       "steps": [
         "slotted page: PUT /api/v1/meta/page/NAME?mode=draft&package=PKG with type 'record', object OBJ, kind 'slotted', isDefault true and slots overriding highlights, details and discussion (not tabs: `slots.tabs` is retired by ADR-0085, and the save door refuses it with its tombstone, '`page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) …', packages/spec/src/ui/page.zod.ts; the slot keys are header, actions, alerts, highlights, details and discussion); publish; open a record of OBJ in the app",
-        "variables: on an app page of the package (created in Studio's Interfaces, New page, or written through the API) declare six variables, one per type — string, number, boolean, object, array, record_id — each with a default; add one element:text per variable whose visibleWhen reads it (e.g. page.flag == true, page.count > 2, size(page.items) > 0, page.obj.k == 'v', page.name == '', page.rec == ''), plus an element:text_input writing the string variable and an element:record_picker writing the record_id one",
+        "variables: on an app page of the package (written through the API, or created in the running app; Studio's Interfaces pillar and its New page retired with #36502) declare six variables, one per type — string, number, boolean, object, array, record_id — each with a default; add one element:text per variable whose visibleWhen reads it (e.g. page.flag == true, page.count > 2, size(page.items) > 0, page.obj.k == 'v', page.name == '', page.rec == ''), plus an element:text_input writing the string variable and an element:record_picker writing the record_id one",
         "publish; open the page; screenshot the first render; then type into the text input and pick a record, re-reading after each without reloading"
       ],
       "acceptance": [
@@ -4060,7 +4090,8 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
-        }
+        },
+        { "revision":  4, "date":  "2026-11-24", "change":  "steps[1] no longer names Studio's Interfaces New page, retired with #36502, as a way to create the page. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -4447,7 +4478,7 @@
       "title": "Authorable keys Studio has no control for still work when another door writes them: per metadata type, each key written into a package draft through the metadata API is stored, served after publish and takes its runtime effect",
       "since": "v18",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -4463,7 +4494,7 @@
           "the showcase's external datasource showcase_external (examples/app-showcase/src/system/datasources/showcase-external.datasource.ts) for the datasource / external rows"
         ],
         "knownGaps": [
-          "ROWS THAT FAIL TODAY (QA run #26715, at 3fcafcd3) — score each fail citing its record: the form-view key defaults applies only on some form surfaces (gap-view card). Out of the matrix since QA run #29672 (at 3482f3d8d2, re-read at 339f63da30): drawerSide and drawerWidth are refused at parse, so they are no longer a stored-and-inert row (their retiredKey tombstones in packages/spec/src/ui/view.zod.ts, and form-view-drawer-keys-removed in packages/spec/src/conversions/registry.ts); layout, defaultTab and tabPosition have a Studio control, since the form-view inspector renders the form variant's spec schema through SchemaForm (ui/packages/app-shell/src/views/metadata-admin/inspectors/ViewVariantInspector.tsx), so step 4 moves them out. layout:'horizontal' not drawn on the Studio canvas was #29676, fixed by #29759 (7ba8b11f52). Fixed since the run, so no longer fails: a list view locked by sharing.lockedBy alone, which now shows its lock indicator (#29312, merged 2026-11-02); field deleteBehavior 'restrict' under a master_detail parent (#26718; since out of the matrix: the field inspector offers a deleteBehavior control on lookup, user and master_detail fields, offeredDeleteBehaviors in ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx, so step 4 moved it out, QA run #33861), an object bound to an unknown datasource (#26912), a chart list view on another object's dataset (#26719). Measured rendering by QA run #27441 at c4c515ad, so no longer a failing row: the form-view `buttons` key (the authored submit label shown, cancel hidden; ObjectForm folds buttons.submit and buttons.cancel onto its flat renderer props, ui/packages/plugin-form/src/ObjectForm.tsx)",
+          "ROWS THAT FAIL TODAY (QA run #26715, at 3fcafcd3) — score each fail citing its record: the form-view keys subforms and modalSize, which no surface reads from a form view since #36425 (PR #36543; a source read at base 5dbcc02b, no run yet: the named-form page FormPage.tsx names neither key, recordFormSubforms in ui/packages/app-shell/src/utils/recordFormNavigation.ts takes child collections from the object alone, and modalSize's liveness re-audit is #36544). The form-view key defaults left this list with the same change: the record form, where it did not apply, no longer loads a form view, and the named-form page applies it on a create. Out of the matrix since QA run #29672 (at 3482f3d8d2, re-read at 339f63da30): drawerSide and drawerWidth are refused at parse, so they are no longer a stored-and-inert row (their retiredKey tombstones in packages/spec/src/ui/view.zod.ts, and form-view-drawer-keys-removed in packages/spec/src/conversions/registry.ts); layout, defaultTab and tabPosition have a Studio control, since the form-view inspector renders the form variant's spec schema through SchemaForm (ui/packages/app-shell/src/views/metadata-admin/inspectors/ViewVariantInspector.tsx), so step 4 moves them out. layout:'horizontal' not drawn on the Studio canvas was #29676, fixed by #29759 (7ba8b11f52). Fixed since the run, so no longer fails: a list view locked by sharing.lockedBy alone, which now shows its lock indicator (#29312, merged 2026-11-02); field deleteBehavior 'restrict' under a master_detail parent (#26718; since out of the matrix: the field inspector offers a deleteBehavior control on lookup, user and master_detail fields, offeredDeleteBehaviors in ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx, so step 4 moved it out, QA run #33861), an object bound to an unknown datasource (#26912), a chart list view on another object's dataset (#26719). Measured rendering by QA run #27441 at c4c515ad, so no longer a failing row: the form-view `buttons` key (the authored submit label shown, cancel hidden; ObjectForm folds buttons.submit and buttons.cancel onto its flat renderer props, ui/packages/plugin-form/src/ObjectForm.tsx)",
           "NOT JUDGEABLE HERE: mailAssociation (needs a mailbox with inbound ingest), ackPlaintextMasking (its only reader is a build-time warning), lifecycle.ttl (the sweep is hourly — drive it only with time to wait for the next sweep), dimensions (inconclusive at 3fcafcd3). Record them not-run with this line cited",
           "app / menu-entry keys are studio-authoring.app-and-nav-properties, page slots and variables studio-authoring.authored-page-slots-and-variables, the widget types studio-authoring.dashboard-widget-and-filter-types — not repeated here",
           "one runner's budget does not reach the matrix: QA run #31486 (owed:weekly, at 0647dabb) drove 9 rows (managedBy, ownership, systemFields, autonumber format, storage notNull, internal, maskingRule, flow successMessage, flow requiredPermissions) and reached no other, so acceptance[0]–[2] scored partial. The item needs a runner of its own, or a split of the matrix into items; the split is owed and not made here"
@@ -4531,7 +4562,7 @@
         "flow.errorHandling { strategy, maxRetries } → maxRetries 2 yields three failed attempts, each its own failed run in GET /api/v1/automation/NAME/runs (retryExecution in packages/services/service-automation/src/engine.ts starts each attempt as a new run), not three attempts inside one run",
         "flow.nodes[].inputSchema → stored and served",
         "view.list: searchableFields, userFilters, resizable, compactToolbar, selection, pagination, rowHeight, grouping, rowColor, hiddenFields, fieldOrder, rowActions, bulkActions, conditionalFormatting, inlineEdit, exportOptions (needs an export grant), appearance, addRecord, showRecordCount, allowPrinting, emptyState → each renders as its key describes; probe compactToolbar, showRecordCount and resizable at the value opposite to what the list does with the key unset, since at that default a stored key renders exactly like no key and proves nothing (gap-view card, 3fcafcd3)",
-        "view.form: groups, subforms, submitBehavior, modalSize, allowSkip, showStepIndicator, buttons → render as described (buttons measured rendering, knownGaps[0]); splitDirection / splitSize / splitResizable → refused at parse (retired in @objectstack/spec 18.3.0 with the split form, ADR-0050); drawerSide / drawerWidth → refused at parse (retired in @objectstack/spec 18.3.0, ADR-0049: no form view opens in a drawer); defaults: partial (knownGaps[0]). layout, defaultTab and tabPosition are not rows: Studio offers a control for each (step 4, knownGaps[0]). modalSize acts only on the form view the record modal selects, the object's default form view, or for a create its `create` form view when one is declared (selectRecordFormView, ui/packages/app-shell/src/utils/recordFormNavigation.ts), so author it there",
+        "view.form (read on the named-form page: publish the scratch form view and open /forms/NAME, adding ?recordId=ID for an edit; since #36425 the record create and edit surfaces load no form view, so nothing drawn there is this row's observable): submitBehavior, allowSkip, showStepIndicator, buttons → render as described (ui/apps/console/src/components/FormPage.tsx reads each; buttons measured rendering, knownGaps[0]); defaults → prefills a create and never an edit (FormPage.tsx readPrefill); groups → the legacy alias of sections, folded onto `sections` at parse (packages/spec/src/ui/view.zod.ts#FormViewSchema), so the draft read carries the sections, which counts as written, and the page draws them; subforms and modalSize → stored and served, with no reader on a form view since #36425: the named-form page reads neither, and the record form takes its child collections from the object's field groups and sizes its own dialog, so each is a FAIL of acceptance[1] and [2] scored against knownGaps[0] (modalSize's ledger re-audit is #36544), never a tick on the stored value; splitDirection / splitSize / splitResizable → refused at parse (retired in @objectstack/spec 18.3.0 with the split form, ADR-0050); drawerSide / drawerWidth → refused at parse (retired in @objectstack/spec 18.3.0, ADR-0049: no form view opens in a drawer). layout, defaultTab and tabPosition are not rows: Studio offers a control for each (step 4, knownGaps[0])",
         "dashboard.requiredPermissions → a viewer without the capability is refused the dashboard. Its steps[0] stored-check runs as a holder of the capability: an admin who does not hold it is refused the draft and the live read alike (403)",
         "dataset (Studio's New dataset, ui/packages/app-shell/src/views/studio-design/datasetCreate.tsx DatasetCreateEntry, writes only a name, an object, the seed's count measure, group-by dimensions and sum measures, so it offers no control for the keys below): include, dimensions with nullLabel, measures count / sum / avg / filtered / ratio, currency format → a report bound to it shows the null bucket labelled and each measure's value",
         "permission.description / isDefault / allowExport / rowLevelSecurity[].positions → the Setup list shows the description; isDefault raises a suggestion; allowExport → export 200 with it, 403 EXPORT_NOT_PERMITTED without; positions limit the policy to holders of the position"
@@ -4599,6 +4630,12 @@
           "date": "2026-11-15",
           "change": "the field.deleteBehavior row leaves the matrix as step 4 says: Studio's field inspector offers a deleteBehavior control (ObjectFieldInspector.tsx offeredDeleteBehaviors), recorded in fixtures.knownGaps[0]. The flow.errorHandling row names its observable: three failed runs, one per attempt, in /runs. QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 172. Variants after the removed row shift down by one. The clauses are unchanged. Read at base 895783a1",
           "ref": "#33981"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-26",
+          "change": "the view.form row is re-audited after #36425 (PR #36543) and its STALE marker of PR #36793 removed. Its observable is the named-form page (/forms/NAME), the one console surface that still loads a form view: submitBehavior, allowSkip, showStepIndicator, buttons and defaults are read there, groups is folded onto sections at parse, and subforms and modalSize have no form-view reader left, so they move into fixtures.knownGaps[0] as failing rows and defaults moves out of it. A source read, not a run: FormPage.tsx, recordFormNavigation.ts, MetadataProvider.tsx, view.zod.ts and packages/spec/liveness/view.json, at base 5dbcc02b. The clauses are unchanged",
+          "ref": "#36798"
         }
       ]
     },
@@ -4730,7 +4767,7 @@
       "title": "A write that names a package nobody installed is refused, for every metadata type as it already is for flows: the save door answers WRITABLE_PACKAGE_REQUIRED and stores nothing, publish-drafts on that id promotes nothing, and Studio opened on it says the package does not exist instead of rendering a writable builder",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4773,7 +4810,7 @@
         {
           "clause": "Studio opened on a package that does not exist shows that it does not exist, with a way back — never a writable builder; an unknown pillar segment does not silently render another pillar",
           "oracle": "screenshot",
-          "verify": "the not-found state for both URLs (no New object, no Create app); the bogus pillar URL is not shown as the Interfaces pillar with the bogus URL kept",
+          "verify": "the not-found state for both URLs (no New object, no Create app); the bogus pillar URL is not shown as another pillar with the bogus URL kept (it was the Interfaces pillar until #36502 retired it; an old /interfaces URL now lands on the Data pillar by design, so it is not a bogus pillar URL)",
           "evidence": "the screenshots described"
         }
       ],
@@ -4809,7 +4846,8 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
-        }
+        },
+        { "revision":  4, "date":  "2026-11-24", "change":  "acceptance[3]'s FAIL shape no longer names the Interfaces pillar, retired by #36502, whose old URL now redirects to the Data pillar by design. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -4817,7 +4855,7 @@
       "title": "Customize a read-only base's view, dashboard or report in Studio: the edit lands in <base>.custom as a declared override, every read serves it, the pair's export carries the declaration, and 'Restore package original' brings the base back",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4839,31 +4877,31 @@
       },
       "steps": [
         "record the shipped base first, for each variant: GET /api/v1/meta/TYPE/NAME, the same with ?package=com.example.showcase, GET /api/v1/meta/TYPE/NAME/layers, and GET /api/v1/packages/com.example.showcase/export — the restore clause diffs against these",
-        "dashboard leg: open /_console/studio/com.example.showcase/interfaces and select showcase_ops_dashboard. Read the header: the editors are read-only and a Customize button (data-testid studio-customize) is offered, titled with the base. Press it with the network panel recording: no write is sent (the dashboard canvas re-runs its analytics dataset query on the unlock re-render, POST /api/v1/analytics/dataset/query/batch, a read; QA run #33861)",
-        "edit a widget title, blur the input, and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and the PUT /api/v1/meta/dashboard/showcase_ops_dashboard?mode=draft&package=com.example.showcase.custom that follows; GET /api/v1/meta/dashboard/showcase_ops_dashboard?state=draft&package=com.example.showcase.custom",
-        "publish through the surface's Pending / Publish, which act on the pair (POST /api/v1/packages/com.example.showcase.custom/publish-drafts); reload the pillar and read the header badge (data-testid studio-override-chip)",
+        "dashboard leg: open showcase_ops_dashboard's All metadata item page, /_console/studio/com.example.showcase/metadata/dashboard/showcase_ops_dashboard (the door since #36502 retired the Interfaces pillar; StudioBundleItemEditor with the type's registered designer). Read the header: the designer is read-only and a Customize button (data-testid studio-customize) is offered, titled with the base. Press it with the network panel recording: no write is sent (the dashboard preview may re-run its analytics dataset query on the unlock re-render, POST /api/v1/analytics/dataset/query/batch, a read; QA run #33861)",
+        "edit the dashboard's Description in its designer, blur the input, and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and the PUT /api/v1/meta/dashboard/showcase_ops_dashboard?mode=draft&package=com.example.showcase.custom that follows; GET /api/v1/meta/dashboard/showcase_ops_dashboard?state=draft&package=com.example.showcase.custom",
+        "publish through the surface's Pending / Publish, which act on the pair (POST /api/v1/packages/com.example.showcase.custom/publish-drafts); reload the item page and read the header badge (data-testid studio-override-chip)",
         "the reads after publish: GET /api/v1/meta/dashboard/showcase_ops_dashboard with no package, with ?package=com.example.showcase, its /layers, and the list GET /api/v1/meta/dashboard; then open the dashboard in the showcase app as the end user (client reload only, no server restart)",
         "export: GET /api/v1/packages/com.example.showcase.custom/export and GET /api/v1/packages/com.example.showcase/export. A standalone view sits in the export's `viewItems` collection, not `views` (packages/metadata-protocol/src/package-unmanaged-install.ts, the assembled viewItems channel)",
         "Restore: open the override chip's popover and press its Restore (data-testid studio-override-restore), read the confirmation (studio-restore-original-dialog) and confirm with studio-restore-original-confirm (StudioCustomizeControls.tsx); capture DELETE /api/v1/meta/dashboard/showcase_ops_dashboard?state=draft&package=com.example.showcase.custom then DELETE …?package=com.example.showcase.custom; repeat step 5's reads and render",
-        "view leg: in the same Interfaces pillar open the showcase_task object leaf's list-view inspector (ObjectListViewInspector) on a packaged list view; Customize, change a setting or the column set, publish, and run steps 5–7 for the view (GET /api/v1/meta/view/VIEW, ?package=com.example.showcase, /layers, the list GET /api/v1/meta/view?object=showcase_task, and the view's end-user render at /apps/com.example.showcase/showcase_task/view/VIEW, e.g. …/view/in_progress — not the 'In-Progress Tasks' nav entry, which is a filtered object entry, nav_slice_in_progress in examples/app-showcase/src/ui/apps/index.ts, and never renders the view). Report leg: the same for the picked report from the Interfaces pillar"
+        "view leg: open a packaged list view's All metadata item page, e.g. /_console/studio/com.example.showcase/metadata/view/showcase_task.in_progress; Customize, change a setting or remove a column in the view's designer (Remove <column>), publish, and run steps 5–7 for the view (GET /api/v1/meta/view/VIEW, ?package=com.example.showcase, /layers, the list GET /api/v1/meta/view?object=showcase_task, and the view's end-user render at /apps/com.example.showcase/showcase_task/view/VIEW, e.g. …/view/in_progress — not the 'In-Progress Tasks' nav entry, which is a filtered object entry, nav_slice_in_progress in examples/app-showcase/src/ui/apps/index.ts, and never renders the view). Report leg: the same for the picked report on its item page, /_console/studio/com.example.showcase/metadata/report/NAME"
       ],
       "acceptance": [
         {
           "clause": "Customize unlocks the item and writes nothing; the first saved edit asks the ensure door once and writes the item's draft into com.example.showcase.custom, declaring overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }, while the base's own item is untouched",
           "oracle": "network",
-          "verify": "step 2 sends no request; step 3 sends exactly one ensure POST (201 on the run's first customization, 200 after), once per editing session: the surface keeps the door's answer only while it is mounted (ensurePairPackage, StudioDesignSurface.tsx), so a fresh page load of the same item asks the ensure door again (200) on its first edit and then the draft PUT naming package=com.example.showcase.custom whose body carries the overrides block and none of the read's `_` keys (overrideDraftBody, StudioCustomizeControls.tsx). No write names com.example.showcase. A draft written into com.example.showcase, or a package-less write, is the FAIL",
+          "verify": "step 2 sends no request; step 3 sends exactly one ensure POST (201 on the run's first customization, 200 after), once per editing session: the editor keeps the door's answer only while it is mounted (StudioBundleItemEditor.tsx), so a fresh page load of the same item asks the ensure door again (200) on its first edit and then the draft PUT naming package=com.example.showcase.custom whose body carries the overrides block and none of the read's `_` keys (overrideDraftBody, StudioCustomizeControls.tsx). No write names com.example.showcase. A draft written into com.example.showcase, or a package-less write, is the FAIL",
           "evidence": "the network trace of steps 2–3 + the pair's draft read"
         },
         {
           "clause": "after publish every read of the base's name serves the override — the read naming no package, the read naming the base, the layered read (code = the base's document, overlay and effective = the override) and the list — so the three reads the epic names show one column set",
           "oracle": "api",
-          "verify": "step 5's reads carry the edited title (dashboard) or column set (view) on all four; the package-less read reports _packageId com.example.showcase and carries the overrides block; /layers' code is byte-identical to step 1's base. Re-fetch each read fresh (cache-staleness). A read that still serves the base, or two reads that disagree, is the FAIL ADR-0146 D8 forbids",
+          "verify": "step 5's reads carry the edited description (dashboard) or column set (view) on all four; the package-less read reports _packageId com.example.showcase and carries the overrides block; /layers' code is byte-identical to step 1's base. Re-fetch each read fresh (cache-staleness). A read that still serves the base, or two reads that disagree, is the FAIL ADR-0146 D8 forbids",
           "evidence": "the four reads per variant, beside step 1's baseline"
         },
         {
           "clause": "the end user sees the customization after publish with no server restart",
           "oracle": "screenshot",
-          "verify": "the showcase dashboard (and, on the view leg, the task list) renders the edited title or columns after a client reload; the server log shows no restart across the sequence",
+          "verify": "the showcase dashboard (and, on the view leg, the task list) renders the edited description or columns after a client reload; the server log shows no restart across the sequence",
           "evidence": "before/after end-user screenshots + the server log excerpt"
         },
         {
@@ -4881,7 +4919,7 @@
         {
           "clause": "'Restore package original' deletes the pair's draft and row at the pair, and every read and the end user's render serve the base again",
           "oracle": "api",
-          "verify": "step 7's two DELETEs name package=com.example.showcase.custom and answer 200; the four reads equal step 1's baseline and the render shows the shipped title or columns. Cancel on the dialog deletes nothing (a separate attempt before the confirm). A restore that answers 200 while any read still serves the override is the FAIL",
+          "verify": "step 7's two DELETEs name package=com.example.showcase.custom and answer 200; the four reads equal step 1's baseline and the render shows the shipped description or columns. Cancel on the dialog deletes nothing (a separate attempt before the confirm). A restore that answers 200 while any read still serves the override is the FAIL",
           "evidence": "the DELETE trace + the post-restore reads diffed against step 1 + the reverted render"
         },
         {
@@ -4896,9 +4934,9 @@
         "a customization that carries no overrides block, or declares a package other than com.example.showcase, is served over the base — FAIL: only the base's pair declares, and only a declared item is served at the base's name (ADR-0146 D2, D8)"
       ],
       "variants": [
-        "dashboard (showcase_ops_dashboard, Interfaces pillar)",
-        "view (a showcase_task list view, the Interfaces pillar's object leaf and its list-view inspector)",
-        "report (a packaged showcase report, Interfaces pillar)"
+        "dashboard (showcase_ops_dashboard, its All metadata item page)",
+        "view (a showcase_task list view, its All metadata item page and the view's designer)",
+        "report (a packaged showcase report, its All metadata item page)"
       ],
       "traps": [
         "stale-console-bundle",
@@ -4908,11 +4946,11 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist; the VIEW variant only, on showcase_task.in_progress: acceptance[0] at the network layer — Customize, one ensure answering 200 or 201, the draft PUT naming package=com.example.showcase.custom with overrides { package: 'com.example.showcase', basedOn } and the edited column set; acceptance[1]'s read naming no package, the read naming the base and the list, at HTTP — not /layers; acceptance[3]'s studio-override-chip drawn — not its sentence or title; acceptance[5]'s two DELETEs at the pair answering 200 and the three reads back to the shipped columns — not Cancel and not the end user's render. It drives neither the dashboard nor the report variant, acceptance[2] or acceptance[4]) + ui/packages/app-shell/src/views/studio-design/InterfacesPillar.customize-28562.test.tsx + StudioCustomizeControls.customize-28562.test.tsx + StudioDesignSurface.customizePublish-28562.test.tsx (jsdom, the console's calls and states for acceptance[0], [3] and [5]'s client half) + packages/objectql/src/protocol-custom-override-effective-read.test.ts (protocol layer: the five reads agree and the pair's per-package read carries the declaration — corroborates acceptance[1] and [4], drives no HTTP door). The dashboard and report variants, the end user's render and both exports remain the run's live leg"
+        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist; the VIEW variant only, on showcase_task.in_progress: acceptance[0] at the network layer — Customize on the view's All metadata item page (/studio/com.example.showcase/metadata/view/showcase_task.in_progress, objectstack#36502), one ensure answering 200 or 201, the draft PUT naming package=com.example.showcase.custom with overrides { package: 'com.example.showcase', basedOn } and the edited column set; acceptance[1]'s read naming no package, the read naming the base and the list, at HTTP — not /layers; acceptance[3]'s studio-override-chip drawn — not its sentence or title; acceptance[5]'s two DELETEs at the pair answering 200 and the three reads back to the shipped columns — not Cancel and not the end user's render. It drives neither the dashboard nor the report variant, acceptance[2] or acceptance[4]) + ui/packages/app-shell/src/views/studio-design/StudioBundleItemEditor.customize-28569.test.tsx + StudioCustomizeControls.customize-28562.test.tsx + StudioDesignSurface.customizePublish-28562.test.tsx + metadataArea.test.ts (areaItemOpensFormEditor: a read-only base's view, dashboard, report and page open that editor) (jsdom, the console's calls and states for acceptance[0], [3] and [5]'s client half) + packages/objectql/src/protocol-custom-override-effective-read.test.ts (protocol layer: the five reads agree and the pair's per-package read carries the declaration — corroborates acceptance[1] and [4], drives no HTTP door). The dashboard and report variants, the end user's render and both exports remain the run's live leg"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#STUDIO_CUSTOMIZE_TYPES (view, dashboard, report), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#overrideDraftBody (the pair's draft body and its declaration), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioCustomizeButton, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioOverrideChip, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioRestoreOriginalDialog",
-        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Interfaces pillar's save into the pair and restoreOriginal: two client.reset calls at the pair, the draft then the row) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage",
+        "ui/packages/app-shell/src/views/studio-design/StudioBundleItemEditor.tsx (the All metadata item page's Customize editor: the save into the pair and its Restore, the draft then the row; the door since #36502 retired the Interfaces pillar) + ui/packages/app-shell/src/views/studio-design/metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage",
         "packages/spec/src/kernel/override-declaration.zod.ts#OverrideDeclarationSchema (overrides: { package, basedOn })",
         "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D2, D3, D8 (the five reads agree; export carries the declaration; the epic's two-minute check 「HotCRM 视图「定制」→ 三处读取同一列集、导出带声明、「恢复包原版」回原样」)",
         "#28562 (N-17) landed by PR #28711; the one effective read #28409 (N-10) by PR #28507; the pair's Pending and Publish by PR #28747 (#28572)",
@@ -4955,6 +4993,12 @@
           "date": "2026-11-15",
           "change": "steps[1] says Customize sends no write (the canvas re-runs a read), and steps[7] names the view's own end-user route instead of the task list, since the 'In-Progress Tasks' nav entry is a filtered slice, not the view (QA run #33861, comment 6894395705; ledger 6896511848 of #33761 row 174; the record numbers the Customize step 2). The clauses are unchanged. Read at base 895783a1",
           "ref": "#33981"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-24",
+          "change": "RE-POINTED: the Customize door for a read-only base's dashboard, view and report moves from the retired Interfaces pillar to each item's All metadata item page (StudioBundleItemEditor, metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES), so steps[1], [2], [3] and [7], the wording of acceptance[0]-[2] and [5], the variants, automated.ref and source name that page and its designer. The dashboard edit is its Description, since the designer edits a widget title only through the widget's own inspector. The clauses are unchanged. The live spec's view leg drives the new door (test:e2e:live:ci 23/23 green on a local CI-shaped boot). Read at base 47ed85d2",
+          "ref": "#36502"
         }
       ]
     },
@@ -5061,10 +5105,10 @@
     },
     {
       "id": "studio-authoring.package-customization-counts-and-marks",
-      "title": "The Studio landing says 'n customized, m switched off' for each read-only base, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
+      "title": "Setup → Packages says 'n customized, m switched off' in each read-only base's detail, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
       "since": "v18",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -5083,17 +5127,17 @@
       },
       "steps": [
         "GET /api/v1/packages/com.example.showcase/customizations and record counts.overrides, counts.extensions and counts.switchedOff and the listed items",
-        "open /_console/studio and read the read-only showcase card's line (data-testid studio-landing-customizations, data-state read), its pair link (studio-landing-customizations-pair) and its switched-off link (studio-landing-customizations-switched-off)",
+        "open /_console/apps/setup/component/developer/packages?face=admin, open the showcase row's detail and read its customizations section (data-testid pkg-detail-customizations-summary, data-state read), its rows (pkg-detail-customization, data-mode changed / added / arranged / switchedOff) and its Customize in Studio link (pkg-detail-customize)",
         "open /_console/studio/com.example.showcase/metadata: read the directory total (directory-customizations-total) and the per-type tile counts",
         "open the dashboard list of that area: read the mark on the overridden dashboard and on the pair's added item (customization-mark), then switch on the 'only customizations' filter (metadata-only-customizations) and read what remains",
-        "control: open the landing and a writable package's All metadata area with the network panel recording — the landing asks for no writable card, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
+        "control: open an authored (writable) package's detail on the same page and a writable package's All metadata area with the network panel recording — the detail draws no customizations section and asks nothing, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
       ],
       "acceptance": [
         {
-          "clause": "the landing line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions and m = counts.switchedOff of the served read — no number of the console's own",
+          "clause": "the detail's line reads 'n customized, m switched off' where n = counts.overrides + counts.extensions + counts.arrangements (#36833: an arrangement is a customization) and m = counts.switchedOff of the served read — no number of the console's own",
           "oracle": "dom",
           "verify": "after a screenshot confirms the card rendered, the line's numbers equal step 1's served counts (fetchPackageCustomizations computes none); the pair link's href names com.example.showcase.custom, and following it lands on the base's Studio (/_console/studio/com.example.showcase/data: Studio redirects a pair URL to its base, customizationPairBaseOf, ADR-0146 D3), whatever its title 'Open the customization package … in Studio' says; the switched-off link opens the Automations pillar",
-          "evidence": "the served read + the landing DOM read"
+          "evidence": "the served read + the detail DOM read"
         },
         {
           "clause": "the All metadata area marks the pair's items — an override 'Customized', an item the pair adds 'Added' — and the 'only customizations' filter leaves exactly those; the directory's total and tiles match the served read",
@@ -5102,9 +5146,9 @@
           "evidence": "the directory and list DOM reads beside step 1"
         },
         {
-          "clause": "a failed read draws no number and no mark — never a '0' — the landing asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
+          "clause": "a failed read draws no number and no mark — never a '0' — the detail asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
           "oracle": "network",
-          "verify": "step 5: the landing sends no customizations request for a writable card; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "verify": "step 5: the detail sends no customizations request for a writable package; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: PackageCustomizationsPanel.test.tsx and metadataAreaHost.customizations-28568 pin it",
           "evidence": "the network trace + the pair-id refusal body"
         }
       ],
@@ -5118,10 +5162,10 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
+        "ref": "ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
       },
       "source": [
-        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx#BuilderLanding (the card's line)",
+        "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/PackageCustomizationsPanel.tsx#PackageCustomizationsPanel (the detail's line and rows)",
         "ui/packages/app-shell/src/views/studio-design/customizationMarks.ts#customizationMarkOf + ui/packages/app-shell/src/views/studio-design/CustomizationMark.tsx#CustomizationMark + ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx (the only-customizations filter) + ui/packages/app-shell/src/views/metadata-admin/DirectoryPage.tsx (the total and the tile counts)",
         "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D3 (one line per package on the landing) and D8 item 4 (the per-package customization read)",
         "#28566 (N-24) landed by PR #28634; #28568 (N-26b) by PR #28667; the read #28411 (N-15)"
@@ -5144,6 +5188,12 @@
           "date": "2026-11-04",
           "change": "acceptance[0].verify and fixtures.requires[2] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the pair link's href names the pair, but Studio redirects a pair URL to its base (customizationPairBaseOf), and the pair-added fixture item may be written by API. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-24",
+          "change": "the line moved from the removed Studio home to the read-only base's detail in Setup → Packages (#36908): title, steps[1], steps[4], acceptance[0] and [2], automated.ref and source re-pointed; acceptance[0] now counts counts.arrangements in n (#36833's requirement; that card was closed as not planned, and #36908 delivers it in the panel's new home). The All metadata half is unchanged",
+          "ref": "#36908"
         }
       ]
     },
@@ -5609,7 +5659,7 @@
         {
           "clause": "Studio's dataset form offers Synonyms and Description on the measure row, with the help text that states the limits",
           "oracle": "dom",
-          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.form.ts#datasetForm)",
+          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters'. Studio draws them in DatasetDefaultInspector's row Advanced fold through DatasetMemberVocabulary (ui/packages/app-shell/src/views/metadata-admin/inspectors/DatasetMemberVocabulary.tsx, data-testid dataset-measures-synonyms / dataset-measures-description), which takes its label and help copy from the spec form (packages/spec/src/ui/dataset.metadata-form.ts#datasetForm)",
           "evidence": "a screenshot of the measure row"
         }
       ],
@@ -5629,7 +5679,7 @@
         "packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm",
         "packages/spec/src/ui/dataset.zod.ts#DatasetMemberSynonymsSchema",
         "packages/spec/src/ui/dataset.zod.ts#checkDatasetVocabulary",
-        "packages/spec/src/ui/dataset.form.ts#datasetForm"
+        "packages/spec/src/ui/dataset.metadata-form.ts#datasetForm"
       ],
       "history": [
         {

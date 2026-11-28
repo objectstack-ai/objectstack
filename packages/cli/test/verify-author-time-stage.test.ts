@@ -60,7 +60,7 @@ function taskApp(planted: boolean): Record<string, unknown> {
       version: '1.0.0',
       name: 'Verify Gate',
       type: 'app',
-      engines: { protocol: '^18' },
+      engines: { protocol: '^19' },
     },
     objects: [
       {
@@ -101,7 +101,7 @@ function taskApp(planted: boolean): Record<string, unknown> {
         objectName: 'vg_task',
         type: 'url',
         target: 'https://example.com/help',
-        locations: ['record_header'],
+        locations: ['record_page'],
         visible: planted ? 'done != true' : 'record.done != true',
       },
     ],

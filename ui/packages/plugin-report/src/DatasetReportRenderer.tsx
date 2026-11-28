@@ -93,7 +93,7 @@
  */
 
 import * as React from 'react';
-import { Loader2, AlertTriangle, Table2, ShieldAlert } from 'lucide-react';
+import { Loader2, AlertTriangle, Table2, ShieldAlert, ChevronDown, ChevronRight } from 'lucide-react';
 import {
   ComponentRegistry,
   formatMeasure,
@@ -110,6 +110,8 @@ import {
   // family lives (#4466 / #4497 / #4673 / #4500 / #4508), so routing through it
   // INHERITS those fixes instead of re-deriving them on a third surface.
   buildChartSeries,
+  findChartSeriesRow,
+  type ChartSegmentClickEvent,
   // The authored half of objectui#4229's data/presentation split (objectui#4877):
   // the chrome and the per-series presentation. No axis is lowered, and none
   // needs to be: a report's `chart.xAxis`/`chart.yAxis` are bare
@@ -156,11 +158,15 @@ import {
   type ReportTableSnapshot,
 } from './ReportExport';
 import {
+  ReportCompareToggle,
   ReportDateRangeControl,
   initialReportPeriod,
   readDateRangeDeclaration,
+  reportChartComparable,
+  reportCompareTo,
   reportTimeWindow,
   useReportDateDimension,
+  type ReportCompareTo,
   type ReportPeriod,
   type ReportTimeWindow,
 } from './ReportDateRange';
@@ -215,6 +221,12 @@ export interface DatasetDrillArgs {
    * would mis-filter — without re-fetching the dataset definition.
    */
   objectFilter?: Record<string, unknown>;
+  /**
+   * The object fields the clicked number stands for — the bucket's grouped
+   * fields and the measure's aggregated ones — which the drill list shows
+   * after the record's name (objectstack-ai/objectstack#36256).
+   */
+  fields?: string[];
 }
 
 /** A report (or joined block) bound to a dataset. Field access is permissive — */
@@ -280,6 +292,16 @@ export interface DatasetReportRendererProps {
    */
   onDrill?: (args: DatasetDrillArgs) => void;
   className?: string;
+  /**
+   * objectstack#36374 — fold the report's table under a 「Computed values」
+   * disclosure while a chart is drawn above it, as the report builder's
+   * preview shows it: the chart is the picture, the numbers are one click
+   * away. The table stays mounted while folded, so the export control (which
+   * writes the drawn table) keeps working. A report whose chart IS its table
+   * (`table` / `pivot`, or no chart), a cross-tab, and a joined report draw
+   * their table as always. Off by default: the report page is unchanged.
+   */
+  foldTableUnderChart?: boolean;
 }
 
 /** `true` when this report should render through the dataset path. */
@@ -688,6 +710,7 @@ function useDatasetRows(
   totalsGroupings?: string[][],
   order?: SelectionOrder,
   timeWindow?: ReportTimeWindow,
+  compareTo?: ReportCompareTo,
 ) {
   const [state, setState] = React.useState<{
     status: 'idle' | 'loading' | 'ok' | 'error';
@@ -702,6 +725,11 @@ function useDatasetRows(
     error?: string;
     /** The query was refused because this viewer may not read the data (objectui#12330). */
     forbidden?: boolean;
+    /**
+     * The selection signature this outcome answers (objectstack#38008). Unset
+     * only on the first mount's `idle`, which carries no rows.
+     */
+    signature?: string;
   }>({
     status: 'idle',
     rows: [],
@@ -719,8 +747,10 @@ function useDatasetRows(
   // The report's period (`dateRange`) is part of the signature too: picking
   // another window on the chip is another selection, so it re-queries.
   const windowKey = JSON.stringify(timeWindow ?? null);
+  // Turning the comparison on or off is another selection too.
+  const compareKey = JSON.stringify(compareTo ?? null);
   const packageId = React.useContext(ReportPackageContext);
-  const signature = `${packageId ?? ''}|${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}`;
+  const signature = `${packageId ?? ''}|${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}|${compareKey}`;
 
   // objectui#10814 — the data-invalidation bus (`notifyDataChanged` from
   // `@object-ui/react`), read the objectui#10623 way: the nonce moves when a
@@ -757,13 +787,13 @@ function useDatasetRows(
     if (!src || typeof src.queryDataset !== 'function') {
       lastQueriedSignatureRef.current = null;
       setDatasetObject(undefined);
-      setState({ status: 'error', rows: [], error: 'This data source does not support dataset queries.' });
+      setState({ status: 'error', rows: [], error: 'This data source does not support dataset queries.', signature });
       return;
     }
     if (!dataset || measures.length === 0) {
       lastQueriedSignatureRef.current = null;
       setDatasetObject(undefined);
-      setState({ status: 'idle', rows: [] });
+      setState({ status: 'idle', rows: [], signature });
       return;
     }
     let cancelled = false;
@@ -771,7 +801,7 @@ function useDatasetRows(
     lastQueriedSignatureRef.current = signature;
     if (!inPlace) {
       setDatasetObject(undefined);
-      setState({ status: 'loading', rows: [] });
+      setState({ status: 'loading', rows: [], signature });
     }
     src
       .queryDataset(dataset, {
@@ -785,6 +815,11 @@ function useDatasetRows(
         // `runtimeFilter`, never a bucket. Absent, the selection is exactly
         // what a report without a period has always posted.
         ...(timeWindow ? { timeDimensions: [timeWindow] } : {}),
+        // "Compare with previous period" (objectstack#36645): the executor
+        // runs the same selection over the window just before this one and
+        // answers each measure's earlier value as `<measure>__compare`. Only
+        // ever sent beside the window it shifts.
+        ...(timeWindow && compareTo ? { compareTo } : {}),
       }, ...(packageId ? [{ callerPackage: packageId }] : []))
       .then((res) => {
         if (!cancelled) {
@@ -799,6 +834,7 @@ function useDatasetRows(
             drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined,
             drillScopes: res?.drillScopes,
             totals: Array.isArray(res?.totals) ? res.totals : undefined,
+            signature,
           });
         }
       })
@@ -816,10 +852,10 @@ function useDatasetRows(
         // text, so the adapter's message (which quotes the server and names
         // the object) cannot reach the page. Every other failure keeps it.
         if (classifyLoadError(e) === 'forbidden') {
-          setState({ status: 'error', rows: [], forbidden: true });
+          setState({ status: 'error', rows: [], forbidden: true, signature });
           return;
         }
-        setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e) });
+        setState({ status: 'error', rows: [], error: String((e as Error)?.message ?? e), signature });
       });
     return () => {
       cancelled = true;
@@ -827,8 +863,25 @@ function useDatasetRows(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, invalidationNonce]);
 
+  // objectstack#38008 — the render that carries a NEW selection runs before the
+  // effect above can mark it loading, so `state` still holds the previous
+  // selection's outcome. Handed out as is, the caller draws the new selection
+  // over rows that answer the old one: switching 「Compare with previous
+  // period」 on painted, for a frame, a comparison series with no comparison
+  // values. An outcome answers only the signature it was queried for; under
+  // any other it reads as loading.
+  if (state.signature !== undefined && state.signature !== signature) {
+    const stale: typeof state = STALE_SELECTION_STATE;
+    return stale;
+  }
   return state;
 }
+
+/** What {@link useDatasetRows} answers while its outcome belongs to a previous selection. */
+const STALE_SELECTION_STATE: { status: 'loading'; rows: Row[] } = Object.freeze({
+  status: 'loading' as const,
+  rows: Object.freeze([]) as unknown as Row[],
+});
 
 /**
  * `buildDatasetDrillFilter`, with a refused filter REPORTED instead of thrown —
@@ -919,6 +972,75 @@ function resolveRelationshipDrill(
       console.warn('[DatasetReportRenderer] drill-down not opened — its relationship dimension could not be resolved:', error);
     },
   );
+}
+
+/**
+ * Drill one clicked bucket — a table line or a chart mark — to its records:
+ * the exact field-to-stored-value filter when the answer names its `object`
+ * (a relationship path resolved first), else the host's `groupKey` fallback.
+ * One function for both, so a bar and the table line it stands for open the
+ * same list (objectstack-ai/objectstack#36256). `fields` names the grouped
+ * and measured fields the drill list shows by default.
+ */
+function emitBucketDrill({
+  state,
+  dataset,
+  groupKey,
+  drillDims,
+  rawRow,
+  rowRanges,
+  scope,
+  runtimeFilter,
+  dataSource,
+  onDrill,
+}: {
+  state: { object?: string; dimensionFields?: Record<string, string> };
+  dataset: string;
+  groupKey: Record<string, unknown>;
+  drillDims: string[];
+  rawRow: Record<string, unknown> | undefined;
+  rowRanges: Record<string, DatasetDrillRange> | undefined;
+  scope: MeasureDrillScope;
+  runtimeFilter: Record<string, unknown> | undefined;
+  dataSource: unknown;
+  onDrill: (args: DatasetDrillArgs) => void;
+}): void {
+  const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
+  const fields = Array.from(new Set([
+    // A relationship path shows its lookup field: the list draws no dotted column.
+    ...drillDims.map((d) => state.dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
+    ...Object.values(rowRanges ?? {}).map((range) => range.field.split('.')[0]),
+    ...measuredFieldsOf(scope),
+  ]));
+  if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
+    const object = state.object;
+    resolveRelationshipDrill(object, scope, rawRow, drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
+      onDrill({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved, ...(fields.length ? { fields } : {}) }));
+    return;
+  }
+  let objectFilter: Record<string, unknown> | undefined;
+  if (state.object && (drillDims.length > 0 || hasRange)) {
+    const built = drillFilterOrRefusal(scope, rawRow, drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
+    // Refused: no drill at all — see `drillFilterOrRefusal`.
+    if (built === null) return;
+    objectFilter = built;
+  } else if (Object.keys(scope).length > 0) {
+    // No exact bucket filter to carry the scope, and the host's groupKey
+    // fallback rebuilds the list from the bucket ALONE: no drill.
+    return;
+  }
+  onDrill({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter, ...(fields.length ? { fields } : {}) });
+}
+
+/**
+ * The fields a measure scope says hold a value (`{ field: { $null: false } }`,
+ * which `drillScopes` writes for a measure over a field): the fields the
+ * clicked number aggregates.
+ */
+function measuredFieldsOf(scope: MeasureDrillScope): string[] {
+  return Object.entries(scope ?? {})
+    .filter(([field, c]) => !field.startsWith('$') && !!c && typeof c === 'object' && (c as { $null?: unknown }).$null === false)
+    .map(([field]) => field);
 }
 
 function EmptyMeasures({ dataset }: { dataset: string }) {
@@ -1111,25 +1233,7 @@ function DatasetReportTable({
     const rowRanges = members
       ? spanDrillRanges(members.map((i) => state.drillRanges?.[i]))
       : state.drillRanges?.[index];
-    const hasRange = !!rowRanges && Object.keys(rowRanges).length > 0;
-    let objectFilter: Record<string, unknown> | undefined;
-    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
-      const object = state.object;
-      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges, dataSource, (resolved) =>
-        onDrill!({ dataset, groupKey, runtimeFilter, object, objectFilter: resolved }));
-      return;
-    }
-    if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, rowRanges);
-      // Refused: no drill at all — see `drillFilterOrRefusal`.
-      if (built === null) return;
-      objectFilter = built;
-    } else if (Object.keys(scope).length > 0) {
-      // No exact bucket filter to carry the scope, and the host's groupKey
-      // fallback rebuilds the list from the bucket ALONE: no drill.
-      return;
-    }
-    onDrill!({ dataset, groupKey, runtimeFilter, object: state.object, objectFilter });
+    emitBucketDrill({ state, dataset, groupKey, drillDims, rawRow: state.drillRawRows?.[index], rowRanges, scope, runtimeFilter, dataSource, onDrill: onDrill! });
   };
 
   // objectui#7534 — resolve a BUILT-IN default measure's caption through the
@@ -1435,7 +1539,7 @@ export function planReportChart(t: unknown): ReportChartPlan {
  */
 function useRegistryComponent(
   type: string,
-): React.ComponentType<{ schema: Record<string, unknown> }> | undefined {
+): React.ComponentType<{ schema: Record<string, unknown>; onChartClick?: (event: ChartSegmentClickEvent) => void }> | undefined {
   const [, bump] = React.useReducer((x: number) => x + 1, 0);
   React.useEffect(() => {
     if (ComponentRegistry.get(type)) return;
@@ -1452,7 +1556,7 @@ function useRegistryComponent(
     return unsub;
   }, [type]);
   return ComponentRegistry.get(type) as
-    | React.ComponentType<{ schema: Record<string, unknown> }>
+    | React.ComponentType<{ schema: Record<string, unknown>; onChartClick?: (event: ChartSegmentClickEvent) => void }>
     | undefined;
 }
 
@@ -1476,6 +1580,22 @@ function useRegistryComponent(
  * names the measure but carries no usable `label` returns `undefined` and falls
  * through to the dataset's own measure label, exactly as an absent entry does.
  */
+/** The column the dataset executor answers a measure's earlier window under (`compareTo`). */
+const COMPARE_SUFFIX = '__compare';
+
+/**
+ * The signed change from the previous period to the current one, as a percent
+ * of the previous value (`+25%`, `−10%`). `undefined` when either side is not
+ * a number or the previous value is 0, where a percent says nothing.
+ */
+export function formatPeriodChange(current: unknown, previous: unknown, locale?: string): string | undefined {
+  const cur = typeof current === 'number' ? current : typeof current === 'string' && current.trim() !== '' ? Number(current) : NaN;
+  const prev = typeof previous === 'number' ? previous : typeof previous === 'string' && previous.trim() !== '' ? Number(previous) : NaN;
+  if (!Number.isFinite(cur) || !Number.isFinite(prev) || prev === 0) return undefined;
+  const ratio = (cur - prev) / Math.abs(prev);
+  return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' }).format(ratio);
+}
+
 function authoredSeriesLabel(series: unknown, measure: string, language: string | undefined): string | undefined {
   if (!Array.isArray(series) || !measure) return undefined;
   for (const entry of series as unknown[]) {
@@ -1548,6 +1668,8 @@ function DatasetReportChart({
   dataSource,
   order,
   timeWindow,
+  compareTo,
+  onDrill,
 }: {
   dataset: string;
   chart: Record<string, unknown>;
@@ -1555,6 +1677,14 @@ function DatasetReportChart({
   dataSource?: unknown;
   order?: SelectionOrder;
   timeWindow?: ReportTimeWindow;
+  /**
+   * The viewer's 「Compare with previous period」 (objectstack#36645). Set only
+   * for a chart {@link reportChartComparable} accepts; the chart then draws the
+   * earlier window beside the current one.
+   */
+  compareTo?: ReportCompareTo;
+  /** The report's drill sink: a clicked mark drills like its table line (objectstack-ai/objectstack#36256). */
+  onDrill?: (args: DatasetDrillArgs) => void;
 }) {
   const xAxis = typeof chart.xAxis === 'string' ? chart.xAxis : '';
   const yAxis = typeof chart.yAxis === 'string' ? chart.yAxis : '';
@@ -1589,6 +1719,7 @@ function DatasetReportChart({
     undefined,
     order,
     timeWindow,
+    compareTo,
   );
   const ChartComponent = useRegistryComponent('chart');
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
@@ -1601,7 +1732,9 @@ function DatasetReportChart({
   const tt = useSafeTranslate();
   // objectui#4575 — the single-value metric below is a MEASURE like any other
   // and follows the display locale. (The series charts render their own labels
-  // through the chart component, not through `formatMeasure`.)
+  // through the chart component, not through `formatMeasure`; a percent
+  // measure's pattern reaches that component as its value-axis `format`,
+  // objectstack#36988 — see `percentAxisFormat`.)
   const displayLocale = useDisplayLocale();
   // objectui#4020 — the UI LANGUAGE an authored `series[].label` is picked in.
   // Deliberately not `displayLocale`: that one prefers the tenant's REGIONAL
@@ -1714,6 +1847,13 @@ function DatasetReportChart({
   // refusal is an error here too: the table beside this slot reads the same
   // dataset and draws the one no-access state, so the chart draws no second
   // one (objectui#12330).
+  //
+  // Except a refused COMPARISON (objectstack#36645): the table beside the
+  // chart never asks for one, so a silent fallback would leave the viewer's
+  // switch on over a chart that vanished with no reason given.
+  if (state.status === 'error' && compareTo && !state.forbidden) {
+    return <FetchStates status="error" error={state.error} />;
+  }
   if (state.status === 'error' || state.rows.length === 0) return null;
 
   // objectui#7534 — resolve a BUILT-IN default measure's caption through the
@@ -1743,16 +1883,33 @@ function DatasetReportChart({
   // raw `name` to a fully-translated console.
   const measureLabel = authoredSeriesLabel(chart.series, yAxis, language) ?? headerLabel(yAxis);
 
+  // The earlier window's caption: the dashboard's own words for the same
+  // `previousPeriod` comparison, so a report and a dashboard tile read alike.
+  const compareLabel = tt('dashboard.trend.vsPreviousPeriod', 'vs previous period');
+  const compareKey = `${yAxis}${COMPARE_SUFFIX}`;
+
   if (plan.kind === 'single_value') {
     const mf = measureField(yAxis);
+    const current = state.rows[0]?.[yAxis];
+    const previous = compareTo ? state.rows[0]?.[compareKey] : undefined;
+    const change = compareTo ? formatPeriodChange(current, previous, displayLocale) : undefined;
     return (
       <div className="rounded-md border bg-card p-3" data-testid="dataset-report-metric">
         {title ? <h3 className="mb-2 text-sm font-semibold">{title}</h3> : null}
         <div className="flex flex-col gap-0.5 py-2">
           <span className="text-2xl font-semibold tabular-nums">
-            {formatMeasure(state.rows[0]?.[yAxis], mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
+            {formatMeasure(current, mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
           </span>
           <span className="text-xs text-muted-foreground">{measureLabel}</span>
+          {compareTo ? (
+            <span className="pt-1 text-xs text-muted-foreground tabular-nums" data-testid="dataset-report-metric-previous">
+              {compareLabel}{' '}
+              <span className="font-medium text-foreground">
+                {formatMeasure(previous, mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
+              </span>
+              {change ? <span data-testid="dataset-report-metric-change">{` (${change})`}</span> : null}
+            </span>
+          ) : null}
         </div>
       </div>
     );
@@ -1851,6 +2008,40 @@ function DatasetReportChart({
   // itself — not spec `ChartAxis` objects, so there is no axis presentation to
   // merge. (`@object-ui/core`'s object-axis lowering, `mergeAuthoredPresentation`,
   // was deliberately not used here and was removed by objectui#11372.)
+  // objectstack-ai/objectstack#36256 — a mark drills to the records its
+  // bucket counted, through the table's own `emitBucketDrill`, so a bar and
+  // its summary line open the same list. A measure the answer gives no record
+  // list (`drillScopes`) offers no click.
+  const markScope: MeasureDrillScope | undefined = state.object ? measureDrillScope(state.drillScopes, yAxis) : {};
+  const handleMarkClick = onDrill && markScope !== undefined
+    ? (ev: ChartSegmentClickEvent) => {
+      // A mark of the earlier window stands for records the current query did
+      // not count, so it opens no list (the dashboard's rule for the same
+      // `<measure>__compare` series).
+      if (ev?.series === compareKey) return;
+      const at = findChartSeriesRow(plotRows, queryDimensions, [yAxis], ev?.category, ev?.series, {
+        nullCategoryLabel,
+        bucketId: ev?.categoryId,
+      });
+      if (at < 0) return;
+      const index = plotLayout ? plotLayout[at] : at;
+      const groupKey: Record<string, unknown> = {};
+      for (const dim of queryDimensions) groupKey[dim] = displayRows[index]?.[dim];
+      emitBucketDrill({
+        state,
+        dataset,
+        groupKey,
+        drillDims: state.dimensionFields ? queryDimensions.filter((d) => d in state.dimensionFields!) : [],
+        rawRow: state.drillRawRows?.[index],
+        rowRanges: state.drillRanges?.[index],
+        scope: markScope,
+        runtimeFilter,
+        dataSource,
+        onDrill,
+      });
+    }
+    : undefined;
+
   const authoredSeries = mergeAuthoredSeries(derivedSeries, chart.series);
   // #4020's three-level display name OUTRANKS both of the labels above: the
   // derivation's `fields[].label` (level ② without the i18n field-label
@@ -1871,6 +2062,34 @@ function DatasetReportChart({
       ? { ...s, label: authoredSeriesLabel(chart.series, s.dataKey, language) ?? derivedSeries[i].label }
       : s.dataKey === yAxis ? { ...s, label: measureLabel } : s,
   );
+  // 「Compare with previous period」 (objectstack#36645): the measure's
+  // earlier window as one more series, drawn muted / dashed by the chart's
+  // `variant: 'comparison'` styling. The rows already carry it: the executor
+  // restates the earlier window's buckets in the current window's keys, so a
+  // month axis pairs each month with the month one period before it.
+  const comparisonAggregate = measureField(yAxis)?.aggregate;
+  const comparedSeries = compareTo && !seriesBy
+    ? [
+      ...chartSeries,
+      {
+        dataKey: compareKey,
+        label: `${measureLabel} · ${compareLabel}`,
+        variant: 'comparison' as const,
+        ...(typeof comparisonAggregate === 'string' ? { aggregate: comparisonAggregate } : {}),
+      },
+    ]
+    : chartSeries;
+  // objectstack#37053 — every series plots the one measure (its `seriesBy`
+  // split and its earlier window included), so each carries that measure's
+  // format facts, and the chart's value axis prints the measure's units: a
+  // `percentScale: 'whole'` measure's ticks read `33.3%` beside the table's
+  // `33.3%`, a `CNY` amount's carry `¥`. Renderer-internal, beside
+  // `aggregate`; nothing authored reaches it (`mergeAuthoredSeries` lowers
+  // presentation keys only).
+  const seriesMeasureFormat = measureFormatCarrier(measureField(yAxis));
+  const drawnSeries = seriesMeasureFormat
+    ? comparedSeries.map((s) => ({ ...s, measureFormat: seriesMeasureFormat }))
+    : comparedSeries;
 
   // The authored CHROME — `showLegend`, `showDataLabels`, `colors`, `subtitle`,
   // `description`, `annotations`, `interaction`, `height` — lowered by the same
@@ -1890,6 +2109,12 @@ function DatasetReportChart({
   // it UNDER any explicit author `colors` map found on `chart`, so an authored
   // colour still wins per category (objectui#4877's precedence, preserved).
   const { title: _chartOwnTitle, ...chrome } = chartConfigPresentation(chart, categoryColors);
+  // objectstack#36988 — the value axis reads in the measure's units: a
+  // `'0.0%'` measure's ticks print `0.0%` … `34.0%` beside the table's `33.3%`,
+  // not the raw fractions `0` … `0.34`. Carried on the chart's own value-axis
+  // `format` key, and only where that key's reading of the pattern is the
+  // table's (see `percentAxisFormat`).
+  const valueAxisFormat = percentAxisFormat(measureField(yAxis));
 
   return (
     <div className="rounded-md border bg-card p-3" data-testid="dataset-report-chart">
@@ -1906,7 +2131,7 @@ function DatasetReportChart({
           // input the legend, the mark's tooltip name and the single-value
           // caption all read — so legend and tooltip follow this by
           // construction rather than by a second resolution.
-          series: chartSeries,
+          series: drawnSeries,
           // The default plot height, kept beneath the spread so an authored
           // `height` wins. A non-positive one never reaches here (the whitelist
           // drops it), which leaves this default rather than an invisible plot.
@@ -1915,6 +2140,10 @@ function DatasetReportChart({
           // often viewed in a background tab or exported, where an animated
           // chart freezes at frame 0 (pie/donut would show no ring).
           isAnimationActive: false,
+          // The spec `ChartAxis` shape the chart already reads (`yAxis[0]` is
+          // the primary value axis); presentation only, so no `field` — the
+          // series above stay the plotted columns, `seriesBy` split included.
+          ...(valueAxisFormat ? { yAxis: [{ format: valueAxisFormat }] } : {}),
           ...chrome,
           // objectui#4906 — the category dimension's DECLARED picklist order
           // (framework#3588), derived above. Omitted (rather than `undefined`)
@@ -1922,9 +2151,73 @@ function DatasetReportChart({
           // chart's own default (value-descending) still applies.
           ...(categoryOrder ? { categoryOrder } : {}),
         }}
+        onChartClick={handleMarkClick}
       />
     </div>
   );
+}
+
+/**
+ * The value-format facts a report chart's series carry for the measure they
+ * plot (objectstack#37053) — the chart renderer's internal
+ * `series[].measureFormat`: the measure's `format` pattern, its
+ * `percentScale`, and the currency the table prints the column in when a cell
+ * has no row of its own (`measureCellCurrency` with no row). That is the one
+ * currency a value axis can print: a per-row currency column
+ * (`currencyField`, ADR-0144 D9) has none, so its axis keeps plain numbers.
+ * `undefined` when the measure states none of them.
+ *
+ * ⚠️ A second copy of this function lives in `plugin-dashboard`'s `DatasetWidget`, because
+ * the shared home (`@object-ui/core`) sits outside the change that wrote it;
+ * `DatasetReportRenderer.measureFormatCarrierParity-37053.test.ts`
+ * (plugin-report) holds the two byte-identical. Edit both, or move them to
+ * core together.
+ */
+export function measureFormatCarrier(
+  field: DatasetResultField | undefined,
+): { format?: string; currency?: string; percentScale?: 'fraction' | 'whole' } | undefined {
+  if (!field) return undefined;
+  const currency = measureCellCurrency(field);
+  const carrier = {
+    ...(typeof field.format === 'string' && field.format !== '' ? { format: field.format } : {}),
+    ...(currency ? { currency } : {}),
+    ...(field.percentScale ? { percentScale: field.percentScale } : {}),
+  };
+  return Object.keys(carrier).length > 0 ? carrier : undefined;
+}
+
+/**
+ * The value-axis `format` a report chart hands its chart for the measure it
+ * plots, or `undefined` to leave the axis on the chart's own default
+ * (objectstack#36988).
+ *
+ * Only a PERCENT pattern travels, and only where the chart's reading of it is
+ * the table's: the chart's axis `format` (`formatterFor`, plugin-charts) reads
+ * a `%` pattern as a 0–1 fraction printed ×100 — `formatMeasure`'s reading at
+ * the `fraction` scale, which is also its reading of a column the server
+ * leaves unannotated. Three measures are handed no `format`, because that
+ * key cannot carry what the table prints for them; their axis reads the
+ * series' `measureFormat` carrier instead (objectstack#37053, see
+ * `measureFormatCarrier`), which a declared axis `format` would outrank:
+ *
+ *  - `percentScale: 'whole'` — already percentage points; the axis would
+ *    multiply them by 100 a second time;
+ *  - a declared `currency`, or a per-row `currencyField` (ADR-0144 D9) — the
+ *    table prints the currency, and the axis pattern names no ISO code;
+ *  - a pattern carrying a currency symbol, which the two readers place
+ *    differently.
+ *
+ * A plain numeral pattern does not travel either: the compact default reads
+ * the same number on the axis, where a fixed-width pattern
+ * (`'0,0.00'` → `1,200,000.00`) would outgrow the axis band.
+ */
+function percentAxisFormat(field: DatasetResultField | undefined): string | undefined {
+  const format = field?.format;
+  if (typeof format !== 'string' || !format.includes('%') || /[$£€¥₹]/.test(format)) return undefined;
+  if (field?.percentScale === 'whole') return undefined;
+  const currencyField = (field as { currencyField?: unknown }).currencyField;
+  if (field?.currency || (typeof currencyField === 'string' && currencyField !== '')) return undefined;
+  return format;
 }
 
 /**
@@ -2231,25 +2524,20 @@ function DatasetMatrixTable({
     if (scope === undefined) return;
     // objectstack-ai/objectstack#1752: include the date-bucket range sidecar so an "X by time" cell scopes
     // to the clicked time bucket, not every bucket in that row/column.
-    const cellRanges = state.drillRanges?.[index];
-    const hasRange = !!cellRanges && Object.keys(cellRanges).length > 0;
-    let objectFilter: Record<string, unknown> | undefined;
-    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
-      const object = state.object;
-      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges, dataSource, (resolved) =>
-        onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object, objectFilter: resolved }));
-      return;
-    }
-    if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
-      // Refused: no drill at all — see `drillFilterOrRefusal`.
-      if (built === null) return;
-      objectFilter = built;
-    } else if (Object.keys(scope).length > 0) {
-      // The host's groupKey fallback cannot carry the scope: no drill.
-      return;
-    }
-    onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object: state.object, objectFilter });
+    // The same builder as a summary line, so a cell's drill list also shows
+    // its down + across fields and the measured one by default (#37033).
+    emitBucketDrill({
+      state,
+      dataset,
+      groupKey: { ...rowKey, ...colKey },
+      drillDims,
+      rawRow: state.drillRawRows?.[index],
+      rowRanges: state.drillRanges?.[index],
+      scope,
+      runtimeFilter,
+      dataSource,
+      onDrill: onDrill!,
+    });
   };
 
   // Single measure → one column per across-bucket; multiple → bucket × measure.
@@ -2426,7 +2714,10 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
   runtimeFilter,
   onDrill,
   className,
+  foldTableUnderChart,
 }) => {
+  const tt = useSafeTranslate();
+  const [tableOpen, setTableOpen] = React.useState(false);
   // objectui#5137 — `runtimeFilter` ONLY. `filter` is rejected by the strict
   // spec, so it is not read here either; it is reported instead of applied.
   const reportSite = describeReportSite(report);
@@ -2456,6 +2747,10 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
   const dateDimension = useReportDateDimension(String(report.dataset ?? ''), dateRangeDecl, reportPackageId);
   const timeWindow =
     period && dateDimension.status === 'ready' ? reportTimeWindow(dateDimension.dimension, period) : undefined;
+  // 「Compare with previous period」 (objectstack#36645) — the viewer's, like
+  // the period itself, and keyed on the same declaration.
+  const [comparePicked, setComparePicked] = React.useState<{ key: string; on: boolean } | null>(null);
+  const compareOn = !!comparePicked && comparePicked.key === dateRangeKey && comparePicked.on;
 
   // Joined → a vertical stack of dataset-bound blocks.
   if (presentation === 'joined' && Array.isArray(report.blocks)) {
@@ -2547,6 +2842,13 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
     report.chart && typeof report.chart === 'object' && (report.chart as { type?: unknown }).type
       ? (report.chart as Record<string, unknown>)
       : null;
+  // Offered beside the period chip only when the chart can draw it over the
+  // window's dimension; sent only while the period names a window to step
+  // back from.
+  const compareOffered =
+    !!dateRangeDecl &&
+    reportChartComparable(chartCfg, dateDimension.status === 'ready' ? dateDimension.dimension : undefined);
+  const compareTo = compareOffered ? reportCompareTo(compareOn, timeWindow) : undefined;
   const chart = chartCfg ? (
     <DatasetReportChart
       dataset={String(report.dataset ?? '')}
@@ -2555,6 +2857,8 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       dataSource={dataSource}
       order={reportOrder}
       timeWindow={timeWindow}
+      compareTo={compareTo}
+      onDrill={drillSink}
     />
   ) : null;
 
@@ -2589,6 +2893,11 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
     />
   );
 
+  // objectstack#36374 — fold the table only under a chart that is drawn
+  // separately from it: a series or a single number.
+  const chartPlan = chartCfg ? planReportChart(chartCfg.type).kind : undefined;
+  const foldTable = !!foldTableUnderChart && !crossTab && (chartPlan === 'series' || chartPlan === 'single_value');
+
   // A declared period whose dimension is still being resolved, or cannot be,
   // draws that state INSTEAD of the body: a table queried before the window
   // is known would show every period under a chip naming one.
@@ -2611,17 +2920,27 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       data-report-name={report.name}
       data-report-presentation={presentation}
     >
-      {/* One header row: the period chip on the left, Export on the right;
-          hidden when neither draws. */}
+      {/* One header row: the period chip (and 「Compare with previous
+          period」 beside it) on the left, Export on the right; hidden when
+          neither draws. */}
       <div className="flex flex-wrap items-center justify-between gap-2 empty:hidden" data-testid="dataset-report-header">
         {dateRangeDecl && period ? (
-          <ReportDateRangeControl
-            decl={dateRangeDecl}
-            value={period}
-            onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <ReportDateRangeControl
+              decl={dateRangeDecl}
+              value={period}
+              onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
+            />
+            {compareOffered ? (
+              <ReportCompareToggle
+                checked={compareOn}
+                available={!!timeWindow}
+                onChange={(on) => setComparePicked({ key: dateRangeKey, on })}
+              />
+            ) : null}
+          </div>
         ) : null}
-        <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} />
+        <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} dataSource={dataSource} />
       </div>
       {periodError ? (
         <FetchStates status="error" error={periodError} />
@@ -2630,7 +2949,21 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       ) : (
         <>
           {crossTab ? table : chart}
-          {crossTab ? chart : table}
+          {crossTab ? chart : foldTable ? (
+            <div className="flex flex-col gap-2" data-testid="dataset-report-computed-values">
+              <button
+                type="button"
+                className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                aria-expanded={tableOpen}
+                onClick={() => setTableOpen((open) => !open)}
+                data-testid="dataset-report-computed-values-toggle"
+              >
+                {tableOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                {tt('report.computedValues', 'Computed values')}
+              </button>
+              <div hidden={!tableOpen}>{table}</div>
+            </div>
+          ) : table}
         </>
       )}
     </div>

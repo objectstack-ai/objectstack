@@ -22,6 +22,7 @@ export const DocuSignEnvelope = ObjectSchema.create({
   label: 'DocuSign Envelope',
   pluralLabel: 'DocuSign Envelopes',
   icon: 'file-signature',
+  color: 'teal',
   description: 'An envelope sent for signature through DocuSign, with the signature status last read from DocuSign.',
   // Org-shared on purpose: the record mirrors DocuSign's state, and the flows
   // that refresh it run for whoever polls.

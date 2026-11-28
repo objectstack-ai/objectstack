@@ -129,6 +129,7 @@ describe('the resident footer row (objectstack#35702)', () => {
     ]);
     const row = await screen.findByTestId('data-table-summary-row');
     expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(row).queryByText('Add calculation')).toBeNull();
     expect(within(row).getByTestId('data-table-summary-amount')).toHaveTextContent('Sum 350');
   });
 
@@ -137,7 +138,9 @@ describe('the resident footer row (objectstack#35702)', () => {
     const onPick = vi.fn();
     renderGrid({ residentSummaryRow: true, onColumnSummaryPick: onPick });
     await screen.findByTestId('data-table-summary-row');
-    expect(screen.getByTestId('summary-picker-hint-amount')).toHaveTextContent('Calculate');
+    // objectstack#36048 — the entry shows at rest, not only on hover.
+    expect(screen.getByTestId('summary-picker-hint-amount')).toHaveTextContent('Add calculation');
+    expect(screen.getByTestId('summary-picker-hint-amount').className).not.toMatch(/(^|\s)opacity-0(\s|$)/);
 
     await user.click(screen.getByTestId('summary-picker-amount'));
     const menu = await screen.findByTestId('summary-menu-amount');
@@ -222,7 +225,7 @@ describe('the resident footer row (objectstack#35702)', () => {
     await user.click(within(await screen.findByTestId('summary-menu-amount')).getByTestId('summary-option-sum'));
     expect(onPick).toHaveBeenLastCalledWith('amount', 'sum');
     await waitFor(() => expect(screen.getByTestId('summary-picker-amount')).not.toHaveTextContent('Sum'));
-    expect(screen.getByTestId('summary-picker-hint-amount')).toHaveTextContent('Calculate');
+    expect(screen.getByTestId('summary-picker-hint-amount')).toHaveTextContent('Add calculation');
   });
 
   it('keeps a pick the host saved', async () => {

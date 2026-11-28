@@ -660,6 +660,75 @@ describe('a request whose auth context adapter is not the observed view is refus
   });
 });
 
+describe('the discovery scope follows the composition: a kernel that does not mount SSO answers the vendor\'s 404 and logs nothing', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  interface Kernel {
+    manager: AuthManager;
+    logger: { warn: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn> };
+  }
+
+  function kernel(plugins: Record<string, unknown>): Kernel {
+    const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: createMemoryEngine(),
+      trustedOrigins: [BASE],
+      plugins,
+      logger,
+    } as unknown as ConstructorParameters<typeof AuthManager>[0]);
+    return { manager, logger };
+  }
+
+  const doors: ReadonlyArray<readonly [path: string, request: () => Request]> = [
+    ['POST /sso/register', () => new Request(`${AUTH}/sso/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify(registration('unmounted-register', 'https://idp.acme.example')),
+    })],
+    ['POST /sign-in/sso', () => new Request(`${AUTH}/sign-in/sso`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify({ providerId: 'unmounted-oidc', callbackURL: `${BASE}/after` }),
+    })],
+    ['GET /sso/callback/:providerId', () => new Request(`${AUTH}/sso/callback/unmounted-oidc?code=idp-code&state=any-state`)],
+  ];
+
+  const compositions: ReadonlyArray<readonly [name: string, plugins: Record<string, unknown>]> = [
+    ['plugins.sso false', { sso: false }],
+    ['plugins.sso unset and OS_SSO_ENABLED unset (the default)', {}],
+  ];
+
+  describe.each(compositions)('%s', (_name, plugins) => {
+    it.each(doors)('%s answers 404, and nothing is logged at error level', async (_door, request) => {
+      vi.stubEnv('OS_SSO_ENABLED', undefined);
+      const { manager, logger } = kernel(plugins);
+      const res = await manager.handleRequest(request());
+      expect(res.status, await res.clone().text()).toBe(404);
+      expect(logger.error).not.toHaveBeenCalled();
+      const lines = [...logger.warn.mock.calls, ...logger.info.mock.calls].map((call) => String(call[0]));
+      expect(lines.filter((line) => line.includes('SSO request refused'))).toEqual([]);
+    });
+  });
+
+  it('CONTROL: a kernel that mounted SSO keeps the scope when OS_SSO_ENABLED is unset after the build: an unobserved context adapter is still answered 503', async () => {
+    vi.stubEnv('OS_SSO_ENABLED', 'true');
+    const { manager, logger } = kernel({});
+    const ctx = await ((await manager.getAuthInstance()) as any).$context;
+    // The configuration re-read at request time now says "no SSO"; the
+    // composition that answers the request still mounts it.
+    vi.stubEnv('OS_SSO_ENABLED', undefined);
+    ctx.adapter = { ...ctx.adapter };
+    const res = await manager.handleRequest(doors[0]![1]());
+    expect(res.status, await res.clone().text()).toBe(503);
+    expect(await res.json()).toMatchObject({ success: false, error: { code: 'SERVICE_UNAVAILABLE' } });
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the SSO discovery scope judges only the reads it names', () => {
   /** A guard that answers every read itself, recording it. */
   function recordingGuard(): { guard: EgressGuard; sent: string[] } {

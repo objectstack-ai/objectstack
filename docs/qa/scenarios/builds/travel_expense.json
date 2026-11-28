@@ -8,7 +8,7 @@
     "scope": "project",
     "name": "Travel Expense",
     "engines": {
-      "protocol": "^18"
+      "protocol": "^19"
     }
   },
   "objects": [
@@ -155,7 +155,10 @@
             ],
             "approved": [],
             "rejected": []
-          }
+          },
+          "initialStates": [
+            "pending"
+          ]
         }
       ],
       "highlightFields": [
@@ -806,6 +809,12 @@
           "collapse": "none"
         },
         {
+          "key": "lines",
+          "label": "Expense Lines",
+          "collapse": "none",
+          "relatedList": "demotravel_claim_line"
+        },
+        {
           "key": "status",
           "label": "Status & Payment",
           "collapse": "none"
@@ -842,7 +851,10 @@
             ],
             "paid": [],
             "rejected": []
-          }
+          },
+          "initialStates": [
+            "draft"
+          ]
         },
         {
           "name": "submit_needs_lines",
@@ -1428,7 +1440,10 @@
             "rejected": [
               "draft"
             ]
-          }
+          },
+          "initialStates": [
+            "draft"
+          ]
         }
       ],
       "nameField": "name",

@@ -64,6 +64,13 @@ vi.mock('./metadata-admin/inspectors/ReportDefaultInspector', () => ({
   ),
 }));
 
+// objectstack#36716 — the editor reads where its Save would land from the
+// package list: the report's package is listed, and writable.
+vi.mock('./studio-design/packages-io', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchListedPackageManifests: vi.fn(async () => new Map([['com.qa.tr', { writable: true, manifest: { id: 'com.qa.tr' } }]])),
+}));
+
 const meta = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 
@@ -147,9 +154,10 @@ function mountReport() {
 /** A client whose served reads translate and whose layered read is the stored row. */
 function makeClient({ draft }: { draft: typeof SOURCE | null }) {
   return {
-    // The served draft read (`RuntimeDraftBar`): translated, like every served read.
+    // The served draft read: translated, like every served read.
     get: vi.fn(async () => (draft ? served(draft) : null)),
-    // The served draft read the editor hands `authoredBuffer` (objectstack#35054): the envelope, translated.
+    // The served draft read the editor hands `authoredBuffer` (objectstack#35054), and the draft bar's
+    // (`getDraft(type, name)`, objectstack#36350: the envelope keeps the version its Publish pins): translated.
     getDraft: vi.fn(async () => (draft ? { type: 'report', name: draft.name, item: served(draft) } : null)),
     layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: SOURCE, draft })),
     save: vi.fn(async () => ({})),
@@ -162,7 +170,8 @@ async function openEditAndSave() {
   fireEvent.click(await screen.findByTestId('report-edit-button'));
   await screen.findByTestId('report-config-panel');
   // Let the draft bar's read settle, so a resume (if any) has landed first.
-  await waitFor(() => expect(client.value.get).toHaveBeenCalled());
+  // The draft bar's read (`getDraft(type, name)`; the editor's names its package).
+  await waitFor(() => expect(client.value.getDraft).toHaveBeenCalledWith('report', 'task_overview'));
   await act(async () => {});
   fireEvent.click(screen.getByTestId('stub-report-edit'));
   await act(async () => {
@@ -189,7 +198,10 @@ describe('the report quick edit edits the authored report (objectstack#35008, Re
     mountReport();
     const [type, name, body, opts] = await openEditAndSave();
 
-    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft' }]);
+    // objectstack#36374 — Save stages the body and publishes it in the same press.
+    // objectstack#36716 — saved in the writable package it is served from.
+    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft', ifNoneMatch: '*', packageId: PKG }]);
+    expect(client.value.publish).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
     // Read at the package the served report came from.
     expect(client.value.layered).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
     expect(body.label).toBe(SOURCE.label);
@@ -211,7 +223,7 @@ describe('the report quick edit edits the authored report (objectstack#35008, Re
     expect(body.blocks.map((b: any) => b.label)).toEqual(['Open Tasks', 'Completed Tasks']);
     expect(body.description).toBe('Edited description');
     // The draft bar still reads the draft, for its indicator and Publish.
-    expect(client.value.get).toHaveBeenCalledWith('report', 'task_overview', { state: 'draft' });
+    expect(client.value.getDraft).toHaveBeenCalledWith('report', 'task_overview');
   });
 
   it('a pending draft whose stored copy the layers do not serve opens no editor (objectstack#35054)', async () => {

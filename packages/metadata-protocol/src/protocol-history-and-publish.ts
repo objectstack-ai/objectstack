@@ -23,6 +23,7 @@
  * not move.
  */
 
+import { applyOldShapeFormRowRemovals, formTypeWriteRefusal, healOldShapeFormRowRemovals, restoreOldShapeFormRowRemovals, type AppliedOldShapeFormRowRemoval } from './protocol-form-writes.js';
 import { stampHtmlPageRequires } from './runtime-authoring-gate.js';
 import type { RuntimeAuthoringIssue, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { DraftConflictError, packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
@@ -45,7 +46,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
-import { environmentActionPublishSlotRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
+import { environmentActionPublishSlotRefusal, packagelessHolderRefusal, packagelessRowHeldBaseAddress } from './protocol-save.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
@@ -68,6 +69,7 @@ import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './proto
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
+import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -84,6 +86,12 @@ type LandedPromotion = {
     version: string;
     /** The draft row the promotion consumed. */
     promotedDraft?: { body: unknown; hash: string };
+    /**
+     * [ADR-0159 D5] The old-shape `view` rows a `form` promotion removed or
+     * re-saved at its address, each with the version it replaced: the undo
+     * puts them back before it undoes the promotion itself.
+     */
+    removedOldShapeRows?: readonly AppliedOldShapeFormRowRemoval[];
 };
 
 /**
@@ -107,7 +115,10 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * moves an ADR-0067 D3 revert makes, read off the same pre-publish capture) —
  * and the draft row the promotion consumed is put back as the pending draft,
  * byte for byte, so its hash and its version token are the ones the author
- * holds.
+ * holds. [ADR-0159 D5] A `form` promotion also removed (or re-saved) the
+ * old-shape `view` row of its address; that row is put back first, at the
+ * version it stood at ({@link restoreOldShapeFormRowRemovals}), so an undo
+ * that stops part-way never leaves the address without it.
  *
  * Each undo step appends its own history event, as a revert does: history is
  * append-only (D3), so the log records that the publish happened and was
@@ -151,6 +162,9 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'engine' | 'isArtif
                 ? 'override-artifact' : 'runtime-only';
         const intent = intentFor(item.packageId);
         try {
+            if (item.removedOldShapeRows && item.removedOldShapeRows.length > 0) {
+                await restoreOldShapeFormRowRemovals(host, args.repo, item.removedOldShapeRows, { actor, source, message });
+            }
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
             }
@@ -674,7 +688,7 @@ export class ProtocolHistoryAndPublishFacet {
      * `recordPendingDenialAudit`, rethrow. Skip it and the refusal is silent
      * again — the pre-#7748 state, not merely a worse one.
      */
-    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
+    static async promoteDraftForPublish(host: Pick<ProtocolHost, 'anonymousElevatedFlowRefusal' | 'applyRegistryWriteThrough' | 'expandStoredViewContainers' | 'readFlattenedMetaItems' | 'readActiveOverlayRows' | 'restoreArtifactRegistryView' | 'storedOverlayEntries' | 'assertRuntimeAuthoringRules' | 'classifyObjectContribution' | 'credentialChannelFor' | 'declinesStoredRow' | 'defaultRecordPageSaveRefusal' | 'engine' | 'ensureOverlayIndex' | 'expandRuntimeViewContainer' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'isSealedManagedItem' | 'isWritablePackage' | 'lockWriteRefusal' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'objectExtensionItemRefusal' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'optimisticConflictAuditEntry' | 'overlayPackageMismatchError' | 'overrideWriteVerdict' | 'packagelessAddress' | 'packagelessDraftAddress' | 'permissionSetNameCollisionRefusal' | 'readItemActiveRows' | 'resolveSduiManifest' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'seedExternalIdSaveRefusal' | 'shippedArtifactsOf' | 'storedParentForToken' | 'uninstalledNamedBaseRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal' | 'unknownPicklistBindingSaveRefusal'>, request: {
             type: string; name: string; actor?: string; message?: string;
             /**
              * [#8907] ADR-0048 — the package binding of the draft being promoted,
@@ -729,6 +743,21 @@ export class ProtocolHistoryAndPublishFacet {
             /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
             userTextLocales?: readonly (string | undefined)[];
             /**
+             * [#36601] `PublishMetaItemRequestSchema.parentVersion`: the
+             * caller's pin on the active row this promotion replaces — a
+             * token, `null` for "no active row here", absent for unpinned.
+             * Stated by the per-item publish only; a package publish pins
+             * nothing.
+             */
+            parentVersion?: string | null;
+            /**
+             * [#36350] `PublishMetaItemRequestSchema.draftVersion`: the
+             * caller's pin on the draft this promotion reads — a token, absent
+             * for unpinned. Stated by the per-item publish only; a package
+             * publish pins nothing.
+             */
+            draftVersion?: string;
+            /**
              * [ADR-0144 D2 and D6, amended] The registry question this
              * promotion asks before the row goes live, stated by every producer
              * ({@link PROMOTION_REGISTRY_QUESTION}, `registry-question.ts`): the
@@ -761,8 +790,13 @@ export class ProtocolHistoryAndPublishFacet {
              * discipline — per the maintainer's ruling, no parallel top-level map.
              */
             advisories: RuntimeAuthoringIssue[];
-            /** What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly` was stated. */
-            result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+            /**
+             * What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly`
+             * was stated. [ADR-0159 D5] For a `form`, also the old-shape rows
+             * the same transaction removed or re-saved, each with the version
+             * it replaced (absent when it changed none).
+             */
+            result?: { version: string; seq: number; item: MetadataItem; packageId: string | null; removedOldShapeRows?: readonly AppliedOldShapeFormRowRemoval[] };
             /**
              * [#32369] What a judge-only call judged: the draft body the
              * promotion would make active and the package it would write it
@@ -861,6 +895,36 @@ export class ProtocolHistoryAndPublishFacet {
                 if (address.kind === 'none' && address.into !== null && others.length > 0) {
                     addressRefusal = packagelessPublishNoDraftRefusal(request.type, request.name, address.into, others);
                 }
+                // [ADR-0150 D3, the 2026-11-26 note] …and the holders, where
+                // the promotion reads the package-unbound draft or writes the
+                // package-unbound active row, as the draft save naming no
+                // package judges them ({@link packagelessHolderRefusal}, its
+                // disabled-holders judgment only): of a name only disabled
+                // packages hold, that draft and that row are their
+                // customization, hidden with them, and the promotion wrote the
+                // active row the next enable serves. Refused with the enable
+                // as the remedy, nothing written. A publish with no draft is
+                // not asked, and keeps its `NO_DRAFT`.
+                //
+                // [#37851 ruling A] …and a promotion of a package's own draft
+                // into its own row (`key` and `into` that package) is asked
+                // too, as the bare save of the item is: of a name only
+                // disabled packages hold it wrote the disabled package's
+                // active row, which the next enable served. It touches no
+                // package-less row, so it is asked the judgment's first state
+                // only ({@link disabledHoldersOnlyRefusal}, the `?package=`
+                // remedy, which the publish naming that package reaches),
+                // whatever package-less row is stored beside it.
+                if (addressRefusal === undefined && address.kind === 'draft') {
+                    const ownDraft = address.key !== null && address.into !== null;
+                    const active = await host.packagelessAddress(singularType, request.name, request.member, 'active');
+                    if (ownDraft || active.unbound || address.drafts.unbound) {
+                        addressRefusal = packagelessHolderRefusal(host, 'publish', request.type, singularType, request.name, request.member, {
+                            candidates: [...new Set([...active.candidates, ...address.drafts.candidates])],
+                            unbound: !ownDraft,
+                        }, 'disabled-holders');
+                    }
+                }
             }
         }
         // ADR-0010 L3 — lock blocks publish too (publishing is a write).
@@ -900,10 +964,82 @@ export class ProtocolHistoryAndPublishFacet {
             { verb: 'publish' },
         );
         if (unboundBase) throw unboundBase;
+        // [#21207] A conflict refused at this door, keyed values or none in
+        // the text and attributes, carrying its audit row. `draft-pin` is the
+        // caller's `draftVersion` refused; `promotion` is the store's own
+        // refusal at `repo.promoteDraft` (the judged draft moved, or the
+        // caller's `parentVersion` on the active row did not hold).
+        const publishConflictRefusal = async (err: ConflictError, at: 'draft-pin' | 'promotion'): Promise<Error> => {
+            const subject = `${request.type}/${request.name}`;
+            const conflict = await host.metadataConflictRefusal(
+                err,
+                subject,
+                at === 'draft-pin'
+                    ? `${subject} draft changed since the version this publish pinned (draftVersion), so nothing was `
+                        + `published. Re-read the draft and publish again to promote what it holds now.`
+                    : err instanceof DraftConflictError
+                        ? `${subject} draft changed after this publish judged it, so nothing was `
+                            + `published. Publish again to judge and promote the current draft.`
+                        : `${subject} published row advanced while you held the draft.`,
+                // [#36601] A publish pinned "no active row here" is told so, as the save door's first-write pin is.
+                at === 'promotion' && request.parentVersion === null && !(err instanceof DraftConflictError) ? 'active' : undefined,
+            );
+            // [#8594] Attached, not written — same reason as the lock gate
+            // above. The repository's own transaction has already unwound by
+            // the time the caller's `catch` runs, but the BATCH caller's has not.
+            return withPendingAudit(
+                conflict,
+                host.optimisticConflictAuditEntry({
+                    type: request.type,
+                    name: request.name,
+                    operation: 'publish',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishMetaItem',
+                    expectedParent: err.expectedParent,
+                    actualHead: err.actualHead,
+                }),
+            );
+        };
         const draftForGate = await repo.get(
             { type: singularType, name: request.name, org: 'env' } as Parameters<typeof repo.get>[0],
             { state: 'draft', packageId: draftKey, ...memberOption(request.member) },
         );
+        // [ruling 7168616260 on #36350] The caller's pin on the DRAFT this
+        // promotion reads (`PublishMetaItemRequestSchema.draftVersion`),
+        // judged before any rule judges the draft: a token is matched in keyed
+        // form against the draft row just read ({@link storedParentForToken},
+        // the save door's comparison), and a draft that moved since the
+        // caller wrote or read it — or is no longer pending — is refused 409
+        // `METADATA_CONFLICT` naming the draft's current token, with nothing
+        // promoted. Held through the write by `expectedDraftHash` below, which
+        // locks the promotion to this same row. `parentVersion` pins the
+        // active row; the two judge different rows and may be sent together.
+        // Absent, any pending draft is promoted, as before.
+        if (request.draftVersion !== undefined) {
+            // Off-type from an in-process caller (`null`, a number) is no pin:
+            // `storedParentForToken` reads `null` as "nothing pinned", which
+            // would publish unpinned exactly the draft the caller meant to
+            // guard. The REST door refuses it `400` before it gets here.
+            if (typeof request.draftVersion !== 'string') {
+                const err: any = new Error(
+                    `${request.type}/${request.name}: draftVersion must be a string — the version token of the draft `
+                        + `this publish promotes. Leave it out to publish whichever draft is pending.`,
+                );
+                err.code = 'VALIDATION_ERROR';
+                err.status = 400;
+                throw err;
+            }
+            try {
+                await host.storedParentForToken(
+                    { type: singularType, name: request.name, org: 'env' },
+                    request.draftVersion,
+                    draftForGate?.hash ?? null,
+                );
+            } catch (err: unknown) {
+                if (err instanceof ConflictError) throw await publishConflictRefusal(err, 'draft-pin');
+                throw err;
+            }
+        }
         // [ADR-0150 D4, ruling 6902014292] The environment's own action
         // draft is promoted into the one package-unbound active row of the
         // name: when that row is a holder's customization, the publish would
@@ -1107,6 +1243,20 @@ export class ProtocolHistoryAndPublishFacet {
                 singularType, request.name, promoteInto, 'publish',
             );
             if (nameCollision) throw nameCollision;
+        }
+        // [ADR-0159 card ② items 5 and 7] …and the save door's two `form`-type
+        // refusals, judged again on the draft's body and the package it is
+        // promoted into before `repo.promoteDraft` writes: a package-less view
+        // draft that would store a list at the name a read-only package
+        // authors as a `form` (`VALIDATION_ERROR`, 400), and a `form` draft
+        // left open on a public address another form has taken since the
+        // draft was saved (`FORM_ADDRESS_TAKEN`, 409). See
+        // {@link formTypeWriteRefusal}.
+        if (draftForGate) {
+            const formRefusal = await formTypeWriteRefusal(
+                host, singularType, draftForGate.body, request.name, promoteInto,
+            );
+            if (formRefusal) throw formRefusal;
         }
         // [#28905, ADR-0146 D1, D11] …and the promotion INTO the read-only
         // base itself, of an item of one of the five overlay types it ships:
@@ -1330,7 +1480,46 @@ export class ProtocolHistoryAndPublishFacet {
         // with no manifest promotes the draft as written, as it saves it.
         const sduiManifest = host.resolveSduiManifest();
         try {
-            const result = await repo.promoteDraft(ref, {
+            // [#36601] The caller's pin on the PUBLISHED layer, judged on the
+            // active row at the address this promotion writes (`promoteInto`,
+            // the binding `repo.promoteDraft` writes the active row under):
+            // a token is matched in keyed form ({@link storedParentForToken},
+            // the save door's comparison) and handed to the store as the
+            // stored hash its `put` locks against, so a row published between
+            // this read and the write is refused there too; `null` asserts no
+            // active row. The draft's own pin is `expectedDraftHash` below:
+            // the two judge different rows. Without it the promotion replaces
+            // whatever is live, as before.
+            let expectedActiveHash: string | null | undefined;
+            if (request.parentVersion !== undefined) {
+                const activeHead = await repo.headAt(ref, {
+                    state: 'active',
+                    packageId: promoteInto,
+                    ...memberOption(request.member),
+                });
+                expectedActiveHash = await host.storedParentForToken(ref, request.parentVersion, activeHead.head?.hash ?? null);
+            }
+            // [ADR-0159 D5, card ② item 5] A `form` made active here removes
+            // the promoted-into package's old-shape row of the name in the
+            // same transaction, as the published save does
+            // ({@link applyOldShapeFormRowRemovals}); the registry is healed
+            // after the commit. ⛔ Form content only.
+            let removedOldShapeRows: AppliedOldShapeFormRowRemoval[] = [];
+            const promoteFormAware = async (promote: () => Promise<any>): Promise<any> => {
+                if (singularType !== 'form' || request.judgeOnly) return promote();
+                const run = async () => {
+                    const promoted = await promote();
+                    removedOldShapeRows = await applyOldShapeFormRowRemovals(host, {
+                        name: request.name,
+                        packageId: promoteInto,
+                        actor: request.actor ?? null,
+                        source: 'protocol.publishMetaItem',
+                    });
+                    return promoted;
+                };
+                return typeof host.engine?.transaction === 'function' ? retireOverlayCacheOnRollback(host.engine, () => host.engine.transaction!(run)) : run();
+            };
+            const result = await promoteFormAware(() => repo.promoteDraft(ref, {
                 deriveActiveBody: (draftBody) => stampHtmlPageRequires(singularType, draftBody, sduiManifest),
                 // #4556 — NULL, not 'system', for an actor-less publish.
                 actor: request.actor ?? null,
@@ -1358,42 +1547,20 @@ export class ProtocolHistoryAndPublishFacet {
                 // none), so a draft saved after the gate's read is refused as a
                 // conflict instead of being promoted unjudged.
                 expectedDraftHash: draftForGate ? draftForGate.hash : null,
+                // [#36601] …over the active row the caller pinned, when it pinned one.
+                ...(expectedActiveHash !== undefined ? { expectedActiveHash } : {}),
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
-            });
+            }));
+            await healOldShapeFormRowRemovals(host, removedOldShapeRows);
             return {
                 singularType,
                 advisories: runtimeAdvisories,
-                result,
+                result: removedOldShapeRows.length > 0 ? { ...result, removedOldShapeRows } : result,
                 ...(draftForGate ? { promotedDraft: { body: draftForGate.body, hash: draftForGate.hash } } : {}),
             };
         } catch (err: any) {
-            if (err instanceof ConflictError) {
-                // [#21207] Keyed values or none in the text and attributes.
-                const conflict = await host.metadataConflictRefusal(
-                    err,
-                    `${request.type}/${request.name}`,
-                    err instanceof DraftConflictError
-                        ? `${request.type}/${request.name} draft changed after this publish judged it, so nothing was `
-                            + `published. Publish again to judge and promote the current draft.`
-                        : `${request.type}/${request.name} published row advanced while you held the draft.`,
-                );
-                // [#8594] Attached, not written — same reason as the lock gate
-                // above. The repository's own transaction has already unwound by
-                // the time this `catch` runs, but the BATCH caller's has not.
-                throw withPendingAudit(
-                    conflict,
-                    host.optimisticConflictAuditEntry({
-                        type: request.type,
-                        name: request.name,
-                        operation: 'publish',
-                        ...(request.actor ? { actor: request.actor } : {}),
-                        source: 'protocol.publishMetaItem',
-                        expectedParent: err.expectedParent,
-                        actualHead: err.actualHead,
-                    }),
-                );
-            }
+            if (err instanceof ConflictError) throw await publishConflictRefusal(err, 'promotion');
             throw err;
         }
     }
@@ -2130,7 +2297,7 @@ export class ProtocolHistoryAndPublishFacet {
             ? this.engine.transaction.bind(this.engine)
             : undefined;
         const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
-            engineTx ? (cb) => engineTx(() => cb()) : (cb) => cb();
+            engineTx ? (cb) => retireOverlayCacheOnRollback(this.engine, () => engineTx(() => cb())) : (cb) => cb();
         /** The promotion request for one draft: Phase 0 judges it, Phase 1 writes it. */
         const promotionRequest = (d: (typeof ordered)[number]) => ({
             registryQuestion: PROMOTION_REGISTRY_QUESTION['package-publish'],
@@ -2253,6 +2420,7 @@ export class ProtocolHistoryAndPublishFacet {
                             seq: result.seq,
                             advisories,
                             ...(promotedDraft ? { promotedDraft } : {}),
+                            ...(result.removedOldShapeRows?.length ? { removedOldShapeRows: result.removedOldShapeRows } : {}),
                         });
                         if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
                     } catch (e: unknown) {
@@ -2292,13 +2460,28 @@ export class ProtocolHistoryAndPublishFacet {
                     // [#22877] Keyed by member too: two members of one name
                     // are two plan items.
                     const promotedKeys = new Set(promoted.map((p) => commitPlanKey(p.d)));
+                    const committedItems = commitItems.filter((it) => promotedKeys.has(commitPlanKey(it)));
+                    // [ADR-0159 D5, ADR-0067 D3] …and every old-shape `view` row a
+                    // `form` promotion removed or re-saved: a row this publish
+                    // edited, recorded at the version it stood at before the
+                    // publish (the first removal of it; a row the batch also
+                    // promotes keeps its own pre-publish capture), so the
+                    // commit's revert restores it as it restores any edited row.
+                    for (const p of promoted) {
+                        for (const removal of p.removedOldShapeRows ?? []) {
+                            const item: CommitPlanItem = {
+                                type: 'view', name: removal.row.name, existedBefore: true, prevVersion: removal.replacedVersion,
+                            };
+                            if (!committedItems.some((it) => commitPlanKey(it) === commitPlanKey(item))) committedItems.push(item);
+                        }
+                    }
                     commit = await this.recordPackageCommit({
                         packageId: request.packageId,
                         operation: 'apply',
                         ...(request.message ? { message: request.message } : {}),
                         ...(request.actor ? { actor: request.actor } : {}),
                         ...(request.aiModel ? { aiModel: request.aiModel } : {}),
-                        items: commitItems.filter((it) => promotedKeys.has(commitPlanKey(it))),
+                        items: committedItems,
                         ...(publishedSeqs.length
                             ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
                             : {}),

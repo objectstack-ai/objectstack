@@ -70,6 +70,9 @@ import { LOCKED_ACCOUNT_ROW_FIELDS, refuseLockedAccountSession } from './auth-ma
 import { refuseDevSeedCredentialSession, stampDevSeedCredential } from './dev-seed-credential.js';
 import { PLATFORM_IDP_PROVIDER_ID } from './implicit-account-linking.js';
 import { PENDING_SSO_SOURCE } from './pending-sso-marker.js';
+import { settleSsoSignInProvider } from './sso-session-provider.js';
+import { endRegistrationsBeforeAccountDelete, RemovedAccountRegistrationsNotEnded } from './removed-account-registrations.js';
+import { resolveAttributedUserId } from './auth-actor-attribution.js';
 
 /**
  * The `AuthManager` members the functions below read — every one of them, and
@@ -195,6 +198,38 @@ export function composeDatabaseHooks(
       });
     }
   };
+  // A removed account keeps nothing running in its name
+  // (`removed-account-registrations.ts`): an administrator's delete
+  // (`/admin/remove-user`) ends what a password reset ends of the account's
+  // registrations — its OAuth applications disabled, its SCIM credentials
+  // revoked, each revoke recorded against the administrator — here, after the
+  // vendor authorized the delete and before the row is deleted, inside the
+  // delete's unit of work (`runSubjectErasureAtomically`). It is the last
+  // moment those rows can be found by their owner, so an arm that does not
+  // finish refuses the delete (`503 SERVICE_UNAVAILABLE`) and it rolls back. A
+  // host `delete.before` runs first; its `false` (abort) is honoured and ends
+  // nothing.
+  const hostUserDeleteBefore = (host as any)?.user?.delete?.before;
+  const userDeleteBefore = async (user: any, ctx: any) => {
+    const result = hostUserDeleteBefore ? await hostUserDeleteBefore(user, ctx) : undefined;
+    if (result === false) return false;
+    const userId = typeof user?.id === 'string' ? user.id : undefined;
+    if (!userId) return result;
+    try {
+      await endRegistrationsBeforeAccountDelete(this.config.dataEngine as never, userId, {
+        actorId: await resolveAttributedUserId(),
+        warn: (message) => this.config.logger?.warn?.(message),
+      });
+    } catch (e) {
+      if (!(e instanceof RemovedAccountRegistrationsNotEnded)) throw e;
+      const { APIError } = await import('better-auth/api');
+      const err = new APIError('SERVICE_UNAVAILABLE', { message: e.message, code: 'SERVICE_UNAVAILABLE' });
+      (err as { cause?: unknown }).cause = e;
+      throw err;
+    }
+    return result;
+  };
+
   const hostUserDeleteAfter = (host as any)?.user?.delete?.after;
   const userDeleteAfter = async (user: any, ctx: any) => {
     const result = hostUserDeleteAfter ? await hostUserDeleteAfter(user, ctx) : undefined;
@@ -466,6 +501,13 @@ export function composeDatabaseHooks(
   const hostSessionCreateAfter = (host as any)?.session?.create?.after;
   const sessionCreateAfter = async (session: any, ctx: any) => {
     const result = hostSessionCreateAfter ? await hostSessionCreateAfter(session, ctx) : undefined;
+    // A session an SSO sign-in minted records the provider it came through, so
+    // deleting that provider ends it (`sso-session-provider.ts`). Never throws.
+    await settleSsoSignInProvider(session, ctx, this.config.dataEngine as never, (message) => {
+      const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+      if (typeof sink?.error === 'function') sink.error(message);
+      else console.error(message);
+    });
     const sink = this.config.getAuditSink?.();
     if (sink) {
       const login = loginEventFor(session, typeof ctx?.path === 'string' ? ctx.path : undefined);
@@ -621,6 +663,7 @@ export function composeDatabaseHooks(
       },
       delete: {
         ...((host as any)?.user?.delete ?? {}),
+        before: userDeleteBefore,
         after: userDeleteAfter,
       },
     },

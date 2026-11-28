@@ -39,6 +39,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid during collection, not inside a case's clock: the dispatcher reaches
+// `standalone-stack.ts`, whose dynamic `@objectstack/metadata` import would
+// otherwise load inside the first case that gets that far (check:test-source-alias).
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, KernelResolver } from '../http-dispatcher.js';
 
@@ -319,4 +323,57 @@ describe('[#22755] no preamble-gate exemption — the credential is the session,
         expect(result.response?.body?.error?.details?.code ?? result.response?.body?.error?.code).toBe('PASSWORD_EXPIRED');
         expect(webhooks.handleRedeliver).not.toHaveBeenCalled();
     });
+});
+
+// [#37610] The redelivery door's two `501` sentences are the operation-message
+// catalog's, in the request's top `Accept-Language` tag, as the own-door
+// bridge answers its doors' own. The English is byte for byte the sentence the
+// door answered before, the code and status are unchanged, and no
+// `userMessage` is added.
+describe('[#37610] the redelivery door\'s 501 follows the request\'s language', () => {
+    const SENTENCES = {
+        unregistered: {
+            en: 'Webhook redelivery is not available: no webhooks service is registered. @objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
+            'zh-CN': 'Webhook 重新投递不可用：未注册 webhooks 服务。@objectstack/plugin-webhooks 在安装其重新投递否决器后注册该服务，这需要数据引擎和 @objectstack/service-messaging；启动日志会指出缺少的是哪一个。',
+            'ja-JP': 'Webhook の再配信は利用できません。webhooks サービスが登録されていません。@objectstack/plugin-webhooks は再配信の拒否フックがインストールされると登録します。それにはデータエンジンと @objectstack/service-messaging が必要です。不足しているものは起動ログに示されます。',
+            'es-ES': 'El reenvío de webhooks no está disponible: no hay ningún servicio webhooks registrado. @objectstack/plugin-webhooks lo registra una vez instalado su veto de reenvío, que necesita el motor de datos y @objectstack/service-messaging; el registro de arranque indica cuál falta.',
+        },
+        memberMissing: {
+            en: 'Webhook redelivery is not available: the registered webhooks service does not implement handleRedeliver.',
+            'zh-CN': 'Webhook 重新投递不可用：已注册的 webhooks 服务未实现 handleRedeliver。',
+            'ja-JP': 'Webhook の再配信は利用できません。登録されている webhooks サービスは handleRedeliver を実装していません。',
+            'es-ES': 'El reenvío de webhooks no está disponible: el servicio webhooks registrado no implementa handleRedeliver.',
+        },
+    };
+    const HEADERS: Record<keyof typeof SENTENCES.unregistered, Array<Record<string, string>>> = {
+        en: [{ 'accept-language': 'en-US,en;q=0.9' }, {}],
+        'zh-CN': [{ 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' }],
+        'ja-JP': [{ 'accept-language': 'ja-JP,ja;q=0.9' }],
+        'es-ES': [{ 'accept-language': 'es-ES,es;q=0.9' }],
+    };
+
+    for (const site of [
+        { name: 'no webhooks slot on the kernel', services: {} as Record<string, unknown>, sentences: SENTENCES.unregistered },
+        { name: 'a webhooks service without handleRedeliver', services: { webhooks: { somethingElse: vi.fn() } }, sentences: SENTENCES.memberMissing },
+    ]) {
+        it(`${site.name}: 501 NOT_IMPLEMENTED in en (and with no header), zh-CN, ja-JP and es-ES`, async () => {
+            for (const [locale, list] of Object.entries(HEADERS) as Array<[keyof typeof HEADERS, Array<Record<string, string>>]>) {
+                for (const headers of list) {
+                    const { dispatcher } = makeDispatcher(site.services);
+                    const request = new Request(`${ORIGIN}/api/v1${REDELIVER}`, {
+                        method: 'POST',
+                        headers: { ...JSON_HEADERS, ...headers },
+                        body: JSON.stringify({ deliveryId: 'del_1' }),
+                    });
+                    const label = JSON.stringify(headers);
+                    const result = await dispatcher.dispatch('POST', REDELIVER, {}, {}, ctx(request));
+                    expect(envelope(result), label).toEqual({ status: 501, code: 'NOT_IMPLEMENTED' });
+                    // [#37737] The body is in the request's language, so the answer says it varies by it.
+                    expect(result.response?.headers?.Vary, label).toBe('Accept-Language');
+                    expect(result.response?.body?.error?.message, label).toBe(site.sentences[locale]);
+                    expect(result.response?.body?.error?.userMessage, label).toBeUndefined();
+                }
+            }
+        });
+    }
 });

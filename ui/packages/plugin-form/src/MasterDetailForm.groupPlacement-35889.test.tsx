@@ -150,6 +150,43 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     expect(submitted).not.toHaveBeenCalled();
   });
 
+  it('an expanded row editor opens in the slot beside its collection, a form of its own, with no nesting warning', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const parent = parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]);
+    const child = { name: 'po_line', fields: { qty: { type: 'number', label: 'Qty' }, note: { type: 'text', label: 'Note' }, po: { type: 'master_detail', label: 'PO', reference: 'po' } } };
+    const ds = makeDataSource(parent, {
+      getObjectSchema: vi.fn(async (object: string) => (object === 'po_line' ? child : parent)),
+      findOne: vi.fn().mockResolvedValue({ id: 'po1', ref: 'PO-7', memo: 'm' }),
+      find: vi.fn().mockImplementation((object: string) =>
+        Promise.resolve({ data: object === 'po_line' ? [{ id: 'l1', po: 'po1', qty: 3, note: 'n' }] : [] }),
+      ),
+    });
+    const withEditor = [{ ...details[0], formFields: ['qty', 'note'] }];
+    const { container } = render(
+      <MasterDetailForm schema={{ objectName: 'po', mode: 'edit', recordId: 'po1', details: withEditor } as any} dataSource={ds} />,
+    );
+    const expand = await waitFor(() => {
+      const el = container.querySelector('[data-form-slot] [data-testid="line-items-expand-0"]') as HTMLElement | null;
+      if (!el) throw new Error('no expand in the placed collection');
+      return el;
+    });
+    fireEvent.click(expand);
+    const editor = await waitFor(() => {
+      const el = container.querySelector('[data-testid="md-row-form"]') as HTMLElement | null;
+      if (!el || !el.querySelector('input')) throw new Error('editor not open');
+      return el;
+    });
+    const header = container.querySelector('[data-form-section="__section_header"]')!.closest('form')!;
+    expect(editor.closest('[data-form-slot]')).toBe(container.querySelector('[data-form-slot]'));
+    for (const input of editor.querySelectorAll('input')) {
+      expect((input as HTMLInputElement).form).not.toBe(header);
+      expect(editor.contains((input as HTMLInputElement).form)).toBe(true);
+    }
+    const nesting = errors.mock.calls.filter((call) => /cannot be a descendant of|cannot contain a nested|validateDOMNesting/i.test(call.map(String).join(' ')));
+    expect(nesting).toEqual([]);
+    errors.mockRestore();
+  });
+
   it('saves the record and its lines in one batch from the placed table', async () => {
     const batchTransaction = vi.fn().mockResolvedValue({ results: [{ id: 'po1' }] });
     const ds = makeDataSource(parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]), { batchTransaction });
@@ -194,5 +231,66 @@ describe('MasterDetailForm — a group-placed collection sits at its group (obje
     expect(panel).toBeTruthy();
     const label = panel.getAttribute('aria-labelledby');
     expect(label && document.getElementById(label)?.textContent?.trim()).toBe('Lines');
+  });
+});
+
+describe('MasterDetailForm — a refused save marks the tab of the placed lines it was refused on', () => {
+  const tabbed = {
+    objectName: 'po',
+    mode: 'edit',
+    recordId: 'po1',
+    formType: 'tabbed',
+    sections: [
+      { name: 'header', label: 'Header', fields: ['ref'] },
+      { name: 'totals', label: 'Totals', fields: ['memo'] },
+    ],
+    details,
+  };
+  const refusal = (field: string, failedOperation?: { index: number; object: string }) =>
+    Object.assign(new Error(`${field} is not valid`), {
+      details: { code: 'VALIDATION_FAILED', fields: [{ field, message: `${field} is not valid` }], ...(failedOperation ? { failedOperation } : {}) },
+    });
+
+  async function saveRefusedWith(err: Error) {
+    const parent = parentWith([HEADER_GROUP, LINES_GROUP, TOTALS_GROUP]);
+    const child = { name: 'po_line', fields: { qty: { type: 'number', label: 'Qty' }, po: { type: 'master_detail', label: 'PO', reference: 'po' } } };
+    const batchTransaction = vi.fn().mockRejectedValue(err);
+    const ds = makeDataSource(parent, {
+      batchTransaction,
+      getObjectSchema: vi.fn(async (object: string) => (object === 'po_line' ? child : parent)),
+      findOne: vi.fn().mockResolvedValue({ id: 'po1', ref: 'PO-7', memo: 'm' }),
+      find: vi.fn().mockImplementation((object: string) =>
+        Promise.resolve({ data: object === 'po_line' ? [{ id: 'l1', po: 'po1', qty: 3 }] : [] }),
+      ),
+    });
+    const { container } = render(<MasterDetailForm schema={tabbed as any} dataSource={ds} />);
+    const qty = await waitFor(() => {
+      const el = [...container.querySelectorAll('[data-form-slot] [data-testid="md-collection"] input')]
+        .find((input) => (input as HTMLInputElement).value === '3') as HTMLInputElement | undefined;
+      if (!el) throw new Error('lines not placed');
+      return el;
+    });
+    fireEvent.change(qty, { target: { value: '4' } });
+    fireEvent.change(container.querySelector('input[name="ref"]') as HTMLInputElement, { target: { value: 'PO-8' } });
+    fireEvent.click(screen.getByTestId('md-form-submit'));
+    await waitFor(() => expect(batchTransaction).toHaveBeenCalledTimes(1));
+    return container;
+  }
+
+  it('a field only a line writes: the lines tab is marked, the header tab is not', async () => {
+    await saveRefusedWith(refusal('qty'));
+    await waitFor(() => expect(screen.getByTestId('form-tab:lines').getAttribute('data-error')).toBe('true'));
+    expect(screen.getByTestId('form-tab:header').hasAttribute('data-error')).toBe(false);
+  });
+
+  it('the operation the server names as failed: a line op marks the lines tab', async () => {
+    await saveRefusedWith(refusal('anything', { index: 1, object: 'po_line' }));
+    await waitFor(() => expect(screen.getByTestId('form-tab:lines').getAttribute('data-error')).toBe('true'));
+  });
+
+  it('control: a refusal on the header\'s own field marks its tab and leaves the lines tab unmarked', async () => {
+    await saveRefusedWith(refusal('ref'));
+    await waitFor(() => expect(screen.getByTestId('form-tab:header').getAttribute('data-error')).toBe('true'));
+    expect(screen.getByTestId('form-tab:lines').hasAttribute('data-error')).toBe(false);
   });
 });

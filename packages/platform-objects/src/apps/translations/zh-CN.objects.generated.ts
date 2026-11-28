@@ -176,7 +176,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "封禁用户",
-        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。",
+        description: "要封禁该用户吗？封禁后会立即登出，在解除封禁前无法再次登录，其 API 密钥也会被拒绝，OAuth 访问令牌与令牌续期同样被拒绝。解除封禁后这些密钥恢复可用。封禁还会暂停该用户负责的 AI 服务账号、停用其注册的 OAuth 应用并吊销其创建的 SCIM 凭据；解除封禁不会恢复这些。",
         successMessage: "用户已封禁",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
             helpText: "该用户的直接汇报对象。服务端会拒绝不在同一组织的经理、把用户指派给自己,以及会形成环路或超出汇报链深度上限的关系。"
           }
         }
+      },
+      remove_user_manager: {
+        label: "移除经理",
+        confirmText: "要移除该用户的经理吗?在重新设置经理之前,该用户不向任何人汇报;审批路由与 own_and_reports 记录范围会随之变化。",
+        successMessage: "已移除经理"
       },
       list_platform_admins: {
         label: "平台管理员",
@@ -491,6 +496,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "撤销原因",
         help: "会话被撤销的原因（idle_timeout、absolute_max、concurrent_cap、ip_not_allowed、user_revoked、admin、organization_membership_ended、admin_password_reset、password_reset 等）。"
+      },
+      sso_provider_id: {
+        label: "SSO 提供方",
+        help: "此会话登录时所经由的 SSO 提供方（如有）。删除该提供方会结束此会话。由系统管理。"
       },
       active_organization_id: {
         label: "当前组织"
@@ -4496,6 +4505,42 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "标准单位设置",
+    pluralLabel: "标准单位设置",
+    description: "本组织中以标准计量单位（KGM、H87 等）表示的数量显示几位小数，组织设置过的每个标准单位一行。",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "标准单位",
+        help: "标准单位编码（UN/ECE 第 20 号建议），须为大写，例如千克 KGM、克 GRM、件 H87。本组织自己的单位在「计量单位」中各自设置小数位。设置创建后不能更改编码。"
+      },
+      decimal_places: {
+        label: "小数位",
+        help: "以此单位表示的数量默认显示几位小数。它不会对已存储的值做舍入，字段自身的小数位仍限制存储和显示的位数。删除这条设置即可清除。"
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "全部",
+        description: "本组织中以标准单位表示的数量显示的小数位。字段自身的小数位仍限制存储和显示的位数。",
+        emptyState: {
+          title: "暂无标准单位设置",
+          message: "标准单位按存放数量的字段的小数位显示。添加一条设置，可以为克、千克等标准单位指定自己的小数位。"
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "请输入大写的标准单位编码，例如 KGM 或 H87。本组织自己的单位在「计量单位」中各自设置小数位。"
+      },
+      standard_unit_setting_code_immutable: {
+        message: "设置创建后不能更改单位。请删除它，再为另一个单位添加设置。"
+      }
+    }
+  },
   sys_work_calendar: {
     label: "工作日历",
     pluralLabel: "工作日历",
@@ -4616,6 +4661,91 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           title: "还没有日历例外",
           message: "每个节假日或调休工作日录一行，或从文件导入一整年的数据。"
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "任务",
+    pluralLabel: "任务",
+    description: "待办的事项，带负责人和到期时间。",
+    fields: {
+      title: {
+        label: "标题"
+      },
+      description: {
+        label: "说明"
+      },
+      status: {
+        label: "状态",
+        options: {
+          todo: "待办",
+          in_progress: "进行中",
+          done: "完成"
+        }
+      },
+      due_at: {
+        label: "到期时间"
+      },
+      assignee_id: {
+        label: "负责人"
+      },
+      completed_at: {
+        label: "完成时间",
+        help: "状态变为“完成”时由平台写入，离开“完成”时清空。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "分配给我的",
+        emptyState: {
+          title: "没有分配给你的任务",
+          message: "分配给你的未完成任务会显示在这里。"
+        }
+      },
+      created_by_me: {
+        label: "我创建的",
+        emptyState: {
+          title: "还没有任务",
+          message: "你创建的任务会显示在这里。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_note: {
+    label: "备忘",
+    pluralLabel: "备忘",
+    description: "备忘：一个标题和一段带格式的正文。",
+    fields: {
+      title: {
+        label: "标题"
+      },
+      body: {
+        label: "正文"
+      },
+      heading: {
+        label: "显示标题",
+        help: "标题；标题为空时取正文第一行。由平台维护。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "我的",
+        emptyState: {
+          title: "还没有备忘",
+          message: "你写的备忘会显示在这里。"
+        }
+      },
+      all: {
+        label: "全部"
       }
     }
   }

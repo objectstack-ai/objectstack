@@ -78,9 +78,9 @@
  */
 
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
-import type { IWebhookService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
 
 /**
  * The one path this domain claims — exactly, with no sub-paths: the redeliver
@@ -111,28 +111,15 @@ export async function handleWebhooksRedeliverRequest(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
 ): Promise<HttpDispatcherResult> {
-    const service = await deps.resolveService(context, WEBHOOKS_SLOT, context.environmentId) as
-        Pick<IWebhookService, 'handleRedeliver'> | undefined;
+    // The request's own kernel serves the door, and only it (`readDoorSlot`).
+    const service = await readDoorSlot(deps, context, WEBHOOKS_SLOT);
+    // [#37610] The `501` is the operation-message catalog's, in the request's
+    // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
-        return {
-            handled: true,
-            response: deps.error(
-                'Webhook redelivery is not available: no webhooks service is registered. '
-                + '@objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs '
-                + 'the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'webhook_redeliver_service_unregistered');
     }
     if (typeof service.handleRedeliver !== 'function') {
-        return {
-            handled: true,
-            response: deps.error(
-                'Webhook redelivery is not available: the registered webhooks service '
-                + 'does not implement handleRedeliver.',
-                501,
-            ),
-        };
+        return catalogNotImplemented(deps, context, 'webhook_redeliver_member_missing');
     }
 
     const request = context.request as Request;

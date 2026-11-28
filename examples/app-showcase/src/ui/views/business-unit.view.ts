@@ -36,12 +36,6 @@ export const BusinessUnitViews = defineView({
       },
     },
   },
-  // The default form — what the create and edit surfaces render.
-  form: {
-    type: 'simple',
-    data,
-    sections: [
-      { name: 'unit', label: 'Unit', columns: 2, fields: ['name', 'parent', 'kind', 'manager', 'headcount'] },
-    ],
-  },
+  // No form here: the create and edit forms lay a unit out by the object's
+  // `fieldGroups` (data/objects/business-unit.object.ts).
 });

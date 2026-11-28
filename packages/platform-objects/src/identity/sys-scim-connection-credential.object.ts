@@ -36,6 +36,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   label: 'SCIM Connection Credential',
   pluralLabel: 'SCIM Connection Credentials',
   icon: 'users',
+  color: 'purple',
   isSystem: true,
   // ObjectStack owns this lifecycle end to end — plugin-auth's SCIM connection
   // service is the only writer; no user CRUD, no better-auth involvement.
@@ -89,7 +90,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       icon: 'plus-circle',
       variant: 'primary',
       mode: 'create',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/scim/mint-credential',
@@ -155,7 +156,7 @@ export const SysScimConnectionCredential = ObjectSchema.create({
       icon: 'shield-off',
       variant: 'danger',
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/scim/revoke-credential',

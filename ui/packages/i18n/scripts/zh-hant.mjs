@@ -308,49 +308,6 @@ function indexOnce(text, anchor) {
 }
 
 /**
- * The `console.ai.*` leaves the generated pack does NOT carry: text the console
- * SENDS to the agent rather than shows (objectui#3896). They are read from the
- * `en` and `zh-Hans` packs only, by the conversation's language, and the cloud
- * confirm gate recognises exactly those two spellings, so a Traditional copy
- * would be unreachable text that reads as a third gate language.
- * `src/__tests__/outbound-agent-messages.test.ts` owns that invariant over
- * every pack; this list is how the generated pack keeps it. Each is a
- * one-line property in zh-Hans.ts, replaced line for line by a comment, so the
- * two packs' line numbers stay aligned.
- */
-export const GATE_ONLY_KEYS = Object.freeze([
-  'planApproveMessage',
-  'planApproveDefaultsMessage',
-  'planAnswerMessage',
-  'planExtendExistingMessage',
-  'planBuildNewAppMessage',
-  'changesConfirmMessage',
-]);
-
-/**
- * The zh-Hans pack body with each {@link GATE_ONLY_KEYS} property line replaced
- * by a comment. Throws unless each key is exactly one single-line property.
- *
- * @param {string} body
- * @returns {string}
- */
-function withoutGateOnlyKeys(body) {
-  let out = body;
-  for (const name of GATE_ONLY_KEYS) {
-    const line = new RegExp(`^([ \\t]+)${name}: '[^'\\n]*',$`, 'gm');
-    const hits = out.match(line) ?? [];
-    if (hits.length !== 1 || out.split(`${name}:`).length !== 2) {
-      throw new Error(
-        `gen-zh-hant: expected ${name} exactly once in zh-Hans.ts, as a one-line property. ` +
-          'The pack source changed shape; update GATE_ONLY_KEYS in scripts/zh-hant.mjs.',
-      );
-    }
-    out = out.replace(line, `$1// ${name}: gate-only, read from zh-Hans (GATE_ONLY_KEYS, scripts/zh-hant.mjs).`);
-  }
-  return out;
-}
-
-/**
  * The catalogue's own declaration in the source, at the start of a line (a doc
  * comment may name it in prose), and the name the generated catalogue takes.
  */
@@ -390,21 +347,19 @@ function convertCatalogue(zhHansSource, header, prepare) {
  * Text in, text out, so the generated module keeps the source's shape exactly:
  * the same keys in the same order, the same comments (converted), the same
  * `as const`. Only the pack's doc comment and its own name change (`zh` →
- * `zhHant`), the {@link GATE_ONLY_KEYS} lines become comments, and the header
- * says the file is generated.
+ * `zhHant`) and the header says the file is generated.
  *
  * @param {string} zhHansSource the text of `src/locales/zh-Hans.ts`
  * @returns {string} the text of `src/locales/zh-Hant.ts`
  */
 export function generateZhHantPack(zhHansSource) {
-  return convertCatalogue(zhHansSource, GENERATED_HEADER, withoutGateOnlyKeys);
+  return convertCatalogue(zhHansSource, GENERATED_HEADER, (body) => body);
 }
 
 /**
  * A pack-shaped namespace's zh-Hant catalogue (`src/namespaces/<ns>/zh-Hant.ts`),
  * generated from its zh-Hans catalogue the way {@link generateZhHantPack}
- * generates the pack: same keys, same order, converted text. A namespace holds
- * none of the {@link GATE_ONLY_KEYS}, so nothing is dropped.
+ * generates the pack: same keys, same order, converted text.
  *
  * @param {string} zhHansSource the text of `src/namespaces/<ns>/zh-Hans.ts`
  * @returns {string} the text of `src/namespaces/<ns>/zh-Hant.ts`

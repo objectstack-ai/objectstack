@@ -6,7 +6,9 @@
  * Shows the configuration an operator needs to sanity-check an agent
  * before saving:
  *   • Persona header (avatar, label, role, active flag).
- *   • Model config (provider, model id, temperature, max tokens).
+ *   • Model config (model id, temperature, max tokens). Never a provider: an
+ *     agent's `model.provider` was retired (#37712, ADR-0049): the deployment's
+ *     AI settings choose the provider, and the key never had an effect.
  *   • System prompt / instructions in a scrollable monospace block.
  *   • Skills as a chip list.
  *   • Planning + guardrails callouts.
@@ -54,7 +56,6 @@ import { t as tr, tFormat } from '../i18n.js';
 import { PreviewShell, PreviewMessage, PreviewErrorBoundary } from './PreviewShell.js';
 
 interface ModelConfig {
-  provider?: string;
   model?: string;
   temperature?: number;
   maxTokens?: number;
@@ -153,7 +154,7 @@ export function AgentPreview({ name, draft, locale }: MetadataPreviewProps) {
                     label={tr(active ? 'engine.agentPreview.active' : 'engine.agentPreview.disabled', locale)}
                     tone={active ? 'green' : 'gray'}
                   />
-                  {model.provider && <Pill icon={Sparkles} label={`${model.provider}${model.model ? ` · ${model.model}` : ''}`} mono />}
+                  {model.model && <Pill icon={Sparkles} label={model.model} mono />}
                   {model.temperature != null && (
                     <Pill icon={Gauge} label={tFormat('engine.agentPreview.temperature', locale, { value: String(model.temperature) })} />
                   )}

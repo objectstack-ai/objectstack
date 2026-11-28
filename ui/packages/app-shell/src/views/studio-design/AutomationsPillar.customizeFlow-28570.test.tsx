@@ -92,6 +92,7 @@ const srv = vi.hoisted(() => ({
   saveRefusal: null as null | { status: number; message: string },
   saves: [] as Array<{ name: string; body: Record<string, unknown>; opts: Record<string, unknown> }>,
   resets: [] as Array<{ name: string; opts: Record<string, unknown> }>,
+  publishes: [] as Array<{ name: string; opts: Record<string, unknown> }>,
   version: 0,
   /** Whether the engine's `_status` answer holds a row for the flow. */
   statusRow: true,
@@ -137,6 +138,16 @@ const mockClient = vi.hoisted(() => ({
     srv.version += 1;
     return { success: true, version: `v${srv.version}`, state: 'draft' };
   }),
+  // objectstack#36511 — a Save publishes the one flow it wrote: the pair's draft
+  // becomes its published row.
+  publish: vi.fn(async (_type: string, name: string, opts: Record<string, unknown> = {}) => {
+    srv.publishes.push({ name, opts: clone(opts) });
+    if (opts.packageId === PAIR && srv.pairDraft) {
+      srv.pairActive = srv.pairDraft;
+      srv.pairDraft = null;
+    }
+    return { success: true };
+  }),
   reset: vi.fn(async (_type: string, name: string, opts: Record<string, unknown> = {}) => {
     srv.resets.push({ name, opts: clone(opts) });
     if (opts.packageId === PAIR) {
@@ -159,12 +170,19 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AutomationsPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { ensureCustomizationPackage } from './packages-io';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { publishRefusal } from './metadataError';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -221,6 +239,7 @@ beforeEach(() => {
   srv.saveRefusal = null;
   srv.saves.length = 0;
   srv.resets.length = 0;
+  srv.publishes.length = 0;
   srv.version = 0;
   srv.statusRow = true;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
@@ -257,14 +276,16 @@ function Host({
         : null,
     [readOnly, walled, pairId, ensure, ensurePackage],
   );
-  return <AutomationsPillar packageId={BASE} readOnly={readOnly} customization={customization} />;
+  return <AutomationsPillar packageId={BASE} flowName={FLOW_NAME} readOnly={readOnly} customization={customization} />;
 }
 
 function mount(props: React.ComponentProps<typeof Host> = {}) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/automations`]}>
-      <Host {...props} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${BASE}/metadata/flow/${FLOW_NAME}`]}>
+        <Host {...props} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
 }
 
@@ -282,7 +303,7 @@ async function customize(): Promise<void> {
 }
 
 async function openMenu(): Promise<void> {
-  fireEvent.pointerDown(await screen.findByTestId('auto-item-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
+  fireEvent.pointerDown(await screen.findByTestId('studio-detail-more', undefined, { timeout: 8000 }), { button: 0, ctrlKey: false });
   await screen.findByTestId('auto-item-new-similar');
 }
 
@@ -331,7 +352,17 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await customize();
 
     patchFlow();
+    await sleep(1500);
+    expect(srv.saves, 'nothing is written before Save (objectstack#36511)').toEqual([]);
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
+    // Then that one flow is published at the pair: the override is live. Read
+    // at the base, the Save takes the pair to hold no live flow of the name,
+    // and its publish asserts so (objectstack#36726).
+    await waitFor(() => expect(srv.publishes).toEqual([
+      // objectstack#37440 — and to the draft this Save wrote (its receipt).
+      { name: FLOW_NAME, opts: { packageId: PAIR, ifNoneMatch: '*', draftVersion: expect.any(String) } },
+    ]));
     expect(srv.ensure).toEqual([201]);
     const [saved] = srv.saves;
     expect(saved!.name).toBe(FLOW_NAME);
@@ -353,11 +384,13 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await waitFor(() => expect(screen.queryByTestId('studio-override-popover')).toBeNull());
     await expectLedgerSwitchAlone();
 
-    // A later edit asks the door no more, and is pinned to the version it was answered.
+    // A later edit asks the door no more; its draft was published, so the next
+    // save asserts no draft again.
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(2), { timeout: 8000 });
     expect(srv.ensure).toEqual([201]);
-    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifMatch: 'v1' });
+    expect(srv.saves[1]!.opts).toMatchObject({ packageId: PAIR, ifNoneMatch: '*' });
     expect(srv.saves[1]!.body.overrides).toEqual(DECLARATION);
     expect(calls('/toggle')).toHaveLength(0);
   });
@@ -385,6 +418,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     // Its editors are open: an edit is saved into the pair, keeping the declaration.
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     expect(srv.saves[0]!.opts.packageId).toBe(PAIR);
     expect(srv.saves[0]!.body.overrides).toEqual(DECLARATION);
@@ -398,16 +432,15 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     mount({ listedPair: PAIR });
     await openFlow(/^Notify owner and manager v2$/);
 
-    // objectstack#29692 — the dialog names the flow as its rail row does.
-    const railText = within(screen.getByTestId('studio-rail-automations'))
-      .getByRole('button', { name: /^Notify owner/ })
-      // The row's label, without the switch reading the row prints after it.
-      .querySelector('.flex-1')
-      ?.textContent?.trim();
-    expect(railText).toBe('Notify owner');
+    // objectstack#29692 — the dialog names the flow by its listed label, the
+    // label the base's flow list serves (objectstack#36903: the rail is gone).
+    // Read off the header's title, which names the flow by that label too, so
+    // the case still cross-checks the dialog against what the page shows.
+    const listedLabel = within(header()).getByTestId('auto-canvas-caption').textContent ?? '';
+    expect(listedLabel).not.toBe('');
     fireEvent.click(within(await openRestorePopover()).getByTestId('studio-override-restore'));
     const dialog = await screen.findByTestId('studio-restore-original-dialog');
-    const vars = { item: railText!, package: 'HotCRM' };
+    const vars = { item: listedLabel, package: 'HotCRM' };
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreConfirm', 'en', vars));
     expect(dialog).toHaveTextContent(tFormat('engine.studio.customize.restoreFlowBody', 'en', vars));
     expect(dialog).toHaveTextContent(t('engine.studio.customize.restoreDraft', 'en'));
@@ -436,6 +469,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await customize();
     expect(within(header()).queryByRole('switch')).toBeNull();
     patchFlow();
+    await pressStudioSave();
     await waitFor(() => expect(srv.saves).toHaveLength(1), { timeout: 8000 });
     await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
     expect(within(header()).queryByRole('switch')).toBeNull();
@@ -470,6 +504,7 @@ describe('Customize a read-only base’s flow into its pair (objectstack#28570)'
     await openFlow();
     await customize();
     patchFlow();
+    await pressStudioSave();
     expect(await screen.findByTestId('studio-refusal-message', undefined, { timeout: 8000 })).toHaveTextContent(sentence);
     expect(within(header()).queryByTestId('studio-override-chip')).toBeNull();
   });

@@ -44,11 +44,11 @@
  * ## What it does NOT read — named in the footer of every run
  *
  * The maintainer's direct dispatch (the first leg of 取卡全序, three provenance pieces), the contract-surface leg
- * (`references/lanes/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
+ * (`references/domains/spec.md`), a `tooling` card's three-gate admission (triage's reading: only one gate is a
  * machine line), the multi-seat odd/even alternation, batching a p3 onto a PR that touches the same files (rule
- * ④'s "or batched", a judgement over a diff), lane ownership (a `domain:*` card outside the seat's lane, a cloud
- * card or a security card is listed but may not be claimed; each row prints its `domain:*` so the seat can read it)
- * and an area item that holds a sub-epic (rule 3 ③ binds that sub-epic's child order; the reader ranks the area p2
+ * ④'s "or batched", a judgement over a diff), lane ownership (a cloud card or a security card is listed but may not
+ * be claimed; lanes are seats and epics, so the `domain:*` each row prints reads as file ownership only, never as a
+ * lane a card belongs to) and an area item that holds a sub-epic (rule 3 ③ binds that sub-epic's child order; the reader ranks the area p2
  * before p3 unless the sub-epic is named as an `epic:` item). A seat reads those itself; the output says so every
  * time, so an absent leg never reads as a leg that found nothing.
  *
@@ -133,7 +133,7 @@ export const RULE_PHRASES = Object.freeze([
 export const DUTIES_PATH = '.claude/skills/pm-dispatch/references/execution-duties.md';
 export const DUTIES_PHRASES = Object.freeze([
   '候选 = open、未 assign、无 `needs-user-decision`、无 `pm:retriage`',
-  '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/lanes/spec.md`)> 标签序',
+  '取卡全序:维护者直派插队卡(出处三件)> 契约面卡(判据见 `references/domains/spec.md`)> 标签序',
   '同级先非车队卡(作者非 `Bot` 且首行非席位签名),再 `Bug`、卡龄',
   '本车道开放卡现读 `card-pick.mjs --order <序>`',
   '开放 = 未派发(无 `pm:dispatched`、无 assignee)',
@@ -149,11 +149,11 @@ export const LIFECYCLE_PHRASES = Object.freeze(['无分诊审计、他席 `Claim
 /** The legs this file cannot read, printed under every run. */
 export const UNREAD_LEGS = Object.freeze([
   "the maintainer's direct dispatch (取卡全序 leg 1, three provenance pieces) — not on the board as a label",
-  'the contract-surface leg (取卡全序 leg 2, `references/lanes/spec.md`) — a judgement over the diff, not a label',
+  'the contract-surface leg (取卡全序 leg 2, `references/domains/spec.md`) — a judgement over the diff, not a label',
   "a `tooling` card's three-gate admission — triage's reading; flagged on the row, not judged",
   'multi-seat odd/even alternation — the seat applies it to this list',
   "batching a p3 onto a PR that touches the same files (rule ④'s \"or batched\") — a judgement over a diff; here every area p3 ranks as its close-out",
-  "lane ownership — a `domain:*` card outside this seat's lane, a cloud card or a security card is listed here but a seat may not claim it; read each row's `domain:*` against your lane",
+  "lane ownership — a cloud card or a security card is listed here but a seat may not claim it; each row's `domain:*` reads as file ownership only (lanes are seats and epics), never as a lane the card belongs to",
   "an area item that holds a sub-epic — ranked here p2 before p3, but rule 3 ③ binds that sub-epic's child order; name it as `epic:#N` in --order to get it",
 ]);
 
@@ -684,7 +684,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the same-grade order and the epic child order': 5,
   'the candidate definition: label reasons, claims and the triage audit': 9,
   'the walk: every page, the count checked, the limit and --why': 11,
-  'the CLI: usage, exits and the footer': 12,
+  'the CLI: usage, exits and the footer': 13,
 });
 const SELF_TEST_BATTERY_FLOOR = 8;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -903,6 +903,7 @@ export async function selfTest() {
     t('--order as the last argument with no value is a usage error; --order "" is the p0/p1-only order', [Boolean(parseArgs(['--order']).error), parseArgs(['--order', '']).opts?.order], [true, []]);
     t('--seat reads every lane a seat signature carries, an epic seat\'s epic:#N included', [parseSeat('epic:#35205#1')?.name, parseSeat('domain:ui#2')?.name, parseSeat('area:ux#1'), parseSeat('repo:objectstack#5 x')], ['epic:#35205#1', 'domain:ui#2', null, null]);
     t('⭐ the footer names lane ownership and the sub-epic an area item holds, beside the five legs it named before', [UNREAD_LEGS.length, UNREAD_LEGS.some((l) => l.startsWith('lane ownership — ')), UNREAD_LEGS.some((l) => l.startsWith('an area item that holds a sub-epic — '))], [7, true, true]);
+    t('⛔ the lane-ownership leg reads `domain:*` as file ownership, never as the seat\'s lane: lanes are seats and epics', [UNREAD_LEGS.some((l) => /outside this seat's lane|against your lane/.test(l)), UNREAD_LEGS.some((l) => l.startsWith('lane ownership — ') && l.includes('file ownership only'))], [false, true]);
     const c = card(['area:ux', 'priority:p2', 'domain:ui']);
     const ok = await quiet(main)(['--order', 'area:ux'], { get: fixtureGet({ issues: [c], comments: { [c.number]: [] } }, REPO), nowMs: NOW });
     t('a complete run exits 0', ok.code, EXIT_OK);

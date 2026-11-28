@@ -13,49 +13,56 @@
  */
 
 /**
- * Shell header (objectui#12509). From `sm` up: one 48 px row, a three-column
- * grid so the pillar switcher centers. The right column never drops below its
- * content (Create app, Changes, Publish), so on a tight row the switcher moves
- * left and the package chip truncates instead of anything sliding under the
- * switcher. Below `sm`: two rows, the package and its actions on the first,
- * the switcher at full width on the second (`STUDIO_HEADER_PILLAR_NAV`).
+ * Studio's accent: graphite, a neutral of Studio's own (objectstack#37452).
+ * Studio is the development surface of an app, not the app, so it never takes
+ * the app's theme colour; only the app's logo keeps that colour. The values
+ * are HSL triples, the format the theme's `--primary` holds, for the light
+ * and the dark theme; the dark one is a light graphite, so it reads on the
+ * dark sidebar.
  */
-export const STUDIO_HEADER =
-  '@container/studio-header grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-3 py-2 sm:h-12 sm:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] sm:py-0';
-/** The pillar switcher: its own full-width row below `sm`, the middle column from `sm` up. */
-export const STUDIO_HEADER_PILLAR_NAV =
-  'order-last col-span-2 flex items-center gap-0.5 rounded-lg bg-muted p-[3px] sm:order-none sm:col-span-1';
-/** One switcher segment: an equal share of the row below `sm`, its own width from `sm` up. */
-export const STUDIO_HEADER_PILLAR =
-  'inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors sm:flex-none sm:shrink-0 xl:px-3';
+export const STUDIO_ACCENT_HSL = { light: '220 9% 23%', dark: '220 9% 83%' } as const;
+/** Text drawn on the accent, light and dark. */
+export const STUDIO_ACCENT_FOREGROUND_HSL = { light: '0 0% 100%', dark: '220 13% 9%' } as const;
+/**
+ * The theme's `--accent` is its hover and highlight tint (a ghost button's or
+ * a menu item's hover), not a strong colour, so Studio rebinds it to a faint
+ * graphite tint, not to graphite itself; the app's branding writes it from
+ * the app's `accentColor`.
+ */
+export const STUDIO_ACCENT_TINT_HSL = { light: '220 9% 94%', dark: '220 9% 18%' } as const;
+/** Text drawn on the tint, light and dark. */
+export const STUDIO_ACCENT_TINT_FOREGROUND_HSL = { light: '220 13% 9%', dark: '220 9% 96%' } as const;
 
 /**
- * objectui#12611 — the package chip at a narrow width. The header's package
- * column is the container: its width is the grid track's, so the chip's
- * fold answers the room the column really has (the pillar switcher and the
- * actions beside it), never the viewport. Below 300 px the chip's
- * "Read-only" word gives way and its lock stays; the package name truncates
- * only after that. At 300 px the 280 px chip still leaves the name 120 px
- * with the word shown. The full name and the posture are in the chip's
- * tooltip. Literal class strings: Tailwind finds a class by scanning source.
+ * The class that makes Studio's accent the theme's primary inside an
+ * element: everything under it that the app's theme colour would tint (the
+ * selected menu entry's pill and left bar, focus rings, `bg-primary` /
+ * `text-primary`) draws graphite instead, whatever colour the app's branding
+ * wrote on the page root. It rebinds every theme token that branding
+ * writes: `--primary`, `--ring`, `--sidebar-primary`, `--sidebar-ring` and
+ * the foreground to {@link STUDIO_ACCENT_HSL} and
+ * {@link STUDIO_ACCENT_FOREGROUND_HSL}, and `--accent` with its foreground to
+ * {@link STUDIO_ACCENT_TINT_HSL} and {@link STUDIO_ACCENT_TINT_FOREGROUND_HSL},
+ * light and dark. It re-derives Tailwind's `--color-*` from them on the same
+ * element, because those are computed once on the page root and inherited
+ * with the app's colour already in them.
+ *
+ * The selected entry's hover deepens the same graphite pill; any other
+ * entry's hover is the sidebar primitive's neutral `--sidebar-accent`, which
+ * branding never writes.
+ *
+ * A literal class string: Tailwind finds a class by scanning source, so the
+ * values are spelled here again; `studio-tokens.test.ts` holds them equal to
+ * the four constants above.
  */
-export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
-
-/**
- * objectstack#34725 — the pillar names, and the words of "All metadata" and
- * Create app, answer the top bar's OWN width, not the viewport's: the right
- * panel beside it is resizable now (the console drawer's 420 px, dragged up to
- * the canvas's 520 px floor), so a 1163 px window can leave the bar 520 px. A
- * viewport breakpoint kept the names on and pushed the bar's right end, the AI
- * assistant's robot, under the panel. The thresholds are the bar widths the
- * old breakpoints gave beside the old fixed slot: 724 px (1024 − 300) for the
- * four pillar names, 920 px (1280 − 360) for the two longer words. Below them
- * the names stay in the accessible name and the tooltip. Literal class
- * strings: Tailwind finds a class by scanning source.
- */
-export const STUDIO_HEADER_PILLAR_NAME = 'sr-only @min-[724px]/studio-header:not-sr-only';
-export const STUDIO_HEADER_WIDE_WORD = 'sr-only @min-[920px]/studio-header:not-sr-only';
-export const STUDIO_PKG_READONLY_WORD = 'hidden @min-[300px]:inline';
+export const STUDIO_ACCENT =
+  '[--primary:220_9%_23%] [--primary-foreground:0_0%_100%] [--ring:220_9%_23%] [--sidebar-primary:220_9%_23%] [--sidebar-ring:220_9%_23%] ' +
+  '[--accent:220_9%_94%] [--accent-foreground:220_13%_9%] ' +
+  'dark:[--primary:220_9%_83%] dark:[--primary-foreground:220_13%_9%] dark:[--ring:220_9%_83%] dark:[--sidebar-primary:220_9%_83%] dark:[--sidebar-ring:220_9%_83%] ' +
+  'dark:[--accent:220_9%_18%] dark:[--accent-foreground:220_9%_96%] ' +
+  '[--color-primary:hsl(var(--primary))] [--color-primary-foreground:hsl(var(--primary-foreground))] [--color-ring:hsl(var(--ring))] ' +
+  '[--color-sidebar-primary:hsl(var(--sidebar-primary))] [--color-sidebar-ring:hsl(var(--sidebar-ring))] ' +
+  '[--color-accent:hsl(var(--accent))] [--color-accent-foreground:hsl(var(--accent-foreground))]';
 
 /** Rail: 240 px, the sidebar surface, a right border. */
 export const STUDIO_RAIL_WIDTH = 'w-60';

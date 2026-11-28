@@ -244,6 +244,10 @@ export const ERROR_CODE_LEDGER = {
     // ledger is door-agnostic.
     'FIELD_VISIBILITY_UNRESOLVED',
     'FORBIDDEN',
+    // [ADR-0159 ruled question 3 = A] The public address clash: a `form` write
+    // that would leave the form open on a `/forms/SLUG` another form holds
+    // (`formAddressClashRefusal`, `@objectstack/metadata-protocol`), 409.
+    'FORM_ADDRESS_TAKEN',
     'FORM_NOT_FOUND',
     'FORM_RESOLVE_FAILED',
     'IMPORT_JOB_CREATE_FAILED',
@@ -734,6 +738,12 @@ export const ERROR_CODE_LEDGER = {
     // string is spelled in each). Served by the `/meta` write doors through
     // `errorFromThrown`.
     'DEFAULT_RECORD_PAGE_CONFLICT',
+    // [ADR-0159 ruled question 3 = A] The public address clash: the `form`
+    // save, draft promotion and restore doors refuse a `form` write that would
+    // leave the form open on a `/forms/SLUG` another form holds, naming both,
+    // 409 (`formAddressClashRefusal`, protocol-form-writes.ts). Served by the
+    // `/meta` write doors through `errorFromThrown`.
+    'FORM_ADDRESS_TAKEN',
     // [#24001] The flow save door's 409 for a refused conversion rename came
     // out with its last producer (this header's "Retiring a code"): protocol
     // 18 reserved the old HTTP-callout node types, so no live owner can
@@ -950,6 +960,15 @@ export const ERROR_CODE_LEDGER = {
     // any standard member: it is neither the client's bad input (the caller is
     // server-side automation) nor a missing precondition on a request.
     'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    // [ADR-0153 D4] A write named a `_sync_` provenance column and is not the
+    // sync-in pull's, or a `before*` hook of any write (the pull's included)
+    // assigned, changed or removed one. 400, judged on the caller's payload
+    // before the middleware, the defaults or a hook run, and on the hooks'
+    // writes before the driver, so nothing is written
+    // (`SyncProvenanceWriteRefusedError`, `sync-provenance-write.ts`). Refused
+    // whatever the caller's context, `isSystem` included: the pull is the
+    // columns' only writer.
+    'ERR_SYNC_PROVENANCE_WRITE_REFUSED',
     // [#8846] `transaction({ require: true })` on a driver with no
     // `beginTransaction` — thrown BEFORE the callback runs, so nothing has
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
@@ -1191,6 +1210,25 @@ export const ERROR_CODE_LEDGER = {
     'API_KEY_EXPIRED',            // past its `expires_at`, or past the one-year grace of a key signed with none
     'API_KEY_INACTIVE',           // no recorded use within the inactivity window; not revoked, a new key is the remedy
     'API_KEY_REVOKED',            // its `revoked` flag is set
+    // [#35402] 403 from the Change Owner doors (`POST /data/:object/:id/change-owner`
+    // and `POST /data/:object/change-owner`, served by `@objectstack/rest`'s
+    // `handleRouteError` passthrough), stamped by `changeOwnerOffRefusal`
+    // (`security/change-record-owner.ts`): the object does not offer the action —
+    // structurally ineligible, or its `userActions.transfer` switch is off — so the
+    // whole call is refused before any row is read, whoever asks (a holder of
+    // `modifyAllRecords` included; ruling 7000907189 points 1–3). The
+    // `CLONE_DISABLED` / `FEEDS_DISABLED` family: it names WHICH object
+    // capability is off, and it is not `PERMISSION_DENIED`, the answer the write
+    // path gives a caller who lacks the transfer grant on an object that offers it.
+    'CHANGE_OWNER_DISABLED',
+    // [#36261] 404 from the same two Change Owner doors, the same wire path
+    // (`handleRouteError` passthrough): an object of a disabled package is
+    // refused before its switch is read, with the data door's own envelope.
+    // Stamped by `objectPackageDisabledError` (`utils/object-package-disabled.ts`),
+    // the ONE constructor, moved down from `@objectstack/metadata-protocol` so
+    // core's Change Owner rules raise it; metadata-protocol re-exports it and
+    // keeps its row for the data door. Provenance, not identity.
+    'OBJECT_PACKAGE_DISABLED',
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
@@ -1584,6 +1622,12 @@ export const ERROR_CODE_LEDGER = {
     // through rest. `@objectstack/rest` keeps its own rows for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [#35525] …and the data door's disabled-package refusal, stamped by the
+    // same gate (`api-exposure-door.ts`) for an object of a disabled package
+    // in a query's read set: 404, the data route's own sentence. Same wire
+    // paths as the two above. Provenance, not identity:
+    // `@objectstack/metadata-protocol` keeps its row for the data door.
+    'OBJECT_PACKAGE_DISABLED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
@@ -1621,6 +1665,25 @@ export const ERROR_CODE_LEDGER = {
   '@objectstack/service-datasource': [
     'DATASOURCE_ADMIN_ERROR',      // lifecycle/validation refusal from the datasource-admin service
     'EXTERNAL_DATASOURCE_ERROR',   // introspection/connection-test refusal from the external-datasource service
+  ],
+  // [#37100] ADR-0161 K7 rules 4 and 5: a write or a search carrying an index
+  // fingerprint other than the one the source's stored generation was built
+  // under is refused 409 with this code, never served from or written into
+  // that generation. Stamped by each knowledge adapter that keeps generations,
+  // and asserted by name in the adapter contract suite (`./testing`).
+  '@objectstack/service-knowledge': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  '@objectstack/knowledge-memory': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  '@objectstack/knowledge-pgvector': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
+  ],
+  // [#37107] The libSQL store, moved in from the cloud repo: the same refusal,
+  // and also for a source whose only index is a table of its earlier releases.
+  '@objectstack/knowledge-turso': [
+    'KNOWLEDGE_REBUILD_REQUIRED',
   ],
   '@objectstack/plugin-audit': [
     'FEEDS_DISABLED',
@@ -1890,6 +1953,21 @@ export const ERROR_CODE_LEDGER = {
     // tree answers with it, the thrown value is the boundary.
     'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
+    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below, read
+    // as: no door answers with this code as its `error.code`. The
+    // `controlled_by_parent` master refusal's code (`data/controlled-by-parent-master.ts`),
+    // stamped on the zod ISSUE as `params.code` beside `params.shape` by
+    // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
+    // on a thrown error, and not in the `message`; no `status` of its own.
+    // Visible on the zod issue itself (any `safeParse`, the Studio settings
+    // tab's path, which keys its localized wording on it), on `defineStack`'s
+    // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues, and
+    // inside the metadata save door's `422 INVALID_METADATA` body, on an
+    // `issues[]` entry: `zodIssuesToMetadataIssues` carries the registered
+    // refusal there as `params.code` beside `params.shape`, while the body's
+    // `code` is `INVALID_METADATA` and the entry's own `code` stays zod's issue
+    // code ('custom'). The read path's `_diagnostics.errors[]` does not carry it.
+    'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
@@ -2311,6 +2389,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
  * adjudicated on #13353 itself.
  */
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
+  {
+    package: '@objectstack/core',
+    code: 'PROJECT_MEMBERSHIP_REQUIRED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared verdict one package over: core\'s `environment-membership.ts` defines the code ' +
+      'beside `judgeEnvironmentMembership` so every door of a multi-environment host applies one ' +
+      'judgment, but core has no HTTP door. The refusal ships on the wire from the runtime ' +
+      'dispatcher (`HttpDispatcher`, the runtime row\'s emitter) and from the REST server, both ' +
+      'of which ask that function and write its code; neither spells the string itself.',
+  },
   {
     package: '@objectstack/metadata-core',
     code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',

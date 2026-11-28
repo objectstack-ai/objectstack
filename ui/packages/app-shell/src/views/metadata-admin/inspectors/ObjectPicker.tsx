@@ -26,11 +26,15 @@
  *   typed, matched or not: a flow reference may hold an expression, and the
  *   server judges an unknown name as it always did. Escape abandons the typing.
  * - **Unless the door takes objects only (`objectsOnly`).** Where no
- *   expression is legal — the new-automation dialog's trigger object — what
+ *   expression is legal — the new-automation dialog's trigger object, a
+ *   Lookup's *Related object*, a summary's child object — what
  *   was typed is never committed as itself: Enter and blur commit the object
  *   it names exactly, else the only pickable match left, else no object at
- *   all, and the picker says no object is chosen. A typed prefix with one
- *   match shown is that match, the way a search box reads it.
+ *   all: the picker says no object is chosen and the value already stored
+ *   stays (a typo never erases a chosen target; clearing the input on
+ *   purpose still does). A typed prefix with one match shown is that match,
+ *   the way a search box reads it. While the catalog is unread or its read
+ *   failed nothing can be resolved, and the typed text is committed as is.
  * - **The options are the names already held,** from one list read made when
  *   the picker mounts ({@link useObjectCatalog}), shown with their labels and
  *   in three groups: this package's objects, then the other objects, then the
@@ -419,7 +423,9 @@ export function ObjectPicker({
   /**
    * Commit what the author typed. Free text by default; with `objectsOnly`,
    * the object it names: the pickable option named exactly so, else the only
-   * pickable option left, else none — an empty commit and a refusal shown.
+   * pickable option left. Text that names none is refused: the stored value
+   * stays, the input shows it again, nothing is committed and the refusal is
+   * shown. An input cleared on purpose still commits no object (`''`).
    */
   const commitTyped = () => {
     if (!objectsOnly || catalog.status !== 'loaded') {
@@ -434,8 +440,15 @@ export function ObjectPicker({
     }
     const pickable = rows.flatMap((r) => (r.kind === 'option' && !r.disabled ? [r.entry.name] : []));
     const name = pickable.includes(wanted) ? wanted : pickable.length === 1 ? pickable[0] : null;
-    setRefused(name === null ? wanted : null);
-    commit(name ?? '');
+    if (name === null) {
+      // A typo must not erase the target already chosen: keep `value`.
+      setRefused(wanted);
+      setText(value);
+      close();
+      return;
+    }
+    setRefused(null);
+    commit(name);
   };
 
   const choose = (row: Row) => {
@@ -510,7 +523,9 @@ export function ObjectPicker({
           value={shown}
           disabled={disabled}
           placeholder={placeholder}
-          className={cn('h-8 text-sm', !restingLabel && 'font-mono')}
+          // A machine name is typed or shown in mono; the placeholder and a
+          // label are prose. The chevron's room is reserved on the right.
+          className={cn('h-8 pr-7 text-sm', !restingLabel && shown && 'font-mono')}
           onFocus={() => {
             setFocused(true);
             setText(value);
@@ -533,6 +548,12 @@ export function ObjectPicker({
             else close();
           }}
           onKeyDown={onKeyDown}
+        />
+        {/* Says the input opens a list; focusing it is what opens it. */}
+        <ChevronDown
+          aria-hidden
+          data-testid="object-picker-chevron"
+          className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
         />
         {open && catalog.status !== 'error' && (
           <div

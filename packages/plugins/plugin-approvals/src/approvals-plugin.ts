@@ -15,9 +15,10 @@ import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
+  actionRedemptionPage,
   requestVisibilitySourceOf,
   slotLabelSourceOf,
   ESCALATION_JOB_NAME,
@@ -38,13 +39,19 @@ import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.
 import { bindSnapshotPredicateGuard } from './payload-predicate-guard.js';
 import { bindRequestChildReadGates, bindRequestReadGate } from './request-read-gate.js';
 import { bindReaderLocaleLabelsMiddleware } from './reader-locale-labels-middleware.js';
+import { bindActionLocaleMiddleware } from './action-locale-middleware.js';
+import {
+  bindApprovalActivityFeed,
+  bindApprovalActivityLocale,
+  bindApprovalActivityReadGate,
+} from './approval-activity-feed.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
 import { backfillProcessPackages, logProcessPackageBackfill, type FlowHolderSource } from './stored-process-package-backfill.js';
 import { APPROVAL_EMAIL_TEMPLATES } from './approval-email-templates.js';
-import { resolvePublicBaseUrl } from './public-base-url.js';
+import { consolePageLink, resolvePublicBaseUrl } from './public-base-url.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -129,6 +136,8 @@ export class ApprovalsServicePlugin implements Plugin {
 
   private readonly options: ApprovalsPluginOptions;
   private service?: ApprovalService;
+  /** [#34862] A Console page's link under the approval links' base and the Console's mount. */
+  private consoleLink?: (pagePath: string) => string;
   private engine?: IObjectQLEngine;
   private escalationJobScheduled = false;
   /**
@@ -251,10 +260,27 @@ export class ApprovalsServicePlugin implements Plugin {
       );
     }
 
+    // [#34862] The Console's mount, for the links that open a Console page:
+    // the auth service's Console page composer (`getConsoleUrl`, which reads
+    // `uiBasePath`), the one composer of Console page links in mail. Read at
+    // link time: the auth service is another plugin's and may start later.
+    // `getService` THROWS on an empty slot; no auth service, no mount.
+    const getConsoleUrl = (path: string): string | undefined => {
+      let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+      try {
+        auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+      } catch {
+        return undefined;
+      }
+      return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+    };
+    this.consoleLink = (pagePath) => consolePageLink(publicBase.url, getConsoleUrl, pagePath);
+
     this.service = new ApprovalService({
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
       publicBaseUrl: publicBase.url,
+      getConsoleUrl,
       // [#8652] Read-only record-reader visibility. Default OFF — an absent
       // option reaches the service as an empty set. This is the host's half
       // only: an object's own `enable.approvalsVisibleToReaders` is read by
@@ -432,6 +458,19 @@ export class ApprovalsServicePlugin implements Plugin {
       // Bound beside the gate, not behind `disableAutoHooks`, for the gate's
       // reason: the approvals door localizes whenever the service runs.
       bindReaderLocaleLabelsMiddleware(engine as any, i18nService, ctx.logger);
+      // [#37531] …and an action row's step label and system note, by the render
+      // the approvals door's timeline is served by (`action-locale-middleware.ts`).
+      const service = this.service;
+      bindActionLocaleMiddleware(engine as any, i18nService, (rows, readContext) => service.localizeActionRows(rows, readContext), ctx.logger);
+      // [#35723] …and the approval entries on a record's activity stream: one
+      // `sys_activity` row per approval step, served only to a caller this
+      // service would serve the request (`approval-activity-feed.ts`). The
+      // gate and the producer bind together: an entry is never written where
+      // its reads could not be narrowed.
+      bindApprovalActivityReadGate(engine as any, visibility, ctx.logger);
+      bindApprovalActivityFeed(engine as any, ctx.logger);
+      // …each entry's line in the reader's language, by the same lookup.
+      bindApprovalActivityLocale(engine as any, i18nService, ctx.logger);
     } else {
       ctx.logger.warn(
         'ApprovalsServicePlugin: the ObjectQL engine has no middleware seam — reads of sys_approval_request, '
@@ -541,10 +580,14 @@ export class ApprovalsServicePlugin implements Plugin {
         const ACT_PATH = '/api/v1/approvals/act';
         const html = (c: any, body: string, status = 200) =>
           c.body(body, status, { 'Content-Type': 'text/html; charset=utf-8' });
+        // [#34862] The inbox link under the Console's mount, as the service's
+        // `handleActionPage` door builds it, so both doors answer one page.
+        const consoleLink = this.consoleLink;
+        const inboxHref = () => (consoleLink ? consoleLink(APPROVALS_INBOX_PATH) : APPROVALS_INBOX_PATH);
         rawApp.get(ACT_PATH, async (c: any) => {
           const token = String(c.req.query('token') ?? '');
           const peek = await svc.peekActionToken(token);
-          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request), 200);
+          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request, inboxHref()), 200);
           return html(c, renderConfirmPage({
             request: peek.request, action: peek.action, approverId: peek.approverId,
             token, actPath: ACT_PATH,
@@ -552,13 +595,17 @@ export class ApprovalsServicePlugin implements Plugin {
         });
         rawApp.post(ACT_PATH, async (c: any) => {
           let token = '';
+          let comment: unknown;
           try {
             const body = await c.req.parseBody();
             token = String(body?.token ?? '');
+            comment = body?.comment;
           } catch { /* fall through to invalid */ }
-          const out = await svc.redeemActionToken(token);
-          if (!out.ok) return html(c, renderResultPage(out.reason, out.request), 200);
-          return html(c, renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+          // [#35722] One page builder for both doors: a reject with no reason
+          // is answered the confirm page again, as `handleActionPage` answers it.
+          const out = await svc.redeemActionToken(token, { comment });
+          const page = actionRedemptionPage(out, { token, actPath: ACT_PATH, inboxHref: inboxHref() });
+          return html(c, page.html, page.status);
         });
         ctx.logger.info(`ApprovalsServicePlugin: actionable-link pages mounted at ${ACT_PATH}`);
       } catch { /* http server not installed */ }

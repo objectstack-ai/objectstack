@@ -34,6 +34,12 @@
  *      {@link SharingWriteVerdict} for the measured fail-open that
  *      collapsing the two into one `true` produced (#5492 E2).
  *
+ *      [#35934] The tri-state primaries have an optional SET form,
+ *      `checkEditMany()` / `checkDeleteMany()`: the same verdict for each of
+ *      a list of record ids, answered with reads that grow per chunk rather
+ *      than per row. A caller feature-detects it and asks per record where it
+ *      is absent; the answers are the same either way.
+ *
  *   3. **Enforcement runs on the FULL envelope.** Every method on both
  *      interfaces below adjudicates access, so each takes a complete
  *      {@link ExecutionContext} — the whole `resolveAuthzContext` result,
@@ -58,19 +64,24 @@
  *      `sharing-service.test.ts` and the `exec-context-annotation.pin.ts`
  *      files in `plugin-sharing` / `plugin-approvals`.
  *
- * ## The read scope's share arm becomes an engine-internal leaf (ADR-0155)
+ * ## The read scope's share arm is an engine-internal leaf (ADR-0155)
  *
- * Today the default implementation carries the read scope's share arm as a
- * list, `{ id: { $in: [granted ids] } }`, read from `sys_record_share` before
- * the query runs, at most 5,000 grants per read: past that cap a member
- * silently loses access, which ADR-0155 removes. From plugin-sharing's switch
- * on (ADR-0155 plan step 6) the arm is a `SharedRecordIds` leaf
- * (`../data/shared-record-ids.ts`): a branded value the driver compiles as a
- * subquery over `sys_record_share` inside the same statement, so every grant
- * counts, at any count. The predicate-update scope the default implementation
- * composes carries the leaf's write form the same way (ADR-0155 ③ ruled A).
- * Until that switch nothing below applies: the arm stays the list. From it on,
- * three things hold for anyone who reads this contract:
+ * The default implementation carries the read scope's share arm as a
+ * `SharedRecordIds` leaf (`../data/shared-record-ids.ts`): a branded value the
+ * driver compiles as a subquery over `sys_record_share` inside the same
+ * statement, so every grant counts, at any count. The predicate-update scope
+ * the default implementation composes carries the leaf's write form the same
+ * way (ADR-0155 ③ ruled A). Before plugin-sharing's switch (ADR-0155 plan
+ * step 6) the arm was a list, `{ id: { $in: [granted ids] } }`, read from
+ * `sys_record_share` before the query ran and capped at 5,000 grants per read:
+ * past the cap a member silently lost access. Share grants count only where
+ * the leaf can be evaluated. On an object bound to another datasource than
+ * `sys_record_share`, or stored by a driver whose `supports.fixedReadLeaves`
+ * does not list the leaf, the default implementation writes no share arm and
+ * reads no grant row, and its grant and sharing-rule doors refuse a new grant
+ * there as inert, `SHARING_NOT_ENABLED` / 422 (ADR-0155 ② ruled R2, ADR-0111
+ * D7); owner, queue and approval access are unchanged. Three things hold for
+ * anyone who reads this contract:
  *
  *   - **The answer is handed to the engine in process.** ⛔ Never serialise it
  *     and never match it with a generic in-process matcher. A copy that crossed
@@ -100,9 +111,9 @@
  *       · A narrowing that names NO object — a middleware or a find hook
  *         registered for no object, or for `'*'` — is not run on the share arm.
  *         On a host where such a registration changes a system read of
- *         `sys_record_share`, the share arm's rows can differ from today's, and
- *         nothing refuses, reports or logs it: this paragraph is the telling
- *         (ADR-0155 D4's boundary).
+ *         `sys_record_share`, the share arm's rows can differ from what the
+ *         engine read returned before the switch, and nothing refuses, reports
+ *         or logs it: this paragraph is the telling (ADR-0155 D4's boundary).
  *
  * Manual share CRUD is exposed via `grant()`, `revoke()`, and
  * `listShares()`. The REST layer wires these to
@@ -305,13 +316,14 @@ export interface ISharingService {
    * principal in `context` can see for `object`. Return `null` when no
    * restriction applies (public object, system context, no userId).
    *
-   * [ADR-0155] From plugin-sharing's switch on, the answer's share arm is a
-   * `SharedRecordIds` leaf composed for `context`'s user, not a list. Hand the
-   * answer to an engine read in process, under `context`, a context acting on
-   * that user's behalf, or a system context; ⛔ never serialise it and never
-   * match it with a generic matcher. "The read scope's share arm becomes an engine-internal
-   * leaf" above says why, and what a host that registers a narrowing of reads
-   * of `sys_record_share` is told.
+   * [ADR-0155] The answer's share arm is a `SharedRecordIds` leaf composed
+   * for `context`'s user, not a list, and there is none on an object where
+   * share grants do not count (R2). Hand the answer to an engine read in
+   * process, under `context`, a context acting on that user's behalf, or a
+   * system context; ⛔ never serialise it and never match it with a generic
+   * matcher. "The read scope's share arm is an engine-internal leaf" above
+   * says why, and what a host that registers a narrowing of reads of
+   * `sys_record_share` is told.
    */
   buildReadFilter(
     object: string,
@@ -421,6 +433,46 @@ export interface ISharingService {
   ): Promise<boolean>;
 
   /**
+   * [#35934] The SET form of {@link checkEdit}: the UPDATE verdict for every
+   * record of `object` that `recordIds` names, in one call. `answer[i]` is the
+   * verdict for `recordIds[i]`, the answer is exactly as long as `recordIds`,
+   * and each verdict is the one {@link checkEdit} answers for that id under the
+   * same `context`: ownership (widened by write DEPTH), a write-level
+   * ({@link ShareAccessLevel} `edit`) share, a record sitting in a queue the
+   * caller belongs to, or the `modifyAllRecords` super-user bypass for `allow`;
+   * the same `abstain` and `deny` rules, the same order. Only the cost differs:
+   * a list of N records is answered with a number of store reads that grows
+   * with N divided by the implementation's chunk, never with N itself, so a
+   * predicate update over many rows asks once rather than once per row.
+   *
+   * Optional. A caller feature-detects it (`typeof … === 'function'`) and
+   * asks {@link checkEdit} once per record where it is absent, with the same
+   * answers. The implementation owns the chunking. **Fail-closed per chunk**,
+   * as {@link checkEdit} is per record: a chunk whose lookup throws answers
+   * `deny` for each of its records, never `abstain`.
+   */
+  checkEditMany?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]>;
+
+  /**
+   * [#35934] The SET form of {@link checkDelete}, on the terms of
+   * {@link checkEditMany}: `answer[i]` is the DELETE verdict
+   * {@link checkDelete} answers for `recordIds[i]`. The verb boundary comes
+   * with it (ADR-0111 D3): `allow` is ownership (widened by write DEPTH), the
+   * `modifyAllRecords` super-user bypass or system context ONLY, so an `edit`
+   * share that makes {@link checkEditMany} answer `allow` leaves this one at
+   * `deny`. Optional and feature-detected; fail-closed per chunk.
+   */
+  checkDeleteMany?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<SharingWriteVerdict[]>;
+
+  /**
    * [ADR-0111 D1] May the principal in `context` MANAGE shares (grant / revoke
    * / list) on `(object, recordId)`? True for system context, the record's
    * owner, holders of the super-user write bypass (`modifyAllRecords`, probed
@@ -453,7 +505,8 @@ export interface ISharingService {
    * recipient (`VALIDATION_FAILED` — other recipient types are not enforced by
    * any gate and are refused rather than persisted inert, ADR-0078), and an
    * object in an enforcing sharing posture (`SHARING_NOT_ENABLED` — a share on
-   * a bypass / owner-less / `controlled_by_parent` object enforces nothing; on
+   * a bypass / owner-less / `controlled_by_parent` object enforces nothing,
+   * nor does one on an object where share grants do not count, ADR-0155 R2; on
    * a public object it is admitted only for a recipient who is an `external`
    * member of the record's organization, since that population's owner-only
    * floor consults it). Upserts match on `(object, record, recipient, source)`

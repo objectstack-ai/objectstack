@@ -129,6 +129,12 @@ export interface RequiredFieldsDialogProps {
   labelOf?: (name: string) => string | undefined;
   title?: string;
   description?: string;
+  /**
+   * What the host adds about the change under the change block, read-only —
+   * the record header's stage menu names the flows the move would start there
+   * (objectstack#35928). Nothing is drawn for none.
+   */
+  notice?: React.ReactNode;
   submitLabel?: string;
 }
 
@@ -153,6 +159,7 @@ export function RequiredFieldsDialog({
   labelOf,
   title,
   description,
+  notice,
   submitLabel,
 }: RequiredFieldsDialogProps): React.ReactElement {
   const tt = useSafeTranslate();
@@ -181,6 +188,16 @@ export function RequiredFieldsDialog({
     shown.push(f);
   }
   const missing = shown.filter((f) => isMissingForRequired(values[f.name]));
+  // The record every control here resolves its options against
+  // (objectstack#37250): the record the prompt judged its fields on (the
+  // stored record with the change merged in, carried on each field
+  // `collectRequiredWhenPromptFields` returns) with the values typed here on
+  // top, i.e. the record the write would leave. An option `visibleWhen` reads
+  // `record.*` (`useCascadingOptions`, through `dependentValues`), and with no
+  // record handed over every option reading the field the change writes was
+  // judged hidden: the loss reason a move to 「失败」 asks for offered nothing.
+  const judged = shown.find((f) => f.record)?.record;
+  const liveRecord = React.useMemo(() => ({ ...judged, ...values }), [judged, values]);
 
   const presentRefusal = (err: unknown) => {
     const { entries, fallback } = refusalOf(err);
@@ -259,7 +276,7 @@ export function RequiredFieldsDialog({
         {(recordName || (changes && changes.length > 0)) && (
           <div className="flex flex-col gap-2 rounded-md border bg-muted/40 px-3 py-2" data-required-fields-change="">
             {recordName && (
-              <p className="min-w-0 break-words text-sm font-semibold">{recordName}</p>
+              <p className="min-w-0 break-words text-sm font-medium">{recordName}</p>
             )}
             {changes && changes.length > 0 && (
               <dl className="flex flex-col gap-1 text-sm">
@@ -273,6 +290,8 @@ export function RequiredFieldsDialog({
             )}
           </div>
         )}
+
+        {notice}
 
         <div className="flex flex-col gap-4 py-2">
           {shown.map((f) => {
@@ -297,6 +316,7 @@ export function RequiredFieldsDialog({
                 <FieldEditWidget
                   field={f.def as never}
                   value={values[f.name]}
+                  dependentValues={liveRecord}
                   onChange={(v: unknown) => {
                     setValues((prev) => ({ ...prev, [f.name]: v }));
                     // A server reason is about the value it was given; a new

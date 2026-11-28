@@ -68,7 +68,7 @@ function fakeServer(initial: Array<{ type: string; name: string }> = []) {
   const draftsReads = vi.fn(async (input: RequestInfo | URL) => {
     expect(String(input)).toBe('/api/v1/meta/_drafts');
     const answer = [...ledger.values()].map((d) => ({ ...d, packageId: PACKAGE }));
-    return { ok: true, status: 200, json: async () => answer };
+    return { headers: new Headers(), ok: true, status: 200, json: async () => answer };
   });
   vi.stubGlobal('fetch', draftsReads);
   const metadataClient = {
@@ -198,7 +198,7 @@ describe('a runtime draft write moves the draft preview bar (objectui#13139)', (
     try {
       await expect(
         persistRuntimeMetadata('view', VIEW, { label: 'x' }, { metadataClient, objectName: OBJECT }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe('saved');
       expect(metadataClient.save).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0]?.[1]).toBeInstanceOf(Error);

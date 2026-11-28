@@ -24,8 +24,11 @@
  * {@link NAMESPACE_UNIQUE_TYPES}: the twelve bucket 2/3 types phase 1's
  * `BARE_NAME_ONE_HOLDER_TYPES` does not list in ADR-0150's execution plan —
  * sharing rule, queue, assignment rule, hook, job, app, page, dashboard,
- * report, book, analytics cube and tool. ⛔ No other type: a narrowing beyond
- * these twelve is the maintainer's to rule. (`tool` is in both lists once
+ * report, book, analytics cube and tool — and the context pack,
+ * `ai_context`, which the maintainer admitted by merging ADR-0150's addendum
+ * of 2026-11-25 (point 3: this predicate carries D2's refusal for a type that
+ * never had a phase-1 one-holder rule). ⛔ No other type: a narrowing beyond
+ * these thirteen is the maintainer's to rule. (`tool` is in both lists once
  * phase 1 takes it: that rule refuses a second holder anywhere in the
  * deployment after the cold boot; this one refuses a second holder inside one
  * namespace at every install. The two never disagree about a refusal, only
@@ -87,11 +90,14 @@ export type NamespaceUniqueType =
   | 'sharing_rule' | 'queue' | 'assignment_rule'
   | 'hook' | 'job'
   | 'app' | 'page' | 'dashboard' | 'report' | 'book' | 'analytics_cube'
-  | 'tool';
+  | 'tool'
+  | 'ai_context'
+  | 'knowledge_source';
 
 /**
  * The covered types, in the order a refusal lists them — ADR-0150's
- * execution-plan order (child N's row).
+ * execution-plan order (child N's row), then `ai_context` (the 2026-11-25
+ * addendum).
  */
 export const NAMESPACE_UNIQUE_TYPES: readonly NamespaceUniqueType[] = Object.freeze([
   'sharing_rule',
@@ -106,6 +112,12 @@ export const NAMESPACE_UNIQUE_TYPES: readonly NamespaceUniqueType[] = Object.fre
   'book',
   'analytics_cube',
   'tool',
+  // [ADR-0150 addendum 2026-11-25, point 3] admitted by the maintainer's merge.
+  'ai_context',
+  // [ADR-0150 addendum 2026-11-25 (`knowledge_source`), point 1] admitted by the
+  // maintainer's merge of that addendum: one holder of a source name inside a
+  // namespace, so `NS-NAME` names one source.
+  'knowledge_source',
 ]);
 
 /** Is `type` one of the covered types? */

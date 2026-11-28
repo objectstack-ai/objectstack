@@ -27,10 +27,48 @@ export interface BulkRowError {
   userMessage?: string;
 }
 
+/**
+ * A record whose per-record dispatch answered a deliberate refusal: a `flow`
+ * action whose run ended `outcome: 'refused'` (`ActionResult.refusal`). It is
+ * neither succeeded (nothing was written) nor failed (nothing went wrong, and
+ * re-running it gets the same answer), so the result reports it apart, with
+ * the sentence the engine rendered for THIS record.
+ */
+export interface BulkRowRefusal {
+  id: string;
+  /** The engine-rendered refusal, `''` when the producer sent none. */
+  message: string;
+}
+
+/**
+ * A record whose per-record dispatch started a run that paused at a screen and
+ * waits for input: a `flow` action whose run is suspended on a `screen` node
+ * (`ActionResult.paused`, objectstack#36931). It is not succeeded (the run has
+ * not finished, and nothing says it will), not failed (nothing went wrong) and
+ * not refused, so the result reports it apart. Its screen is the flow
+ * handler's to show; the console shows every paused record's screen in turn.
+ */
+export interface BulkRowPause {
+  id: string;
+}
+
+/**
+ * What a per-record dispatch ({@link BulkExecutorOptions.runAction}) resolves
+ * with when the action answered a refusal, or started a run that paused at a
+ * screen. Resolving with nothing means the record succeeded.
+ */
+export type BulkRecordVerdict =
+  | { refusal: { message: string }; paused?: undefined }
+  | { paused: true; refusal?: undefined };
+
 export interface BulkProgress {
   total: number;
   done: number;
   failed: number;
+  /** Records a per-record dispatch answered with a refusal ({@link BulkRowRefusal}). */
+  refused: number;
+  /** Records whose per-record run paused at a screen ({@link BulkRowPause}). */
+  paused: number;
   inFlight: boolean;
 }
 
@@ -39,6 +77,24 @@ export interface BulkResult {
   succeeded: number;
   failed: number;
   errors: BulkRowError[];
+  /**
+   * Set only when a per-record dispatch answered one or more records with a
+   * refusal: those records, each with its own sentence, in selection order,
+   * except that a failed record whose `retry()` is refused is appended last.
+   * They are counted neither as succeeded nor as failed, so
+   * `succeeded + failed + refused.length + paused.length === total` on a
+   * per-record run (see `paused`), and `errors` carries no entry for them.
+   */
+  refused?: BulkRowRefusal[];
+  /**
+   * Set only when a per-record dispatch started a run that paused at a screen
+   * for one or more records: those records, in selection order, except that a
+   * failed record whose `retry()` pauses is appended last. They wait for
+   * input, so they are counted neither as succeeded, nor as failed, nor as
+   * refused: `succeeded + failed + refused.length + paused.length === total`
+   * on a per-record run, and `errors` carries no entry for them.
+   */
+  paused?: BulkRowPause[];
   /**
    * Set only when an `execution: 'aggregate'` run (objectui#3139) REJECTED.
    *
@@ -211,6 +267,13 @@ export interface BulkExecutorOptions {
    * Reject with an error that carries the producer's `userMessage` when the
    * failure has one — the row shows it, the error CSV keeps the message.
    *
+   * A record the action REFUSED (a flow run that ended `refused`) is no
+   * failure: resolve with a {@link BulkRecordVerdict} carrying the refusal's
+   * sentence. The executor counts it as refused, never succeeded, and lists it
+   * with its own sentence (`BulkResult.refused`). A record whose run PAUSED at
+   * a screen resolves with `{ paused: true }`: the executor counts it as
+   * waiting for input, never succeeded (`BulkResult.paused`).
+   *
    * When absent, `operation: 'custom'` keeps its historical meaning: no
    * mutation, the consumer wires `onComplete`.
    */
@@ -218,7 +281,7 @@ export interface BulkExecutorOptions {
     def: BulkActionDef,
     row: Record<string, unknown>,
     params: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<BulkRecordVerdict | void>;
   /**
    * Whole-selection dispatcher for a promoted def that opted into
    * `execution: 'aggregate'` (objectui#3139) — the "take every id at once"
@@ -297,6 +360,8 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     total: 0,
     done: 0,
     failed: 0,
+    refused: 0,
+    paused: 0,
     inFlight: false,
   });
   const [result, setResult] = useState<BulkResult | null>(null);
@@ -325,7 +390,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
   );
 
   const reset = useCallback(() => {
-    setProgress({ total: 0, done: 0, failed: 0, inFlight: false });
+    setProgress({ total: 0, done: 0, failed: 0, refused: 0, paused: 0, inFlight: false });
     setResult(null);
     snapshotRef.current = [];
     lastRunRef.current = null;
@@ -351,6 +416,12 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       const errors: BulkRowError[] = [];
       // Record id → its per-record rejection's `userMessage` (custom runner only).
       const userMessages = new Map<string, string>();
+      // Record id → the refusal its per-record dispatch answered (custom runner only).
+      const refusalMessages = new Map<string, string>();
+      const refused: BulkRowRefusal[] = [];
+      // Record ids whose per-record run paused at a screen (custom runner only).
+      const pausedIds = new Set<string>();
+      const paused: BulkRowPause[] = [];
       let succeeded = 0;
       let failed = 0;
       let aggregateRejection: BulkResult['aggregateRejection'];
@@ -358,7 +429,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       let aggregateUnconfirmed: string[] = [];
 
       setResult(null);
-      setProgress({ total, done: 0, failed: 0, inFlight: true });
+      setProgress({ total, done: 0, failed: 0, refused: 0, paused: 0, inFlight: true });
 
       const buildPatch = (): Record<string, unknown> =>
         normalizeMultiValuePatch({ ...(def.patch ?? {}), ...params }, objectFields);
@@ -398,7 +469,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
           }
 
           if (validIds.length === 0) {
-            setProgress({ total, done: succeeded, failed, inFlight: true });
+            setProgress({ total, done: succeeded, failed, refused: refused.length, paused: paused.length, inFlight: true });
             continue;
           }
 
@@ -442,7 +513,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
                   ?? (e instanceof Error ? e.message : String(e)),
               };
             }
-            setProgress({ total, done: succeeded, failed, inFlight: true });
+            setProgress({ total, done: succeeded, failed, refused: refused.length, paused: paused.length, inFlight: true });
             continue;
           }
 
@@ -473,13 +544,21 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
                 // onComplete.
                 // A rejection's producer-marked `userMessage` is kept per row
                 // and attached to the row's error below; the rejection itself
-                // still settles the row as failed with its whole message.
+                // still settles the row as failed with its whole message. A
+                // refusal or pause verdict settles the row as fulfilled and is
+                // moved out of the succeeded count below.
                 return def.actionDef && runAction
-                  ? runAction(def, rowById.get(id) ?? { id }, { ...params }).catch((e: unknown) => {
-                    const userMessage = declaredUserMessage(e);
-                    if (userMessage !== null) userMessages.set(id, userMessage);
-                    throw e;
-                  })
+                  ? runAction(def, rowById.get(id) ?? { id }, { ...params }).then(
+                    (verdict) => {
+                      if (verdict?.refusal) refusalMessages.set(id, verdict.refusal.message);
+                      else if (verdict?.paused) pausedIds.add(id);
+                    },
+                    (e: unknown) => {
+                      const userMessage = declaredUserMessage(e);
+                      if (userMessage !== null) userMessages.set(id, userMessage);
+                      throw e;
+                    },
+                  )
                   : Promise.resolve();
               default:
                 return Promise.reject(new Error(`Unknown operation: ${def.operation}`));
@@ -490,13 +569,22 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
             { ids: validIds, originalSize: batch.length, offset: i, allowBulk, label },
             { bulkCall, perRow },
           );
-          succeeded += outcome.succeeded;
+          // A refused record's dispatch resolved, so the batch counted it as
+          // succeeded; it is refused instead (it wrote nothing).
+          const batchRefused = validIds
+            .filter((id) => refusalMessages.has(id))
+            .map((id) => ({ id, message: refusalMessages.get(id) ?? '' }));
+          refused.push(...batchRefused);
+          // So did a record whose run paused at a screen; it waits instead.
+          const batchPaused = validIds.filter((id) => pausedIds.has(id)).map((id) => ({ id }));
+          paused.push(...batchPaused);
+          succeeded += outcome.succeeded - batchRefused.length - batchPaused.length;
           failed += outcome.failed;
           errors.push(...outcome.errors.map((rowError) => {
             const userMessage = userMessages.get(rowError.id);
             return userMessage === undefined ? rowError : { ...rowError, userMessage };
           }));
-          setProgress({ total, done: succeeded, failed, inFlight: true });
+          setProgress({ total, done: succeeded, failed, refused: refused.length, paused: paused.length, inFlight: true });
         }
       });
 
@@ -505,6 +593,8 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
         succeeded,
         failed,
         errors,
+        ...(refused.length > 0 ? { refused } : {}),
+        ...(paused.length > 0 ? { paused } : {}),
         ...(aggregateRejection ? { aggregateRejection } : {}),
         ...(aggregateUnreadable ? { aggregateUnreadable: true as const } : {}),
         ...(aggregateUnconfirmed.length > 0 ? { aggregateUnconfirmed } : {}),
@@ -514,15 +604,16 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
       const failedIds = new Set(errors.map(e => e.id));
       snapshotRef.current = snapshot.filter(s => !failedIds.has(s.id));
       lastRunRef.current = { def, rows, params };
-      setProgress({ total, done: succeeded, failed, inFlight: false });
+      setProgress({ total, done: succeeded, failed, refused: refused.length, paused: paused.length, inFlight: false });
       setResult(finalResult);
       // Mutating any row in `resource` may have changed how many records
       // belong to a parent (e.g. deleting Contacts under an Account). Drop
       // every cached count for this resource so the next page render
       // re-probes. Cheap — counts are 1-int values. A rejected or unreadable
       // aggregate run, or one that left rows unconfirmed, may have written
-      // rows nobody counted, so it invalidates too.
-      if (succeeded > 0 || aggregateRejection || aggregateUnreadable || aggregateUnconfirmed.length > 0) {
+      // rows nobody counted, so it invalidates too, and so does a run that
+      // paused at a screen: its steps before the screen may have written.
+      if (succeeded > 0 || paused.length > 0 || aggregateRejection || aggregateUnreadable || aggregateUnconfirmed.length > 0) {
         RelatedCountStore.invalidate(resource);
       }
       return finalResult;
@@ -544,7 +635,7 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     let failed = 0;
 
     setResult(null);
-    setProgress({ total, done: 0, failed: 0, inFlight: true });
+    setProgress({ total, done: 0, failed: 0, refused: 0, paused: 0, inFlight: true });
 
     // One refresh for the whole replay, not one per reverted row.
     const settled = await holdingMutationEvents(() =>
@@ -568,14 +659,17 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
     // against rows that have already been reverted, which is rarely useful
     // and easy to do by accident from a sticky toast.
     snapshotRef.current = [];
-    setProgress({ total, done: succeeded, failed, inFlight: false });
+    setProgress({ total, done: succeeded, failed, refused: 0, paused: 0, inFlight: false });
     setResult(undoResult);
     return undoResult;
   }, [resource, dataSource, holdingMutationEvents]);
 
   /**
    * Re-attempt a single previously-failed row using the same operation +
-   * params as the original run. Returns true on success.
+   * params as the original run. Returns true on success. A refused row is not
+   * offered for retry (the dialog lists it apart, with no button): it was a
+   * deliberate answer, not a transient failure. Nor is a paused row: its run
+   * waits at a screen, and a re-run would start a second one.
    */
   const retry = useCallback(
     async (rowId: string): Promise<boolean> => {
@@ -603,7 +697,38 @@ export function useBulkExecutor({ resource, dataSource, objectFields, runAction,
             // A promoted def re-dispatches the action for real; a plain callout
             // def has nothing to retry, so it reports success unchanged.
             if (!last.def.actionDef || !runAction) return true;
-            await runAction(last.def, row, { ...last.params });
+            {
+              const verdict = await runAction(last.def, row, { ...last.params });
+              if (verdict?.refusal) {
+                // The re-run was refused: the row moves from failed to
+                // refused, with this answer's sentence, and is no success.
+                const message = verdict.refusal.message;
+                setResult(prev => {
+                  if (!prev) return prev;
+                  return {
+                    ...prev,
+                    errors: prev.errors.filter(e => e.id !== rowId),
+                    failed: Math.max(0, prev.failed - 1),
+                    refused: [...(prev.refused ?? []).filter(r => r.id !== rowId), { id: rowId, message }],
+                  };
+                });
+                return false;
+              }
+              if (verdict?.paused) {
+                // The re-run paused at a screen: the row moves from failed to
+                // waiting, and is no success until its screen is answered.
+                setResult(prev => {
+                  if (!prev) return prev;
+                  return {
+                    ...prev,
+                    errors: prev.errors.filter(e => e.id !== rowId),
+                    failed: Math.max(0, prev.failed - 1),
+                    paused: [...(prev.paused ?? []).filter(p => p.id !== rowId), { id: rowId }],
+                  };
+                });
+                return false;
+              }
+            }
             break;
           default:
             return false;

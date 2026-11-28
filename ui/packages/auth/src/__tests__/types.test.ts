@@ -10,12 +10,12 @@ describe('getUserInitials', () => {
     expect(getUserInitials({ name: 'John Doe', email: 'j@test.com' })).toBe('JD');
   });
 
-  it('returns single initial for single-word name', () => {
-    expect(getUserInitials({ name: 'Admin', email: 'a@test.com' })).toBe('A');
+  it('returns the first two letters of a single-word name (the shared getPersonInitials rule)', () => {
+    expect(getUserInitials({ name: 'Admin', email: 'a@test.com' })).toBe('AD');
   });
 
-  it('returns at most 2 characters for long names', () => {
-    expect(getUserInitials({ name: 'John Michael Doe', email: 'j@test.com' })).toBe('JM');
+  it('returns the first and last words\' initials for long names', () => {
+    expect(getUserInitials({ name: 'John Michael Doe', email: 'j@test.com' })).toBe('JD');
   });
 
   it('returns first letter of email when name is empty', () => {

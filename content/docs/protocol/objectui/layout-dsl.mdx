@@ -90,12 +90,11 @@ each holding typed `components`. There is no `context:` key — the binding is
 of actions declared on that object — there is no built-in id registry, so
 `edit` / `delete` / `share` resolve nowhere (the host draws its own Edit /
 Delete chrome). The list is the whole set the header draws: an action that
-declares `record_header` but is not named is not drawn there, and a header with
+declares `record_page` but is not named is not drawn there, and a header with
 no `actions` draws none of the object's own actions. `placedActions: true` in
-place of the list asks for every action placed at `record_header` /
-`record_more`, read live, so an action another package places on the object is
+place of the list asks for every action placed at `record` / `record_page`, read live, so an action another package places on the object is
 drawn without editing the page; it is refused beside a list. Declare the action,
-placed at `record_header`, then name it:
+placed at `record_page`, then name it:
 
 {/* os:check-yaml action */}
 ```yaml
@@ -104,7 +103,7 @@ label: Send Statement
 objectName: account
 type: flow
 target: account_statement
-locations: [record_header]
+locations: [record_page]
 ```
 
 {/* os:check-yaml page */}
@@ -929,7 +928,7 @@ The predicate's **binding root** is set by the layer, not the key:
 | Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |
 | Runtime record form **fields** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6010) |
 | Runtime record form **sections** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6110 + #6111) |
-| Metadata-editing forms (`*.form.ts`) | `data` — the row under edit |
+| Metadata-editing forms (`*.metadata-form.ts`) | `data` — the row under edit |
 
 The two form rows were one row until objectui#6010 bound the host predicate scope
 on the SDUI form renderer's authored-predicate call sites — at that point only the

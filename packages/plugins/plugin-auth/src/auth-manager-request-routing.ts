@@ -65,10 +65,11 @@ import {
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { clientAddressStateEntries } from './request-client-address.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
+import { ADMIN_REMOVE_USER_PATH, answerRemovalEnded, runWithRemovalTally } from './removed-account-registrations.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
 import { OAUTH_REVOKE_PATH } from './mcp-token-revocation.js';
 import { ssoCallbackOf } from './sso-oidc-refusal-cause.js';
-import { isSsoDiscoveryEgressPath } from './sso-discovery-egress.js';
+import { isSsoDiscoveryEgressPath, mountsSsoEndpoints } from './sso-discovery-egress.js';
 import { samlSingleLogoutProviderId, SIGN_OUT_ENDPOINT_PATH } from './sso-sign-out-of-idp.js';
 import type { ScimRequestScope } from './scim-connection-service.js';
 
@@ -233,8 +234,13 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // scope entered inside a hook never reaches. Only reads at origins the
   // request's provider configuration names are judged (the global before-hook
   // names a registration's, the observed adapter a stored provider's as the
-  // vendor reads it); every other read is sent as it was.
-  const runHandler = isSsoDiscoveryEgressPath(this.betterAuthEndpointPath(request))
+  // vendor reads it); every other read is sent as it was. The scope opens only
+  // where the built instance mounts the vendor's `sso` plugin
+  // (`mountsSsoEndpoints`): a kernel without SSO serves none of these paths,
+  // so the vendor answers its own 404 and no provider read can happen, while
+  // a kernel that mounts it is judged exactly as before — an unobserved
+  // adapter there is still refused 503.
+  const runHandler = isSsoDiscoveryEgressPath(this.betterAuthEndpointPath(request)) && mountsSsoEndpoints(auth)
     ? (): Promise<Response> => this.runSsoDiscoveryEgress(runVendorHandler)
     : runVendorHandler;
 
@@ -364,11 +370,18 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // members and invitations before the organization row, with no
   // transaction, and the engine's refusal on that last row used to leave the
   // organization standing with no owner.
+  //
+  // An administrator's delete answers what it ended of the account's
+  // registrations (`removed-account-registrations.ts`): the delete's database
+  // hook writes it into the tally opened here, and a delete that succeeded
+  // carries it as `revoked`, as the forced reset answers its own.
   const providerResponse =
-    endpointPath !== undefined &&
-    (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
-      ? await this.runSubjectErasureAtomically(runRequest)
-      : await runRequest();
+    endpointPath === ADMIN_REMOVE_USER_PATH
+      ? await answerRemovalEnded(await runWithRemovalTally(() => this.runSubjectErasureAtomically(runRequest)))
+      : endpointPath !== undefined &&
+          (SESSION_ERASURE_PATHS.has(endpointPath) || endpointPath === ORGANIZATION_DELETE_PATH)
+        ? await this.runSubjectErasureAtomically(runRequest)
+        : await runRequest();
   const vendorResponse = revocationRequest
     ? await this.answerOAuthTokenRevocation(revocationRequest, providerResponse)
     : providerResponse;

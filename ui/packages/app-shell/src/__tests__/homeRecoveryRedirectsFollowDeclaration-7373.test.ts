@@ -36,8 +36,8 @@
  *     agent;
  *   - `console/ai/__tests__/resolveCollapseToDockTarget.test.ts` — the dock
  *     landing on a cold deep link;
- *   - `views/studio-design/StudioDesignSurface.packageDeletionInference.test.tsx`
- *     — eviction when the edited package is deleted;
+ *   - `views/studio-design/StudioDesignSurface.backToApp-36501.test.tsx` — the
+ *     Studio top bar's 「Back to app」 when the package has no published app;
  *   - `apps/console/src/components/StudioRoute.test.tsx` — the `/studio` entry
  *     gate and the front door's wordmark;
  *   - `apps/console/src/pages/auth/__tests__/AcceptInvitationRoute.test.tsx` —
@@ -131,20 +131,37 @@ const RECOVERY_SITES: ReadonlyArray<{
   },
   {
     file: 'packages/app-shell/src/console/ai/AiChatPage.tsx',
+    alsoReads: [
+      'packages/app-shell/src/console/ai/ChatPane.tsx',
+      'packages/app-shell/src/console/ai/aiChatHydration.ts',
+      'packages/app-shell/src/console/ai/aiChatLinks.ts',
+      'packages/app-shell/src/console/ai/useDeferredFirstSend.ts',
+      'packages/app-shell/src/console/ai/aiChatChrome.ts',
+      'packages/app-shell/src/console/ai/agentCopy.ts',
+    ],
     site: 'the AI page: no-agent screen + collapse-to-dock landing',
     expression: /const homePath = useHomePath\(\)/,
   },
   {
     file: 'packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx',
     alsoReads: [
-      'packages/app-shell/src/views/studio-design/StudioNavItemInspector.tsx',
       'packages/app-shell/src/views/studio-design/PackageSwitcher.tsx',
-      'packages/app-shell/src/views/studio-design/InterfacesNavRail.tsx',
+      'packages/app-shell/src/views/studio-design/StudioBackToApp.tsx',
       'packages/app-shell/src/views/studio-design/AutomationsFlowRail.tsx',
       'packages/app-shell/src/views/studio-design/StudioPillarKit.tsx',
       'packages/app-shell/src/views/studio-design/DataPillarHelpers.tsx',
+      'packages/app-shell/src/views/studio-design/AutomationsPillar.tsx',
+      'packages/app-shell/src/views/studio-design/DataPillar.tsx',
+      'packages/app-shell/src/views/studio-design/StudioSurfaceFrame.tsx',
+      'packages/app-shell/src/views/studio-design/StudioSurfacePage.tsx',
+      'packages/app-shell/src/views/studio-design/studioSurfaceDrafts.tsx',
+      'packages/app-shell/src/views/studio-design/studioSurfaceNavigation.tsx',
+      'packages/app-shell/src/views/studio-design/studioSurfacePublish.ts',
+      'packages/app-shell/src/views/studio-design/studioSurfaceRightSlot.tsx',
+      'packages/app-shell/src/views/studio-design/studioSurfaceSave.ts',
+      'packages/app-shell/src/views/studio-design/studioSurfaceScope.ts',
     ],
-    site: 'Studio: deleted-package eviction + header Home',
+    site: 'Studio: the header Back to app, with no app to name',
     expression: /const homePath = useHomePath\(\)/,
   },
   {

@@ -1,44 +1,34 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#11667 — the AI chat's tool-approval card and Builder handoff card
- * speak the session's language.
+ * objectui#11667 — the AI chat's tool-approval card speaks the session's
+ * language.
  *
  * `ChatPane` handed `ChatbotEnhanced` three literals for the inline HITL card
  * ("Approve & run", "Reject", and the deny reason "Operator rejected from
- * chat") and left the ADR-0057 P4 handoff card on the component's English
- * defaults ("Build this in the Builder", "Open in Builder →", and the
- * superseded card's tooltip "A newer request is available"). Every other label
- * on the same screen was already a `console.ai.*` key, so a zh-CN reader met
- * these six in English.
+ * chat"). Every other label on the same screen was already a `console.ai.*`
+ * key, so a zh-CN reader met these three in English.
  *
  * Rendered as shipped: the REAL `ChatbotEnhanced` under a real `I18nProvider`,
  * with only the transport (`useObjectChat`) stubbed so the conversation is a
- * fixture — one tool call awaiting approval, and two handoff cards, so one of
- * them is the superseded card whose tooltip is the sixth string. The deny
- * reason is read where it is RECORDED: the body of the reject request the real
- * `useHitlInChat` sends.
+ * fixture — one tool call awaiting approval. The deny reason is read where it
+ * is RECORDED: the body of the reject request the real `useHitlInChat` sends.
  */
+// AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
+// here so collection pays that transform, not a clocked case (check-test-source-alias).
+import '@object-ui/plugin-grid';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import React from 'react';
 
-/** The six strings the card names, as they used to reach every locale. */
-const ENGLISH = [
-  'Approve & run',
-  'Reject',
-  'Operator rejected from chat',
-  'Build this in the Builder',
-  'Open in Builder →',
-  'A newer request is available',
-] as const;
+/** The three strings the card names, as they used to reach every locale. */
+const ENGLISH = ['Approve & run', 'Reject', 'Operator rejected from chat'] as const;
 
 /**
  * The conversation: one destructive tool call held for approval (the shape
- * `mapMessages` lifts from a `pending_approval` result), then two
- * `suggest_builder` handoffs — the older one is superseded by the newer one.
+ * `mapMessages` lifts from a `pending_approval` result).
  * Module-scoped so the stubbed hook hands back one stable array.
  */
 const MESSAGES = [
@@ -54,34 +44,6 @@ const MESSAGES = [
         args: { id: 't1' },
         state: 'approval-requested',
         pendingActionId: 'pa_11667',
-      },
-    ],
-  },
-  {
-    id: 'a2',
-    role: 'assistant',
-    content: '',
-    toolInvocations: [
-      {
-        toolCallId: 'call-handoff-old',
-        toolName: 'suggest_builder',
-        state: 'output-available',
-        result: { handoff: 'build', prompt: 'Build a CRM' },
-        builderHandoff: { prompt: 'Build a CRM' },
-      },
-    ],
-  },
-  {
-    id: 'a3',
-    role: 'assistant',
-    content: '',
-    toolInvocations: [
-      {
-        toolCallId: 'call-handoff-new',
-        toolName: 'suggest_builder',
-        state: 'output-available',
-        result: { handoff: 'build', prompt: 'Build a CRM with deals' },
-        builderHandoff: { prompt: 'Build a CRM with deals' },
       },
     ],
   },
@@ -120,6 +82,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
 import { I18nProvider } from '@object-ui/i18n';
 import type { AgentDescriptor } from '@object-ui/plugin-chatbot';
 import { ChatPane } from '../AiChatPage';
+import { isApprovalPendingIn, publishPlanApprovalPending } from '../../../assistant/assistantBus';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -207,17 +170,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('AI chat tool-approval and Builder handoff labels follow the UI locale (objectui#11667)', () => {
-  it('zh-CN: none of the six English strings reaches the reader, and each surface renders in Chinese', async () => {
+describe('AI chat tool-approval labels follow the UI locale (objectui#11667)', () => {
+  it('zh-CN: none of the three English strings reaches the reader, and the card renders in Chinese', async () => {
     const { container } = renderPane('zh-CN');
 
-    // Each surface is on the page — so the absence below is a reading, not an
+    // The card is on the page — so the absence below is a reading, not an
     // empty render.
     expect(await screen.findByRole('button', { name: '通过并执行' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument();
-    expect(screen.getAllByText('在构建器中搭建')).toHaveLength(2);
-    expect(screen.getByTestId('builder-handoff-open')).toHaveTextContent('在构建器中打开 →');
-    expect(screen.getByTestId('builder-handoff-superseded')).toHaveAttribute('title', '已有更新的请求');
 
     expect(englishFound(container)).toEqual([]);
 
@@ -246,5 +206,24 @@ describe('AI chat tool-approval and Builder handoff labels follow the UI locale 
     await waitFor(() => expect(rejectRequests(fetchMock)).toHaveLength(1));
     const [, init] = rejectRequests(fetchMock)[0];
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ reason: 'Operator rejected from chat' });
+  });
+});
+
+// ui ADR-0057 Amendment A5, row 3 (objectstack#37860) — the pane publishes a
+// write awaiting approval to the assistant bus, per conversation, where the
+// drawer's host reads it when the drawer is next opened from the entry; the
+// user's decision in the chat clears it. Same fixture, same real pane.
+describe('the pane tells the assistant bus a write awaits approval (objectstack#37860)', () => {
+  afterEach(() => publishPlanApprovalPending({ userId: undefined, conversationId: 'conv-1', pending: false }));
+
+  it('pending while the card waits; cleared once the user decides', async () => {
+    renderPane('en');
+    expect(await screen.findByRole('button', { name: 'Reject' })).toBeInTheDocument();
+    expect(isApprovalPendingIn('conv-1', undefined)).toBe(true);
+    // Control: the reading is the conversation's, not every conversation's.
+    expect(isApprovalPendingIn('conv-2', undefined)).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    await waitFor(() => expect(isApprovalPendingIn('conv-1', undefined)).toBe(false));
   });
 });

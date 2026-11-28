@@ -14,6 +14,10 @@
  * the list's last item when more fields changed than are named (#25787).
  * `activityValueTrue` / `activityValueFalse` word a yes/no field's value inside
  * a field-change summary, for a field that declares no option words of its own.
+ *
+ * [#36074] `repliedToYourComment` titles the reply notice to a thread's
+ * starter, `repliedInYourThread` the one to an earlier replier, and
+ * `repliedAnonymous` either when the reply names no author.
  */
 
 import type { TranslationData } from '@objectstack/spec/system';
@@ -28,6 +32,9 @@ export const enMessages: Messages = {
   activityDeleted: 'Deleted {{object}} "{{label}}"',
   mentionedYou: '{{actor}} mentioned you',
   mentionedYouAnonymous: 'You were mentioned',
+  repliedToYourComment: '{{actor}} replied to your comment',
+  repliedInYourThread: '{{actor}} replied in a comment thread you are in',
+  repliedAnonymous: 'Someone replied to a comment',
   activityValueTrue: 'Yes',
   activityValueFalse: 'No',
 };
@@ -40,6 +47,9 @@ export const zhCNMessages: Messages = {
   activityDeleted: '删除了 {{object}} "{{label}}"',
   mentionedYou: '{{actor}} 提到了你',
   mentionedYouAnonymous: '有人提到了你',
+  repliedToYourComment: '{{actor}} 回复了你的评论',
+  repliedInYourThread: '{{actor}} 回复了你参与的评论',
+  repliedAnonymous: '有人回复了评论',
   activityValueTrue: '是',
   activityValueFalse: '否',
 };
@@ -52,6 +62,9 @@ export const jaJPMessages: Messages = {
   activityDeleted: '{{object}}「{{label}}」を削除しました',
   mentionedYou: '{{actor}}さんがあなたをメンションしました',
   mentionedYouAnonymous: 'あなたがメンションされました',
+  repliedToYourComment: '{{actor}}さんがあなたのコメントに返信しました',
+  repliedInYourThread: '{{actor}}さんがあなたも参加しているコメントに返信しました',
+  repliedAnonymous: 'コメントに返信がありました',
   activityValueTrue: 'はい',
   activityValueFalse: 'いいえ',
 };
@@ -64,6 +77,9 @@ export const esESMessages: Messages = {
   activityDeleted: 'Eliminó {{object}} "{{label}}"',
   mentionedYou: '{{actor}} te mencionó',
   mentionedYouAnonymous: 'Te han mencionado',
+  repliedToYourComment: '{{actor}} respondió a tu comentario',
+  repliedInYourThread: '{{actor}} respondió en una conversación en la que participas',
+  repliedAnonymous: 'Alguien respondió a un comentario',
   activityValueTrue: 'Sí',
   activityValueFalse: 'No',
 };
@@ -76,6 +92,9 @@ export const zhHantMessages: Messages = {
   activityDeleted: '刪除了 {{object}}「{{label}}」',
   mentionedYou: '{{actor}} 提及了你',
   mentionedYouAnonymous: '有人提及了你',
+  repliedToYourComment: '{{actor}} 回覆了你的留言',
+  repliedInYourThread: '{{actor}} 回覆了你參與的留言',
+  repliedAnonymous: '有人回覆了留言',
   activityValueTrue: '是',
   activityValueFalse: '否',
 };
@@ -88,6 +107,9 @@ export const arMessages: Messages = {
   activityDeleted: 'حذف {{object}} "{{label}}"',
   mentionedYou: 'أشار إليك {{actor}}',
   mentionedYouAnonymous: 'تمت الإشارة إليك',
+  repliedToYourComment: 'ردّ {{actor}} على تعليقك',
+  repliedInYourThread: 'ردّ {{actor}} في محادثة تعليقات تشارك فيها',
+  repliedAnonymous: 'ردّ أحدهم على تعليق',
   activityValueTrue: 'نعم',
   activityValueFalse: 'لا',
 };
@@ -100,6 +122,9 @@ export const frMessages: Messages = {
   activityDeleted: 'A supprimé {{object}} « {{label}} »',
   mentionedYou: '{{actor}} vous a mentionné',
   mentionedYouAnonymous: 'Vous avez été mentionné',
+  repliedToYourComment: '{{actor}} a répondu à votre commentaire',
+  repliedInYourThread: '{{actor}} a répondu dans une discussion à laquelle vous participez',
+  repliedAnonymous: 'Quelqu\'un a répondu à un commentaire',
   activityValueTrue: 'Oui',
   activityValueFalse: 'Non',
 };
@@ -112,6 +137,9 @@ export const ptBRMessages: Messages = {
   activityDeleted: 'Excluiu {{object}} "{{label}}"',
   mentionedYou: '{{actor}} mencionou você',
   mentionedYouAnonymous: 'Você foi mencionado',
+  repliedToYourComment: '{{actor}} respondeu ao seu comentário',
+  repliedInYourThread: '{{actor}} respondeu em uma conversa da qual você participa',
+  repliedAnonymous: 'Alguém respondeu a um comentário',
   activityValueTrue: 'Sim',
   activityValueFalse: 'Não',
 };
@@ -124,6 +152,9 @@ export const ruMessages: Messages = {
   activityDeleted: 'Удалил(а) {{object}} «{{label}}»',
   mentionedYou: '{{actor}} упомянул(а) вас',
   mentionedYouAnonymous: 'Вас упомянули',
+  repliedToYourComment: '{{actor}} ответил(а) на ваш комментарий',
+  repliedInYourThread: '{{actor}} ответил(а) в обсуждении, в котором вы участвуете',
+  repliedAnonymous: 'Кто-то ответил на комментарий',
   activityValueTrue: 'Да',
   activityValueFalse: 'Нет',
 };
@@ -136,6 +167,9 @@ export const deMessages: Messages = {
   activityDeleted: 'Hat {{object}} „{{label}}“ gelöscht',
   mentionedYou: '{{actor}} hat Sie erwähnt',
   mentionedYouAnonymous: 'Sie wurden erwähnt',
+  repliedToYourComment: '{{actor}} hat auf Ihren Kommentar geantwortet',
+  repliedInYourThread: '{{actor}} hat in einer Diskussion geantwortet, an der Sie beteiligt sind',
+  repliedAnonymous: 'Jemand hat auf einen Kommentar geantwortet',
   activityValueTrue: 'Ja',
   activityValueFalse: 'Nein',
 };
@@ -148,6 +182,9 @@ export const koMessages: Messages = {
   activityDeleted: '{{object}} "{{label}}"을(를) 삭제했습니다',
   mentionedYou: '{{actor}}님이 회원님을 멘션했습니다',
   mentionedYouAnonymous: '회원님이 멘션되었습니다',
+  repliedToYourComment: '{{actor}}님이 회원님의 댓글에 답글을 남겼습니다',
+  repliedInYourThread: '{{actor}}님이 회원님이 참여한 댓글에 답글을 남겼습니다',
+  repliedAnonymous: '누군가 댓글에 답글을 남겼습니다',
   activityValueTrue: '예',
   activityValueFalse: '아니요',
 };

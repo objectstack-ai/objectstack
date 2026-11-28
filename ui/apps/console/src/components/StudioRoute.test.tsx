@@ -22,7 +22,7 @@
  * mounted the builder ungated.
  *
  * The two builder components are the only stubs, and they are SPIES: the
- * assertion for a non-holder is that `BuilderLanding` / `StudioDesignSurface`
+ * assertion for a non-holder is that `StudioEntryRedirect` / `StudioDesignSurface`
  * were never CALLED, which is strictly stronger than "their DOM is absent" —
  * a component that never mounts cannot render an authoring affordance, a
  * Publish button, or fire the metadata reads behind them. `AuthGuard`,
@@ -100,7 +100,7 @@ vi.mock('../../../../packages/auth/src/useAuth', async (importOriginal) => ({
  * metadata backend; what this file measures is whether the router ever reaches
  * them at all.
  */
-const builderLanding = vi.fn();
+const studioEntry = vi.fn();
 const designSurface = vi.fn();
 
 // `@object-ui/app-shell` is aliased to `packages/app-shell/src`
@@ -126,9 +126,11 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
     </div>
   ),
   getProductName: () => 'ObjectOS',
-  BuilderLanding: () => {
-    builderLanding();
-    return <div data-testid="studio-front-door">pick a package</div>;
+  // objectstack#36908 — bare `/studio` is Studio's entry, which draws no page:
+  // the stub records the capability set the gate hands it.
+  StudioEntryRedirect: ({ systemPermissions }: { systemPermissions?: string[] }) => {
+    studioEntry(systemPermissions);
+    return <div data-testid="studio-entry">entry</div>;
   },
   StudioDesignSurface: () => {
     designSurface();
@@ -153,7 +155,10 @@ const pathname = () => screen.getByTestId('pathname').textContent;
  * file's pin.
  */
 const NOTICE = 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.';
-const WAY_HOME = 'Back to home';
+/** jsdom's window is 1024 px wide: a desktop, whose way home opens an app's start page. */
+const WAY_HOME = 'Back to app start page';
+/** A phone's way home, to its app list. */
+const PHONE_WAY_HOME = 'Back to home';
 
 /**
  * The refusal, said at the URL that was opened: the sentence is on screen, the
@@ -234,10 +239,10 @@ function answerWith(systemPermissions: unknown) {
 beforeEach(() => {
   auth = { isAuthenticated: true, isLoading: false, user: { id: 'u1' } };
   fetchCalls = [];
-  builderLanding.mockClear();
+  studioEntry.mockClear();
   designSurface.mockClear();
   answerWith(TENANT_OWNER_CAPS);
-  // The landing mounts the real `AppHeader` (objectui#11863), which reads its
+  // A screen that mounts the real `AppHeader` reads its
   // user-scoped feeds and the AI agent catalogue on mount; each answers empty
   // here, so no request leaves the process. The entry gate's own read goes
   // through the mocked `createAuthenticatedFetch`, not this.
@@ -291,9 +296,9 @@ describe('/studio/* — the entry decision, both ways', () => {
     await expectRefusedAt('/studio/', '/home');
     // The load-bearing half: not "a notice was drawn" but "the builder was
     // never mounted", so nothing inside it could render or fetch.
-    expect(builderLanding).not.toHaveBeenCalled();
+    expect(studioEntry).not.toHaveBeenCalled();
     expect(designSurface).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('studio-front-door')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('studio-entry')).not.toBeInTheDocument();
     expect(screen.queryByTestId('studio-pillar-builder')).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-launcher')).not.toBeInTheDocument();
   });
@@ -319,88 +324,70 @@ describe('/studio/* — the entry decision, both ways', () => {
   it("the refusal's way home leads to the DECLARED landing where there is one (objectui#7373)", async () => {
     // The card's case on this gate: a control-plane customer who follows a
     // `/studio` link they may not enter. Pre-#7373 the way out defaulted to the
-    // `/home` literal, which on that deployment is the environment launcher —
-    // "Build an app" / "Start from a template" cards acting on an environment
-    // the control plane does not have. This pin fails on that implementation.
-    // Since objectui#12035 the way out is the refusal's link, not a redirect.
+    // `/home` literal, which on that deployment was the environment launcher.
+    // Since objectstack#36732 that page is retired from 768 px up: `/home` is
+    // the desktop resolver, which lands in the declared app (pinned in
+    // `RootLandingRedirect.route.test.tsx`). Studio sits outside the `/me/apps`
+    // provider, so the way out names that resolver and never an app it cannot
+    // tell a permission set hides. Since objectui#12035 the way out is the
+    // refusal's link, not a redirect.
     renderStudioDeepLink('/studio/hotcrm/data', CONTROL_PLANE_APPS);
 
-    await expectRefusedAt('/studio/hotcrm/data', '/apps/cloud_control');
-    await userEvent.click(screen.getByRole('link', { name: WAY_HOME }));
-
-    await waitFor(() => expect(pathname()).toBe('/apps/cloud_control'));
-    expect(screen.getByTestId('declared-landing')).toBeInTheDocument();
-    expect(screen.queryByTestId('home-launcher')).not.toBeInTheDocument();
+    await expectRefusedAt('/studio/hotcrm/data', '/home');
+    expect(screen.queryByTestId('declared-landing')).not.toBeInTheDocument();
     // The load-bearing half is unchanged by the retarget: refusing is still
     // refusing, and the builder is still never mounted.
     expect(designSurface).not.toHaveBeenCalled();
   });
 
-  it('keeps the launcher for an environment that declares no landing', async () => {
-    // The status quo, as its own case: a real app list WITHOUT a declaration
-    // resolves to the launcher, exactly like the no-context cases above.
+  it('objectstack#36732 — on a desktop with no declaration the way home is the /home resolver too', async () => {
+    // A real app list WITHOUT a declaration: the `/home` resolver lands in
+    // its first product app, the place `/` lands, never Setup.
     renderStudioDeepLink('/studio/hotcrm/data', [
-      { name: 'crm', label: 'CRM' },
       { name: 'setup', label: 'Setup' },
+      { name: 'crm', label: 'CRM' },
     ]);
 
     await expectRefusedAt('/studio/hotcrm/data', '/home');
     await userEvent.click(screen.getByRole('link', { name: WAY_HOME }));
-
     await waitFor(() => expect(pathname()).toBe('/home'));
-    expect(screen.getByTestId('home-launcher')).toBeInTheDocument();
     expect(designSurface).not.toHaveBeenCalled();
   });
 
-  it('NEGATIVE CONTROL: a holder still gets the front door, unchanged', async () => {
+  it("NEGATIVE CONTROL: a holder still gets Studio's entry, handed the set the gate read", async () => {
     // A gate that refused everyone would pass every assertion above.
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/');
 
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    expect(builderLanding).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('studio-entry')).toBeInTheDocument());
+    // objectstack#36908 — the entry chooses the package list by these.
+    expect(studioEntry).toHaveBeenCalledWith(OPERATOR_CAPS);
     expect(pathname()).toBe('/studio/');
     // ...and is never shown the refusal (objectui#12035).
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
     expect(screen.queryByTestId('studio-access-required')).not.toBeInTheDocument();
   });
 
-  it('NEGATIVE CONTROL: a holder still gets the pillar builder, unchanged', async () => {
+  it('NEGATIVE CONTROL: a holder still gets the builder, on the page the old pillar address names', async () => {
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/hotcrm/data');
 
     await waitFor(() => expect(screen.getByTestId('studio-pillar-builder')).toBeInTheDocument());
     expect(designSurface).toHaveBeenCalled();
-    expect(pathname()).toBe('/studio/hotcrm/data');
+    // objectstack#36909 — the retired Data pillar's address lands on the object list.
+    expect(pathname()).toBe('/studio/hotcrm/metadata/object?package=hotcrm');
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
   });
 
-  it("the front door's header brand walks back to the same home the gate's refusal names", async () => {
-    // Two affordances one route apart — this brand (the `studio` variant of
-    // `AppHeader` since objectui#11863, the wordmark before it) and the pillar
-    // builder's header Home button — must not name two different homes; that
-    // asymmetry is the defect objectui#7256 measured and objectui#7373 finished
-    // removing.
-    answerWith(OPERATOR_CAPS);
-    renderStudioDeepLink('/studio/', CONTROL_PLANE_APPS);
-
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    // The mark is named 「PRODUCT home」 since objectui#12605 (the ruled
-    // accessible name: product name + home); its target is unchanged.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute(
-      'href',
-      '/apps/cloud_control',
-    );
-  });
-
-  it('the package-less scope\'s bare leg lands on its one pillar, the builder mounted (objectui#11553)', async () => {
+  it('the package-less scope\'s bare leg lands on its flow list, the builder mounted (objectui#11553)', async () => {
     // `~org` is the reserved segment for the organization's own, package-less
     // flows. Without its own leg it falls to `:packageId`, whose redirect
-    // targets a Data pillar that scope does not have.
+    // targets an object list that scope does not have. objectstack#36909 — in
+    // one hop, not through the retired Automations pillar's address.
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/~org');
 
-    await waitFor(() => expect(pathname()).toBe('/studio/~org/automations'));
+    await waitFor(() => expect(pathname()).toBe('/studio/~org/metadata/flow?source=runtime'));
     await waitFor(() => expect(screen.getByTestId('studio-pillar-builder')).toBeInTheDocument());
     expect(designSurface).toHaveBeenCalled();
   });
@@ -483,5 +470,32 @@ describe('/studio/* — the states that are not an answer', () => {
     expect(pathname()).toBe('/login?redirect=%2Fstudio%2Fhotcrm%2Fdata');
     expect(designSurface).not.toHaveBeenCalled();
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
+  });
+});
+
+describe('/studio refused: the way home names where it goes, by viewport', () => {
+  const desktopWidth = window.innerWidth;
+  function atWidth(px: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: px });
+  }
+  afterEach(() => atWidth(desktopWidth));
+
+  it('on a desktop, where home is an app\'s start page, it reads as the app pill\'s row does', async () => {
+    atWidth(1280);
+    renderStudioDeepLink('/studio/hotcrm/data');
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: WAY_HOME })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: PHONE_WAY_HOME })).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — on a phone, whose Home is still its app list, it keeps 「Back to home」', async () => {
+    atWidth(375);
+    renderStudioDeepLink('/studio/hotcrm/data');
+
+    expect(await screen.findByText(NOTICE)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: PHONE_WAY_HOME })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: WAY_HOME })).not.toBeInTheDocument();
+    expect(designSurface).not.toHaveBeenCalled();
   });
 });

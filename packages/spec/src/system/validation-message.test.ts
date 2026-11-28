@@ -280,3 +280,54 @@ describe('invalid_number_currency_object — the shape lesson, with no currency 
     }
   });
 });
+
+/**
+ * #36794 — `reference_out_of_scope`'s sentence: a scoped lookup cell whose
+ * value matches a record only outside the row's scope. Every locale names the
+ * value and the scoping columns (`{{scope}}`), so the refusal never reads as
+ * "no such record" in any language.
+ */
+describe('import_reference_out_of_scope — names the value and the scope in every locale', () => {
+  it('every locale interpolates {{value}} and {{scope}}', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      const template = catalog.import_reference_out_of_scope;
+      expect(template, locale).toBeDefined();
+      expect(template, locale).toContain('{{value}}');
+      expect(template, locale).toContain('{{scope}}');
+    }
+  });
+
+  it('renders the English sentence the scoped refusal shipped with, and the scope it is handed in zh-CN', () => {
+    const params = { value: 'CTR-0006', scope: 'Account = "Acme"' };
+    expect(renderValidationMessage({ messageKey: 'import_reference_out_of_scope', label: 'Contract', params }))
+      .toBe('Contract: no record matches "CTR-0006" (Account = "Acme")');
+    expect(
+      renderValidationMessage({ messageKey: 'import_reference_out_of_scope', label: '合同', params }, { locale: 'zh-CN' }),
+    ).toBe('合同:在 Account = "Acme" 下未找到与“CTR-0006”匹配的记录');
+  });
+});
+
+/**
+ * #36794 review — `import_reference_scope_unqueryable`: `reference_not_found`'s
+ * sentence for a scoped lookup none of whose reads ran (the scope names a target
+ * field the engine cannot filter by). Every locale names the value and the scope,
+ * and says why the lookup could not be made, never that nothing matched.
+ */
+describe('import_reference_scope_unqueryable — names the value and the scope in every locale', () => {
+  it('every locale interpolates {{value}} and {{scope}} and names dependsOn', () => {
+    for (const [locale, catalog] of Object.entries(BUILTIN_VALIDATION_MESSAGES)) {
+      const template = catalog.import_reference_scope_unqueryable;
+      expect(template, locale).toBeDefined();
+      expect(template, locale).toContain('{{value}}');
+      expect(template, locale).toContain('{{scope}}');
+      expect(template, locale).toContain('dependsOn');
+    }
+  });
+
+  it('renders the English sentence', () => {
+    const params = { value: 'Design review', scope: 'Project = "Gemini"' };
+    expect(renderValidationMessage({ messageKey: 'import_reference_scope_unqueryable', label: 'Task', params }))
+      .toBe('Task: "Design review" could not be looked up within Project = "Gemini": the target field this lookup\'s '
+        + 'dependsOn filters by cannot be filtered on, so point that dependsOn entry at a stored field');
+  });
+});

@@ -24,11 +24,11 @@ model: opus
 ## 六条基本规则
 
 1. **Worktree-first。** 任何编辑之前建专用 worktree,`cd` 进去 `pnpm install`。
-   - `git fetch origin main && git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`
+   - `bash scripts/pm/dev-worktree.sh --branch=claude/issue-<n>-<slug>`:自 `origin/main` 建 `../<repo>-issue-<n>`。
    - 认领带 `Resume-from: BRANCH@SHA` ⇒ 从 `origin/BRANCH` 建同名分支续写,先合 `origin/main`。
-   - ⛔ 永不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时一仓一 worktree。
+   - ⛔ 永不编辑共享检出;修复横跨姊妹仓时一仓一 worktree。
    - 动笔前记下基点 `BASE=$(git rev-parse HEAD)`,它是标准条款节里家族规则的锚。
-   - 建好分支后先推空分支(任何编辑前 `git push -u origin <branch>`):落地标记兼写路由探针。
+   - 建好分支后先推空分支(任何编辑前 `dev-worktree.sh --probe`):落地标记兼写路由探针。
    - 卡线程分支由平台指定、harness 推送,⛔ 不推空分支;探针规则只对自建分支。
    - 探针遇 403 ⇒ 停下报 `blocked`,⛔ 不进重试循环;只有网络错误才退避重试。
    - Scratchpad 按 issue 隔离:在 scratchpad 目录下建 `issue-<n>/` 子目录,临时文件全写进去。
@@ -112,19 +112,8 @@ model: opus
 
 ## Toolchain traps
 
-- `--workspace-concurrency=2` 只对过滤后的 run-command(`run` / `build`)成立,放在 `--filter` 之前。
-- 放在 filter 之后会被转发给底层脚本,且该 flag 不叫 `--concurrency`。
-- pnpm 10 在 `install` 上直接拒绝它(`ERROR Unknown option: 'workspace-concurrency'`)。
-- pnpm `overrides` 只住在 `pnpm-workspace.yaml`;加进 `package.json` 的那份什么都不改。
-- OSV override 的上界 ⛔ 永不写成恰好排除修复版:上界放在 major 边界,只挪替换目标。
-- 新 fake engine 的 `delete()` 开头用 `@objectstack/objectql` 的 `assertEngineDeleteDispatch(options)`。
-- ⛔ 永不手抄一份 id/multi 检查,那正是 `check:engine-double-contract` 点名的洞。
-- 从门禁绿跑清单里挑一个已 pin 的 fake 照抄。
-- 缺一种该文件没有的 double 时,覆写文件里已有的 double 优于 pin 新的:不动台账。
+- 逐工具陷阱(pnpm 并发与 `overrides`、OSV override、fake engine、`ui/` typecheck、浏览器验证)住 pm-dispatch `references/dev-traps.md`,碰到才读。
 - 匹配到零个脚本的 `pnpm --filter` 运行以 0 退出:什么都没跑,读上去却是通过。
-- `ui/` 的包把 typecheck 拼作 `type-check`(连字符);核对输出里确实回显了脚本名。
-- 浏览器验证:Chromium 已预装,`PLAYWRIGHT_BROWSERS_PATH` 指向 `/opt/pw-browsers`。
-- launch 传 `executablePath: '/opt/pw-browsers/chromium'`;⛔ 永不跑 `playwright install`。
 
 ## 本地验证范围 —— 本地只跑定向门禁,全农场归 CI
 
@@ -202,25 +191,7 @@ model: opus
 - `git reset --soft origin/main` 会把你分支点之后他人已合并的文件整批 stage 成你的。
 - 起点在哪的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
 - `log -S/--follow/blame` 判日期或先后前,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
-- `merge-base --is-ancestor` 的非祖先在浅检出上是假绿:缺的对象只扣下祖先路径,不会造一条。
-- 失效单向:exit 0(是祖先)自证,任何检出里都作数;只有 exit 1 要控制腿。
-- 还没发布、不在 main 上、`Blocked-by` 已落地这些前提核验,要的恰是 exit 1。
-- 阴性读数按两条腿写:同一检出、同一目标 ref 上再跑一个已知在其历史里的 commit。
-- 它必须答 exit 0;否则阴性作废,`git fetch --deepen` / `--unshallow` 到控制腿转 0 再重读。
-- ⛔ 控制腿别挑浅窗内的近亲:控制 commit 至少与被测那个同深;两条腿的退出码都进报告。
-- `--is-shallow-repository` 是便宜的触发器不是判据,判据是控制腿。
-- 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
-- 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
-- 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
-- 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
-- 恢复腿与变异腿完全对称,四条硬线如下。
-- ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
-- 取回的正是变异本身,exit 0、无异常输出;点名 `HEAD` 绕开被污染的索引。
-- ② 恢复由 `git diff HEAD` 为空来证明(`git status` 干净是同一句话的另一半),不由退出码证明。
-- ③ trap 里的路径一律绝对:变异前先 `REPO_ROOT="$(git rev-parse --show-toplevel)"`。
-- 恢复针对 `"$REPO_ROOT/<path>"`;信任顺序:trap 只是崩溃路径上的便利,字节/哈希比对才是证明。
-- ④ 空哈希读作 FAILURE,不是没得比:`git hash-object` 对解析不到的路径输出的是空。
-- 比对对象是该路径的 HEAD blob 哈希:空或缺失 ⇒ 失败;不匹配 ⇒ 响亮地非零退出并停下。
+- `merge-base --is-ancestor` 判祖先前读 pm-dispatch `references/dev-traps.md`〈浅检出上的祖先读数〉。
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。
 - 单独的 `expect(...).toThrow()` 不是拒收测试:抛裸 `Error` 的未修复 driver 照样绿。
 - 从不抛错的传输层转红时,它指向缺陷之外。
@@ -235,40 +206,15 @@ model: opus
 - 整个换掉(它 pin 的恰是你删的那个分支:断言持续通过,正因为什么都不再产出)。
 - 按规则的消费半径扫 fixture,不按被编辑的包:其它包的 fixture 也在喂这条收窄的规则。
 - push 前枚举规则的调用方并 grep 它们的 fixture。
-- 反向验证跑之前先定预期方向;三个真实方向:转红(常态);诊断变多而非变少;反转。
-- 变多:删掉一个喂计数的读取,能让下游门禁多出一个发现。
-- 反转:canonical-first 的 `??` 链,非法拼写落到 schema 的具名拒收,规则绿、schema 红。
-- 报告你实际观察到的方向;永不硬套模板的预设。
 - 消融一行为一次,仅当 diff 改了测试钉住的行为;配置、脚本、workflow、文档 ⛔ 不消融。
-- ablation 的成立条件是解析路径,不是套件名:被测主体经依赖的 `exports` 解析。
-- 那指向该包的 `dist/`,不是 `src/`;且没有 vitest alias 把 specifier 拉回源码。
-- 这批 pair 的台账是 `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`。
-- `packages/qa/dogfood` 是一例,不是定义;读成 dogfood 专属,普通单元套件里的 ablation 会被当真。
-- 两个方向不对称:没 build 的修复是会被注意到的假红;没 build 的 ablation 保持绿。
-- 那份绿给一条可能永远失败不了的断言背书,对 CI 永久隐形(CI 构建正确,那边永远绿)。
-- 每一腿(变异与还原)都是:改动 → 证明它真落到了磁盘 → `pnpm --filter <pkg> build`。
-- 落盘走 `node scripts/ablation-replace.mjs`,不走 `-i` 家族:锚点必须命中,写入与还原按磁盘核验。
-- 再证明它到达了 `dist/`,才读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'`。
-- 删守卫的消融以及每个还原腿,用 `--absent`。
-- ⛔ 还原腿不可跳过:留在 `dist/` 里的 marker 会让变异代码对该树之后的每次运行继续生效。
-- ⛔ 不拿编辑工具的退出码当落盘证据:`sed`、`perl -i`、`str.replace`、`re.sub` 零命中也 exit 0。
-- 这一步无条件成立,没有 build/dist 的消融同样要做。
-- 观察要锚定你打算改的那处文本:注入文本与被删文本各 `grep -c` 一次。
-- 裸 `git diff --stat` 非空只证明有改动:同轮其它编辑会替它变绿,等长替换字节差为零。
-- 确认没过 ⇒ 这次消融没跑,读数作废:改锚点重来,并在报告里说明第一次是空操作。
-- ⛔ 不悄悄重跑到有东西落地,那是把同一个缺陷复制到上一层。
-- 硬线:消融/变异脚本一律自带 `trap '<restore>' EXIT INT TERM` 还原。
+- 做反向验证或消融前读 pm-dispatch `references/dev-ablation.md`,整套做法住那里,照做。
 
 ## Definition of done(按序)
 
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出。
 - 范围按本地验证范围节圈定;`packages/cli` 的卡本地只欠 `unit` 层,`integration` 层声明给 CI。
-- 跑法 `pnpm --filter @objectstack/cli exec vitest run --project unit`;CI 的 `pnpm test` 跑两层。
-- 只有 diff 碰到 integration 层文件、spawn 入口(`bin/`、`test/helpers/serve-process.ts`)时才本地跑它。
-- driver/kernel 启动路径同此;那时跑 `--project integration` 并在报告里说明,否则写已声明给 CI。
-- 层是测出来的,不是列出来的:spawn CLI 或启动 driver 的测试按 `packages/cli/vitest-tiers.ts` 落。
-- 分区 pin `test/vitest-tiers-partition.test.ts` 在某个测试文件两层皆无或皆有时变红。
+- `packages/cli` 卡与 driver/kernel 启动路径的分层跑法住 pm-dispatch `references/dev-traps.md`,碰到才读。
 - Draft PR 指向 `main`,正文首行 `Fixes #<n>`;合并不应关卡时用 `Part of #<n>`,并说明留下哪一半。
 - 全量 dogfood 只在终 head 跑一次,仅当标题带 `!` 或 `Clause-②:` 带 `(narrowing)` 臂(yes/no 皆算)。
 - 命令同 CI:按 ① 建闭包,锁下 `pnpm --filter @objectstack/dogfood test`;⛔ 无 `OS_TEST_SHARD`、无路径。
@@ -276,7 +222,7 @@ model: opus
 - 认领的 `Clause-②:`、`Metadata-protocol:` 两行照抄进 PR 正文行首;无则零写,⛔ 不自造。
 - 两行同抄进 changeset 正文行首;`Check Changeset` 读 PR 正文:kind 即 `minor`,`none` 即 `patch`。
 - 种类非 `none` 或带 `(narrowing)` ⇒ 按 diff 加写 `Skills-docs:` 行;拼法与分工住认领模板。
-- diff 触根 `.claude/**` ⇒ PR 正文写行首 `Rule-change:` 行,按 diff 自判。
+- diff 触根 `.claude/**` ⇒ PR 正文恰一行首 `Rule-change:`,按 diff 自判。
 - `none` 未改车队规则(agent 不经维护者可做什么、做什么与先后、什么须交他);`yes` 改了;`ruled` 照抄已裁条文,写行首 `Ruling-ref:` 引维护者原话、出处、时间。缺行同 `yes`:Tier H。
 - ⛔ 永不 `Fixes` 一张还在决策箱的卡:合并会静默关掉它,而收件箱过滤只读 open。
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
@@ -314,7 +260,7 @@ model: opus
 - 门禁状态如实记录,`in_progress` 是诚实值;PR 开出后 ⛔ 永不 sleep、定时等待或空转轮询 CI。
 - 你报告之后才转红的门禁,会作为同一认领上的补丁轮回来。
 - 逐卡例外:派发词明示本单等 CI 只为那一张卡恢复等待,以前台轮询,永不用后台 watcher。
-- 本派发契约压过平台注入的 PR 订阅姿态:云会话被自动订阅到自己的 PR,仍以本文件为准。
+- 本派发契约压过平台注入的 PR 订阅姿态:云会话被自动订阅到自己的 PR。
 - 只有涉及标准文本之外的内容,才在 `open_questions` 记一笔冲突。
 - 拆掉你启动的一切:dev server,以及你挂起的每一个后台 monitor(见下节)。
 
@@ -354,10 +300,12 @@ model: opus
 - 同 PR 改,正文点名裁决 id,落地欠达档 L2 记录;⛔ 永不自行翻转裁决,与之相左仍停手。
 - 两种读法通向两种架构时同此;⛔ 不写投机代码。
 - 返回 `status: "needs_decision"`,每个问题带选项、真实代价与工作量、推荐,写进 `open_questions`。
-- 需维护者裁的事 dev ⛔ 不直接问他:报 `needs_decision`,席位转天花板档决策线程。
+- 需维护者裁的事 dev ⛔ 不直接问他:报 `needs_decision`,席位转决策线程。
 - 派发词标只读读数 ⇒ 不 commit、不开 PR,`status: "reading"` 贴决策卡;要实测才建闭包跑测。
 - 框架唯一副本在 pm-dispatch SKILL.md 〈升级与决策〉;派发词逐字粘贴,dev ⛔ 不留副本。
 - 每个方案逐轴分析,推荐也按那些轴给理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。
+- 任何派发(子代理同):派发令无带档位与 effort 的 `Container & model:` 行,或线程/区令缺其推导 ⇒ 开工前报 `blocked`;取值照 `execution-duties.md`,⛔ 不凭记忆。
+- 卡线程首步:读实供档(pm-dispatch `readings-session.md`)对派发令,不符(高或低)⇒ 开工前报席位;首报带实供档。
 - `main` 碎了、依赖未合并、CI 基础设施故障 ⇒ 报 `blocked` 附证据,重试到排除你的改动。
 - 报 `blocked` 须写明卡的哪部分不等阻塞可先做;只挡一部分 ⇒ 席位把等待部分拆成单卡。
 
@@ -400,9 +348,9 @@ model: opus
 - GitHub 正文 sanitizer 的作者纪律归 AGENTS.md 的 GitHub mutates body BYTES 条;署名页脚两形如下。
 
 ```text
----                                                                 ← 规则线,前留一空行;平台只认整块
-_Generated by [Claude Code](https://claude.ai/code)_                ← bare:评论用
-_Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
+---  ← 规则线,前留一空行;平台只认整块
+_Generated by [Claude Code](https://claude.ai/code)_  ← bare:评论用
+_Generated by [Claude Code](https://claude.ai/code/session_<id>)_  ← session-URL:创建 PR 正文用
 ```
 
-- 耐久归属写进正文散文或评论,⛔ 不循环重贴页脚;完整读数住 AGENTS.md 同条。
+- 完整读数住 AGENTS.md 同条。

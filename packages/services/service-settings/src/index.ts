@@ -181,6 +181,28 @@ export {
   smsTestActionHandler,
   storageSettingsManifest,
   storageTestActionHandler,
+  // What `@objectstack/service-knowledge` contributes when it is mounted —
+  // never registered by default (`builtinSettingsManifests`).
+  knowledgeSettingsManifest,
+  knowledgeTestActionHandler,
+  aiSettingsManifest,
+  aiEmbedderSettingsSpecifiers,
+  withAiEmbedderSection,
+  aiTestEmbedderActionHandler,
+  // The `ai` model configuration — the providers that are on, their models,
+  // the default and structured-output models — as the AI runtime reads it,
+  // and the save rule that keeps the chosen models among them.
+  AI_PROVIDERS,
+  resolveAiModelConfiguration,
+  aiModelRuleBreaches,
+  parseAiModelList,
+  registerAiModelRules,
+  type AiProviderId,
+  type AiProviderModels,
+  type AiModelChoice,
+  type AiModelConfiguration,
+  type AiModelRule,
+  type AiModelRuleBreach,
 } from './manifests/index.js';
 
 // Re-export the spec types for convenience so plugin authors only need

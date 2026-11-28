@@ -77,7 +77,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 vi.mock('../../preview/DraftChangesPanel', () => ({
   DraftChangesPanel: (props: Record<string, unknown>) => {
@@ -88,7 +87,11 @@ vi.mock('../../preview/DraftChangesPanel', () => ({
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
+import { pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -96,6 +99,10 @@ import { FlowPreview } from '../metadata-admin/previews/FlowPreview';
 import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { browserClick } from '../metadata-admin/previews/__tests__/browserClick';
 import { tFormat } from '../metadata-admin/i18n';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 
@@ -157,7 +164,9 @@ function renderAt(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        {/* objectstack#36903 — the flow designer, full-screen on the flow's address. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -180,7 +189,7 @@ async function outlastDebounce(): Promise<void> {
 }
 
 async function openFlow(): Promise<void> {
-  renderAt(`/studio/${PKG}/automations`);
+  renderAt(`/studio/${PKG}/metadata/flow/approval`);
   await screen.findByTitle('API name: approval', undefined, { timeout: 8000 });
 }
 
@@ -218,6 +227,8 @@ describe('Publish refuses while an edit is held, naming it (objectui#11786)', ()
     fireEvent.change(within(rail).getByPlaceholderText('Your request was approved'), {
       target: { value: 'Request approved' },
     });
+    // objectstack#36511 — saved by the top bar's Save.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 4000 });
     await waitFor(() => expect(screen.queryByTestId('studio-held')).toBeNull());
 

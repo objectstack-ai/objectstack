@@ -14,6 +14,8 @@ import { collectDroppedRefinements } from '../../scripts/lib/dropped-refinements
 import { Field } from './field.zod';
 import { defineStack } from '../stack.zod';
 import { isMaskedOnReadFieldType } from './masked-field-types';
+import { resolveFieldHistory } from './field-history-default';
+import { CONTROLLED_BY_PARENT_MASTER_INVALID, type ControlledByParentMasterShape } from './controlled-by-parent-master';
 import type { StateMachineValidation } from './validation.zod';
 
 describe('ObjectCapabilities', () => {
@@ -32,6 +34,11 @@ describe('ObjectCapabilities', () => {
     // The record-reader approval tier is opt-IN (#8652: default OFF, the
     // downstream project opts in): an absent flag grants nothing.
     expect(result.approvalsVisibleToReaders).toBe(false);
+    // [#36290] Field-change values are on unless turned off, and the flag has
+    // NO default: a parsed body never materializes it, so a built artifact or
+    // a stored definition can always tell an authored `false` from silence.
+    expect('fieldHistory' in result).toBe(false);
+    expect(ObjectCapabilities.parse({ fieldHistory: false }).fieldHistory).toBe(false);
   });
 
   it('should accept custom capability values', () => {
@@ -92,6 +99,65 @@ describe('ObjectCapabilities', () => {
     expect(trashMsg).toContain('The recycle bin that shipped later (ADR-0148) has no flag');
     expect(trashMsg, 'the prescription carries ADR ids and the migration command, never a tracker id')
       .not.toMatch(/#\d{3,5}/);
+  });
+
+  // `enable.trash` and `versioning` both promised history, so both refusals
+  // say where field history lives now. It is the model `resolveFieldHistory`
+  // enforces (values on by default, `enable.fieldHistory: false` for the
+  // object, a field's own `fieldHistory: false`, a media or structured-JSON
+  // field opting in with `fieldHistory: true`), never `trackHistory`: on a
+  // field that only opts a media or JSON type in and `false` turns nothing off.
+  describe('retired history-promising keys prescribe the field-history model that runs', () => {
+    const trashMessage = (): string => {
+      const r = ObjectCapabilities.safeParse({ trash: false });
+      expect(r.success).toBe(false);
+      return r.success ? '' : r.error.issues.map((i) => i.message).join('\n');
+    };
+    const versioningMessage = (): string => {
+      try {
+        ObjectSchema.create({
+          name: 'demo',
+          fields: { status: { type: 'text' } },
+          versioning: { enabled: true },
+        } as Record<string, unknown> as Parameters<typeof ObjectSchema.create>[0]);
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error('`versioning` was not refused');
+    };
+
+    for (const [key, read] of [['enable.trash', trashMessage], ['versioning', versioningMessage]] as const) {
+      it(`${key}: values show by default, and the two off switches are named`, () => {
+        const message = read();
+        expect(message).toContain(
+          'Field history is on by default: a changed field\'s old → new values show on the record activity timeline',
+        );
+        expect(message, 'the default-off types are named with their opt-in').toContain(
+          'except a media or structured-JSON field, which opts in with `fieldHistory: true`.',
+        );
+        expect(message).toContain('`enable.fieldHistory: false` turns them off for the object');
+        expect(message).toContain('a field opts out with its own `fieldHistory: false`');
+        expect(message).toMatch(/For retention, (use )?a (data lifecycle policy \(`lifecycle`\)|`lifecycle` policy)/);
+      });
+
+      it(`${key}: never sends the author to \`trackHistory\``, () => {
+        expect(read()).not.toContain('trackHistory');
+      });
+    }
+
+    it('the prescription agrees with resolveFieldHistory', () => {
+      const text = { type: 'text' } as const;
+      expect(resolveFieldHistory(text, {}), 'values show by default').toBe(true);
+      expect(resolveFieldHistory(text, { enable: { fieldHistory: false } }), 'object off switch').toBe(false);
+      expect(resolveFieldHistory({ ...text, fieldHistory: false }, {}), 'field off switch').toBe(false);
+      expect(resolveFieldHistory({ ...text, trackHistory: false }, {}), 'trackHistory: false is no off switch').toBe(true);
+      const json = { type: 'json' } as const;
+      expect(resolveFieldHistory(json, {}), 'a structured-JSON field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...json, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
+      const image = { type: 'image' } as const;
+      expect(resolveFieldHistory(image, {}), 'a media field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...image, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
+    });
   });
 
   it('rejects unknown capability keys instead of stripping them', () => {
@@ -1310,7 +1376,7 @@ describe('ObjectSchema.create()', () => {
 
     it('tombstone: dead metadata keys removed in 16.0 carry upgrade guidance', () => {
       const cases: Array<[string, unknown, string]> = [
-        ['versioning', { enabled: true }, 'trackHistory'],
+        ['versioning', { enabled: true }, 'fieldHistory'],
         ['softDelete', { enabled: true }, 'the recycle bin that shipped later (ADR-0148)'],
         ['search', { fields: ['name'] }, 'searchableFields'],
         ['recordName', { type: 'autonumber' }, 'autonumber'],
@@ -1408,7 +1474,7 @@ describe('ObjectSchema.create()', () => {
             name: 'clone_demo',
             label: 'Clone',
             mode: 'custom',
-            locations: ['list_item'],
+            locations: ['record_row'],
             type: 'api',
             method: 'POST',
             target: '/api/v1/data/demo',
@@ -1436,7 +1502,7 @@ describe('ObjectSchema.create()', () => {
             name: 'activate_demo',
             label: 'Activate',
             mode: 'custom',
-            locations: ['list_item'],
+            locations: ['record_row'],
             type: 'api',
             method: 'PATCH',
             target: '/api/v1/data/demo/{id}',
@@ -1445,7 +1511,7 @@ describe('ObjectSchema.create()', () => {
             name: 'clone_demo',
             label: 'Clone',
             mode: 'custom',
-            locations: ['list_item'],
+            locations: ['record_row'],
             type: 'api',
             method: 'POST',
             target: '/api/v1/data/demo',
@@ -1630,7 +1696,13 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     ({ name: 'cbp_line', sharingModel: 'controlled_by_parent' as const, fields });
   const issuesOf = (input: unknown) => {
     const r = ObjectSchema.safeParse(input);
-    return r.success ? [] : r.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
+    return r.success
+      ? []
+      : r.error.issues.map((i) => ({
+          path: i.path.join('.'),
+          message: i.message,
+          params: (i as { params?: Record<string, unknown> }).params,
+        }));
   };
 
   it('ACCEPTS one required master_detail — through the raw parse and through the builder', () => {
@@ -1648,7 +1720,7 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
     const issues = issuesOf(cbp({ parent: { type: 'lookup', reference: 'cbp_header', required: true } }));
     expect(issues).toHaveLength(1);
     expect(issues[0].path).toBe('sharingModel');
-    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. ADR-0055 §1:/);
+    expect(issues[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' but no required `master_detail` field, nor a single `master_detail` declared `required: false`\. Since @objectstack\/spec 18, /);
     expect(issues[0].message).toContain("`parent` is a required `lookup`");
     // The builder path refuses it too — the HotCRM shape.
     expect(() => ObjectSchema.create(cbp({ parent: Field.lookup('cbp_header', { label: 'Header', required: true }) }))).toThrow(
@@ -1687,10 +1759,33 @@ describe('ObjectSchema refuses a controlled_by_parent object without exactly one
       b: { type: 'master_detail', reference: 'master_b', required: true },
     }));
     expect(two.map((i) => i.path)).toEqual(['fields']);
-    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. ADR-0055 §1:/);
+    expect(two[0].message).toMatch(/^Object 'cbp_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields \(`a`, `b`\)\. Since @objectstack\/spec 18, /);
     // Both refusals date themselves: 17.7.0 accepts either shape, so each names the release that refuses it.
-    expect(two[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
-    expect(none[0].message).toContain('since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(two[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+    expect(none[0].message).toContain('Since @objectstack/spec 18, a controlled-by-parent object derives');
+  });
+
+  it('stamps every refusal with the machine-readable code and its shape, and cites no ADR in the message', () => {
+    const SHAPES: Array<[ControlledByParentMasterShape, Record<string, unknown>]> = [
+      ['no-master', { title: { type: 'text' } }],
+      ['required-lookup-only', { parent: { type: 'lookup', reference: 'cbp_header', required: true } }],
+      ['several-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: false },
+        b: { type: 'master_detail', reference: 'master_b', required: false },
+      }],
+      ['several-required-masters', {
+        a: { type: 'master_detail', reference: 'master_a', required: true },
+        b: { type: 'master_detail', reference: 'master_b', required: true },
+      }],
+      ['master-not-writable', { parent: { type: 'master_detail', reference: 'cbp_header', required: true, system: true } }],
+    ];
+    for (const [shape, fields] of SHAPES) {
+      const issues = issuesOf(cbp(fields));
+      expect(issues, shape).toHaveLength(1);
+      expect(issues[0].params, shape).toEqual({ code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape });
+      expect(issues[0].message, shape).not.toMatch(/ADR-/);
+    }
+    expect(CONTROLLED_BY_PARENT_MASTER_INVALID).toBe('CONTROLLED_BY_PARENT_MASTER_INVALID');
   });
 
   it('judges controlled_by_parent only — every other sharing model keeps its relations as authored', () => {

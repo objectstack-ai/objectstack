@@ -499,12 +499,12 @@ export const fr: PlatformTranslationData = {
     },
     ai: {
       title: 'IA et Embedder',
-      description: 'Fournisseur LLM, modèle, identifiants et configuration de l’Embedder utilisés par les services d’IA et de connaissances de la plateforme.',
+      description: 'Fournisseur LLM, modèle et identifiants utilisés par le service d’IA de la plateforme.',
       groups: {
-        provider: {
-          title: 'Fournisseur',
-          description: 'Choisissez le backend LLM.',
-        },
+        provider: { title: 'Fournisseurs',
+          description: 'Activez chaque fournisseur dont les modèles peuvent être utilisés. Le fournisseur par défaut est toujours activé.' },
+        structured_output: { title: 'Sortie structurée',
+          description: 'Le modèle des appels qui doivent répondre dans une forme de données fixe. Laissez vide pour utiliser le modèle par défaut.' },
         gateway: {
           title: 'Vercel AI Gateway',
           description: 'Routeur multifournisseur. Le modèle s’écrit provider/model, par ex. openai/gpt-4o.',
@@ -548,7 +548,8 @@ export const fr: PlatformTranslationData = {
       },
       keys: {
         provider: {
-          label: 'Fournisseur',
+          label: 'Fournisseur par défaut',
+          help: 'Traite toutes les requêtes qui ne nomment aucun modèle.',
           options: {
             gateway: 'Vercel AI Gateway',
             openai: 'OpenAI',
@@ -640,8 +641,30 @@ export const fr: PlatformTranslationData = {
           label: 'Journaliser les prompts complets',
           help: 'Inclut les prompts rendus (et pas seulement les métadonnées) dans les lignes de trace.',
         },
+        default_model: { label: 'Modèle par défaut', help: 'L\'un des modèles du fournisseur par défaut. Laissez vide pour utiliser son premier modèle.' },
+        gateway_enabled: { label: 'Vercel AI Gateway' },
+        openai_enabled: { label: 'OpenAI' },
+        anthropic_enabled: { label: 'Anthropic' },
+        google_enabled: { label: 'Google Generative AI' },
+        deepseek_enabled: { label: 'DeepSeek' },
+        dashscope_enabled: { label: '阿里通义 DashScope' },
+        cloudflare_enabled: { label: 'Cloudflare AI Gateway' },
+        siliconflow_enabled: { label: '硅基流动 SiliconFlow' },
+        openrouter_enabled: { label: 'OpenRouter' },
+        gateway_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        openai_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        anthropic_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        google_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        deepseek_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        dashscope_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        cloudflare_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        siliconflow_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        openrouter_models: { label: 'Autres modèles', help: 'Autres ID de modèle de ce fournisseur, un par ligne. Le modèle ci-dessus vient en premier.' },
+        structured_output_provider: { label: 'Fournisseur', help: 'Un fournisseur activé. Laissez vide pour utiliser le fournisseur par défaut.' },
+        structured_output_model: { label: 'Modèle', help: 'L\'un des modèles de ce fournisseur. Laissez vide pour utiliser son premier modèle.' },
         embedder_provider: {
           label: 'Fournisseur',
+          help: 'Lu au démarrage du serveur : une modification enregistrée d’un paramètre de l’embedder prend effet au prochain redémarrage.',
           options: {
             none: 'Désactivé (aucun embedding)',
             openai: 'OpenAI',
@@ -678,6 +701,15 @@ export const fr: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'Tester la connexion' },
+        test_gateway: { label: 'Tester la connexion' },
+        test_openai: { label: 'Tester la connexion' },
+        test_anthropic: { label: 'Tester la connexion' },
+        test_google: { label: 'Tester la connexion' },
+        test_deepseek: { label: 'Tester la connexion' },
+        test_dashscope: { label: 'Tester la connexion' },
+        test_cloudflare: { label: 'Tester la connexion' },
+        test_siliconflow: { label: 'Tester la connexion' },
+        test_openrouter: { label: 'Tester la connexion' },
         test_embedder: { label: 'Tester l’Embedder' },
         reset: { label: 'Rétablir les valeurs de l’environnement' },
       },
@@ -692,73 +724,19 @@ export const fr: PlatformTranslationData = {
       title: 'Connaissances',
       description: 'Backend de stockage vectoriel pour le RAG et les sources de connaissances.',
       groups: {
-        adapter: {
-          title: 'Backend',
-          description: 'Choisissez où sont stockés les morceaux de documents et leurs vecteurs.',
-        },
-        turso: { title: 'Turso / libSQL', description: 'Fonctionne avec Turso géré, un fichier local ou en mémoire.' },
-        ragflow: {
-          title: 'RAGFlow',
-          description: 'Déploiement RAGFlow externe. Voir https://ragflow.io pour l’auto-hébergement.',
-        },
         indexing: {
           title: 'Valeurs d’indexation par défaut',
           description: 'Une valeur définie sur la source de connaissances elle-même l’emporte sur ces valeurs par défaut.',
         },
-        permissions: { title: 'Autorisations' },
       },
       keys: {
-        adapter: {
-          label: 'Adaptateur',
-          options: {
-            memory: 'En mémoire (dév. / test uniquement)',
-            turso: 'Turso / libSQL (cloud ou local)',
-            ragflow: 'RAGFlow (externe)',
-          },
-        },
-        turso_url: {
-          label: 'URL de connexion',
-          help: 'Exemples : libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
-        },
-        turso_auth_token: {
-          label: 'Jeton d’authentification',
-          help: 'Nécessaire uniquement pour les URL Turso gérées.',
-        },
-        ragflow_base_url: { label: 'Base URL', help: 'Exemple : http://localhost:9380' },
-        ragflow_api_key: { label: 'Clé API' },
-        ragflow_default_dataset: {
-          label: 'ID du jeu de données par défaut',
-          help: 'Utilisé lorsqu’une source de connaissances ne désigne pas son propre jeu de données RAGFlow.',
-        },
         chunk_target: {
           label: 'Taille cible des morceaux (caractères)',
-          help: 'Plafond souple de taille des morceaux avant que le découpage par jetons n’intervienne.',
-        },
-        chunk_overlap: {
-          label: 'Chevauchement des morceaux (caractères)',
-          help: 'Caractères repris du morceau précédent pour que le contexte franchisse la frontière.',
-        },
-        over_fetch: {
-          label: 'Multiplicateur de sur-récupération',
-          help: 'La recherche récupère ce multiple du nombre de résultats demandés, pour qu’il en reste assez à renvoyer après le filtrage selon les détails des documents.',
-        },
-        enforce_rls: {
-          label: 'Appliquer la RLS à la recherche',
-          help: 'Revérifie chaque résultat selon les autorisations au niveau des enregistrements de l’appelant.',
+          help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Une taille fixée sur la source elle-même l’emporte ; la limite d’entrée du modèle d’embedding peut l’abaisser.',
         },
       },
       actions: {
         test: { label: 'Tester la connexion' },
-      },
-      banners: {
-        adapter_switch_warning: {
-          title: 'Les index existants ne sont pas migrés',
-          text: 'Changer d’adaptateur ne migre PAS les index existants — les documents indexés avec l’adaptateur précédent deviennent inaccessibles jusqu’à leur réindexation.',
-        },
-        enforce_rls_warning: {
-          title: 'Laissez la RLS activée en production',
-          text: 'La désactiver contourne la protection propre à la plateforme contre les fuites de données du stockage vectoriel — laissez-la activée en production.',
-        },
       },
     },
     lifecycle: {

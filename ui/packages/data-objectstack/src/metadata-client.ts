@@ -36,6 +36,7 @@ import {
   FindReferencesToMetaResponseSchema,
   FlowRegistrationSchema,
   GetMetaItemLayeredResponseSchema,
+  GetMetaItemsResponseSchema,
 } from '@objectstack/spec/api';
 // objectui#8676 - the object-metadata write invariant, applied HERE because this
 // is a DOOR and not a writer. Every `client.save('object', ...)` call site in the
@@ -55,6 +56,7 @@ import type {
 // objectui#12929 — the batch publish door's request options are picked off the
 // client's declared `packages.publishDrafts` signature (type-only, erased).
 import type { ObjectStackClient } from '@objectstack/client';
+import type { MetadataProvenance } from '@objectstack/spec/kernel';
 
 /**
  * One advisory finding the framework's runtime authoring gate produced for a
@@ -285,8 +287,14 @@ export interface MetadataListOptions {
  * `flow`, a server with no automation service, or one that predates the key —
  * and absence means no engine judged the flow, ⛔ never `registered`. A name
  * the map has no entry for is unjudged in the same way.
+ *
+ * `changedAt` is when each listed item's served row last changed, keyed by the
+ * item's `name` (objectstack#36894): an ISO-8601 instant, present only for an
+ * item served from a stored row. A code-shipped item has no entry, and a
+ * server that predates the key sends none — either way the item has no known
+ * change time, ⛔ never a stand-in.
  */
-export type MetadataListAnswer<T = unknown> = { items: T[] } & Pick<GetMetaItemsResponse, 'registrations'>;
+export type MetadataListAnswer<T = unknown> = { items: T[] } & Pick<GetMetaItemsResponse, 'registrations' | 'changedAt'>;
 
 /**
  * Keep the verdicts of a list answer's `registrations` that parse with the
@@ -300,6 +308,23 @@ function readRegistrations(raw: unknown): Record<string, FlowRegistration> | und
   for (const [name, verdict] of Object.entries(raw as Record<string, unknown>)) {
     const parsed = FlowRegistrationSchema.safeParse(verdict);
     if (parsed.success) out[name] = parsed.data;
+  }
+  return out;
+}
+
+/**
+ * objectstack#36898 — keep the entries of a list answer's `changedAt` that
+ * parse with the spec's own rule (`GetMetaItemsResponseSchema.changedAt`, an
+ * ISO-8601 instant), one entry at a time: an entry that does not parse is not
+ * a time this client can read, so its item has no change time — what absence
+ * already means — and the others stand.
+ */
+function readChangedAt(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [name, at] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof at !== 'string') continue;
+    if (GetMetaItemsResponseSchema.safeParse({ type: 'list', items: [], changedAt: { [name]: at } }).success) out[name] = at;
   }
   return out;
 }
@@ -612,6 +637,14 @@ export interface MetadataLayered<T = unknown> {
    */
   draft?: T | null;
   /**
+   * objectstack#36601 — the published row's version (spec
+   * `GetMetaItemLayeredResponseSchema.overlayVersion`): the token a pinned
+   * publish sends as `If-Match`, `null` when no published row is stored at the
+   * read's address. ABSENT when the server served none (a server from before
+   * the field): a caller then pins nothing. Forwarded only when served.
+   */
+  overlayVersion?: string | null;
+  /**
    * Load-time validation result for `effective` (server-computed via
    * the same Zod registry used at save time). Undefined for types
    * without a registered Zod schema. Surfaced by the Studio as a
@@ -628,8 +661,13 @@ export interface MetadataLayered<T = unknown> {
   lockSource?: 'artifact' | 'package' | 'overlay' | 'env-forced';
   /** Optional docs URL for the lock reason (rendered as "View docs →"). */
   lockDocsUrl?: string;
-  /** Origin of the item: `package` (loader) | `org` (tenant) | `env-forced`. */
-  provenance?: 'package' | 'org' | 'env-forced';
+  /**
+   * Origin of the item: `package` (loader) | `org` (tenant) | `env-forced` |
+   * `platform` (the platform's own boot registration, a store-slot marker).
+   * Typed from the spec's `MetadataProvenance`, so a value the spec adds is
+   * accepted here without a second edit (#37013).
+   */
+  provenance?: MetadataProvenance;
   /** Owning package id (denormalised from the loader tag). */
   packageId?: string;
   /** Owning package version. */
@@ -1201,8 +1239,9 @@ export class MetadataClient {
 
   /**
    * The same list read as {@link list}, with what the server serves beside
-   * the items (objectui#12349): today that is the automation engine's
-   * `registrations` on a `flow` list — see {@link MetadataListAnswer}.
+   * the items (objectui#12349): the automation engine's `registrations` on a
+   * `flow` list and each item's `changedAt` (objectstack#36898) — see
+   * {@link MetadataListAnswer}.
    *
    * One request for both methods: `list` is this read with the items picked
    * out, so a caller asking both at once shares one in-flight GET.
@@ -1221,7 +1260,12 @@ export class MetadataClient {
       if (Array.isArray(data)) return { items: data as T[] };
       if (data && Array.isArray((data as { items?: unknown[] }).items)) {
         const registrations = readRegistrations((data as { registrations?: unknown }).registrations);
-        return { items: (data as { items: T[] }).items, ...(registrations ? { registrations } : {}) };
+        const changedAt = readChangedAt((data as { changedAt?: unknown }).changedAt);
+        return {
+          items: (data as { items: T[] }).items,
+          ...(registrations ? { registrations } : {}),
+          ...(changedAt ? { changedAt } : {}),
+        };
       }
       return { items: [] };
     });
@@ -1821,6 +1865,8 @@ export class MetadataClient {
         effective: (envelope.effective ?? null) as T | null,
         // objectstack#29793 — the draft layer, forwarded only when served.
         ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+        // objectstack#36601 — the published version a pinned publish sends, forwarded only when served.
+        ...(envelope.overlayVersion !== undefined ? { overlayVersion: envelope.overlayVersion } : {}),
         ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
         lock: envelope.lock,
         ...(envelope.lockReason !== undefined ? { lockReason: envelope.lockReason } : {}),
@@ -1854,6 +1900,7 @@ export class MetadataClient {
       overlayScope: body.overlayScope ?? null,
       effective: body.effective ?? null,
       ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+      ...(body.overlayVersion !== undefined ? { overlayVersion: body.overlayVersion as string | null } : {}),
       ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
       ...(body.lock !== undefined ? { lock: body.lock as MetadataLayered['lock'] } : {}),
       ...(body.lockReason !== undefined ? { lockReason: body.lockReason as string } : {}),
@@ -1985,12 +2032,35 @@ export class MetadataClient {
    * objectstack#26649 — `member` promotes one bundle member's draft, sent as
    * `?member=` under the same rule as {@link publishDraft}'s; omitted, the
    * canonical member's draft.
+   *
+   * objectstack#36601 — `ifMatch` pins the PUBLISHED layer: the publish lands
+   * only over the active row whose version the caller loaded (the `/layers`
+   * read's `overlayVersion`, a publish receipt's `version`), sent as
+   * `If-Match`; `ifNoneMatch: '*'` lands only where no active row is stored.
+   * A stale pin is refused `409 METADATA_CONFLICT` with the current version as
+   * `currentVersion`, and nothing is promoted. Neither, the publish is
+   * unpinned, as before. ⛔ Never both: refused before any request.
+   *
+   * objectstack#36350 — `draftVersion` pins the DRAFT this publish promotes:
+   * the version a draft save's receipt returned (or the draft read's
+   * `version`), sent as the `draftVersion` body member beside `message`. A
+   * draft another writer changed since is refused `409 METADATA_CONFLICT`
+   * with the draft's current version as `currentVersion` (`null` when no
+   * draft is pending any more), and nothing is promoted. It pins the draft
+   * only and is sent beside `ifMatch`, which keeps pinning the active row.
+   * Omitted, whichever draft is pending is promoted, as before.
    */
   async publish<T = unknown>(
     type: string,
     name: string,
-    options: { message?: string; packageId?: string; member?: string } = {},
+    options: { message?: string; packageId?: string; member?: string; ifMatch?: string; ifNoneMatch?: '*'; draftVersion?: string } = {},
   ): Promise<T> {
+    if (options.ifMatch && options.ifNoneMatch) {
+      throw new Error(
+        `MetadataClient.publish: ifMatch and ifNoneMatch are mutually exclusive (type="${type}", name="${name}").` +
+          ' Send ifMatch with the published version you read, or ifNoneMatch: "*" when no published row is there.',
+      );
+    }
     // objectstack `9e04c3e35` (`@objectstack/rest` 17.2.0) — this door accepts
     // `?package=<id>` and forwards it as the promotion's package binding, so
     // objectstack-ai/objectstack#9612's package-closure narrowing at the runtime publish gate is
@@ -2013,10 +2083,15 @@ export class MetadataClient {
       ...this.headers,
       'Content-Type': 'application/json',
     };
+    if (options.ifMatch) headers['If-Match'] = options.ifMatch;
+    if (options.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
     const res = await this.sendWrite(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify(options.message ? { message: options.message } : {}),
+      body: JSON.stringify({
+        ...(options.message ? { message: options.message } : {}),
+        ...(options.draftVersion !== undefined ? { draftVersion: options.draftVersion } : {}),
+      }),
     });
     if (!res.ok) throw await parseError(res);
     const body = await res.json();

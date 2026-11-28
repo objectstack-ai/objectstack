@@ -288,3 +288,38 @@ export function describeNonArrayData(
     + 'takes its rows only from an array: every non-array value is dropped to zero rows, so the '
     + `table renders its header over an empty body.\n${wayOut}`;
 }
+
+/** The first word of the refused-`editable` line, for a reader filtering the console. */
+export const DATA_TABLE_EDITABLE_DIAGNOSTIC_PREFIX = '[ObjectUI] DataTable editable:';
+
+/**
+ * The message for a `data-table` node whose `editable: true` the table refuses,
+ * or `null` when there is nothing to say (objectstack#35827).
+ *
+ * The table has ONE editing model: select-first, each committed cell saved at
+ * once through `onRowSave`. The staged model — click-to-edit, a
+ * pending-changes bar and "Save All" through `onBatchSave` — is retired, so an
+ * `editable` table without both a select-first host (`GridCellSelectionProvider`) and
+ * an `onRowSave` slot has no way to save an edit. It draws read-only rather
+ * than hold an edit nothing sends; this line says so, once per node, on the
+ * channel the other diagnostics in this module use.
+ *
+ * It changes no behaviour of its own: the refusal is the renderer's
+ * (`editable` takes effect only where it can save), and this only names it.
+ */
+export function describeUnsavableEditable(
+  editable: boolean,
+  savePath: { selectFirst: boolean; rowSave: boolean },
+  address: DataTableNodeAddress,
+): string | null {
+  if (!editable || (savePath.selectFirst && savePath.rowSave)) return null;
+  const missing = [
+    savePath.selectFirst ? null : 'no select-first cell model is mounted around it (`GridCellSelectionProvider`)',
+    savePath.rowSave ? null : 'no `onRowSave` slot is supplied to save each committed cell',
+  ].filter((part): part is string => part !== null);
+  return `${DATA_TABLE_EDITABLE_DIAGNOSTIC_PREFIX} ${describeAddress(address)} — `
+    + `\`editable: true\` is refused and the table renders read-only: ${missing.join(', and ')}. `
+    + 'Inline editing saves each committed cell on its own; there is no staged "Save All" mode.\n'
+    + '  Render an `object-grid` (`ObjectGrid`), which mounts both and writes through its data '
+    + 'source, or mount `GridCellSelectionProvider` and pass `onRowSave` in code.';
+}

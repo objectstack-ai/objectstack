@@ -266,9 +266,9 @@ const SCHEMAS: Record<string, Record<string, unknown>> = {
       audience: {
         title: 'Audience',
         description:
-          "Access audience. 'org' (default) inherits the package grant; 'public' is anonymously readable; { permissionSet } gates by a permission set the reader must hold (ADR-0090).",
-        // Union of the two scalar literals and the { permissionSet } object — kept lax
-        // so the permission-set-gated object form round-trips untouched through the form.
+          "Access audience. 'org' (default) inherits the package grant; 'public' is anonymously readable; { permissionSet } gates by a permission set the reader must hold (ADR-0090); { systemPermission } gates by a capability the reader holds through any permission set (ADR-0046 §6.7).",
+        // Union of the two scalar literals and the two gated object forms — kept lax
+        // so either gated form round-trips untouched through the form.
         oneOf: [
           { type: 'string', enum: ['org', 'public'] },
           {
@@ -276,6 +276,12 @@ const SCHEMAS: Record<string, Record<string, unknown>> = {
             title: 'Permission-set gated',
             properties: { permissionSet: { type: 'string', title: 'Permission set' } },
             required: ['permissionSet'],
+          },
+          {
+            type: 'object',
+            title: 'Capability gated',
+            properties: { systemPermission: { type: 'string', title: 'Capability' } },
+            required: ['systemPermission'],
           },
         ],
       },

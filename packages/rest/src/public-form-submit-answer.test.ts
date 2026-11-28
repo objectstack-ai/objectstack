@@ -33,7 +33,12 @@ import { REST_ROUTE_LEDGER } from './rest-route-ledger';
 
 // [#10126] Pay the first transform of this dist-resolved workspace dep at MODULE
 // LOAD, as `public-form-routes.test.ts` does for the same routes.
-import '@objectstack/spec/ui';
+import { projectedFormsOf } from '@objectstack/spec/ui';
+
+// Pay the first transform of `@objectstack/objectql`, which the route source
+// reaches through a dynamic `import()`, at MODULE LOAD rather than inside a
+// clocked `it()` body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/objectql';
 
 const CREATED_ID = 'rec_answer_1';
 /** Synthetic values the stored row carries. None may reach the anonymous caller. */
@@ -88,6 +93,7 @@ function protocolDouble() {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+      if (type === 'form') return projectedFormsOf([formView()]);
       if (type === 'view') return [formView()];
       if (type === 'object') return [requestObject];
       return [];
@@ -198,6 +204,7 @@ function tokenProtocol(opts: {
     getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: vi.fn().mockResolvedValue([]),
     getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+      if (type === 'form') return projectedFormsOf([view]);
       if (type === 'view') return [view];
       if (type === 'object') return [object];
       return [];

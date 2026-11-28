@@ -69,7 +69,10 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [{ name: 'builder' }] }),
+  // objectstack#37227 — where the catalog serves the build agent Home draws no
+  // build chip ("Build an app" was ruled off the page); a custom agent alone
+  // keeps the builder entry this gate must leave alone, "New in Studio".
+  useAgents: () => ({ agents: [{ name: 'custom_helper' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => true,
 }));
@@ -298,10 +301,11 @@ describe('Home on a runtime deployed with OS_CLOUD_URL=off (objectui#5504)', () 
   });
 
   it('leaves the marketplace-independent builder entry alone', () => {
-    // "Build an app" goes to /studio and needs no catalog. A gate that swept it
-    // up would remove the product front door from every air-gapped deployment.
+    // "New in Studio" opens Studio's new-package flow and needs no catalog. A
+    // gate that swept it up would remove the product front door from every
+    // air-gapped deployment.
     renderHome();
-    expect(screen.getByTestId('home-build-app')).toBeEnabled();
+    expect(screen.getByTestId('home-build-in-studio')).toBeEnabled();
   });
 });
 

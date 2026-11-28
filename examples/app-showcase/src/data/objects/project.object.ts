@@ -17,6 +17,7 @@ export const Project = ObjectSchema.create({
   label: 'Project',
   pluralLabel: 'Projects',
   icon: 'folder-kanban',
+  color: 'orange',
   description: 'A delivery project for an account.',
 
   // [#2727 / #2970] Opt in to the generic Attachments panel on the record
@@ -24,6 +25,17 @@ export const Project = ObjectSchema.create({
   // the showcase's files-enabled object for browser-dogfooding the attachments
   // surface (upload / list / download / delete + parent-derived access).
   enable: { files: true },
+
+  // [ADR-0085 §5] The record's sections: the create and edit forms and the
+  // drawer lay a project out by these groups, each listing its members in
+  // display order. The fields no group lists (budget_remaining, labels,
+  // team_members and the two task roll-ups) follow in a trailing untitled
+  // section. No group names a related list, so the Tasks table is not inlined
+  // in the form: tasks are added over time, not entered with the project.
+  fieldGroups: [
+    { key: 'project', label: 'Project', fields: ['name', 'account', 'status', 'health', 'owner'] },
+    { key: 'budget_schedule', label: 'Budget & Schedule', fields: ['budget', 'spent', 'start_date', 'end_date'] },
+  ],
 
   fields: {
     name: Field.text({ label: 'Project Name', required: true, searchable: true, maxLength: 200 }),

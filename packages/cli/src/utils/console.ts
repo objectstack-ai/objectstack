@@ -873,7 +873,9 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  *   (`telemetry.errorReporting.dsn` from the same door), the store the
  *   deployment's storage presigns browser uploads to (S3 and S3-compatible
  *   stores; `readStorageUploadOrigin`), and the hosts an operator names in
- *   `OS_CONSOLE_CSP_CONNECT_SRC`.
+ *   `OS_CONSOLE_CSP_CONNECT_SRC`. The store's origin is also what a file
+ *   preview reads a text or CSV file from, which the bucket's CORS must allow
+ *   for the console's origin.
  * - `default-src 'self'` covers the rest the Console uses: the module workers
  *   maplibre starts from its own file, its Service Worker, and the same-origin
  *   frames (the Studio's live canvas). The build ships no web fonts.
@@ -891,8 +893,18 @@ const DEFAULT_MAP_STYLE_ORIGIN = 'https://demotiles.maplibre.org';
  * - {@link TURNSTILE_ORIGIN} in `script-src` and `frame-src` only while the
  *   opt-in Turnstile challenge on sign-up is on (`readTurnstileEnabled`): the
  *   sign-up form loads Cloudflare's script, which draws the challenge in a
- *   frame from the same origin. With the challenge off, neither is listed and
- *   `frame-src` is left to `default-src 'self'`, exactly as before.
+ *   frame from the same origin.
+ * - The storage origin in `frame-src`, the same one `connect-src` names: the
+ *   file preview shows a PDF in a frame on the signed download link, and an S3
+ *   or S3-compatible store signs that `GET` on the very origin it presigns
+ *   uploads to (one client, one bucket, one presigner). It is the only source
+ *   `frame-src` gains for storage: never the operator's extra `connect-src`
+ *   hosts, never a scheme or a wildcard. With local storage the link is on
+ *   this server, which `'self'` covers, so nothing is added.
+ * - `frame-src` is written only when it names something beyond `'self'` (the
+ *   Turnstile frame, the storage origin, or both), and then it always keeps
+ *   `'self'` for the same-origin frames. With neither, it is left to
+ *   `default-src 'self'`, exactly as before.
  * - {@link CLOUDFLARE_WEB_ANALYTICS_ORIGIN} in `connect-src` only while the
  *   host passes the `cloudflareWebAnalytics` option: the beacon the document
  *   then carries reports each page view there. The beacon itself loads by the
@@ -906,7 +918,8 @@ function consoleContentSecurityPolicy(input: {
   cloudflareWebAnalytics: boolean;
   errorReportingOrigin: string | undefined;
   mapStyleOrigin: string | undefined;
-  storageUploadOrigin: string | undefined;
+  /** The origin of the store's presigned uploads and signed downloads (`readStorageUploadOrigin`). */
+  storageOrigin: string | undefined;
   extraConnectSources: readonly string[];
   embeddable: boolean;
 }): string {
@@ -916,7 +929,7 @@ function consoleContentSecurityPolicy(input: {
   const connectSrc = ["'self'", DEFAULT_MAP_STYLE_ORIGIN];
   if (input.mapStyleOrigin !== undefined) connectSrc.push(input.mapStyleOrigin);
   if (input.errorReportingOrigin !== undefined) connectSrc.push(input.errorReportingOrigin);
-  if (input.storageUploadOrigin !== undefined) connectSrc.push(input.storageUploadOrigin);
+  if (input.storageOrigin !== undefined) connectSrc.push(input.storageOrigin);
   if (input.cloudflareWebAnalytics) connectSrc.push(CLOUDFLARE_WEB_ANALYTICS_ORIGIN);
   connectSrc.push(...input.extraConnectSources);
   const directives: string[][] = [
@@ -929,7 +942,10 @@ function consoleContentSecurityPolicy(input: {
     ['object-src', "'none'"],
     ['base-uri', "'self'"],
   ];
-  if (input.turnstile) directives.push(['frame-src', "'self'", TURNSTILE_ORIGIN]);
+  const frameSrc: string[] = [];
+  if (input.turnstile) frameSrc.push(TURNSTILE_ORIGIN);
+  if (input.storageOrigin !== undefined) frameSrc.push(input.storageOrigin);
+  if (frameSrc.length > 0) directives.push(['frame-src', "'self'", ...new Set(frameSrc)]);
   if (!input.embeddable) directives.push(['frame-ancestors', "'self'"]);
   return directives.map((directive) => directive.join(' ')).join('; ');
 }
@@ -1189,17 +1205,19 @@ export function createConsoleStaticPlugin(
       };
 
       // A storage service that cannot say where its presigned uploads go leaves
-      // the store out of the policy, so browser uploads to it are refused while
-      // every other part of the page works: said once, at `warn`.
+      // the store out of the policy, so browser uploads to it are refused and a
+      // PDF preview from it cannot be framed, while every other part of the page
+      // works: said once, at `warn`.
       let reportedStorageUploadOriginFailure = false;
       const reportStorageUploadOriginFailure = (cause: string) => {
         if (reportedStorageUploadOriginFailure) return;
         reportedStorageUploadOriginFailure = true;
         ctx.logger?.warn?.(
           `Console static: the storage service could not name the host it presigns uploads to (${cause}), so the `
-          + "console document's content-security-policy does not allow it and browser file uploads to that store "
-          + `are blocked. Check the storage settings, or name the store's origin in ${CONSOLE_CSP_CONNECT_SRC_ENV}. `
-          + 'Reported once; every later console document reads it again.',
+          + "console document's content-security-policy does not allow it: browser file uploads to that store are "
+          + 'blocked, and a PDF preview from it cannot be shown in the page (opening the file in a new tab still '
+          + `works). Check the storage settings; naming the store's origin in ${CONSOLE_CSP_CONNECT_SRC_ENV} restores `
+          + 'uploads only. Reported once; every later console document reads it again.',
         );
       };
 
@@ -1252,7 +1270,7 @@ export function createConsoleStaticPlugin(
           cloudflareWebAnalytics: cloudflareWebAnalyticsToken !== undefined,
           errorReportingOrigin: shell?.errorReportingOrigin,
           mapStyleOrigin,
-          storageUploadOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),
+          storageOrigin: await readStorageUploadOrigin(ctx, reportStorageUploadOriginFailure),
           extraConnectSources,
           embeddable: isPublicFormPage(reqPath),
         });
@@ -1718,9 +1736,15 @@ async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<
   return res.status === 200;
 }
 
+/** An `http(s)` origin and nothing else: scheme, host, optional port; no wildcard, no path. */
+const STORAGE_ORIGIN = /^https?:\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::\d{1,5})?$/i;
+
 /**
  * The origin the kernel's `storage` service presigns browser uploads to, for
- * the console document's `connect-src`; `undefined` when there is none.
+ * the console document's `connect-src` and `frame-src`; `undefined` when there
+ * is none. The S3 adapter signs its download links with the same client for
+ * the same bucket, so a signed `GET` carries this origin too: the one the file
+ * preview frames a PDF from.
  *
  * With S3 or an S3-compatible store (R2, MinIO) the Console uploads a file by
  * `PUT`ting it straight to the URL `POST /api/v1/storage/upload/presigned`
@@ -1736,8 +1760,10 @@ async function anonymousFormDoorServes(app: any, c: any, slug: string): Promise<
  * the adapter without a restart, and the next document follows it. A
  * deployment without the service, or whose adapter answers no origin (the
  * local adapter's uploads go to this server, which `'self'` covers), adds
- * nothing. An answer that is not a `connect-src` source, or a failure to
- * answer, adds nothing either and is reported through `onFailure`.
+ * nothing. An answer that is not exactly an `http(s)` origin (a scheme alone,
+ * a wildcard, a path), or a failure to answer, adds nothing to either
+ * directive and is reported through `onFailure`: one value feeds both, so
+ * neither can be wider than the store.
  */
 async function readStorageUploadOrigin(
   ctx: any,
@@ -1758,8 +1784,8 @@ async function readStorageUploadOrigin(
     return undefined;
   }
   if (origin === undefined) return undefined;
-  if (typeof origin !== 'string' || !CONNECT_SOURCE.test(origin)) {
-    onFailure(`it answered ${JSON.stringify(origin)}, which is not a connect-src source`);
+  if (typeof origin !== 'string' || !STORAGE_ORIGIN.test(origin)) {
+    onFailure(`it answered ${JSON.stringify(origin)}, which is not an http(s) origin`);
     return undefined;
   }
   return origin;

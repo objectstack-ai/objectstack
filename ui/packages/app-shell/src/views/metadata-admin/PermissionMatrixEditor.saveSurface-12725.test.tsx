@@ -4,19 +4,23 @@
  * objectui#12725 (the remainder, item 1) — the permission matrix names its
  * authoring surface only under the Studio host.
  *
- * `PermissionMatrixEditPage` serves two hosts: Studio's Access pillar mounts it
+ * `PermissionMatrixEditPage` serves two hosts: Studio's permission set page
+ * (objectstack#36905; the Access pillar before it) mounts it
  * with `packageId` and `embedded`, and its draft save is a person's edit in
  * Studio, so it sends `?surface=studio` (recorded as `by: 'studio'` in the
  * draft's `draftChanges`, objectstack#24395). metadata-admin mounts it through
  * the resource registry with only `type` and `name`: its save is the
  * environment door's live write and states no surface.
  *
- * Both hosts are the REAL ones (`AccessPillar`, `MetadataResourceEditPage`
+ * Both hosts are the REAL ones (`StudioPermissionSetPage`, `MetadataResourceEditPage`
  * through the built-in registration), and the save goes through a REAL
  * `MetadataClient` whose transport records each `PUT`, so the pins read the
  * query string the server would read.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -63,6 +67,8 @@ const client = {
   getDraft: async () => null,
   get: async () => null,
   save: (...args: Parameters<MetadataClient['save']>) => wire.save(...args),
+  publish: (...args: Parameters<MetadataClient['publish']>) => wire.publish(...args),
+  reset: (...args: Parameters<MetadataClient['reset']>) => wire.reset(...args),
 };
 
 vi.mock('./useMetadata', async (importOriginal) => {
@@ -80,11 +86,11 @@ vi.mock('./useMetadata', async (importOriginal) => {
 vi.mock('./AssignedUsersSection', () => ({ AssignedUsersSection: () => null }));
 vi.mock('./AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
-vi.mock('../studio-design/StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import '../../services/builtinComponents.js';
 import { MetadataResourceEditPage } from './ResourceEditPage';
-import { AccessPillar } from '../studio-design/StudioDesignSurface';
+import { StudioPermissionSetPage } from '../studio-design/StudioPermissionSetPage';
+import { StudioSaveHarness, pressStudioSave } from '../studio-design/__tests__/studioSaveHarness';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -109,15 +115,19 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('the permission matrix states `surface` only under the Studio host (objectui#12725)', () => {
-  it('Studio’s Access pillar: the draft save sends `?surface=studio`, once', async () => {
+  it('Studio’s permission set page: the draft save sends `?surface=studio`, once', async () => {
     render(
-      <MemoryRouter>
-        <AccessPillar packageId={PKG} />
-      </MemoryRouter>,
+      <StudioSaveHarness>
+        <MemoryRouter>
+          <StudioPermissionSetPage packageId={PKG} name={SET.name} />
+        </MemoryRouter>
+      </StudioSaveHarness>,
     );
     await waitFor(() => expect(readBox()).toBeInTheDocument(), AUTOSAVE);
 
     fireEvent.click(readBox());
+    // objectstack#36511 — sent by the top bar's Save.
+    await pressStudioSave();
     await waitFor(() => expect(puts).toHaveLength(1), AUTOSAVE);
     expect(puts[0]!.get('mode')).toBe('draft');
     expect(puts[0]!.get('package')).toBe(PKG);

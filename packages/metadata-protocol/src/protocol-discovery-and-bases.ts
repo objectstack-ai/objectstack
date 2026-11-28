@@ -56,6 +56,7 @@ import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
+    TYPE_TO_LIST,
     canonicalMetaType,
     toJsonSchemaSafe,
 } from './protocol-meta-type-schema.js';
@@ -75,6 +76,7 @@ import type { ApiRoutes, CapabilityDescriptor, ServiceInfo, WellKnownCapabilitie
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import { CORE_SERVICE_PROVIDER, serviceUnavailableMessage } from '@objectstack/spec/system';
+import { projectViewForms } from '@objectstack/spec/ui';
 import { SERVICE_CONFIG } from './protocol-discovery-services.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { servedOverrideBaseOf } from './served-override.js';
@@ -85,7 +87,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * answers: the artifact item IS the packaged declaration for each (none has an
  * extension fold, unlike the object).
  */
-export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping';
+export type PackagedArtifactBaseType = 'dashboard' | 'view' | 'report' | 'page' | 'dataset' | 'app' | 'book' | 'mapping' | 'form';
 
 export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getProjectId`; the method's docblock there is its contract. */
@@ -651,6 +653,8 @@ export class ProtocolDiscoveryAndBasesFacet {
             const schema = (zodSchema ? toJsonSchemaSafe(zodSchema, singular) : undefined)
                 ?? HAND_CRAFTED_SCHEMAS[singular];
             const form = TYPE_TO_FORM[singular];
+            // The Studio list layout, beside the form; omitted for a type with none.
+            const list = TYPE_TO_LIST[singular];
             // Phase 2: the authoritative minimal create seed (single source of
             // truth in @objectstack/spec). Studio/CLI derive create defaults
             // from this via /meta/types instead of re-inventing them.
@@ -677,6 +681,7 @@ export class ProtocolDiscoveryAndBasesFacet {
                         : 'registry' as const,
                     schema,
                     form,
+                    ...(list !== undefined ? { list } : {}),
                     ...(createSeed !== undefined ? { createSeed } : {}),
                     // Override the spread `base.actions` with the merged view
                     // (declarative + plugin-registered). Omit when empty to
@@ -754,6 +759,7 @@ export class ProtocolDiscoveryAndBasesFacet {
                 overrideSource: writableOverrides.has(singular) ? 'env' as const : 'registry' as const,
                 schema,
                 form,
+                ...(list !== undefined ? { list } : {}),
                 ...(createSeed !== undefined ? { createSeed } : {}),
                 // Plugin-registered actions on a type with no registry entry.
                 ...(typeActions.length ? { actions: typeActions } : {}),
@@ -925,6 +931,22 @@ export class ProtocolDiscoveryAndBasesFacet {
     /** The body of `ObjectStackProtocolImplementation#getPackagedMappingBase`; the method's docblock there is its contract. */
     static getPackagedMappingBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
         return host.packagedArtifactBase('mapping', name);
+    }
+
+    /**
+     * The body of `ObjectStackProtocolImplementation#getPackagedFormBase`; the
+     * method's docblock there is its contract. [ADR-0159 D5, ADR-0029 D9.2a]
+     * The base's authored `form` item, else the form its old shape carries at
+     * the name, read through THE projection: until card ④ a `form` override's
+     * base still ships most first-party forms as an old shape, and the text the
+     * override changed outranks that base's catalog either way.
+     */
+    static getPackagedFormBase(host: Pick<ProtocolHost, 'packagedArtifactBase'>, name: string): unknown {
+        const authored = host.packagedArtifactBase('form', name);
+        if (authored !== undefined && authored !== null) return authored;
+        const view = host.packagedArtifactBase('view', name);
+        if (view === undefined || view === null) return undefined;
+        return projectViewForms(view).forms.find((form) => form.name === name);
     }
 
     /** The body of `ObjectStackProtocolImplementation#servedOverrideBaseOf`; the method's docblock there is its contract. */
@@ -1131,6 +1153,14 @@ export class ProtocolDiscoveryAndBasesFacet {
      * could have answered in. Each restored slot is answered on the save's
      * `advisories` ({@link translatedEchoNotices}).
      *
+     * The packaged owner (the registry's `getPackagedObjectOwner`) is handed
+     * in beside the base, so what the base carries beyond it (a field a code
+     * extender adds, a `relatedLists` entry a code extender's `place`
+     * splices in) is the last source for a field or entry the stored row does
+     * not declare: the fold serves those over a stored row saved before the
+     * extending package was installed, translated against the base, and that
+     * row carries nothing to compare them with.
+     *
      * Every save is asked, the stored-row migration included
      * (`source: 'migrate-stored'`): it re-saves a row through this door, which
      * is how a row a zh-CN session already stored is repaired. Any other
@@ -1139,7 +1169,7 @@ export class ProtocolDiscoveryAndBasesFacet {
      * the packaged base is a registry lookup, so a degraded MetadataService
      * fails nothing here.
      */
-    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
+    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'engine' | 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
             repo: SysMetadataRepository,
             ref: Parameters<SysMetadataRepository['get']>[0],
             mode: 'draft' | 'publish',): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
@@ -1174,11 +1204,20 @@ export class ProtocolDiscoveryAndBasesFacet {
             const own = await host.getPackageTranslationBundle(entry.packageId);
             if (own !== undefined) patchBundles.push({ patchedBase: entry.base, bundle: own });
         }
+        // The owner alone, so the restore can tell what a code extender
+        // brings from what the owner declares (see the docblock): the same
+        // registry read `getPackagedObjectBase` falls back to. No `try`, for
+        // the reason the stored-row read has none.
+        const registry = (host.engine as any)?.registry;
+        const packagedOwner: unknown = packagedBase && typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(request.name)?.definition
+            : undefined;
         return restoreTranslatedEchoes(request.item, {
             source,
             bundle: host.registeredTranslationBundle(),
             packagedBase: packagedBase ?? undefined,
             ...(patchBundles.length > 0 ? { patchBundles } : {}),
+            ...(packagedOwner !== undefined && packagedOwner !== null ? { packagedOwner } : {}),
         });
     }
 

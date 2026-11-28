@@ -42,6 +42,7 @@ import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { hookRefusalI18nReader } from './sandbox/hook-refusal-catalogue.js';
 import { bindAppArtifactHandlers, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { warnUnmountedDeclaredPlugins } from './artifact-declared-plugins.js';
 import { countServerTiming } from '@objectstack/observability';
 
 /**
@@ -519,8 +520,8 @@ export class AppPlugin implements Plugin {
             // register an app". `manifest`/`functions` are envelope-level
             // wrappers and don't count.
             const APP_CATEGORY_KEYS = [
-                'objects', 'views', 'apps', 'pages', 'dashboards', 'reports',
-                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills',
+                'objects', 'views', 'forms', 'apps', 'pages', 'dashboards', 'reports',
+                'flows', 'workflows', 'triggers', 'agents', 'tools', 'skills', 'aiContexts', 'knowledgeSources',
                 'actions', 'permissions', 'positions', 'translations',
                 'sharingRules', 'data', 'emailTemplates',
                 'docs', 'books',
@@ -1439,7 +1440,21 @@ export class AppPlugin implements Plugin {
         }
         const sys = this.bundle.manifest || this.bundle;
         const appId = sys.id || sys.name;
-        
+
+        // The artifact's `plugins` (an envelope key: top level only) that this
+        // kernel does not run, named once. An artifact carries descriptors for
+        // them and nothing that can start, so a boot from the artifact alone
+        // mounts none of them; before this it said nothing. Keyed on the
+        // `'artifact-door'` registrar: it is the declaration, made by
+        // `createStandaloneStack` alone, that this bundle IS the artifact that
+        // door reads. A config bundle's `plugins` are materialized by its host
+        // under names a descriptor cannot predict, so they are not judged here.
+        // Read in `start()`: the kernel's plugin table is closed once bootstrap
+        // begins. See `./artifact-declared-plugins.ts`.
+        if (this.securityMetadataRegistrar === 'artifact-door') {
+            warnUnmountedDeclaredPlugins(ctx, (this.bundle as { plugins?: unknown }).plugins, String(appId));
+        }
+
         // Execute Runtime Step
         // Retrieve ObjectQL engine from services
         // ctx.getService throws when a service is not registered, so we

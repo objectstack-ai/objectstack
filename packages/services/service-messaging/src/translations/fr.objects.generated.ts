@@ -226,7 +226,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Résumé",
-        help: "Regroupe ces notifications en un seul résumé au lieu de les envoyer une à une : daily l’envoie à minuit, weekly le lundi à minuit, none envoie chacune immédiatement. Les notifications critiques partent toujours immédiatement. S’applique à une préférence dont le canal est * (tous les canaux).",
+        help: "Regroupe ces notifications en un seul résumé au lieu de les envoyer une à une : daily l’envoie à minuit, weekly le lundi à minuit, none envoie chacune immédiatement. Les notifications critiques partent toujours immédiatement. S’applique à une préférence dont le canal est * (tous les canaux). Laissé vide, la préférence suivante décide : celle par défaut pour tous les utilisateurs, puis none.",
         options: {
           none: "aucun",
           daily: "quotidien",
@@ -235,7 +235,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Heures calmes",
-        help: "Une plage quotidienne pendant laquelle les notifications sont retenues puis livrées à sa fin, par exemple { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Les heures sont au format HH:MM dans ce fuseau (UTC si tz est omis), et la plage peut dépasser minuit. Les notifications critiques ne sont pas retenues. S’applique à une préférence dont le canal est * (tous les canaux)."
+        help: "Une plage quotidienne pendant laquelle les notifications sont retenues puis livrées à sa fin, par exemple { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Les heures sont au format HH:MM dans ce fuseau (UTC si tz est omis), et la plage peut dépasser minuit. Les notifications critiques ne sont pas retenues. S’applique à une préférence dont le canal est * (tous les canaux). { \"off\": true } signifie aucune plage de silence ; laissé vide, la préférence suivante décide : celle par défaut pour tous les utilisateurs, puis aucune."
       },
       created_at: {
         label: "Créé le"

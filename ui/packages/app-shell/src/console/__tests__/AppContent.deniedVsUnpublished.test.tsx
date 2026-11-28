@@ -254,6 +254,18 @@ vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
   }),
 }));
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 
 function LocationProbe() {
@@ -537,16 +549,17 @@ describe('AppContent — every screen here states what the probe measured (objec
     ).toEqual([]);
   });
 
-  it('the denial screen offers a way back to /home', async () => {
+  it('the denial screen offers a way back home: the first product app on a desktop (objectstack#36732)', async () => {
     // Nothing declared in `metadataApps` here (the `beforeEach` list is a plain
-    // `crm`), so home IS the launcher — the status quo objectui#7373 kept.
+    // `crm`) and no last app, so home is the first product app: the platform
+    // home page is retired from 768 px up.
     byName.finance = () => json(403, DENIED_BODY);
 
     renderConsoleAt('/apps/finance');
     const home = await screen.findByTestId('app-access-denied-home');
     home.click();
 
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/home'));
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/apps/crm'));
   });
 
   it('…and that way back follows the DECLARED landing where there is one (objectui#7373)', async () => {
@@ -599,12 +612,13 @@ describe('AppContent — every screen here states what the probe measured (objec
 
     renderConsoleAt('/apps/finance');
     const home = await screen.findByTestId(`${testId}-home`);
-    expect(home).toHaveTextContent('Back to home');
+    // objectstack#37163 — a desktop's way home names the app start page it opens.
+    expect(home).toHaveTextContent('Back to app start page');
     expect(screen.getByTestId(`${testId}-retry`)).toBeInTheDocument();
     home.click();
 
-    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/home'));
-    expect(screen.getByTestId('home-launcher')).toBeInTheDocument();
+    // objectstack#36732 — home on a desktop is the first product app.
+    await waitFor(() => expect(screen.getByTestId('pathname').textContent).toBe('/apps/crm'));
   });
 
   // Independent of the way home on purpose: dropping that button leaves these

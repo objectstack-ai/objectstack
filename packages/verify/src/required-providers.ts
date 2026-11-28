@@ -17,14 +17,18 @@
 //
 //   · WHICH tokens: `resolveServedCapabilities` over the tokens the app
 //     declares as `stackDeclaredCapabilities` reads them (the top-level
-//     `requires` when the stack carries one, otherwise each package body's) —
+//     `requires` when the stack carries one, otherwise each package body's)
+//     and the tokens its items mount (`stackItemCapabilities`: a
+//     `knowledge_source` mounts `knowledge`) —
 //     `email` for a declared `auth`, the always-on slate
 //     (`PLATFORM_ALWAYS_ON_CAPABILITIES`), and `job` / `queue` ahead of the
 //     tokens that schedule background work. No preset: `bootStack` takes none,
 //     so the slate is always mounted, as on a `serve` with no `--preset`.
 //   · WHICH provider: `CAPABILITY_PROVIDERS`, the table
-//     `Serve.CAPABILITY_PROVIDERS` is a handle over — main provider, then its
-//     `extras`.
+//     `Serve.CAPABILITY_PROVIDERS` is a handle over — main provider, then
+//     `resolveCapabilityExtras` (its `extras`; for `knowledge` the one vector
+//     store the database chooses — an in-memory one here, as this boot's
+//     database is in memory).
 //   · WITH WHAT: `resolveCapabilityArgument` — `automation` the app's root
 //     (`hostRoot` here), `analytics` the app's cubes, `email` / `sms` the
 //     deployment's mail and SMS configuration (from the configuration and the
@@ -56,19 +60,27 @@
 //     without it would pass green on a composition production does not run.
 //     Every package in the table is a dependency of `@objectstack/verify`
 //     (pinned), so an import failure is a broken install; a configuration the
-//     mail or SMS reader refuses names its own remedy.
+//     mail or SMS reader refuses names its own remedy. The one exception is an
+//     extra the table marks `optional` (the `knowledge` token's libSQL store,
+//     an optional dependency here and of the CLI, since its client is a native
+//     module): where it cannot be imported this boot warns once and goes on
+//     without it, which is the composition `serve` runs on that install.
 
 import {
   CAPABILITY_PROVIDERS,
   providesCapability,
   resolveCapabilityArgument,
+  resolveCapabilityExtras,
+  type CapabilityDatabase,
   resolveServedCapabilities,
   stackDeclaredCapabilities,
+  stackItemCapabilities,
 } from '@objectstack/core';
 
 /** Why this boot constructs a provider, as a refusal names it. */
-function reasonFor(token: string, declared: ReadonlySet<string>): string {
-  return declared.has(token)
+function reasonFor(token: string, served: { declared: ReadonlySet<string>; byItems: ReadonlySet<string> }): string {
+  if (served.byItems.has(token)) return `the stack's items, which mount the '${token}' capability as requires: ['${token}'] does`;
+  return served.declared.has(token)
     ? `requires: ['${token}']`
     : `the always-on '${token}' capability (objectstack serve mounts it for every app)`;
 }
@@ -134,8 +146,20 @@ export async function constructServedProviders(opts: {
   config: unknown;
   held: readonly unknown[];
   packageRoot: string;
+  /**
+   * The database this boot serves, for the providers chosen by it (the
+   * `knowledge` store). The harness boots an in-memory SQLite, so the store
+   * is an in-memory one too. @default `{ driver: 'sqlite-wasm', url: ':memory:' }`
+   */
+  database?: CapabilityDatabase;
 }): Promise<unknown[]> {
-  const { tokens, declared } = resolveServedCapabilities(stackDeclaredCapabilities(opts.config));
+  // [ADR-0161 K8 item 12] A stack that ships a `knowledge_source` mounts the
+  // knowledge service and the store as `serve` mounts them (`stackItemCapabilities`).
+  const served = resolveServedCapabilities(stackDeclaredCapabilities(opts.config), {
+    itemTokens: stackItemCapabilities(opts.config),
+  });
+  const { tokens } = served;
+  const database = opts.database ?? { driver: 'sqlite-wasm', url: ':memory:' };
   const constructed: unknown[] = [];
   const all = (): unknown[] => [...opts.held, ...constructed];
 
@@ -143,7 +167,7 @@ export async function constructServedProviders(opts: {
     const spec = CAPABILITY_PROVIDERS[token];
     if (!spec) continue;
     if (providesCapability(all(), spec.identities)) continue;
-    const reason = reasonFor(token, declared);
+    const reason = reasonFor(token, served);
     constructed.push(
       await constructProvider({
         reason,
@@ -154,12 +178,38 @@ export async function constructServedProviders(opts: {
             stack: opts.config,
             packageRoot: opts.packageRoot,
             providerModule: mod,
+            database,
           }).argument,
       }),
     );
-    for (const extra of spec.extras ?? []) {
+    const extras = resolveCapabilityExtras(token, {
+      stack: opts.config,
+      packageRoot: opts.packageRoot,
+      database,
+    });
+    for (const extra of extras) {
       if (providesCapability(all(), extra.identities)) continue;
-      constructed.push(await constructProvider({ reason, pkg: extra.pkg, exportName: extra.export }));
+      if (extra.optional) {
+        const missing = await import(/* webpackIgnore: true */ extra.pkg).then(
+          () => undefined,
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
+        if (missing !== undefined) {
+          console.warn(
+            `verify: ${reason} mounts ${extra.export} (${extra.pkg}), an optional dependency this install does not ` +
+              `have: ${missing}. It was not mounted, as objectstack serve does not mount it on this install.`,
+          );
+          continue;
+        }
+      }
+      constructed.push(
+        await constructProvider({
+          reason,
+          pkg: extra.pkg,
+          exportName: extra.export,
+          ...(extra.argument === undefined ? {} : { argumentFor: () => extra.argument }),
+        }),
+      );
     }
   }
 

@@ -107,6 +107,11 @@ function matches(row: Row, where: Record<string, unknown> = {}): boolean {
  * A stub engine that keeps rows, and a registry holding what a code package's
  * loader registered (each artifact as `applyProtection` leaves it).
  */
+/** The objects the actions here are bound to, as the deployment serves them. */
+const SERVED_OBJECTS = ['invoice', 'product', 'task'].map((name) => ({
+    name, label: name, fields: { name: { type: 'text', label: 'Name' } },
+}));
+
 function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unknown> }> = []) {
     const tables = new Map<string, Row[]>();
     const table = (name: string) => {
@@ -159,7 +164,13 @@ function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unkn
             unregisterItem: () => {},
             getArtifactItem: (type: string, name: string) => shipped(type, name).find((item) => isCodeArtifactBody(item)),
             getItem: (type: string, name: string) => shipped(type, name)[0],
-            listItems: (type: string) => artifacts.filter((a) => a.type === type).map((a) => a.item),
+            // [#35143] The deployment serves the objects this file's actions are
+            // bound to: the action door refuses a binding to an object it does
+            // not serve.
+            listItems: (type: string) => [
+                ...(type === 'object' ? SERVED_OBJECTS : []),
+                ...artifacts.filter((a) => a.type === type).map((a) => a.item),
+            ],
             getObject: () => undefined,
             // [#26708] Every package this file names is installed — an
             // authored base through the package door, the code package by its

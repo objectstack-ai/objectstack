@@ -1,4 +1,4 @@
-import { test as base, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
+import { test as base, expect, type APIRequestContext, type Page, type Request, type Response } from '@playwright/test';
 
 /**
  * Live e2e for the ADR-0146 customization journey, walked through the Studio
@@ -6,15 +6,19 @@ import { test as base, expect, type APIRequestContext, type Page, type Response 
  * the deployment boots from code, so Studio reads it as read-only and every
  * change goes into its paired customization package `com.example.showcase.custom`.
  *
- *   1. Customize a list view: Customize on `showcase_task.in_progress`, drop a
- *      column, publish the pair, and read the columns the SERVER serves at the
- *      base's name (the read naming no package, the read naming the base, the
- *      type's list) — not what the canvas draws.
+ *   1. Customize a list view: Customize on `showcase_task.in_progress`'s
+ *      All metadata item page (`/studio/<base>/metadata/view/<name>`, the
+ *      door since objectstack#36502 retired the Interfaces pillar), drop a
+ *      column in the view's designer, publish the pair, and read the columns
+ *      the SERVER serves at the base's name (the read naming no package, the
+ *      read naming the base, the type's list) — not what the preview draws.
  *   2. Restore package original: the pair's draft and row are deleted at the
  *      pair, and the three reads serve the shipped column set again.
- *   3. Add `region__c`: Add field on the base object's Form writes an
- *      `object_extension` into the pair; once published, the base object is
- *      served with the field and the pair's own read and export carry it.
+ *   3. Add `region__c`: Add field on the base object's Field layout tab
+ *      (字段布局, formerly Form; objectstack#36505), then the top
+ *      bar's Save (objectstack#36511), writes an `object_extension` into the
+ *      pair and publishes that one item there, so the base object is served
+ *      with the field at once and the pair's own read and export carry it.
  *   4. Uninstall the base: the uninstall door refuses the read-only showcase
  *      with 422 `WRITABLE_PACKAGE_REQUIRED` and removes nothing. This is the
  *      refusal `main` answers here, and the one asserted: `DELETE
@@ -85,6 +89,8 @@ const OBJECT = 'showcase_task';
 /** The column the customization drops, by its field name and its label in the inspector. */
 const DROPPED = { field: 'due_date', label: 'Due Date' };
 const FIELD = { label: 'Region', name: 'region__c' };
+/** The item header's ⋯ menu on the All metadata item page (`StudioBundleItemEditor`). */
+const ITEM_MORE = 'studio-bundle-editor-more';
 
 type Column = string | { field?: string };
 const columnNames = (columns: Column[] | undefined): string[] =>
@@ -117,23 +123,33 @@ async function threeReads(request: APIRequestContext) {
   };
 }
 
-/** Publish the pair's drafts through the surface's Publish / Pending changes dialog. */
+/**
+ * Publish the pair's drafts through 概览's Pending tab, which the menu's 概览
+ * badge opens (objectstack#37456: Studio has no top bar, so its Publish lives
+ * there), then come back to the item the step was on.
+ */
 async function publishPair(page: Page) {
-  await page.getByRole('button', { name: /^Publish/ }).first().click();
+  const item = page.url();
+  await page.getByTestId('studio-menu-overview-pending').click();
+  const panel = page.getByTestId('draft-changes-panel');
+  await expect(panel).toBeVisible();
   const published = page.waitForResponse(
     (r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/packages/${PAIR}/publish-drafts`),
   );
-  await page.getByTestId('draft-changes-publish').click();
+  await panel.getByTestId('draft-changes-publish').click();
   const res = await published;
   expect(res.status(), await res.text()).toBe(200);
   expect((await res.json()).data.outcome).toBe('published');
+  // Back on the item, its header is drawn (the chip in the row, or the ⋯ it
+  // folds into) before anything is read from it.
+  await page.goto(item);
+  await expect(page.getByTestId('studio-override-chip').or(page.getByTestId(ITEM_MORE)).first()).toBeVisible({ timeout: 15_000 });
 }
 
 /**
  * The override chip is reachable on the item header once the pair is published.
- * When the row has room it is in the row. On a narrower content column (the
- * job's 1280 px window with the inspector open) the header folds its identity
- * chips into the item's ⋯ menu first, so the item's name stays readable
+ * When the row has room it is in the row. On a narrower header the identity
+ * chips fold into the item's ⋯ menu first, so the item's name stays readable
  * (objectstack#29693), and there the chip sits in the menu's chips entry. The
  * menu is closed again so the next step opens it fresh.
  */
@@ -142,7 +158,7 @@ async function expectOverrideChip(page: Page) {
   const entry = page.getByTestId('studio-item-header-folded-chips');
   await expect(async () => {
     if (await chip.isVisible()) return;
-    await page.getByTestId('if-item-more').click();
+    await page.getByTestId(ITEM_MORE).click();
     try {
       await expect(entry.getByTestId('studio-override-chip')).toBeVisible({ timeout: 1_000 });
     } finally {
@@ -164,8 +180,11 @@ test('a read-only base is customized, restored and extended through Studio, and 
 
   try {
     await test.step('Customize a view: the edit lands in the pair, and the server serves its columns', async () => {
-      await page.goto(`/studio/${BASE}/interfaces?surface=${encodeURIComponent(`view:${VIEW}`)}`);
-      await expect(page.getByTestId('studio-pkg-readonly')).toBeVisible();
+      // objectstack#36502 — a read-only base's view is customized on its All
+      // metadata item page, in the view's designer.
+      await page.goto(`/studio/${BASE}/metadata/view/${encodeURIComponent(VIEW)}`);
+      // The read-only base offers Customize.
+      await expect(page.getByTestId('studio-customize')).toBeVisible();
       await page.getByTestId('studio-customize').click();
 
       const ensured = page.waitForResponse(
@@ -175,7 +194,7 @@ test('a read-only base is customized, restored and extended through Studio, and 
         (r) => r.request().method() === 'PUT' && r.url().includes(`/api/v1/meta/view/${VIEW}?`),
       );
       await page
-        .getByTestId('if-inspector')
+        .getByTestId('studio-bundle-editor-form')
         .getByRole('button', { name: `Remove ${DROPPED.label}`, exact: true })
         .click();
       const ensure = await ensured;
@@ -202,11 +221,11 @@ test('a read-only base is customized, restored and extended through Studio, and 
       page.on('response', onResponse);
       // objectstack#29692 — Restore is on the override chip's popover: the chip in
       // the row, or in the item's ⋯ menu while the header is folded.
-      const rowChip = page.getByTestId('if-item-header').getByTestId('studio-override-chip');
+      const rowChip = page.getByTestId('studio-bundle-editor').getByTestId('studio-override-chip').first();
       if (await rowChip.isVisible()) {
         await rowChip.click();
       } else {
-        await page.getByTestId('if-item-more').click();
+        await page.getByTestId(ITEM_MORE).click();
         await page.getByTestId('studio-item-header-folded-chips').getByTestId('studio-override-chip').click();
       }
       await page.getByTestId('studio-override-popover').getByTestId('studio-override-restore').click();
@@ -222,25 +241,52 @@ test('a read-only base is customized, restored and extended through Studio, and 
     });
 
     await test.step(`Add ${FIELD.name}: an extension in the pair, served on the base object`, async () => {
-      await page.goto(`/studio/${BASE}/data?surface=${encodeURIComponent(`object:${OBJECT}`)}`);
-      await page.getByTestId('data-object-header').getByRole('button', { name: 'Form', exact: true }).click();
+      // objectstack#36904 — the object designer, on the object's own address.
+      await page.goto(`/studio/${BASE}/metadata/object/${encodeURIComponent(OBJECT)}`);
+      await page.getByTestId('data-object-header').getByRole('button', { name: 'Field layout', exact: true }).click();
       await page.getByTestId('data-form-add-extension-field').click();
       await page.getByTestId('add-field-label-input').fill(FIELD.label);
       await expect(page.getByTestId('add-field-api-name-preview')).toContainText(FIELD.name);
 
+      // objectstack#36511 — the add stays on the page until the top bar's
+      // Save: no write of the extension leaves before it is pressed.
+      const extensionWrites: string[] = [];
+      const onRequest = (r: Request) => {
+        if (r.method() !== 'GET' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}`)) {
+          extensionWrites.push(`${r.method()} ${r.url()}`);
+        }
+      };
+      page.on('request', onRequest);
+      await page.getByTestId('add-field-create').click();
+      await expect(page.getByTestId('studio-save')).toBeVisible();
+      expect(extensionWrites).toEqual([]);
+
+      // Save writes the extension's draft into the pair, then publishes that
+      // one item there: live at once, with no package publish.
       const drafted = page.waitForResponse(
         (r) => r.request().method() === 'PUT' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}?`),
       );
-      await page.getByTestId('add-field-create').click();
+      const published = page.waitForResponse(
+        (r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/meta/object_extension/${OBJECT}/publish`),
+      );
+      await page.getByTestId('studio-save').click();
       const draft = await drafted;
       expect(draft.ok(), await draft.text()).toBeTruthy();
       expect(new URL(draft.url()).searchParams.get('package')).toBe(PAIR);
+      expect(new URL(draft.url()).searchParams.get('mode')).toBe('draft');
       expect(draft.request().postDataJSON()).toEqual({
         extend: OBJECT,
         fields: { [FIELD.name]: { type: 'text', label: FIELD.label } },
       });
-
-      await publishPair(page);
+      const publish = await published;
+      expect(publish.ok(), await publish.text()).toBeTruthy();
+      expect(new URL(publish.url()).searchParams.get('package')).toBe(PAIR);
+      // The Save left nothing to save, and no draft for the package publish.
+      await expect(page.getByTestId('studio-save')).toHaveCount(0);
+      page.off('request', onRequest);
+      expect(extensionWrites.map((w) => w.split(' ')[0])).toEqual(['PUT', 'POST']);
+      const pending = await request.get(`${API}/api/v1/meta/object_extension/${OBJECT}?state=draft&package=${PAIR}`);
+      expect(pending.status(), await pending.text()).toBe(404);
       const object = await request.get(`${API}/api/v1/meta/object/${OBJECT}`);
       expect(object.ok(), await object.text()).toBeTruthy();
       const objectBody = await object.json();

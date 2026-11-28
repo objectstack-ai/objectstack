@@ -176,7 +176,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Banir usuário",
-        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento.",
+        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento. O banimento também suspende as contas de serviço de IA pelas quais ele é responsável, desativa os aplicativos OAuth que ele registrou e revoga as credenciais SCIM que ele emitiu; o desbanimento não restaura nada disso.",
         successMessage: "Usuário banido",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "O usuário a quem esta pessoa se reporta. O servidor recusa um gestor de fora da organização dela, uma autoatribuição e um vínculo que fecharia ou aprofundaria demais a cadeia hierárquica."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Remover gestor",
+        confirmText: "Remover o gestor deste usuário? Ele não se reportará a ninguém até que um gestor seja definido novamente; o roteamento de aprovações e o escopo de registros own_and_reports acompanham a mudança.",
+        successMessage: "Gestor removido"
       },
       list_platform_admins: {
         label: "Administradores da plataforma",
@@ -491,6 +496,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motivo da revogação",
         help: "Por que a sessão foi revogada (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Provedor de SSO",
+        help: "O provedor de SSO pelo qual esta sessão foi iniciada, se houver. Excluir esse provedor encerra a sessão. Gerenciado pelo sistema."
       },
       active_organization_id: {
         label: "Organização ativa"
@@ -4496,6 +4505,42 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "Calendário de trabalho",
     pluralLabel: "Calendários de trabalho",
@@ -4616,6 +4661,91 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           title: "Nenhuma exceção de calendário ainda",
           message: "Adicione uma linha por feriado ou dia útil de compensação, ou importe um ano deles de um arquivo."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "Tarefa",
+    pluralLabel: "Tarefas",
+    description: "Coisas a fazer, com um responsável e um prazo.",
+    fields: {
+      title: {
+        label: "Título"
+      },
+      description: {
+        label: "Descrição"
+      },
+      status: {
+        label: "Status",
+        options: {
+          todo: "A fazer",
+          in_progress: "Em andamento",
+          done: "Concluída"
+        }
+      },
+      due_at: {
+        label: "Prazo"
+      },
+      assignee_id: {
+        label: "Responsável"
+      },
+      completed_at: {
+        label: "Concluída em",
+        help: "Preenchido pela plataforma quando o status passa a Concluída e limpo quando deixa de ser."
+      },
+      owner_id: {
+        label: "Proprietário"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Atribuídas a mim",
+        emptyState: {
+          title: "Nenhuma tarefa atribuída a você",
+          message: "As tarefas em aberto atribuídas a você aparecem aqui."
+        }
+      },
+      created_by_me: {
+        label: "Criadas por mim",
+        emptyState: {
+          title: "Nenhuma tarefa ainda",
+          message: "As tarefas que você cria aparecem aqui."
+        }
+      },
+      all: {
+        label: "Todas as tarefas"
+      }
+    }
+  },
+  sys_note: {
+    label: "Nota",
+    pluralLabel: "Notas",
+    description: "Notas: um título e um corpo formatado.",
+    fields: {
+      title: {
+        label: "Título"
+      },
+      body: {
+        label: "Corpo"
+      },
+      heading: {
+        label: "Cabeçalho",
+        help: "O título ou, quando ele está vazio, a primeira linha do corpo. Mantido pela plataforma."
+      },
+      owner_id: {
+        label: "Proprietário"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Minhas notas",
+        emptyState: {
+          title: "Nenhuma nota ainda",
+          message: "As notas que você escreve aparecem aqui."
+        }
+      },
+      all: {
+        label: "Todas as notas"
       }
     }
   }

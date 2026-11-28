@@ -42,11 +42,15 @@ import { MemoryRouter } from 'react-router-dom';
 // test clock running.
 import { RecordHeaderStateContext } from '@object-ui/components';
 
-const authFetchSpy = vi.fn(async () =>
-  new Response(JSON.stringify({ data: {} }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  }),
+// The approvals reads go out through the authenticated fetch too; they answer from
+// the file's wire double below, as before.
+const authFetchSpy = vi.fn(async (url: string, init?: RequestInit) =>
+  String(url).includes('/approvals/requests')
+    ? fetch(url, init)
+    : new Response(JSON.stringify({ data: {} }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
 );
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -181,7 +185,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
         { name: 'attachments', label: 'Attachments', type: 'file', multiple: true, required: false },
       ],
       visible: 'record.viewer.can_act || record.viewer.can_override',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Approved.', refreshAfter: true,
     },
     {
@@ -193,7 +197,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
       ],
       visible: 'record.viewer.can_act || record.viewer.can_override',
       confirmText: 'Reject this request? A rejection is final for every approver.',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Rejected.', refreshAfter: true,
     },
     {
@@ -660,10 +664,19 @@ describe('record header — the approval is the ONE button group (objectstack#35
 
     await waitFor(() => expect(screen.getByTestId('stub-record-row')).toBeTruthy());
     const tag = await screen.findByTestId('record-approval-tag');
-    expect(tag.textContent).toMatch(/in approval|审批中/i);
+    // objectstack#35890 (item 6) — 「审批中 · 当前步骤」: the step the request
+    // waits at, drawn by the approvals panel's rule (its machine name, prettified).
+    expect(tag.textContent).toBe('In approval · Qc Director Review');
     for (const name of [...APPROVER_DECISIONS, 'approval_recall', 'approval_remind']) {
       expect(decisionButton(name), `${name} must stay hidden`).toBeNull();
     }
+  });
+
+  it('the 审批中 tag names the step by its label when the request has one (objectstack#35890)', async () => {
+    stubApprovalsApi({ ...pendingRequest({ can_act: false, is_submitter: false, can_override: false }), step_label: 'QC director' });
+    renderRecordPage();
+    const tag = await screen.findByTestId('record-approval-tag');
+    await waitFor(() => expect(tag.textContent).toBe('In approval · QC director'));
   });
 
   it('an override-only admin keeps the record row and the marked override menu', async () => {

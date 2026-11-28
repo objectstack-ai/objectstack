@@ -36,6 +36,13 @@ export interface KanbanBoardCoreProps {
   schema: KanbanBoardCoreSchema;
   /** Forwarded unchanged — see `KanbanRendererProps.objectFields`. */
   objectFields?: KanbanRendererProps['objectFields'];
+  /**
+   * The swimlane field's referenced object definition — see
+   * `KanbanBoardProps.swimlaneTargetDef` (objectstack#36930). A PROP, never a
+   * schema key: only `ObjectKanban`, which holds a data source to read it
+   * with, supplies it.
+   */
+  swimlaneTargetDef?: KanbanBoardProps['swimlaneTargetDef'];
   /** Forwarded unchanged — see `KanbanRendererProps.onCardMove`. */
   onCardMove?: KanbanRendererProps['onCardMove'];
   /**
@@ -70,6 +77,12 @@ export interface KanbanBoardCoreProps {
    * from its host.
    */
   onLaneRowsChange?: KanbanBoardProps['onLaneRowsChange'];
+  /**
+   * Each lane's whole record count on a board its host hands one page to —
+   * see `KanbanBoardProps.laneCounts` (objectstack#37327). A PROP for the same
+   * reason: only `ObjectKanban`, which asks the grouped lane read, supplies it.
+   */
+  laneCounts?: KanbanBoardProps['laneCounts'];
   /** Half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
   quickAdd?: boolean;
   /** The other half of the Quick Add pair. Only `KanbanRenderer` supplies it. */
@@ -116,12 +129,14 @@ export interface KanbanBoardCoreProps {
 export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   schema,
   objectFields,
+  swimlaneTargetDef,
   onCardMove,
   cardsMovable,
   rowOpensRecord,
   canDropCard,
   dropBlockedReason,
   onLaneRowsChange,
+  laneCounts,
   quickAdd,
   onQuickAdd,
 }) => {
@@ -156,8 +171,10 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         coverImageField={schema.coverImageField}
         conditionalFormatting={schema.conditionalFormatting}
         objectFields={objectFields}
+        swimlaneTargetDef={swimlaneTargetDef}
         swimlaneField={schema.swimlaneField}
         countsAreWindowed={schema.countsAreWindowed}
+        laneCounts={laneCounts}
       />
     </Suspense>
   );

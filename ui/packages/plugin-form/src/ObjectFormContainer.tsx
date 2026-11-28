@@ -221,6 +221,12 @@ const ObjectFormContainerBody: React.FC<ObjectFormComponentProps> = ({
           onSuccess: handleSuccess,
           modalSize: schema.modalSize,
           modalCloseButton: schema.modalCloseButton,
+          // 「Create more」 (objectstack-ai/objectstack#35980) is a host's
+          // opt-in on `ModalForm`, not an `object-form` page key: the spread
+          // above would carry a stray `createMore` through the index
+          // signature, and this container's `handleSuccess` has no outcome
+          // to hand on. Off here, always.
+          createMore: false,
         }}
         dataSource={dataSource}
         className={schema.className}

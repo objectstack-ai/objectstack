@@ -35,7 +35,7 @@ import {
   PinOff,
   Star,
 } from 'lucide-react';
-import { getLazyIcon, ObjectIconTile } from '@object-ui/components';
+import { getLazyIcon, NeutralIconTile, ObjectIconTile } from '@object-ui/components';
 import {
   DndContext,
   closestCenter,
@@ -80,7 +80,7 @@ import { isElementApiDataSourceShape } from '@object-ui/react';
 // does): this file has its OWN `resolveLabel` over the KEYED vocabulary, and
 // the spec's resolver reads the INLINE locale map — neither accepts the other's
 // shape.
-import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
+import { AI_CHAT_COMPONENT_REF, resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui';
 // Internal module, not re-exported by `index.ts` (objectui#11395). ⛔ Do not
 // re-export `byNavOrder` from this file: `index.ts` re-exports it whole.
 import { byNavOrder } from './navOrder';
@@ -239,8 +239,8 @@ export type NavTargetLabelResolver = (target: NavLabelTarget) => string | undefi
  * What a navigation entry that names no `icon` draws instead: the icon of the
  * object it opens. An `object` entry opens an object's list (a `viewName`
  * picks the list, not the object), so the object page's own icon is the one
- * that says which list the row leads to. Every other entry keeps the
- * renderer's generic icon.
+ * that says which list the row leads to. Every other entry draws its kind's
+ * icon ({@link NAV_KIND_ICON}) on the neutral tile.
  */
 export type NavIconTarget = { kind: 'object'; objectName: string };
 
@@ -281,6 +281,33 @@ export function resolveNavItemIcon(
     if (typeof icon === 'string' && icon.trim() !== '') return icon;
   }
   return undefined;
+}
+
+/**
+ * The icon a navigation entry that is not an object draws when it names none
+ * (objectstack#36141): one glyph per kind, drawn on the neutral tile. An
+ * `object` entry has no row here: it draws its object's icon, else the
+ * generic one ({@link resolveIcon}). Groups and separators draw no icon.
+ */
+export const NAV_KIND_ICON: Readonly<Record<Exclude<NavigationItem['type'], 'object' | 'group' | 'separator'>, string>> = {
+  dashboard: 'layout-dashboard',
+  report: 'chart-column',
+  page: 'file',
+  url: 'external-link',
+  component: 'layout-grid',
+  doc: 'book-open',
+  action: 'zap',
+};
+
+/**
+ * The icon name the row of a non-object entry draws on its neutral tile: its
+ * own `icon` when it names one ({@link resolveNavItemIcon}), else its kind's
+ * ({@link NAV_KIND_ICON}). `undefined` for an `object` entry, a group and a
+ * separator, whose icons are decided elsewhere.
+ */
+export function resolveNavKindIcon(item: NavigationItem): string | undefined {
+  if (item.type === 'object' || item.type === 'group' || item.type === 'separator') return undefined;
+  return resolveNavItemIcon(item) ?? NAV_KIND_ICON[item.type];
 }
 
 /**
@@ -1163,6 +1190,10 @@ export function resolveHref(
         return { href: `${basePath}/metadata${metaQs}`, external: false };
       }
       let url = `${basePath}/component/${segs.join('/')}`;
+      // `ai:chat` (the AI inquiry home page): its params are page copy and a
+      // suggestion list (`AiChatNavParamsSchema`), read by the page off the
+      // navigation entry itself — never serialised into the URL.
+      if (ref === AI_CHAT_COMPONENT_REF) return { href: url, external: false };
       if (navParams && typeof navParams === 'object') {
         const usp = new URLSearchParams();
         for (const [k, v] of Object.entries(navParams)) {
@@ -1749,30 +1780,105 @@ function DropIndicator({ at }: { at: 'before' | 'after' }) {
 }
 
 // ---------------------------------------------------------------------------
-// NavigationItemRenderer (recursive)
+// NavigationGroupSection — the collapsible group, shared with Studio's menu
 // ---------------------------------------------------------------------------
 
-function NavigationItemRenderer({
-  item,
-  basePath,
-  evalVis,
-  checkPerm,
-  checkCap,
-  checkDocTarget,
-  onAction,
-  enablePinning,
-  onPinToggle,
-  renderItemAction,
-  dragActivator,
-  row,
-  inList = true,
-  resolveTargetLabel,
-  resolveTargetIcon,
-  resolveTargetColor,
-  locale,
-  t: tProp,
-  templateContext,
-}: {
+export interface NavigationGroupSectionProps {
+  /** The group's name: the text of its disclosure button. */
+  label: React.ReactNode;
+  /** Whether the group lists its rows. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Drawn open whatever `open` says: the icon rail lists every group's rows. */
+  forceOpen?: boolean;
+  /** The number the header shows while the group is closed; nothing is drawn without one. */
+  closedCount?: number;
+  /** The phone drawer's sizing: a 44 px tap target, larger text and chevron. */
+  isMobile?: boolean;
+  /** The disclosure button's id; the group's list is named by it when given. */
+  labelId?: string;
+  /** On the `SidebarGroup`. */
+  className?: string;
+  'data-testid'?: string;
+  /** The group's rows: `SidebarMenuItem`s, or `<li>`s that hold one. */
+  children: React.ReactNode;
+}
+
+/**
+ * A collapsible sidebar group: its label is the disclosure button, with a
+ * chevron that turns down while the group is open, and its rows are listed
+ * under it while it is open. The app's menu draws every `group` entry with it,
+ * and Studio's left menu draws its groups with it, so the two menus' group
+ * headers cannot drift apart (objectstack#37452).
+ */
+export function NavigationGroupSection({
+  label,
+  open,
+  onOpenChange,
+  forceOpen = false,
+  closedCount,
+  isMobile = false,
+  labelId,
+  className,
+  'data-testid': testId,
+  children,
+}: NavigationGroupSectionProps) {
+  return (
+    <Collapsible open={open || forceOpen} onOpenChange={onOpenChange}>
+      <SidebarGroup className={className} data-testid={testId}>
+        <SidebarGroupLabel asChild className={cn(HIDDEN_ICON_LABEL_NO_POINTER, HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
+          <CollapsibleTrigger id={labelId} className={cn('flex w-full items-center justify-between', isMobile && 'min-h-[44px] text-[15px] rounded-xl')}>
+            {label}
+            {/* objectstack#25876 — a collapsed group says how much it holds.
+                Open, its entries are in view and the count is noise; a group
+                holding the current route is forced open, so it never shows
+                one. `aria-hidden`: the disclosure's name stays the label, and
+                it already announces collapsed. In icon mode it hides under
+                the very classes the label does. */}
+            {!open && closedCount !== undefined && (
+              <Badge
+                variant="secondary"
+                aria-hidden="true"
+                className={cn(
+                  'ml-auto px-1.5 py-0 text-[10px] font-medium tabular-nums',
+                  HIDDEN_ICON_LABEL_NO_POINTER,
+                  HIDDEN_ICON_LABEL_NOT_FOCUSABLE,
+                )}
+              >
+                {closedCount}
+              </Badge>
+            )}
+            <ChevronRight
+              className={cn(open ? 'ml-auto' : 'ml-1', 'transition-transform', isMobile ? 'h-5 w-5' : 'h-4 w-4', open && 'rotate-90')}
+            />
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <CollapsibleContent>
+          <SidebarGroupContent>
+            <SidebarMenu aria-labelledby={labelId}>{children}</SidebarMenu>
+          </SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NavigationItemRenderer (recursive)
+//
+// objectstack#37575 — memoised. The sidebar draws one of these per entry (about
+// seventy on the showcase app), each with its ⋯ menu and tooltip, and the shell
+// re-renders the sidebar every time a boot read lands. Unmemoised, every one of
+// those re-renders redrew every row: on the list page's first load, about eight
+// full passes over ~2,700 components before first paint. A row reads only its
+// props and the tree's contexts (active entry, phone, icon rail), so a row whose
+// props are unchanged has nothing new to draw; the hosts keep their callbacks
+// stable (`UnifiedSidebar`) so that this holds, and the target resolvers are
+// compared by what they answer for the row (`sameRowAnswers`).
+// ---------------------------------------------------------------------------
+
+/** A row's props (objectstack#37575: named, so the memo comparator below can read them). */
+interface NavItemRendererProps {
   item: NavigationItem;
   basePath: string;
   evalVis: VisibilityEvaluator;
@@ -1800,7 +1906,29 @@ function NavigationItemRenderer({
   locale?: string;
   t?: (key: string, options?: any) => string;
   templateContext?: NavTemplateContext;
-}) {
+}
+
+function NavigationItemRow({
+  item,
+  basePath,
+  evalVis,
+  checkPerm,
+  checkCap,
+  checkDocTarget,
+  onAction,
+  enablePinning,
+  onPinToggle,
+  renderItemAction,
+  dragActivator,
+  row,
+  inList = true,
+  resolveTargetLabel,
+  resolveTargetIcon,
+  resolveTargetColor,
+  locale,
+  t: tProp,
+  templateContext,
+}: NavItemRendererProps): React.ReactElement | null {
   // iOS-native mobile drawer polish: >=44px tap targets, larger text and
   // icons, rounder rows. Desktop (>=768px) keeps the compact rail untouched.
   // Decided once for the tree (`NavMobileSource`), not by a hook per row.
@@ -1811,7 +1939,6 @@ function NavigationItemRenderer({
   // one Radix Tooltip per row was a measurable part of every drawer open
   // (objectstack#29141).
   const rowTooltip = (label: string) => (isMobile ? undefined : label);
-  const navIconClass = cn('shrink-0', isMobile ? 'h-5 w-5' : 'h-4 w-4');
   // The initial open state (objectui#13336): see `groupOpensOnFirstView`.
   const activeNavId = React.useContext(ActiveNavIdContext);
   const initialOpen = React.useMemo(() => groupOpensOnFirstView(item, activeNavId), [item, activeNavId]);
@@ -1880,50 +2007,22 @@ function NavigationItemRenderer({
     };
 
     const group = (
-      <Collapsible open={isOpen || inIconRail} onOpenChange={setIsOpen}>
-        <SidebarGroup>
-          <SidebarGroupLabel asChild className={cn(HIDDEN_ICON_LABEL_NO_POINTER, HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
-            <CollapsibleTrigger className={cn('flex w-full items-center justify-between', isMobile && 'min-h-[44px] text-[15px] rounded-xl')}>
-              {groupLabel}
-              {/* objectstack#25876 — a collapsed group says how much it holds.
-                  Open, its entries are in view and the count is noise; a group
-                  holding the current route is forced open, so it never shows
-                  one. `aria-hidden`: the disclosure's name stays the label, and
-                  it already announces collapsed. In icon mode it hides under
-                  the very classes the label does. */}
-              {!isOpen && (
-                <Badge
-                  variant="secondary"
-                  aria-hidden="true"
-                  className={cn(
-                    'ml-auto px-1.5 py-0 text-[10px] font-medium tabular-nums',
-                    HIDDEN_ICON_LABEL_NO_POINTER,
-                    HIDDEN_ICON_LABEL_NOT_FOCUSABLE,
-                  )}
-                >
-                  {countVisibleNavigationItems(children, guardOptions)}
-                </Badge>
-              )}
-              <ChevronRight
-                className={cn(isOpen ? 'ml-auto' : 'ml-1', 'transition-transform', isMobile ? 'h-5 w-5' : 'h-4 w-4', isOpen && 'rotate-90')}
-              />
-            </CollapsibleTrigger>
-          </SidebarGroupLabel>
-          <CollapsibleContent>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {children.map((child) => (
-                  <NavigationItemRenderer
-                    key={child.id}
-                    item={child}
-                    {...rowProps}
-                  />
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </CollapsibleContent>
-        </SidebarGroup>
-      </Collapsible>
+      <NavigationGroupSection
+        label={groupLabel}
+        open={isOpen}
+        onOpenChange={setIsOpen}
+        forceOpen={inIconRail}
+        closedCount={isOpen ? undefined : countVisibleNavigationItems(children, guardOptions)}
+        isMobile={isMobile}
+      >
+        {children.map((child) => (
+          <NavigationItemRenderer
+            key={child.id}
+            item={child}
+            {...rowProps}
+          />
+        ))}
+      </NavigationGroupSection>
     );
     // A plain `<li>`, not a `SidebarMenuItem`: that one is a `group/menu-item`,
     // and every row inside the nested group would show its hover-only pin
@@ -1946,7 +2045,7 @@ function NavigationItemRenderer({
     // which leads to the prop, instead of "clicking does nothing", which for
     // three releases led nowhere.
     if (!onAction) return null;
-    const Icon = resolveIcon(item.icon);
+    const Icon = resolveIcon(resolveNavKindIcon(item));
     // Through `resolveNavItemLabel`, not `resolveLabel`: an action entry's
     // `label` may be absent too (objectui#9868), and that is where the absent
     // arm lives — as is the inline-locale-map read (objectui#11201), which
@@ -1961,8 +2060,7 @@ function NavigationItemRenderer({
           className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
           {...(dragActivator ? dragActivatorProps(dragActivator) : {})}
         >
-          {/* eslint-disable-next-line react-hooks/static-components -- resolveIcon returns a stable icon component from a static registry, not a component created during render */}
-          <Icon className={navIconClass} />
+          <NeutralIconTile glyph={Icon} size={isMobile ? 'md' : 'sm'} className="-mx-0.5" />
           <span>{actionLabel}</span>
           {item.badge != null && (
             <Badge variant={item.badgeVariant ?? 'default'} className="ml-auto text-[10px] px-1.5 py-0">
@@ -2000,11 +2098,13 @@ function NavigationItemRenderer({
   // An `object` entry with no `icon` draws its object's icon, so each list in
   // the menu is told apart the way its own page header shows it.
   // objectstack#35985 — an `object` entry is drawn as its object's tile (a
-  // white glyph on the object's palette colour); every other entry keeps the
-  // line icon, since only objects carry a colour.
-  const iconName = resolveNavItemIcon(item, resolveTargetIcon);
+  // white glyph on the object's palette colour), one with a `viewName` too.
+  // objectstack#36141 — every other entry is drawn on the neutral tile, with
+  // its own icon else its kind's, so the column is one shape throughout and
+  // colour says only which object a row opens.
   const objectTarget: NavIconTarget | null =
     item.type === 'object' && item.objectName ? { kind: 'object', objectName: item.objectName } : null;
+  const iconName = objectTarget ? resolveNavItemIcon(item, resolveTargetIcon) : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
   const Icon = resolveIcon(iconName);
   const { href, external } = resolveHref(item, basePath, templateContext);
   const isActive = activeNavId !== null && item.id === activeNavId;
@@ -2021,8 +2121,7 @@ function NavigationItemRenderer({
           className="-mx-0.5"
         />
       ) : (
-        // eslint-disable-next-line react-hooks/static-components -- resolveIcon returns a stable icon component from a static registry, not a component created during render
-        <Icon className={navIconClass} />
+        <NeutralIconTile icon={iconName} glyph={Icon} size={isMobile ? 'md' : 'sm'} className="-mx-0.5" />
       )}
       <span>{itemLabel}</span>
       {item.badge != null && (
@@ -2080,6 +2179,57 @@ function NavigationItemRenderer({
       )}
     </SidebarMenuItem>
   );
+}
+
+const NavigationItemRenderer = React.memo(NavigationItemRow, sameRowAnswers);
+
+type NavRowRendererProps = NavItemRendererProps;
+const ROW_TARGET_RESOLVERS = new Set(['resolveTargetLabel', 'resolveTargetIcon', 'resolveTargetColor']);
+/** The props a leaf row is compared by what they answer for it, not by identity. */
+const ROW_ANSWER_PROPS = new Set([...ROW_TARGET_RESOLVERS, 'checkCap']);
+
+/**
+ * objectstack#37575 — whether a row's new props draw what its current ones draw.
+ *
+ * Every prop is compared by identity, except the three target resolvers. The
+ * host rebuilds those whenever its metadata store changes (each boot read
+ * that lands does that), while what a resolver answers for any one row rarely
+ * changes. A leaf row asks them for three things only: its label, its icon and
+ * its tile colour. If the new resolvers give the same three answers as the
+ * current ones, the row has nothing new to draw, and it keeps the resolvers it
+ * has, which still give those answers. A group draws its entries, and each of
+ * those asks its own questions, so a group with any new resolver is redrawn and
+ * its entries are compared one by one.
+ *
+ * The capability checker is compared the same way: the host rebuilds it with
+ * the resolvers, and a leaf row asks it about its own `requiresObject` and
+ * `requiresService` only.
+ */
+function sameRowAnswers(prev: NavRowRendererProps, next: NavRowRendererProps): boolean {
+  const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+  for (const key of keys) {
+    if (ROW_ANSWER_PROPS.has(key)) continue;
+    if (!Object.is(prev[key as keyof NavRowRendererProps], next[key as keyof NavRowRendererProps])) return false;
+  }
+  if (
+    prev.resolveTargetLabel === next.resolveTargetLabel &&
+    prev.resolveTargetIcon === next.resolveTargetIcon &&
+    prev.resolveTargetColor === next.resolveTargetColor &&
+    prev.checkCap === next.checkCap
+  ) return true;
+  const { item, t, locale } = next;
+  if (item.type === 'group') return false;
+  const requiresObject = (item as { requiresObject?: string }).requiresObject;
+  const requiresService = (item as { requiresService?: string }).requiresService;
+  if (requiresObject && prev.checkCap('object', requiresObject) !== next.checkCap('object', requiresObject)) return false;
+  if (requiresService && prev.checkCap('service', requiresService) !== next.checkCap('service', requiresService)) return false;
+  if (resolveNavItemLabel(item, t, prev.resolveTargetLabel, locale) !== resolveNavItemLabel(item, t, next.resolveTargetLabel, locale)) return false;
+  if (resolveNavItemIcon(item, prev.resolveTargetIcon) !== resolveNavItemIcon(item, next.resolveTargetIcon)) return false;
+  if (item.type === 'object' && item.objectName) {
+    const target: NavIconTarget = { kind: 'object', objectName: item.objectName };
+    if (prev.resolveTargetColor?.(target) !== next.resolveTargetColor?.(target)) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

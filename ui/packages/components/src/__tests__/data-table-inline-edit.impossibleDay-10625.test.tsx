@@ -20,23 +20,26 @@
  * `DateField` / `DateTimeField`'s face: an empty control, `aria-invalid`, and a
  * notice naming the stored string, described by the control.
  *
- * Rendered through the real registry (`renderComponent`), with no host
- * `renderCellEditor`, which is exactly the path a schema-authored editable
- * `data-table` node takes. Assertions hold in every timezone: a real datetime
+ * Rendered through the real registry inside a select-first host with a
+ * per-cell save (`renderSelectFirstTable`, the one way the table edits since
+ * objectstack#35827), with no host `renderCellEditor`: the table's own
+ * built-in editors. Assertions hold in every timezone: a real datetime
  * is judged by the instant it reads back as, never by a hard-coded wall clock.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { renderComponent } from './test-utils';
+import { openCellEditor, renderSelectFirstTable } from './test-utils';
 // Registers the renderers at module scope (object-ui/no-dynamic-import-in-test-hook).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 function tableWith(type: 'date' | 'datetime', stored: string, onCellChange = vi.fn()) {
   const schema = {
     type: 'data-table' as const,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { header: 'Name', accessorKey: 'name', editable: false },
       { header: 'When', accessorKey: 'when', type },
@@ -44,10 +47,10 @@ function tableWith(type: 'date' | 'datetime', stored: string, onCellChange = vi.
     data: [{ id: '1', name: 'Row one', when: stored }],
     onCellChange,
   } as any;
-  const { container } = renderComponent(schema);
+  const { container } = renderSelectFirstTable(schema);
   const cell = container.querySelectorAll('tbody td')[1] as HTMLElement;
-  fireEvent.click(cell);
-  const input = cell.querySelector('input') as HTMLInputElement;
+  openCellEditor(cell);
+  const input = container.querySelector('td[data-editing-cell] input') as HTMLInputElement;
   return { cell, input, onCellChange };
 }
 

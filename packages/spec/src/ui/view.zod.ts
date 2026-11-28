@@ -90,6 +90,8 @@ import { lazySchema } from '../shared/lazy-schema';
 // This file's shared refusal history (#4001), declared outside it since #21229
 // so the export options block it shares with the `object-grid` row keeps it.
 import { VIEW_HISTORY } from './view-history';
+import { anonymousFormObjectName, publicFormSlug } from './anonymous-form-intake';
+import { deriveViewContainerObject } from './view-container-object';
 // [#21229] The export options block — its format enum, the retired-`'pdf'`
 // prescription and the five-member object — declared once, outside the `ui`
 // barrel: the `object-grid` page-component row takes the object by identity.
@@ -1968,7 +1970,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   sort: z.boolean().default(true).describe('Allow users to sort records'),
   search: z.boolean().default(true).describe('Allow users to search records'),
   filter: z.boolean().default(true).describe('Allow users to filter records'),
-  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload'),
+  refresh: z.boolean().default(true).describe('Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar\'s Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there.'),
   rowHeight: z.boolean().default(true).describe('Allow users to toggle row height/density'),
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
@@ -2021,7 +2023,7 @@ export const ViewTabSchema = lazySchema(() => strictObject({
  * Rendering details (widget, options) default to inference from the field
  * definition on the source object — authors only override when needed.
  *
- * Each property carries a `.meta({ title })` because `view.form.ts` enumerates
+ * Each property carries a `.meta({ title })` because `view.metadata-form.ts` enumerates
  * `userFilters.fields` as a repeater: the title is the English column head
  * Studio reads, and the form's declared row `label` repeats it so the i18n
  * extractor emits a catalog key per column (#30267).
@@ -2174,9 +2176,10 @@ const ADD_RECORD_ENABLED_REQUIRED =
 /**
  * `addRecord.mode` / `addRecord.formView` — retired (#24692, ADR-0049
  * enforce-or-remove; ruling letter B′). No renderer ever read either key:
- * every Add opens the object's create form, chosen by convention —
- * `formViews.create` when the object's view container declares one, else the
- * default form. How that form opens stays the renderer's. D2:
+ * every Add opens the object's create form, which lays out by the object's
+ * `fieldGroups` and leaves out every field marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create` or default `form` is no longer
+ * loaded). How that form opens stays the renderer's. D2:
  * `add-record-mode-form-view-removed`.
  */
 const ADD_RECORD_MODE_RETIRED =
@@ -2188,9 +2191,9 @@ const ADD_RECORD_MODE_RETIRED =
 
 const ADD_RECORD_FORM_VIEW_RETIRED =
   '`addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no '
-  + 'renderer ever read it: the Add button opens the create form chosen by convention, never a named '
-  + 'form. Delete the key, and to give the Add button its own form declare it as `formViews.create` '
-  + 'on the object\'s view container (without one, the default form is used). '
+  + 'renderer ever read it: the Add button opens the object\'s create form, never a named form. '
+  + 'Delete the key. The create form lays out by the object\'s `fieldGroups`; to leave a field out of '
+  + 'it, set `showOnCreate: false` on that field. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` '
   + 'applies the ones it can prove, and you apply the rest by hand.';
 
@@ -2202,8 +2205,10 @@ const ADD_RECORD_FORM_VIEW_RETIRED =
  * REQUIRED (no default — `addRecord: {}` is refused instead of drawing
  * nothing), `position` defaults to `top` (where the renderer places an absent
  * position), and `mode` / `formView`, which no renderer read, are tombstoned.
- * The create form is chosen by convention: `formViews.create` when declared,
- * else `form` / `formViews.default`. The stored-row half of `enabled` is the D2
+ * The create form is the object's own: it lays out by the object's
+ * `fieldGroups` and asks for every field not marked `showOnCreate: false`
+ * (#36425: an internal `formViews.create`, `form` or `formViews.default` is no
+ * longer loaded). The stored-row half of `enabled` is the D2
  * conversion `add-record-enabled-defaulted`, which writes the old default
  * (`true`) onto a block that omits it.
  *
@@ -2368,6 +2373,71 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
+ *
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`.
+ * `count` counts the lane's records (the lane's own count, the one its header
+ * shows); `sum` totals a number field over every record of the lane, `avg`
+ * averages it, and `min` / `max` show its smallest / largest value
+ * (`field` required for all four); `none` shows nothing, also over
+ * `summarizeField`. objectstack#36520: the four aggregates are computed in the
+ * query — one grouped aggregate over the board's filter and search, grouped by
+ * the lane field, under the reader's permissions — never added up over the
+ * cards a lane has loaded, so a lane longer than its page still shows the
+ * whole lane's figure. A field the reader may not read shows no figure.
+ *
+ * objectstack#36871: the list view hands a board whose lanes it cannot know
+ * before the query (lanes over a lookup field) the page of records it fetched
+ * AND the query of that page, so that board asks the same read and its four
+ * aggregates cover every record of each lane too. Its `count` counts the
+ * page it was handed, as its lane header does. Only a board handed its cards
+ * without their query (records handed in whole) adds up a `sum` over those
+ * cards, and draws none of the other three.
+ */
+export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
+  strictObject({
+    surface: 'this `none` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('none'),
+  }),
+  strictObject({
+    surface: 'this `count` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('count'),
+  }),
+  strictObject({
+    surface: 'this `sum` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('sum'),
+    field: z.string().min(1).describe('The number field the lane totals over all of its records (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `avg` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('avg'),
+    field: z.string().min(1).describe('The number field the lane averages over all of its records (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `min` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('min'),
+    field: z.string().min(1).describe('The field whose smallest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `max` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('max'),
+    field: z.string().min(1).describe('The field whose largest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum, average, minimum or maximum of a field over all of the lane\'s records'));
+
+/**
  * Kanban Settings
  */
 export const KanbanConfigSchema = lazySchema(() => strictObject({
@@ -2430,6 +2500,79 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
       + 'the view. List each value once.',
     ),
   summarizeField: z.string().optional().describe('Field to sum at top of column (e.g. amount)'),
+  /**
+   * objectstack#36370 — the statistic each lane shows at its foot
+   * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
+   * records; `{ type: 'sum' | 'avg' | 'min' | 'max', field }` totals, averages,
+   * or takes the smallest / largest value of a field over all of the lane's
+   * records, computed in the query (objectstack#36520); `{ type: 'none' }`
+   * shows nothing, also over a `summarizeField`. Without it a lane shows the
+   * sum of `summarizeField` where that is set, as before this key, and nothing
+   * otherwise.
+   *
+   * ⛔ No spec-side default: absence keeps a board stored before this key
+   * exactly as it was.
+   */
+  summary: KanbanLaneSummarySchema.optional().describe(
+    'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
+    + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
+    + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
+    + 'A list view board whose lanes come from a lookup field draws one page of records: its `sum`, '
+    + '`avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. '
+    + 'Only on a board handed its records whole, '
+    + 'without their query, does `sum` total the records handed in and the other three show nothing. '
+    + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
+  ),
+  /**
+   * objectstack#36370 — whether a card names each field beside its value.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * leaves the values alone.
+   */
+  showFieldLabels: z.boolean().optional().describe(
+    'Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone.',
+  ),
+  /**
+   * objectstack#36370 — whether a card leaves out a field that holds nothing.
+   * Absent means `true`, the card as boards drew it before this key; `false`
+   * keeps the field's row with an empty value, so every card of the lane
+   * lines up.
+   */
+  hideEmptyFields: z.boolean().optional().describe(
+    'Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value.',
+  ),
+  /**
+   * objectstack#36423 — the counts a card shows at its foot. `comments: true`
+   * shows how many comment threads of the record are open (top-level and not
+   * resolved): the number the record page's comments icon shows, except a
+   * reply whose parent was deleted (a thread of its own there) and a comment
+   * not yet stamped with the record pair (`os migrate comment-parent-pair
+   * --apply`; the record page reads by `thread_id`). `attachments: true`
+   * shows how many files are attached to it (an object with `enable.files`).
+   * Each is read for the whole board in one grouped read per counted object
+   * over the cards it has loaded, never one read per card, under the reader's
+   * permissions; where the server cuts that answer to its default page size,
+   * one more grouped read over the cards it did not name, up to 20 in all.
+   * A count of zero draws nothing. Absent, or a member absent or `false`:
+   * that count is neither read nor drawn — the board as it was before this
+   * key.
+   *
+   * An object, so a later foot item is one more member rather than a second
+   * key. ⛔ No spec-side default.
+   */
+  cardFooter: strictObject({
+    surface: 'this kanban card footer',
+    history: VIEW_HISTORY,
+  }, {
+    comments: z.boolean().optional().describe(
+      'Show how many comment threads of the record are open (not resolved). Omit or false: not shown, and not read.',
+    ),
+    attachments: z.boolean().optional().describe(
+      'Show how many files are attached to the record (objects with enable.files). Omit or false: not shown, and not read.',
+    ),
+  }).optional().describe(
+    'The counts each card shows at its foot, each read for the whole board over its loaded cards in grouped reads, never one per card. Omit to show none.',
+  ),
   /**
    * [#16894] The one item-titled view config of the family that omitted this
    * key. `GalleryConfigSchema`, `TimelineConfigSchema`, `CalendarConfigSchema`,
@@ -2548,7 +2691,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
-  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
+  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one'),
   /**
    * [#17054] The fifth binding, and the one this schema was missing while two
    * other faces of this same package already published it as a member: the
@@ -2678,7 +2821,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   titleField: z.string().describe('Field displayed as the task title'),
   progressField: z.string().optional().describe('Field providing the task completion percentage'),
   dependenciesField: z.string().optional().describe("Field listing the task's predecessor (dependency) record ids"),
-  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value'),
+  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one'),
   // Two-level hierarchy: a parent task id (summary bar) and a row type.
   parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
   typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),
@@ -3028,20 +3171,33 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   openNewTab: z.boolean().default(false).describe('Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place'),
   
   /**
-   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
-   * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
-   * (default): the renderer derives the size from the object's field count and
-   * clamps it to the client viewport, so AI writes nothing — it cannot know the
-   * client width. Explicit buckets are a coarse, viewport-independent override.
+   * [#2578] Width of the record drawer, as a coarse T-shirt bucket. Each
+   * explicit bucket is a pixel cap the renderer clamps to the viewport
+   * (`min(92vw, CAP)`): sm 480, md 720, lg 960, xl 1200, full 1600.
+   *
+   * `'auto'` (default) is the host's fixed default width, the same for every
+   * object whatever its field count — nothing is derived from the object's
+   * fields. The console's record side panel (opened from an object's list, from
+   * the bare data page or an interface list page, and the drawer level over a
+   * record page) opens at `min(92vw, 460px)`; a page
+   * block's drawer opens at that block's own default (`min(960px, 60vw)` for
+   * the grid, kanban, calendar, gantt and tree; 42rem for the list, gallery,
+   * map and timeline). A width the reader drags is remembered and wins over
+   * both `'auto'` and a bucket.
+   *
+   * The key has no effect where the record opens as a page rather than a
+   * drawer (in the console every record opens as a page on a phone), nor on a
+   * phone-width screen, where a block's drawer fills the screen.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
-   * the author (often an AI) does not know the client viewport. Kept only as a
-   * renderer fallback for pre-#2578 metadata; new metadata sets `size` (or omits
-   * it for `auto`).
+   * the author (often an AI) does not know the client viewport. It is still
+   * honoured, and where a renderer reads both keys an authored `width` wins over
+   * `size` (the console's record drawer does), so new metadata sets `size` (or
+   * omits it for `auto`) and leaves `width` out.
    */
   width: z.union([z.string(), z.number()]).optional().describe('[DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket.'),
 }));
@@ -3369,6 +3525,19 @@ export function checkListViewTimesheetBinding(
 }
 
 /**
+ * [#36403] The list view body's refusal of `columnState`. The key was never
+ * declared on this authoring shape; it was a wire key of the stored `view`
+ * row (see `VIEW_COLUMN_STATE_RETIRED`, further down, for the retirement and
+ * its census). No conversion reaches a list view body, so this text names no
+ * migration command — the author deletes the key by hand.
+ */
+const VIEW_LIST_COLUMN_STATE_RETIRED =
+  '`listView.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it was '
+  + 'never a list view key: it held one column order and set of widths the console once stored on a view '
+  + 'row, and that layout is no longer applied. Delete the key. To ship a column order, list `columns` in that '
+  + 'order (or set `fieldOrder`); to ship a width, set `width` on the column.';
+
+/**
  * List View Schema (Expanded)
  * Defines how a collection of records is displayed to the user.
  *
@@ -3417,13 +3586,10 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
   surface: 'this list view',
   history: VIEW_HISTORY,
   guidance: {
-    // [commit d5552ca13] Runtime-only overlay key, deliberately NOT declared here: this
-    // is the AUTHORING shape, and column order/widths are per-user state the
-    // console grid writes through the `view` metadata API (objectui's
-    // `gridNonAuthorKeys` disposition). The overlay-validation face declares
-    // it (`flattenedViewOverlayFields` / `viewItemWireFields`); an author who
-    // writes it here gets this prescription instead of a bare typo suggestion.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Never declared on this AUTHORING shape, and now retired from
+    // the wire members too (`flattenedViewOverlayFields` / `viewItemWireFields`
+    // tombstone it); an author who writes it here gets the retirement text.
+    columnState: VIEW_LIST_COLUMN_STATE_RETIRED,
   },
 }, {
   name: SnakeCaseIdentifierSchema.optional().describe('Internal view name (lowercase snake_case)'),
@@ -3566,7 +3732,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
+  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.'),
 
   /** Selection */
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
@@ -3810,6 +3976,55 @@ export const ListViewSchema = lazySchema(() =>
     .superRefine(checkListViewTimesheetBinding));
 
 /**
+ * How a metadata list cell draws its value. The vocabulary is closed: each value
+ * names a renderer the Studio metadata list ships.
+ *
+ * - `text` (the default): the value as written.
+ * - `badge`: a short enum value, as a chip.
+ * - `boolean`: a yes/no mark.
+ * - `count`: how many entries an array or a keyed record holds.
+ * - `list`: the entries of an array, joined; a single value as itself.
+ * - `summary`: the scalar members of an object value, joined in key order.
+ */
+export const MetadataListCellTypeSchema = lazySchema(() => z.enum([
+  'text',
+  'badge',
+  'boolean',
+  'count',
+  'list',
+  'summary',
+]).describe('How a metadata list cell draws its value'));
+
+/**
+ * One column of a metadata type's list: {@link ListColumnSchema} narrowed to the
+ * three members a platform list declares. `field` names a key of the type's own
+ * schema (or a dotted path into it), `label` is the English header, and `type`
+ * picks the cell renderer from {@link MetadataListCellTypeSchema}.
+ *
+ * The header is translated through the same slot as the type's form field of
+ * that path: `metadataForms.<type>.fields.<field>.label`.
+ */
+export const MetadataListColumnSchema = lazySchema(() => ListColumnSchema
+  .pick({ field: true, label: true, type: true })
+  .extend({
+    field: z.string().min(1).describe('Key of the metadata type\'s schema: a top-level key, or a dotted path into it'),
+    type: MetadataListCellTypeSchema.optional().describe('Cell renderer; `text` when absent'),
+  })
+  .describe('One column of a metadata type list'));
+
+/**
+ * The list layout of a metadata type in Studio: {@link ListViewSchema} narrowed
+ * to its data binding and its columns, the list counterpart of a
+ * {@link defineMetadataForm} layout. Build one with {@link defineList}.
+ */
+export const MetadataListViewSchema = lazySchema(() => ListViewShapeSchema
+  .pick({ data: true, columns: true })
+  .extend({
+    columns: z.array(MetadataListColumnSchema).min(1).describe('Columns of the list, in display order'),
+  })
+  .describe('List layout of a metadata type: its schema binding and its columns'));
+
+/**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
  * per-option `default` key (maintainer-ruled narrowing, 2026-08-28, on the
  * objectui#6263 analysis; disposition 甲).
@@ -3841,7 +4056,7 @@ export const ListViewSchema = lazySchema(() =>
  * `shared/strict-object.ts` documents. The census that gates this narrowing
  * (recorded in commit c459da6bc, part of the ruling) measured ZERO occurrences of
  * `default`/`isDefault`/`selected` inside form-view options across this tree,
- * the example apps and the published `*.form.ts` corpus, with the instrument's
+ * the example apps and the published `*.metadata-form.ts` corpus, with the instrument's
  * positive control hitting the 40+ enforced object-field usages.
  *
  * The protocol-18 conversion `form-view-option-default-removed` strips the key
@@ -4054,7 +4269,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * shares by reference with the object-field face, so an enum member carrying
    * a hyphen or a capital (`system-data`, `new-tab`, `perRecord`) cannot be
    * written as one at all. On a metadata form — schema-bound, built by
-   * {@link defineForm} — an enum-typed row MAY carry an inline `options` list,
+   * {@link defineMetadataForm} — an enum-typed row MAY carry an inline `options` list,
    * for human labels or a deliberate subset (the #19331 `object.ownership` /
    * `sharingModel` rows and the master_detail `deleteBehavior` rows are the
    * reference shapes). A row whose members cannot be spelled as option values
@@ -4062,10 +4277,10 @@ const FormFieldBaseSchema = lazySchema(() => {
    * Schema, and their meanings go in `helpText` (the `object.managedBy` /
    * `action.openIn` / `action.execution` rows are the reference shape). The
    * describe below states the rule where an author meets it, and
-   * `defineForm`'s module-load refusal of an unspellable value names the
+   * `defineMetadataForm`'s module-load refusal of an unspellable value names the
    * derive path as its remedy.
    */
-  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
+  options: z.array(FormSelectOptionSchema).optional().describe('Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineMetadataForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`.'),
   
   /** Reference object for lookup/master_detail fields */
   reference: z.string().optional().describe('Target object name for lookup/master_detail fields'),
@@ -4143,7 +4358,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * The read points (`resolveColSpan`, the wide-type list, the span ladder)
    * are recorded in `packages/spec/liveness/view.json`, row `form.sections`.
    */
-  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
+  span: z.enum(['auto', 'full']).default('auto').describe("Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater by its object-field type: the JSON editor it maps to is shared with json, composite and record, which stay one cell); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest."),
 
   /** Custom widget override — only needed when auto-inference is insufficient */
   widget: z.string().optional().describe('Custom widget/component name (overrides type-based inference)'),
@@ -4186,7 +4401,7 @@ const FormFieldBaseSchema = lazySchema(() => {
    * (ADR-0089, canonical `*When` name). Binding root depends on the surface:
    * runtime record forms bind `record` (plus `previous`, the saved record, and
    * `parent` for master-detail line items); metadata-editing forms
-   * (`*.form.ts`) bind the row under edit as `data`.
+   * (`*.metadata-form.ts`) bind the row under edit as `data`.
    *
    * ## `current_user` DOES bind here — client-side, and only under a host that
    * publishes a scope (objectui#6010)
@@ -4422,7 +4637,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    *    translation linter (`collectViewRecord`) accepts it and `translateView`
    *    serves it. A section without a `name` has no key there and keeps its
    *    authored text in every locale.
-   *  - **A metadata-editing form** (`defineForm({ schemaId })`):
+   *  - **A metadata-editing form** (`defineMetadataForm({ schemaId })`):
    *    `metadataForms.<type>.sections.<name>`, read by
    *    `resolveMetadataFormLabels`. A section without a `name` is looked up
    *    there under a slug of its `label`.
@@ -5114,7 +5329,7 @@ const FORM_VIEW_TYPE_RETIRED = {
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is "
     + 'the form\'s layout, and where a form opens is decided by whoever opens it: the console\'s New and Edit '
-    + 'dialogs open the record form themselves (sized by the form\'s `modalSize`), and an action '
+    + 'dialogs open the record form themselves (laid out by the object\'s `fieldGroups`), and an action '
     + '`type: \'modal\'` opens the page it targets. Delete the value for the `simple` default, or write the '
     + 'layout you want: `simple`, `tabbed` or `wizard`. '
     + FORM_VIEW_TYPE_RETIRED_FIX,
@@ -5210,6 +5425,147 @@ const FORM_VIEW_LAYOUT_RETIRED: ReadonlyMap<string, string> = new Map([
     + "('vertical' is the renderer default). "
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.'],
 ]);
+
+/**
+ * The cross-field rules of a form body: the section, wizard-step and
+ * field-predicate checks {@link FormViewSchema} runs. A named function so the
+ * `form` metadata type ({@link FormSchema}, ADR-0159 D2), whose body IS a form
+ * view's, attaches this same binding instead of a copy.
+ */
+function checkFormViewBody(view: any, ctx: z.RefinementCtx): void {
+  // Section-level checks. `.extend()` keeps this refinement (zod 4 attaches
+  // refinements to the schema), so the flattened runtime-overlay variant in
+  // ViewMetadataSchema enforces it too. [#27155] The split-only `pane` check
+  // that used to open this loop is gone: `pane` is a `retiredKey()` tombstone
+  // now, refused on every form type at the section itself.
+  //
+  // ⚠️ This refinement runs BEFORE the `.overwrite()` fold — see
+  // {@link foldFormGroupsIntoSections} — so every check here must keep
+  // reading BOTH buckets (`sections` AND the legacy `groups` alias).
+  for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
+    sections?.forEach((section: any, index: number) => {
+      // The `features.*` scope-root exclusion (ruled 2026-08-27, objectui#6262
+      // — see {@link checkFormViewPredicateFeaturesRoot}): every predicate
+      // this form view carries — section-level, field-level at any depth,
+      // per-option — is refused when it names the root that is unbound on the
+      // standalone form routes. Runs on every form `type`.
+      const sectionRefusal = checkFormViewPredicateFeaturesRoot(section?.visibleWhen);
+      if (sectionRefusal) {
+        ctx.addIssue({ code: 'custom', path: [key, index, 'visibleWhen'], message: sectionRefusal });
+      }
+      section?.fields?.forEach((field: any, fieldIndex: number) => {
+        refineFormFieldFeaturesRoot(field, [key, index, 'fields', fieldIndex], ctx);
+      });
+      // [#13704] Wizard steps carry no predicate slot and do not collapse —
+      // objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
+      // No"), upgraded from a renderer fact to a parse refusal (#13622 D2/T2,
+      // ruled 2026-08-31). Breadth is ruled NARROW: exactly this step-key
+      // family — no per-type presentation-key matrix.
+      //
+      // Post-parse observability decides the spellings checked here: the
+      // retired `visibleOn` never reaches this refinement (its tombstone on
+      // `FormSectionSchema` refuses it at the section, #23543 F4), so the
+      // canonical key is the one spelling to check. `collapsible` /
+      // `collapsed` carry `.default(false)`, so an authored `false` is
+      // indistinguishable from the default here — and needs no refusal: it
+      // declares exactly the behavior a wizard delivers. Only `true` declares
+      // behavior a wizard step does not have.
+      if (view.type === 'wizard' && section != null) {
+        if (section.visibleWhen != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'visibleWhen'],
+            message:
+              '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
+              + '— steps are entered in array order behind the step gate, '
+              + 'never conditionally. Put the predicate on the fields inside the step, or use a '
+              + '`simple`/`tabbed` form for section-level visibility.',
+          });
+        }
+        for (const collapseKey of ['collapsible', 'collapsed'] as const) {
+          if (section[collapseKey] === true) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [key, index, collapseKey],
+              message:
+                `\`${collapseKey}\` on a wizard step is refused: wizard steps do not collapse — `
+                + 'the wizard shows exactly the current step. Remove the key; collapsible '
+                + 'grouping belongs to `simple`/`tabbed` sections.',
+            });
+          }
+        }
+        // [#13855] The field-group REFERENCE form is refused on a wizard step
+        // for the same reason the two refusals above exist, one layer back: a
+        // `fieldGroups` entry carries `visibleWhen` and `collapse`, and
+        // `deriveFieldGroupLayout` passes both through to the derived section.
+        // Accepting `group` here would hand a wizard step exactly the predicate
+        // and collapse state #13704 just finished refusing — reached through
+        // the object's declaration instead of the step's own keys, so the
+        // refusals above would report clean while the behaviour arrived anyway.
+        // The section schema cannot see the group (that is cross-schema), so
+        // the honest answer at parse is to refuse the reference on this form
+        // type, not to guess what the group declares.
+        //
+        // Deliberately the CONSERVATIVE direction: a wizard step whose group
+        // declares neither key is legal metadata this refuses today, and
+        // allowing it later (once the renderer half lands and a ruling covers a
+        // derived predicate on a step) is additive.
+        if (section.group != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'group'],
+            message:
+              '`group` on a wizard step is refused: a field group carries `visibleWhen` and '
+              + '`collapse`, and `deriveFieldGroupLayout` passes both through to the section it '
+              + 'derives — neither of which a wizard step has a slot for (steps are entered in '
+              + 'array order behind the step gate, and the wizard shows exactly the current step). '
+              + 'Enumerate the step with `fields: [...]`, or use a `simple`/`tabbed` form to '
+              + 'inherit the group.',
+          });
+        }
+      }
+    });
+  }
+  // [#13704] A wizard must declare its steps (#13622 D7, ruled 2026-08-31).
+  // Before this refusal, `type: 'wizard'` with absent/empty `sections`
+  // silently fell back to plain simple rendering (objectui RecordFormPage's
+  // conditional spread + ObjectForm's `sections?.length` guard) — the
+  // accepted-but-ignored shape. ⛔ No "at least 2 steps" floor: a one-step
+  // wizard is legal and renders.
+  //
+  // Scoped to the doors where the body claims to be a COMPLETE authored form
+  // view (`ViewSchema.form` / `formViews`, the ViewItem config arms). The
+  // flattened runtime-overlay member (`FormViewOverlayWireSchema` =
+  // `.extend(flattenedViewOverlayFields()).strip()`) is exempt: an overlay is
+  // a partial patch over a shadowed registry entry — `{ type: 'wizard' }`
+  // beside the required `object`+`viewKind` binding, with `sections` supplied
+  // by the base view, is its load-bearing round-trip shape (#7025 pins that
+  // membership; moving it needs its own ruling, per #7741's precedent). The
+  // extension's required `viewKind` is the structural marker of that door: on
+  // THIS strict shape the key can never be present (unknown keys are refused
+  // before acceptance), so reading it distinguishes the doors mechanically.
+  // The step-KEY refusals above run on every door on purpose — they fire only
+  // on a key the author wrote, which is never a partial-overlay artifact.
+  if (view.type === 'wizard' && typeof (view as { viewKind?: unknown }).viewKind !== 'string') {
+    // Mirror `foldFormGroupsIntoSections`' precedence exactly (`sections`
+    // wins even when empty), and report at the bucket the author wrote —
+    // canonical `sections` when neither bucket is present.
+    const steps = view.sections !== undefined ? view.sections : view.groups;
+    if (steps === undefined || steps.length === 0) {
+      const authoredKey =
+        view.sections !== undefined ? 'sections' : view.groups !== undefined ? 'groups' : 'sections';
+      ctx.addIssue({
+        code: 'custom',
+        path: [authoredKey],
+        message:
+          "A `type: 'wizard'` form view must declare its steps: `"
+          + authoredKey + '` is ' + (steps === undefined ? 'absent' : 'empty')
+          + ', and the wizard would silently render as a plain simple form. Declare at least one '
+          + 'step — `sections: [{ label, fields: [...] }]`; sections ARE the steps, in array order.',
+      });
+    }
+  }
+}
 
 /**
  * Form View Schema
@@ -5340,16 +5696,16 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
   drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
-   * Size bucket of the dialog a caller opens this form in. Live on every
-   * layout: the console's New / Edit dialog reads it off the form view it
-   * selects, whatever the form's `type` ([#27155] it outlived `type: 'modal'`).
+   * Size bucket of the dialog a caller opens this form in. [#36425] The
+   * console's New / Edit dialog no longer reads a form view, so it is not that
+   * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
    */
   modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
 
   /**
    * Data Source Configuration. NOT removed in the #3896 sweep despite the
    * ledger's dead verdict — the removal attempt broke the build and thereby
-   * re-verified the entry: `defineForm` (below) writes
+   * re-verified the entry: `defineMetadataForm` (below) writes
    * `data: { provider: 'schema', schemaId }` onto EVERY metadata form, and
    * `metadata-protocol` serves it to the metadata-admin pipeline. The
    * record-form provider values (`object`/`value`) may still be unread — that
@@ -5561,140 +5917,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
   defaults: z.record(z.string(), z.unknown()).optional()
     .describe('Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;).'),
 
-}).superRefine((view, ctx) => {
-  // Section-level checks. `.extend()` keeps this refinement (zod 4 attaches
-  // refinements to the schema), so the flattened runtime-overlay variant in
-  // ViewMetadataSchema enforces it too. [#27155] The split-only `pane` check
-  // that used to open this loop is gone: `pane` is a `retiredKey()` tombstone
-  // now, refused on every form type at the section itself.
-  //
-  // ⚠️ This refinement runs BEFORE the `.overwrite()` fold — see
-  // {@link foldFormGroupsIntoSections} — so every check here must keep
-  // reading BOTH buckets (`sections` AND the legacy `groups` alias).
-  for (const [key, sections] of [['sections', view.sections], ['groups', view.groups]] as const) {
-    sections?.forEach((section, index) => {
-      // The `features.*` scope-root exclusion (ruled 2026-08-27, objectui#6262
-      // — see {@link checkFormViewPredicateFeaturesRoot}): every predicate
-      // this form view carries — section-level, field-level at any depth,
-      // per-option — is refused when it names the root that is unbound on the
-      // standalone form routes. Runs on every form `type`.
-      const sectionRefusal = checkFormViewPredicateFeaturesRoot(section?.visibleWhen);
-      if (sectionRefusal) {
-        ctx.addIssue({ code: 'custom', path: [key, index, 'visibleWhen'], message: sectionRefusal });
-      }
-      section?.fields?.forEach((field, fieldIndex) => {
-        refineFormFieldFeaturesRoot(field, [key, index, 'fields', fieldIndex], ctx);
-      });
-      // [#13704] Wizard steps carry no predicate slot and do not collapse —
-      // objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
-      // No"), upgraded from a renderer fact to a parse refusal (#13622 D2/T2,
-      // ruled 2026-08-31). Breadth is ruled NARROW: exactly this step-key
-      // family — no per-type presentation-key matrix.
-      //
-      // Post-parse observability decides the spellings checked here: the
-      // retired `visibleOn` never reaches this refinement (its tombstone on
-      // `FormSectionSchema` refuses it at the section, #23543 F4), so the
-      // canonical key is the one spelling to check. `collapsible` /
-      // `collapsed` carry `.default(false)`, so an authored `false` is
-      // indistinguishable from the default here — and needs no refusal: it
-      // declares exactly the behavior a wizard delivers. Only `true` declares
-      // behavior a wizard step does not have.
-      if (view.type === 'wizard' && section != null) {
-        if (section.visibleWhen != null) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [key, index, 'visibleWhen'],
-            message:
-              '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
-              + '— steps are entered in array order behind the step gate, '
-              + 'never conditionally. Put the predicate on the fields inside the step, or use a '
-              + '`simple`/`tabbed` form for section-level visibility.',
-          });
-        }
-        for (const collapseKey of ['collapsible', 'collapsed'] as const) {
-          if (section[collapseKey] === true) {
-            ctx.addIssue({
-              code: 'custom',
-              path: [key, index, collapseKey],
-              message:
-                `\`${collapseKey}\` on a wizard step is refused: wizard steps do not collapse — `
-                + 'the wizard shows exactly the current step. Remove the key; collapsible '
-                + 'grouping belongs to `simple`/`tabbed` sections.',
-            });
-          }
-        }
-        // [#13855] The field-group REFERENCE form is refused on a wizard step
-        // for the same reason the two refusals above exist, one layer back: a
-        // `fieldGroups` entry carries `visibleWhen` and `collapse`, and
-        // `deriveFieldGroupLayout` passes both through to the derived section.
-        // Accepting `group` here would hand a wizard step exactly the predicate
-        // and collapse state #13704 just finished refusing — reached through
-        // the object's declaration instead of the step's own keys, so the
-        // refusals above would report clean while the behaviour arrived anyway.
-        // The section schema cannot see the group (that is cross-schema), so
-        // the honest answer at parse is to refuse the reference on this form
-        // type, not to guess what the group declares.
-        //
-        // Deliberately the CONSERVATIVE direction: a wizard step whose group
-        // declares neither key is legal metadata this refuses today, and
-        // allowing it later (once the renderer half lands and a ruling covers a
-        // derived predicate on a step) is additive.
-        if (section.group != null) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [key, index, 'group'],
-            message:
-              '`group` on a wizard step is refused: a field group carries `visibleWhen` and '
-              + '`collapse`, and `deriveFieldGroupLayout` passes both through to the section it '
-              + 'derives — neither of which a wizard step has a slot for (steps are entered in '
-              + 'array order behind the step gate, and the wizard shows exactly the current step). '
-              + 'Enumerate the step with `fields: [...]`, or use a `simple`/`tabbed` form to '
-              + 'inherit the group.',
-          });
-        }
-      }
-    });
-  }
-  // [#13704] A wizard must declare its steps (#13622 D7, ruled 2026-08-31).
-  // Before this refusal, `type: 'wizard'` with absent/empty `sections`
-  // silently fell back to plain simple rendering (objectui RecordFormPage's
-  // conditional spread + ObjectForm's `sections?.length` guard) — the
-  // accepted-but-ignored shape. ⛔ No "at least 2 steps" floor: a one-step
-  // wizard is legal and renders.
-  //
-  // Scoped to the doors where the body claims to be a COMPLETE authored form
-  // view (`ViewSchema.form` / `formViews`, the ViewItem config arms). The
-  // flattened runtime-overlay member (`FormViewOverlayWireSchema` =
-  // `.extend(flattenedViewOverlayFields()).strip()`) is exempt: an overlay is
-  // a partial patch over a shadowed registry entry — `{ type: 'wizard' }`
-  // beside the required `object`+`viewKind` binding, with `sections` supplied
-  // by the base view, is its load-bearing round-trip shape (#7025 pins that
-  // membership; moving it needs its own ruling, per #7741's precedent). The
-  // extension's required `viewKind` is the structural marker of that door: on
-  // THIS strict shape the key can never be present (unknown keys are refused
-  // before acceptance), so reading it distinguishes the doors mechanically.
-  // The step-KEY refusals above run on every door on purpose — they fire only
-  // on a key the author wrote, which is never a partial-overlay artifact.
-  if (view.type === 'wizard' && typeof (view as { viewKind?: unknown }).viewKind !== 'string') {
-    // Mirror `foldFormGroupsIntoSections`' precedence exactly (`sections`
-    // wins even when empty), and report at the bucket the author wrote —
-    // canonical `sections` when neither bucket is present.
-    const steps = view.sections !== undefined ? view.sections : view.groups;
-    if (steps === undefined || steps.length === 0) {
-      const authoredKey =
-        view.sections !== undefined ? 'sections' : view.groups !== undefined ? 'groups' : 'sections';
-      ctx.addIssue({
-        code: 'custom',
-        path: [authoredKey],
-        message:
-          "A `type: 'wizard'` form view must declare its steps: `"
-          + authoredKey + '` is ' + (steps === undefined ? 'absent' : 'empty')
-          + ', and the wizard would silently render as a plain simple form. Declare at least one '
-          + 'step — `sections: [{ label, fields: [...] }]`; sections ARE the steps, in array order.',
-      });
-    }
-  }
-}).overwrite(foldFormGroupsIntoSections));
+}).superRefine(checkFormViewBody).overwrite(foldFormGroupsIntoSections));
 
 /**
  * Object-scoped user filters (ADR-0047 amendment, framework #2679 / objectui #2338).
@@ -5982,7 +6205,7 @@ const VIEW_SCOPE_RETIRED = {
  *
  * Named `scope` (not `provenance`) to avoid colliding with the loader-set
  * `_provenance` envelope field, which tracks a different axis
- * (package | org | env-forced).
+ * (package | org | env-forced | platform).
  */
 export const ViewScopeSchema = enumWithRetiredValues(['package', 'shared'], VIEW_SCOPE_RETIRED)
   .describe('View identity layer: package | shared.');
@@ -6177,36 +6400,33 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
 };
 
 /**
- * [commit d5552ca13] The per-user column layout the console's grid persists through the
- * `view` metadata door — an **explicitly runtime-only overlay key**, admitted
- * where overlays are validated and deliberately NOT authorable.
+ * [#36403] `columnState` RETIRED — ADR-0049 enforce-or-remove, the spec half
+ * of #35955 (maintainer: 「只记在浏览器里」 for column widths, and the
+ * server-side per-user list preference layer 「整个退掉」, 2026-11-21).
  *
- * Modeled on what the write actually sends (measured on objectui#5233's
- * os-dev-report and `ObjectGridColumnState` in objectui's
- * `plugin-grid/src/ObjectGrid.tsx`): `onColumnStateChange` emits
- * `{ order?: string[]; widths?: Record<string, number> }` — the merged result
- * of a column reorder and a resize — and `persistViewPatch` PUTs it as the
- * `columnState` key of a personalization overlay. Until this key was declared,
- * a `columnState`-only patch carried no key any {@link ViewMetadataSchema}
- * member declared, so {@link assertViewIdentity} refused the body ("no
- * recognized `view` key") and the write 422'd — the ruled patch-only write
- * (objectstack#7494 comment 5261754173) could not land. It survived only
- * inside the fat write's copied base, i.e. laundered past validation.
+ * [commit d5552ca13] had admitted it as a runtime-only overlay key: the
+ * console grid's column order and widths, PUT onto a stored `view` row (a
+ * personalization overlay, or a view item record through `updateView`) and
+ * applied on read. The writer is gone. The overlay writer retired with
+ * objectui#12504, and since #35955 a column drag goes to the list's draft
+ * (saved into the view's own `columns` / `fieldOrder`) while column widths
+ * live only in the reader's browser. Writer census before removal, at `main`
+ * 97b9d1e6: none in this framework, its examples or its console
+ * (`ui/packages/**`), none in the HotCRM app or the gallery; cloud was not
+ * reachable. The reader was not gone: until this release the console
+ * applied a stored layout (a record's key rode `listViews()`, an overlay's
+ * survived its narrowing, and the list renderer seeded the grid from it for a
+ * reader with no layout of their own in the browser). The D2 conversion
+ * strips the key on every read, so from this release no stored layout is
+ * applied and every reader sees the view's own column order and widths — the
+ * maintainer's ruling that a stored layout is not migrated (#35955).
  *
- * Posture decisions, both deliberate:
- *  - **Not `.strict()`**: the console owns the internals of this per-user
- *    state (objectui's `gridNonAuthorKeys` ruling, 2026-08-18), so a future
- *    console key here must not 422 against an older server. The two known
- *    keys are typed; unknown inner keys parse. [#20051] They are not stored:
- *    the save keeps only the keys the schema declares, so a new console key
- *    is declared here before the console relies on reading it back.
- *  - **Not exported, not on {@link ListViewSchema}**: exporting would mint a
- *    protocol def / authorable-surface entries, and declaring it on the
- *    authoring shape would bless hand-authoring a payload the product writes
- *    on the user's behalf. Author-writability is a DIFFERENT spec change,
- *    explicitly out of commit d5552ca13's scope; the authoring doors keep rejecting the
- *    key by name (see `VIEW_ITEM_SURFACE.guidance` and `ListViewSchema`'s
- *    `guidance`).
+ * Tombstoned on BOTH wire doors that declared it ({@link viewItemWireFields}
+ * and {@link flattenedViewOverlayFields}), never deleted: a bare deletion on
+ * a closed member reports only "unrecognized key", and the prescription is
+ * the payload. The authoring doors never declared it; their `guidance`
+ * entries carry the same retirement text. Stored rows and sources are
+ * stripped by the D2 conversion `view-column-state-removed`.
  *
  * Declared ABOVE the ViewItem section on purpose: `viewItemWireFields()` reads
  * it, and under `OS_EAGER_SCHEMAS=1` every `lazySchema` factory runs at module
@@ -6214,15 +6434,14 @@ type ViewItemWireArmShape<K extends 'list' | 'form', C extends z.ZodTypeAny> = {
  * TDZ `ReferenceError` at import time (the `strict-object.ts` docblock carries
  * the measured incident).
  */
-const ViewColumnStateSchema = z.object({
-  order: z.array(z.string()).optional()
-    .describe('Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored).'),
-  widths: z.record(z.string(), z.number()).optional()
-    .describe('Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored).'),
-}).describe(
-  'Runtime-only personalization overlay key: the column layout (order/widths) the console grid '
-  + 'persists through the `view` metadata API. NOT authorable — authoring doors reject it by name; do not write it in metadata source.',
-);
+const VIEW_COLUMN_STATE_RETIRED =
+  '`view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one '
+  + 'column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is '
+  + 'no longer applied, so every reader sees the view\'s own column order and widths. The console keeps '
+  + 'column widths in each reader\'s browser and saves a column order into the view itself. '
+  + 'Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a '
+  + 'width, set `width` on the column. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /** The authoring surface `defineViewItem` and Studio's create form are judged by. */
 const VIEW_ITEM_SURFACE = {
@@ -6236,8 +6455,9 @@ const VIEW_ITEM_SURFACE = {
     // instead of leaving them to guess.
     isPinned: 'Pinning is per-user Studio state, not authored metadata — the console writes it through the `view` metadata API. Remove it from authored metadata.',
     sortOrder: 'Switcher position is per-user Studio state, not authored metadata — use `order` for the authored default. Remove it from authored metadata.',
-    // [commit d5552ca13] Runtime-only overlay key — same disposition as the two above.
-    columnState: 'Column order/widths are per-user runtime personalization the console grid writes through the `view` metadata API — not authored metadata. Remove it from authored metadata.',
+    // [#36403] Retired — tombstoned on the wire members; an author gets the
+    // same prescription here ({@link VIEW_COLUMN_STATE_RETIRED}).
+    columnState: VIEW_COLUMN_STATE_RETIRED,
     // [#20456] Declared on the wire members with the switcher's other row
     // state; named here so an author who reaches for it as access control is
     // told what it is.
@@ -6376,14 +6596,11 @@ const VIEW_ITEM_OPTIONS_REFUSED =
 function viewItemWireFields() {
   return {
     ...viewSwitcherRowStateFields(),
-    // Same disposition as the switcher keys: console state written through
-    // the `view` metadata API ({@link ViewColumnStateSchema} carries the
-    // key's own ruling). `updateView` PUTs
-    // `{ ...current, ...partial }`, so on a standalone ViewItem record the
-    // key arrives at THIS member's top level; declaring it validates the
-    // shape where `.strip()` used to let it ride through unchecked.
-    columnState: ViewColumnStateSchema.optional()
-      .describe('Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view\'s row, which has no per-user scope — not authored)'),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. `updateView`
+    // PUT `{ ...current, ...partial }`, so on a standalone ViewItem record the
+    // key arrived at THIS member's top level; a stored record is stripped by
+    // the D2 conversion `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20051] Pinned ABSENT, refused by name — see
     // {@link VIEW_ITEM_OPTIONS_REFUSED}. `z.never()` rather than the form
     // overlay's `z.undefined()` ({@link FORM_OVERLAY_OPTIONS_REFUSED}): this
@@ -6442,7 +6659,7 @@ const FORM_OVERLAY_WIRE_SURFACE: StrictObjectOptions = {
  * The flattened overlays are built by extending an authoring shape, and an
  * extension inherits that shape's refusal: the surface named in it, and the
  * candidate list a typo is pointed at, which would miss every key the overlay
- * adds (`isPinned`, `columnState`, …). So the member is closed with a refusal
+ * adds (`isPinned`, `sortOrder`, …). So the member is closed with a refusal
  * built from its OWN shape — the same `strictObjectError` map
  * {@link strictObject} attaches — and re-declared as a `closedObject`, so the
  * refusal is terminal on this surface and the union keeps its envelope.
@@ -6510,6 +6727,138 @@ export const ViewItemWireSchema: z.ZodDiscriminatedUnion<[
  */
 export function defineViewItem(config: z.input<typeof ViewItemSchema>): ViewItem {
   return ViewItemSchema.parse(config);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The `form` metadata type (ADR-0159)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * [ADR-0159 D2] The prescription a `data` key on a `form` item answers with. A
+ * `form` item's object binding has ONE rung, its `object`; the four-rung
+ * resolution of an old-shape form ({@link anonymousFormObjectName}) lives only
+ * inside {@link projectViewForms}. A form bound to a JSON Schema
+ * (`data.provider: 'schema'`) is a Studio metadata form
+ * ({@link defineMetadataForm}), not a `form` item.
+ */
+const FORM_ITEM_DATA_REFUSED =
+  'A form item is bound with `object`, never with `data` (ADR-0159 D2): remove `data` and set `object` to the '
+  + 'object the form submits into; the name\'s prefix is that object (`OBJECT.KEY`). A form bound to a JSON '
+  + 'Schema is a Studio metadata form (`defineMetadataForm`), not a `form` item.';
+
+/** [ADR-0159 D2] The view-item keys a `form` item does not carry, each with what to do instead. */
+const FORM_ITEM_GUIDANCE = {
+  data: FORM_ITEM_DATA_REFUSED,
+  viewKind: 'A form item has no `viewKind`: the `form` type is the discriminator (ADR-0159 D2). Remove the key.',
+  config: 'A form item carries its body at the top level, not under `config` (ADR-0159 D2, question 5): move '
+    + 'the keys of `config` up beside `name` and `object`.',
+  isDefault: 'A form item has no `isDefault`: the object\'s record create and edit form is its `fieldGroups`, '
+    + 'never a `form` item (ADR-0159 D1). Remove the key.',
+  order: 'A form item has no `order`: forms are not in the view switcher (ADR-0159 D2). Remove the key.',
+  scope: 'A form item has no `scope`: the registry\'s provenance already says package or runtime (ADR-0159 D2). '
+    + 'Remove the key.',
+} as const;
+
+/**
+ * [ADR-0159 D3] The part of a `form` item's name before its last segment must
+ * equal its `object`: `crm_lead.web_to_lead` is a form of `crm_lead`. The view
+ * item never enforced it; the `form` type does from its first release. Applied
+ * to AUTHORED items only: a form the projection reads out of an old shape
+ * ({@link projectViewForms}) is served under the name it is served under today
+ * and is never parsed by {@link FormSchema} (ADR-0159 D5).
+ */
+export function checkFormItemNamePrefix(
+  form: { name?: unknown; object?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof form.name !== 'string' || typeof form.object !== 'string') return;
+  const cut = form.name.lastIndexOf('.');
+  if (cut <= 0) return; // the name grammar refuses a name with no dot
+  const prefix = form.name.slice(0, cut);
+  if (prefix === form.object) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['name'],
+    message:
+      `The form name '${form.name}' names the object '${prefix}', but the form is bound to '${form.object}' `
+      + '(ADR-0159 D3): a form is named `OBJECT.KEY` after the object it submits into. Rename it '
+      + `'${form.object}.${form.name.slice(cut + 1)}', or bind it to '${prefix}'.`,
+  });
+}
+
+/**
+ * [ADR-0159 D2] The body keys of a `form` item: every key of
+ * {@link FormViewSchema}'s shape BY REFERENCE (never transcribed), less
+ * `data`, which a `form` item does not author (the object binding is
+ * `object`).
+ */
+function formItemBodyShape() {
+  const { data: _data, ...body } = FormViewSchema.shape;
+  return body;
+}
+
+/**
+ * [ADR-0159 D2] A `form` metadata item: a named form with a consumer — a public
+ * form (it declares `sharing.publicLink`) or a form an action of
+ * `type: 'form'` opens. Its name is `OBJECT.KEY`, the name the form is served
+ * under (D3); it is bound to one object by `object`; and its body is a form
+ * view's, at the top level (ruled question 5: no `config` wrapper).
+ *
+ * - One Zod source: the body keys are {@link FormViewSchema}'s shape, by
+ *   reference, and its cross-field rules are the same binding
+ *   (`checkFormViewBody`, then the `groups` fold).
+ * - Not carried over from the view item: `viewKind`, `config`, `isDefault`,
+ *   `order` and `scope` — each refused by name with its prescription.
+ * - `data` is refused by name: bind the form with `object`.
+ * - `object` must name an object the package can reference; that is judged
+ *   where a view's object is judged (`os validate`, publish), not here.
+ *
+ * A record create or edit form is NOT a `form` item (ADR-0159 D1): it is the
+ * object's `fieldGroups`.
+ */
+export const FormSchema = lazySchema(() => strictObject({
+  surface: 'this form',
+  history: VIEW_HISTORY,
+  guidance: FORM_ITEM_GUIDANCE,
+}, {
+  name: ViewItemNameSchema.describe('The form\'s name, `OBJECT.KEY` (ADR-0159 D3): the name it is served under, the target of an action of `type: \'form\'`, and the key a declared override names. The part before the last segment is the form\'s `object`.'),
+  object: SnakeCaseIdentifierSchema.describe('The object the form submits into — its one binding (ADR-0159 D2). It must name an object the package can reference.'),
+  label: I18nLabelSchema.optional().describe('The form\'s name in lists (Setup, Studio). When absent a surface shows `title`, then the name.'),
+  ...formItemBodyShape(),
+  protection: ProtectionSchema.optional().describe('Package author protection block — lock policy for this form.'),
+  // ADR-0010 — runtime protection envelope (internal — set by the loader).
+  ...MetadataProtectionFields,
+  // ADR-0146 D2 / ADR-0159 D4 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
+})
+  .superRefine(checkFormViewBody)
+  .superRefine(checkFormItemNamePrefix)
+  .overwrite(foldFormGroupsIntoSections));
+
+/** A `form` metadata item as authored (ADR-0159). */
+export type Form = z.input<typeof FormSchema>;
+/** Post-parse shape of {@link Form} — defaults applied, the `groups` alias folded. */
+export type FormParsed = z.infer<typeof FormSchema>;
+
+/**
+ * Type-safe factory for a `form` metadata item (ADR-0159, ruled question 1 = A):
+ * the item a stack lists under `forms: [...]`, one per `*.form.ts` module.
+ * Validates at authoring time.
+ *
+ * @example
+ * ```ts
+ * export const webToLead = defineForm({
+ *   name: 'crm_lead.web_to_lead',
+ *   object: 'crm_lead',
+ *   label: 'Web to lead',
+ *   title: 'Contact us',
+ *   sections: [{ fields: [{ field: 'name' }, { field: 'email' }] }],
+ *   sharing: { enabled: true, allowAnonymous: true, publicLink: '/forms/contact-us' },
+ * });
+ * ```
+ */
+export function defineForm(config: z.input<typeof FormSchema>): FormParsed {
+  return FormSchema.parse(config);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -6724,13 +7073,11 @@ function flattenedViewOverlayFields<K extends 'list' | 'form'>(kind: K) {
         + 'personalization PUTs.',
       ),
     label: I18nLabelSchema.optional().describe('Display label (inherited from the shadowed entry —).'),
-    // [commit d5552ca13] Runtime-only overlay key — declared HERE (the overlay-validation
-    // face) and on `viewItemWireFields()`, never on an authoring shape. This is
-    // what lets a `columnState`-only personalization patch through the
-    // identity precondition (the vocabulary is derived from the members' keys)
-    // AND gets its inner shape genuinely validated instead of ridden past
-    // `.strip()` unchecked.
-    columnState: ViewColumnStateSchema.optional(),
+    // [#36403] RETIRED — see {@link VIEW_COLUMN_STATE_RETIRED}. It was the
+    // overlay's per-user column order and widths; no writer is left, and a
+    // stored overlay row is stripped by the D2 conversion
+    // `view-column-state-removed`.
+    columnState: retiredKey(VIEW_COLUMN_STATE_RETIRED),
     // [#20456] A console round-trip key (the switcher's set-default writes it
     // and reads it back), declared here since before that census; now it
     // carries its meaning too.
@@ -7065,7 +7412,7 @@ const LIST_OVERLAY_DEFAULT_TYPE = 'grid';
 const LIST_OVERLAY_TYPE_NEEDS_COLUMNS =
   'This list view overlay sets `type` but lists no `columns`. A body that sets `type` is a full inline list '
   + 'config, and a full config lists its columns: add `columns: ["field_a", "field_b"]`. A patch on the view '
-  + 'it shadows (`sort`, `hiddenFields`, `columnState`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
+  + 'it shadows (`sort`, `hiddenFields`, `rowHeight`, `inlineEdit`, …) sets no `type` and needs no `columns`: '
   + 'remove `type` to save this body as a patch on the view it shadows.';
 
 /**
@@ -7385,7 +7732,6 @@ export const VIEW_CONSOLE_ROUND_TRIP_KEYS = {
   isPinned: ['viewItem', 'listOverlay'],
   sortOrder: ['viewItem', 'listOverlay'],
   visibility: ['viewItem', 'listOverlay'],
-  columnState: ['viewItem', 'listOverlay'],
   _isOverride: ['listOverlay'],
 } as const satisfies Record<string, readonly ViewMetadataBranch[]>;
 
@@ -8051,14 +8397,203 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
   return expandViewContainerWithDiagnostics(object, container).items;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// [ADR-0159 D5] The projection of the three old form shapes into `form` items
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * The read-envelope mark of a `form` item the projection read out of an old
+ * shape ({@link projectViewForms}): a surface can say "defined in a view" and
+ * offer the move (ADR-0159 D5). It names the shape: `'view'`.
+ */
+export const PROJECTED_FORM_SOURCE_KEY = '_formDefinedIn' as const;
+
+/** One `form` item a `view` body carries (ADR-0159 D5). */
+export interface ProjectedFormItem {
+  /** The name the form is served under today: a stored item's own `name`, or the name `expandViewContainer` gives a container's form. */
+  name: string;
+  /** The object the form submits into, by today's four-rung resolution ({@link anonymousFormObjectName}). */
+  object: string;
+  /** The form body, unchanged, at the top level (ruled question 5), plus the item's own `label`, `overrides` and envelope. */
+  [key: string]: unknown;
+}
+
+/** What one `view` body carries, as the `form` type reads it (ADR-0159 D5, D6 rule 7). */
+export interface ViewFormProjection {
+  /** The form items the body carries, under the names they are served as today, in scan order. */
+  forms: ProjectedFormItem[];
+  /** The names the body writes a LIST at — an item, or a container's expansion. A list is not a form (D3). */
+  lists: string[];
+  /**
+   * Set when the body carries form content the projection cannot turn into
+   * items (D6 rule 7): a `form` or `formViews` that is not an object, a
+   * `formViews` entry that is not one, a `viewKind: 'form'` item with no
+   * `config` object, or a container whose expansion throws. `links` are the
+   * `sharing.publicLink` values the content names, normalised to slugs: a
+   * reader treats each as withdrawn.
+   */
+  unreadable?: { reason: string; links: string[] };
+}
+
+/** The `view`-item keys that travel onto a projected `form` item beside its body. */
+const PROJECTED_ITEM_KEYS = ['label', 'overrides', 'protection', '_lock', '_lockReason', '_lockSource', '_packageId', '_packageVersion', '_provenance'] as const;
+
+/** Every `sharing.publicLink` slug a value names, at any depth (rule 7's "the links it names"). */
+function namedPublicLinks(value: unknown, out: Set<string> = new Set(), depth = 0): string[] {
+  if (depth > 12 || value === null || typeof value !== 'object') return [...out];
+  if (Array.isArray(value)) {
+    for (const v of value) namedPublicLinks(v, out, depth + 1);
+    return [...out];
+  }
+  const rec = value as Record<string, unknown>;
+  const sharing = rec.sharing;
+  if (sharing && typeof sharing === 'object' && typeof (sharing as Record<string, unknown>).publicLink === 'string') {
+    const link = (sharing as Record<string, unknown>).publicLink as string;
+    if (link) out.add(publicFormSlug(link));
+  }
+  for (const [k, v] of Object.entries(rec)) if (k !== 'sharing') namedPublicLinks(v, out, depth + 1);
+  return [...out];
+}
+
+function projectedItem(
+  name: string,
+  object: string,
+  body: Record<string, unknown>,
+  carrier: Record<string, unknown>,
+): ProjectedFormItem {
+  const item: ProjectedFormItem = { ...body, name, object };
+  for (const key of PROJECTED_ITEM_KEYS) {
+    if (carrier[key] !== undefined && item[key] === undefined) item[key] = carrier[key];
+  }
+  // A view item's own audience gate travels with it: a caller refused the
+  // form at `/meta/view/NAME` is refused it at `/meta/form/NAME` (card ② item 2).
+  const own = Array.isArray(carrier.requiredPermissions) ? carrier.requiredPermissions : [];
+  if (own.length > 0) {
+    const inner = Array.isArray(body.requiredPermissions) ? body.requiredPermissions : [];
+    item.requiredPermissions = [...new Set([...own, ...inner])];
+  }
+  item[PROJECTED_FORM_SOURCE_KEY] = 'view';
+  return item;
+}
+
+/**
+ * [ADR-0159 D5] THE projection: turn one `view` body into the `form` items it
+ * carries — the container's `form`, each `formViews` entry, and a
+ * `viewKind: 'form'` item's `config` — and the names it writes a list at.
+ *
+ * It is the ONLY reader of the old shapes for form content: the loader, the
+ * stored-row read, the anonymous doors, the withdrawal judgement and the lint
+ * call it, and none re-reads `formViews` by hand.
+ *
+ * - A projected item takes the name it is served under today (a stored item's
+ *   own `name`; for a container, the name {@link expandViewContainerWithDiagnostics}
+ *   gives it), `object` from today's four-rung resolution
+ *   ({@link anonymousFormObjectName}), and its body UNCHANGED, lifted to the top
+ *   level (ruled question 5). It is marked {@link PROJECTED_FORM_SOURCE_KEY}.
+ * - ⛔ A projected item is never parsed by {@link FormSchema}: the authored-only
+ *   refusals (`data` by name, the name's prefix equal to `object`) are not
+ *   applied to it, because the view item never enforced them (D3) and nothing an
+ *   author wrote stops loading.
+ * - A body it cannot turn into items at all is `unreadable` (D6 rule 7), with
+ *   the links it names; never an item that fails an authored-`form` refusal.
+ *
+ * Pure: no I/O, no registry, no module-load work.
+ */
+export function projectViewForms(body: unknown, options: { object?: string } = {}): ViewFormProjection {
+  const out: ViewFormProjection = { forms: [], lists: [] };
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return out;
+  const v = body as Record<string, any>;
+  const unreadable = (reason: string, content: unknown): ViewFormProjection => ({
+    forms: [],
+    lists: out.lists,
+    unreadable: { reason, links: namedPublicLinks(content) },
+  });
+  if (isAggregatedViewContainer(v)) {
+    if (v.form !== undefined && v.form !== null && (typeof v.form !== 'object' || Array.isArray(v.form))) {
+      return unreadable('the container\'s `form` is not an object', { form: v.form, formViews: v.formViews });
+    }
+    if (v.formViews !== undefined && v.formViews !== null) {
+      if (typeof v.formViews !== 'object' || Array.isArray(v.formViews)) {
+        return unreadable('the container\'s `formViews` is not an object', { form: v.form, formViews: v.formViews });
+      }
+      for (const [key, entry] of Object.entries(v.formViews)) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          return unreadable(`the container's \`formViews.${key}\` is not an object`, { form: v.form, formViews: v.formViews });
+        }
+      }
+    }
+    // The object the loaders and the runtime door expand the container under
+    // (`deriveViewContainerObject`), so the projected names are the served ones.
+    const object = deriveViewContainerObject(v) ?? options.object;
+    if (object === undefined) return unreadable('the container names no object', { form: v.form, formViews: v.formViews });
+    let expanded: ExpandedViewItem[];
+    try {
+      expanded = expandViewContainerWithDiagnostics(object, v).items;
+    } catch (err) {
+      return unreadable(`the container cannot be expanded (${err instanceof Error ? err.message : String(err)})`, { form: v.form, formViews: v.formViews });
+    }
+    for (const item of expanded) {
+      if (item.viewKind !== 'form') {
+        out.lists.push(item.name);
+        continue;
+      }
+      const config = (item.config ?? {}) as Record<string, unknown>;
+      const carrier: Record<string, unknown> = { ...v, label: item.label };
+      // The doors read a container's forms as the items it expands to, so the
+      // four rungs are asked of the expanded item: the form's own
+      // `data.object`, else the object the container expands under.
+      out.forms.push(projectedItem(item.name, anonymousFormObjectName({ object: item.object }, config) ?? item.object, config, carrier));
+    }
+    return out;
+  }
+  const name = typeof v.name === 'string' && v.name ? v.name : undefined;
+  if (v.viewKind === 'form') {
+    if (!v.config || typeof v.config !== 'object' || Array.isArray(v.config)) {
+      return unreadable('a `viewKind: \'form\'` item carries no `config` object', v);
+    }
+    if (name === undefined) return unreadable('a `viewKind: \'form\'` item names no `name`', v.config);
+    const object = anonymousFormObjectName(v, v.config);
+    if (typeof object !== 'string' || !object) return unreadable('a `viewKind: \'form\'` item names no object', v.config);
+    out.forms.push(projectedItem(name, object, v.config as Record<string, unknown>, v));
+    return out;
+  }
+  if (name !== undefined) out.lists.push(name);
+  return out;
+}
+
+/**
+ * [ADR-0159 D5] Every `form` item a set of `view` bodies carries, one per name
+ * in scan order (the first body that projects a name keeps it): the source
+ * half of the `form` read for one package's old shapes. A container comes
+ * before the items it expands, so the four-rung `object` is the container's.
+ */
+export function projectedFormsOf(bodies: ReadonlyArray<unknown>): ProjectedFormItem[] {
+  const seen = new Set<string>();
+  const out: ProjectedFormItem[] = [];
+  const ordered = [...bodies].sort((a, b) => Number(!isAggregatedViewContainer(a)) - Number(!isAggregatedViewContainer(b)));
+  for (const body of ordered) {
+    for (const form of projectViewForms(body).forms) {
+      if (seen.has(form.name)) continue;
+      seen.add(form.name);
+      out.push(form);
+    }
+  }
+  return out;
+}
+
 /**
  * Type-safe factory for a standalone {@link FormView} bound to a JSON Schema
  * rather than to an ObjectQL object.
  *
- * Use this for forms that edit **metadata** (e.g. `report.form.ts`,
- * `dashboard.form.ts`), **action inputs**, or **flow screens** — anywhere the
+ * Use this for forms that edit **metadata** (e.g. `report.metadata-form.ts`,
+ * `dashboard.metadata-form.ts`), **action inputs**, or **flow screens** — anywhere the
  * data shape is described by a Zod-derived JSON Schema instead of an Object
  * field set.
+ *
+ * Named `defineForm` until ADR-0159 (question 1, ruled A): that name belongs to
+ * the `form` metadata type's factory, so this Studio helper is
+ * `defineMetadataForm` and its modules are `*.metadata-form.ts`, after the
+ * `metadataForms` translation family they feed.
  *
  * The returned FormView is validated at definition time; the runtime form
  * renderer (`@object-ui/plugin-form`) inspects `data.provider === 'schema'`
@@ -8074,7 +8609,7 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  *
  * @example
  * ```ts
- * export const reportForm = defineForm({
+ * export const reportForm = defineMetadataForm({
  *   schemaId: 'report',
  *   type: 'tabbed',
  *   sections: [
@@ -8093,7 +8628,7 @@ export function expandViewContainer(object: string, container: any): ExpandedVie
  * });
  * ```
  */
-export function defineForm(
+export function defineMetadataForm(
   config: Omit<z.input<typeof FormViewSchema>, 'data'> & { schemaId: string },
 ): FormViewParsed {
   const { schemaId, ...rest } = config;
@@ -8103,7 +8638,7 @@ export function defineForm(
   });
   if (parsed.success) return parsed.data;
   // The refusal stays an `Error` with a stack, so an uncaught module-load throw
-  // prints its issues and the remedy, with the author's `defineForm(...)` call
+  // prints its issues and the remedy, with the author's `defineMetadataForm(...)` call
   // as the first frame. Two traps, both measured on zod 4.6.1: `new z.ZodError`
   // builds a plain object (no `Error` parent, no `stack`), which node prints as
   // `ZodError { name, message: [Getter/Setter] }`; and zod builds every
@@ -8112,36 +8647,69 @@ export function defineForm(
   // The error is built from issues that already carry the remedy, so its
   // lazily computed `message` holds it whenever it is first read.
   const refusal = new z.ZodRealError(withOptionValueDeriveRemedy(parsed.error.issues));
-  z.core.util.captureStackTrace(refusal, defineForm);
+  z.core.util.captureStackTrace(refusal, defineMetadataForm);
   throw refusal;
 }
 
 /**
- * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
+ * Type-safe factory for a metadata type's Studio list layout — the list
+ * counterpart of {@link defineMetadataForm}. It binds the columns to the type's JSON
+ * Schema (`data.provider === 'schema'`) and validates them against
+ * {@link MetadataListViewSchema} at definition time, so a malformed column
+ * fails at module load.
+ *
+ * @example
+ * ```ts
+ * export const hookList = defineList({
+ *   schemaId: 'hook',
+ *   columns: [
+ *     { field: 'name', label: 'Name' },
+ *     { field: 'object', label: 'Object', type: 'list' },
+ *     { field: 'events', label: 'Events', type: 'list' },
+ *   ],
+ * });
+ * ```
+ */
+export function defineList(
+  config: Omit<z.input<typeof MetadataListViewSchema>, 'data'> & { schemaId: string },
+): MetadataListViewParsed {
+  const { schemaId, ...rest } = config;
+  const parsed = MetadataListViewSchema.safeParse({
+    ...rest,
+    data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  const refusal = new z.ZodRealError(parsed.error.issues);
+  z.core.util.captureStackTrace(refusal, defineList);
+  throw refusal;
+}
+
+/**
+ * [#19678] The remedy {@link defineMetadataForm}'s refusal of an unspellable inline
  * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
  * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
  * members inline, and the wall names the derive path for a row whose members
  * cannot be spelled.
  *
- * The refusal itself is `SystemIdentifierSchema`'s grammar message
- * (`shared/identifiers.zod.ts`), reached through `SelectOptionSchema.value`,
+ * The refusal itself is the option-value grammar message
+ * (`SelectOptionValueSchema`, `data/field.zod.ts`), reached through `SelectOptionSchema.value`,
  * which the form face reuses BY REFERENCE (pinned in
  * `form-select-option.test.ts`). That message cannot carry this remedy where it
- * is declared: the same grammar bounds object-field options and three
- * object-storage names, and "derive the members from the served JSON Schema"
- * is true only on a schema-bound form. `defineForm` is exactly that door — it
+ * is declared: the same grammar bounds object-field options and picklist
+ * items, and "derive the members from the served JSON Schema"
+ * is true only on a schema-bound form. `defineMetadataForm` is exactly that door — it
  * stamps `data.provider: 'schema'` on every form it builds — so the remedy is
  * appended here, to the issue that door raises, and nowhere else.
  */
 const FORM_OPTION_VALUE_DERIVE_REMEDY =
-  'An enum member carrying a hyphen, a capital or a single character cannot be a form option '
+  'An enum member carrying a hyphen or a capital cannot be a form option '
   + '`value`, which is a lowercase system identifier. When this row edits a spec enum whose '
   + 'members cannot be spelled as option values, omit `options`: the control derives the '
   + 'members from the served JSON Schema, and their meanings go in `helpText`.';
 
 /**
- * The two issue codes the system-identifier grammar raises on a string: the
- * pattern (`invalid_format`) and the two-character floor (`too_small`).
+ * The two issue codes the option-value grammar raises on a string: the
+ * pattern (`invalid_format`) and the empty-value floor (`too_small`).
  */
 const OPTION_VALUE_GRAMMAR_CODES: ReadonlySet<string> = new Set(['invalid_format', 'too_small']);
 
@@ -8252,6 +8820,15 @@ export type FormSelectOptionParsed = z.infer<typeof FormSelectOptionSchema>;
 export type ListColumn = z.input<typeof ListColumnSchema>;
 /** Post-parse shape of {@link ListColumn} — defaults applied, transforms run (ADR-0122). */
 export type ListColumnParsed = z.infer<typeof ListColumnSchema>;
+export type MetadataListCellType = z.input<typeof MetadataListCellTypeSchema>;
+/** Post-parse shape of {@link MetadataListCellType} (ADR-0122). */
+export type MetadataListCellTypeParsed = z.infer<typeof MetadataListCellTypeSchema>;
+export type MetadataListColumn = z.input<typeof MetadataListColumnSchema>;
+/** Post-parse shape of {@link MetadataListColumn} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListColumnParsed = z.infer<typeof MetadataListColumnSchema>;
+export type MetadataListView = z.input<typeof MetadataListViewSchema>;
+/** Post-parse shape of {@link MetadataListView} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListViewParsed = z.infer<typeof MetadataListViewSchema>;
 // `FormField` is declared next to FormFieldSchema — it IS that schema's
 // annotation, so it cannot be inferred back out of it (#4171).
 export type SelectionConfig = z.input<typeof SelectionConfigSchema>;
@@ -8329,6 +8906,8 @@ export type CalendarConfig = z.input<typeof CalendarConfigSchema>;
 export type GanttConfig = z.input<typeof GanttConfigSchema>;
 export type GanttQuickFilter = z.input<typeof GanttQuickFilterSchema>;
 export type KanbanConfig = z.input<typeof KanbanConfigSchema>;
+export type KanbanLaneSummary = z.input<typeof KanbanLaneSummarySchema>;
+export type KanbanLaneSummaryParsed = z.infer<typeof KanbanLaneSummarySchema>;
 export type ListMapConfig = z.input<typeof ListMapConfigSchema>;
 export type NavigationMode = z.input<typeof NavigationModeSchema>;
 export type TreeConfig = z.input<typeof TreeConfigSchema>;

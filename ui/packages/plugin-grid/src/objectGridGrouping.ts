@@ -18,10 +18,12 @@ import {
   useGroupedDataInOptionOrder, usableGroupingFields,
   type GroupAggregationConfig, type GroupOptionRanks, type ServerGroupSource, type TemporalAggregateFaces,
 } from './useGroupedData';
-import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
+import {
+  groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupHeaders, type ServerGroupLeaf,
+} from './useServerGrouping';
 import { useLookupTargetDefs } from './lookupGroupTargets';
 import { normalizeColumns } from './objectGridColumns';
-import { honestGroupAggregations } from './recordCurrencyAggregates';
+import { honestGroupAggregations, honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
 import type { useGridTranslation } from './objectGridTranslations';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import type { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
@@ -82,11 +84,25 @@ function temporalFacesOfAggregations(
   return out;
 }
 
+/**
+ * The records a server-grouped grid matches: its top-level group counts
+ * summed. `undefined` with no answer in hand; `null` — no total — when the
+ * answer is partial (`hasMore`, objectstack#37278): it lists only some of the
+ * groups, so their sum is not the total.
+ */
+export function serverGroupTotalOf(
+  groupHeaders: Pick<ServerGroupHeaders, 'headers' | 'partial'>,
+): number | null | undefined {
+  if (!groupHeaders.headers) return undefined;
+  if (groupHeaders.partial) return null;
+  return (groupHeaders.headers[0] ?? []).reduce((sum, row) => sum + (Number(row.count) || 0), 0);
+}
+
 export function useObjectGridGrouping({
   schema, dataSource, objectName, objectFields, objectTypesPending, data, setData, setTotalMatching,
   t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey, serverPageSize,
   groupRowQuery, groupingKeyReadable, groupingRefusesNothing, unmaskedGroupingFields,
-  serverGroupedFetch, invalidationNonce,
+  serverGroupedFetch, invalidationNonce, savedFigureNonce, regroupNonce,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -109,6 +125,17 @@ export function useObjectGridGrouping({
   unmaskedGroupingFields: GroupingDecisions['unmaskedGroupingFields'];
   serverGroupedFetch: GroupingDecisions['serverGroupedFetch'];
   invalidationNonce: RowLoad['invalidationNonce'];
+  /**
+   * objectstack#35689 — bumped when a select-first save changed a figure but
+   * no group: the server's headers are asked again, the rows on screen stay.
+   */
+  savedFigureNonce: number;
+  /**
+   * objectstack#35689 — bumped when the reader left a row whose save moved it
+   * to another group: the server's headers and the open groups' rows are
+   * asked again.
+   */
+  regroupNonce: number;
 }) {
   // --- Grouping support ---
   // Build a per-field value formatter so group headers display the human
@@ -290,33 +317,44 @@ export function useObjectGridGrouping({
       return { error: err instanceof Error ? err : new Error(String(err)) };
     }
   }, [groupRowQueryKey]);
-  const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
-  // [ADR-0144 D6] A money aggregate over a `record`-mode amount stands only in
-  // groups bucketed by that amount's code field; elsewhere it would add
-  // amounts in different currencies, so it is dropped before either the
-  // server or the client bucketing computes it. Keyed on what it reads, so a
+  const groupReloadKey = `${refreshKey}:${invalidationNonce}:${regroupNonce}`;
+  const groupHeaderReloadKey = `${groupReloadKey}:${savedFigureNonce}`;
+  // [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate over a `record`-mode
+  // amount or quantity stands only in groups bucketed by its code or unit
+  // field; elsewhere it would add amounts in different currencies or
+  // quantities in different units, so it is dropped before either the server
+  // or the client bucketing computes it. Keyed on what it reads, so a
   // host that rebuilds `schema` every render does not re-key the header query.
+  // [objectstack#36276] Judged PER DEPTH, on the levels the grid really
+  // groups by (the server's, or the render grouping's): a depth-`d` group is
+  // bucketed by the first `d` levels only, so a sum over a quantity whose unit
+  // field is the second level stands in the second level's bands and is left
+  // out of the first's. The header query judges its own depths the same way.
   // [objectstack#32119] Per aggregated field whose cell paints a date-family
   // face, that face, resolved as the group headings' faces are: a `min` /
   // `max` over it is a time, drawn as the cell draws it, and a `sum` / `avg`
-  // over it is no figure at all, so it is dropped here with the money
+  // over it is no figure at all, so it is dropped here with the measure
   // aggregates, before either path computes it or the server is asked.
   const groupAggregationKey = JSON.stringify({
     aggregations: schema.aggregations ?? null,
-    grouping: usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field),
+    grouping: usableGroupingFields(serverGroupedFetch ? serverGroupingFields : groupingForRender?.fields).map((gf) => gf.field),
     temporal: temporalFacesOfAggregations(schema.aggregations, normalizeColumns(schema.columns) ?? [], objectFields),
   });
-  const groupAggregations = React.useMemo(() => {
+  const { groupAggregations, groupAggregationsByDepth } = React.useMemo(() => {
     const { aggregations, grouping, temporal } = JSON.parse(groupAggregationKey) as {
       aggregations: ObjectGridSchema['aggregations'] | null;
       grouping: string[];
       temporal: Array<[string, TemporalCellFace]>;
     };
     const temporalFields = new Set(temporal.map(([field]) => field));
-    const honest = honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
-    if (!honest || temporalFields.size === 0) return honest;
-    const kept = honest.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
-    return kept.length === honest.length ? honest : kept;
+    const configured = aggregations ?? undefined;
+    const faceable = !configured || temporalFields.size === 0
+      ? configured
+      : configured.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
+    return {
+      groupAggregations: honestGroupAggregations(faceable, objectFields, grouping),
+      groupAggregationsByDepth: honestGroupAggregationsByDepth(faceable, objectFields, grouping),
+    };
   }, [groupAggregationKey, objectFields]);
   const displayLocale = useDisplayLocale();
   const temporalAggregates = React.useMemo((): TemporalAggregateFaces | undefined => {
@@ -334,7 +372,7 @@ export function useObjectGridGrouping({
     ...groupSearchOf(groupRowQuery),
     aggregations: groupAggregations,
     objectFields,
-    reloadKey: groupReloadKey,
+    reloadKey: groupHeaderReloadKey,
   });
   // Keyed on the hook's STATE values (a stable identity React promises), so
   // the group tree is rebuilt when the server answers, not on every render.
@@ -378,6 +416,7 @@ export function useObjectGridGrouping({
     serverGroupSource,
     groupOptionRanks,
     temporalAggregates,
+    groupAggregationsByDepth,
   );
 
   // Reset grouped pagination to page 1 whenever the grouping config, page size
@@ -434,12 +473,11 @@ export function useObjectGridGrouping({
     if (outstanding && pages.some((page) => (page?.rows.length ?? 0) > 0)) return;
     setData(outstanding ? [] : pages.flatMap((page) => page?.rows ?? []));
   }, [serverGroupedFetch, serverLeafKeys, groupRows.pages]);
-  // …and the match total is the QUERY's: the top-level group counts summed.
-  const serverGroupTotal = serverGroupedFetch && groupHeaders.headers
-    ? (groupHeaders.headers[0] ?? []).reduce((sum, row) => sum + (Number(row.count) || 0), 0)
-    : undefined;
+  // …and the match total is the QUERY's: the top-level group counts summed —
+  // over a WHOLE answer only (`serverGroupTotalOf`).
+  const serverGroupTotal = serverGroupedFetch ? serverGroupTotalOf(groupHeaders) : undefined;
   useEffect(() => {
-    if (serverGroupTotal !== undefined) setTotalMatching(serverGroupTotal);
+    if (serverGroupTotal !== undefined) setTotalMatching(serverGroupTotal ?? undefined);
   }, [serverGroupTotal]);
 
   return {

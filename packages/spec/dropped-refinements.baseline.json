@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 274,
-    "droppedRefinementSites": 1151,
+    "publishedSchemasWithDroppedRefinements": 281,
+    "droppedRefinementSites": 1239,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -12,6 +12,40 @@
       "sites": [
         "memory",
         "structuredOutput.schema"
+      ]
+    },
+    "ai/AskQuestion": {
+      "sites": [
+        ""
+      ]
+    },
+    "ai/AskQuestionEnvelope": {
+      "sites": [
+        "questions.element"
+      ]
+    },
+    "ai/AiContext": {
+      "sites": [
+        "related",
+        "related.element.orderBy",
+        "related.element.where.lazy",
+        "related.element.where.lazy.lazy",
+        "related.element.where.lazy.lazy.right.$not.lazy"
+      ]
+    },
+    "ai/AiContextRelated": {
+      "sites": [
+        "orderBy",
+        "where.lazy",
+        "where.lazy.lazy",
+        "where.lazy.lazy.right.$not.lazy"
+      ]
+    },
+    "ai/AiContextRelatedWhere": {
+      "sites": [
+        "lazy",
+        "lazy.lazy",
+        "lazy.lazy.right.$not.lazy"
       ]
     },
     "ai/BlueprintField": {
@@ -60,6 +94,7 @@
     },
     "ai/Skill": {
       "sites": [
+        "",
         "triggerConditions.element"
       ]
     },
@@ -116,6 +151,10 @@
         "manifest.actions.element.in.texts.valueType",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
+        "manifest.aiContexts.element.related",
+        "manifest.aiContexts.element.related.element.orderBy",
+        "manifest.aiContexts.element.related.element.where.lazy",
+        "manifest.aiContexts.element.related.element.where.lazy.lazy",
         "manifest.analyticsCubes.element.measures.valueType",
         "manifest.apps.element",
         "manifest.assignmentRules.element",
@@ -140,6 +179,9 @@
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
         "manifest.flows.element.variables.element",
+        "manifest.forms.element",
+        "manifest.forms.element.sections.element",
+        "manifest.forms.element.submitBehavior.options[1].url",
         "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.hooks.element.refusals.valueType",
@@ -152,6 +194,8 @@
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
         "manifest.objects.element",
+        "manifest.objects.element.actionLayout.list",
+        "manifest.objects.element.actionLayout.record",
         "manifest.objects.element.defaultRowScope",
         "manifest.objects.element.fieldGroups",
         "manifest.objects.element.fields.out.valueType",
@@ -176,6 +220,7 @@
         "manifest.reports.element.runtimeFilter",
         "manifest.reports.element.runtimeFilter.lazy",
         "manifest.sharingRules.element.sharedWith",
+        "manifest.skills.element",
         "manifest.skills.element.triggerConditions.element",
         "manifest.translations.element",
         "manifest.translations.element.valueType.flows.valueType.errorMessage",
@@ -186,8 +231,6 @@
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.translations.element.valueType.flows.valueType.successMessage",
         "manifest.views.element.form",
-        "manifest.views.element.form.sections.element",
-        "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
         "manifest.views.element.list.emptyState.link.url",
@@ -308,6 +351,10 @@
         "data.options[1].manifest.actions.element.in.texts.valueType",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
+        "data.options[1].manifest.aiContexts.element.related",
+        "data.options[1].manifest.aiContexts.element.related.element.orderBy",
+        "data.options[1].manifest.aiContexts.element.related.element.where.lazy",
+        "data.options[1].manifest.aiContexts.element.related.element.where.lazy.lazy",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.options[1].manifest.apps.element",
         "data.options[1].manifest.assignmentRules.element",
@@ -331,6 +378,9 @@
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "data.options[1].manifest.flows.element.variables.element",
+        "data.options[1].manifest.forms.element",
+        "data.options[1].manifest.forms.element.sections.element",
+        "data.options[1].manifest.forms.element.submitBehavior.options[1].url",
         "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.hooks.element.refusals.valueType",
@@ -341,6 +391,8 @@
         "data.options[1].manifest.mappings.element.connectorSource.paging",
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
+        "data.options[1].manifest.objects.element.actionLayout.list",
+        "data.options[1].manifest.objects.element.actionLayout.record",
         "data.options[1].manifest.objects.element.defaultRowScope",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.out.valueType",
@@ -365,13 +417,17 @@
         "data.options[1].manifest.reports.element.runtimeFilter",
         "data.options[1].manifest.reports.element.runtimeFilter.lazy",
         "data.options[1].manifest.sharingRules.element.sharedWith",
+        "data.options[1].manifest.skills.element",
         "data.options[1].manifest.skills.element.triggerConditions.element",
         "data.options[1].manifest.translations.element",
         "data.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
+        "data.options[1].manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
+        "data.options[1].manifest.translations.element.valueType.flows.valueType.records.valueType.fields.valueType",
+        "data.options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
+        "data.options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "data.options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "data.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.options[1].manifest.views.element.form",
-        "data.options[1].manifest.views.element.form.sections.element",
-        "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
         "data.options[1].manifest.views.element.list.emptyState.link.url",
@@ -381,6 +437,22 @@
         "data.options[1].manifest.views.element.list.grouping.fields.element.field",
         "data.options[1].manifest.views.element.list.kanban.groupByField",
         "data.options[1].manifest.views.element.list.timeline.groupByField"
+      ]
+    },
+    "api/GetMetaTypesResponse": {
+      "sites": [
+        "entries.element.actions.element.in",
+        "entries.element.actions.element.in.ai.outputSchema",
+        "entries.element.actions.element.in.onSuccess",
+        "entries.element.actions.element.in.params.element.in",
+        "entries.element.actions.element.in.preflight.fields.element",
+        "entries.element.actions.element.in.refusals.valueType",
+        "entries.element.actions.element.in.resultDialog.fields.element",
+        "entries.element.actions.element.in.texts.valueType",
+        "entries.element.form",
+        "entries.element.form.sections.element",
+        "entries.element.form.subforms.element.columns.element",
+        "entries.element.form.submitBehavior.options[1].url"
       ]
     },
     "api/GetObjectPermissionsResponse": {
@@ -463,6 +535,10 @@
         "options[1].manifest.actions.element.in.texts.valueType",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
+        "options[1].manifest.aiContexts.element.related",
+        "options[1].manifest.aiContexts.element.related.element.orderBy",
+        "options[1].manifest.aiContexts.element.related.element.where.lazy",
+        "options[1].manifest.aiContexts.element.related.element.where.lazy.lazy",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
         "options[1].manifest.apps.element",
         "options[1].manifest.assignmentRules.element",
@@ -486,6 +562,9 @@
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "options[1].manifest.flows.element.variables.element",
+        "options[1].manifest.forms.element",
+        "options[1].manifest.forms.element.sections.element",
+        "options[1].manifest.forms.element.submitBehavior.options[1].url",
         "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.hooks.element.refusals.valueType",
@@ -496,6 +575,8 @@
         "options[1].manifest.mappings.element.connectorSource.paging",
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
+        "options[1].manifest.objects.element.actionLayout.list",
+        "options[1].manifest.objects.element.actionLayout.record",
         "options[1].manifest.objects.element.defaultRowScope",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.out.valueType",
@@ -520,17 +601,17 @@
         "options[1].manifest.reports.element.runtimeFilter",
         "options[1].manifest.reports.element.runtimeFilter.lazy",
         "options[1].manifest.sharingRules.element.sharedWith",
+        "options[1].manifest.skills.element",
         "options[1].manifest.skills.element.triggerConditions.element",
         "options[1].manifest.translations.element",
         "options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
         "options[1].manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
+        "options[1].manifest.translations.element.valueType.flows.valueType.records.valueType.fields.valueType",
         "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "options[1].manifest.views.element.form",
-        "options[1].manifest.views.element.form.sections.element",
-        "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
         "options[1].manifest.views.element.list.emptyState.link.url",
@@ -562,6 +643,10 @@
         "data.packages.element.options[1].manifest.actions.element.in.texts.valueType",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
+        "data.packages.element.options[1].manifest.aiContexts.element.related",
+        "data.packages.element.options[1].manifest.aiContexts.element.related.element.orderBy",
+        "data.packages.element.options[1].manifest.aiContexts.element.related.element.where.lazy",
+        "data.packages.element.options[1].manifest.aiContexts.element.related.element.where.lazy.lazy",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
         "data.packages.element.options[1].manifest.apps.element",
         "data.packages.element.options[1].manifest.assignmentRules.element",
@@ -585,6 +670,9 @@
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
         "data.packages.element.options[1].manifest.flows.element.variables.element",
+        "data.packages.element.options[1].manifest.forms.element",
+        "data.packages.element.options[1].manifest.forms.element.sections.element",
+        "data.packages.element.options[1].manifest.forms.element.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.hooks.element.refusals.valueType",
@@ -595,6 +683,8 @@
         "data.packages.element.options[1].manifest.mappings.element.connectorSource.paging",
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.list",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.record",
         "data.packages.element.options[1].manifest.objects.element.defaultRowScope",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
@@ -619,18 +709,24 @@
         "data.packages.element.options[1].manifest.reports.element.runtimeFilter",
         "data.packages.element.options[1].manifest.reports.element.runtimeFilter.lazy",
         "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
+        "data.packages.element.options[1].manifest.skills.element",
         "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
         "data.packages.element.options[1].manifest.translations.element",
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.errorMessage",
+        "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
+        "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.records.valueType.fields.valueType",
+        "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
+        "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
+        "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "data.packages.element.options[1].manifest.translations.element.valueType.flows.valueType.successMessage",
         "data.packages.element.options[1].manifest.views.element.form",
-        "data.packages.element.options[1].manifest.views.element.form.sections.element",
-        "data.packages.element.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.views.element.list",
         "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
+        "data.packages.element.options[1].manifest.views.element.list.emptyState.link.url",
         "data.packages.element.options[1].manifest.views.element.list.filter.element",
         "data.packages.element.options[1].manifest.views.element.list.filter.element.options[0]",
         "data.packages.element.options[1].manifest.views.element.list.gantt.groupByField",
+        "data.packages.element.options[1].manifest.views.element.list.grouping.fields.element.field",
         "data.packages.element.options[1].manifest.views.element.list.kanban.groupByField",
         "data.packages.element.options[1].manifest.views.element.list.timeline.groupByField"
       ]
@@ -684,7 +780,9 @@
         "data.listViews.valueType.kanban.groupByField",
         "data.listViews.valueType.timeline.groupByField",
         "data.membershipKeys",
-        "data.membershipKeys.valueType"
+        "data.membershipKeys.valueType",
+        "data.actionLayout.list",
+        "data.actionLayout.record"
       ]
     },
     "api/PackageInstallBody": {
@@ -1197,7 +1295,9 @@
         "listViews.valueType.kanban.groupByField",
         "listViews.valueType.timeline.groupByField",
         "membershipKeys",
-        "membershipKeys.valueType"
+        "membershipKeys.valueType",
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/ObjectExtension": {
@@ -1208,7 +1308,9 @@
         "fields.out.valueType.inlineColumns.element",
         "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
-        "fields.out.valueType.summaryOperations"
+        "fields.out.valueType.summaryOperations",
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/OracleConfig": {
@@ -1563,7 +1665,9 @@
         "operations.element.options[3].object.listViews.valueType.kanban.groupByField",
         "operations.element.options[3].object.listViews.valueType.timeline.groupByField",
         "operations.element.options[3].object.membershipKeys",
-        "operations.element.options[3].object.membershipKeys.valueType"
+        "operations.element.options[3].object.membershipKeys.valueType",
+        "operations.element.options[3].object.actionLayout.list",
+        "operations.element.options[3].object.actionLayout.record"
       ]
     },
     "system/CreateObjectOperation": {
@@ -1596,7 +1700,9 @@
         "object.listViews.valueType.kanban.groupByField",
         "object.listViews.valueType.timeline.groupByField",
         "object.membershipKeys",
-        "object.membershipKeys.valueType"
+        "object.membershipKeys.valueType",
+        "object.actionLayout.list",
+        "object.actionLayout.record"
       ]
     },
     "system/CronSchedule": {
@@ -1651,7 +1757,9 @@
         "options[3].object.listViews.valueType.kanban.groupByField",
         "options[3].object.listViews.valueType.timeline.groupByField",
         "options[3].object.membershipKeys",
-        "options[3].object.membershipKeys.valueType"
+        "options[3].object.membershipKeys.valueType",
+        "options[3].object.actionLayout.list",
+        "options[3].object.actionLayout.record"
       ]
     },
     "system/ObjectStorageConfig": {
@@ -1890,6 +1998,14 @@
     "ui/EmptyState": {
       "sites": [
         "link.url"
+      ]
+    },
+    "ui/Form": {
+      "sites": [
+        "",
+        "sections.element",
+        "subforms.element.columns.element",
+        "submitBehavior.options[1].url"
       ]
     },
     "ui/FormSection": {

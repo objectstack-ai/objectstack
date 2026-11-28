@@ -16,10 +16,14 @@
  * `resolveFlowTriggerKind`. A record preset waits for its object: Create sends
  * nothing until one is named.
  *
- * Driven through the REAL `AutomationsPillar` and its `CreateItemDialog`; the
+ * Driven through the REAL list create dialog (`MetadataListCreateDialog`,
+ * objectstack#36903: the pillar's New moved there) and its `CreateItemDialog`; the
  * metadata client is a double that records each save.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -75,7 +79,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { AutomationsPillar } from './StudioDesignSurface';
+import { ListFlowCreate } from './__tests__/listFlowCreateHost';
 import { FLOW_PRESETS, flowPresetTrigger } from './flowPresets';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
@@ -133,7 +137,7 @@ async function pickObject(name: string): Promise<void> {
 }
 
 function create(): void {
-  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createDraft') }));
+  fireEvent.click(screen.getByRole('button', { name: en('engine.studio.createLive') }));
 }
 
 /** Wait for save number `n` and return its body, judged by the spec. */
@@ -159,8 +163,8 @@ const startOf = (flow: Record<string, unknown>) =>
 describe('objectui#11861 — New automation opens on starting points', () => {
   it('offers 3 to 5 presets, the first chosen, and folds the trigger form under Advanced', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
     await openNew('Ticket done');
@@ -204,8 +208,8 @@ describe('objectui#11861 — New automation opens on starting points', () => {
     'the %s preset saves a working flow, the very flow Advanced writes for its trigger',
     async (_id, preset) => {
       render(
-        <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-          <AutomationsPillar packageId={PKG} />
+        <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+          <ListFlowCreate packageId={PKG} />
         </MemoryRouter>,
       );
       const watches = startWatchesObject.includes(preset.triggerType);
@@ -239,8 +243,8 @@ describe('objectui#11861 — New automation opens on starting points', () => {
 
   it('a record preset with no object sends nothing and says what it needs, until the object is named', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
     await openNew('Ticket opened');
@@ -265,8 +269,8 @@ describe('objectui#11861 — New automation opens on starting points', () => {
 
   it("Advanced, left on its first choice, writes objectui#11788's blank flow byte for byte — the control", async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow`]}>
+        <ListFlowCreate packageId={PKG} />
       </MemoryRouter>,
     );
     await openNew('Decide later');

@@ -75,7 +75,7 @@
  * that does NOT honour the seam must not have its writes vouched for.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import {
   assertEngineDeleteDispatch,
   assertEngineUpdateDispatch,
@@ -294,6 +294,20 @@ const CALLER = {
 };
 
 // ── the stack ──────────────────────────────────────────────────────────────
+
+// The sqlite-wasm arm's FIRST case used to pay the one-time sql.js load and
+// WASM compile (`loadSqlJs` caches it per module instance) inside vitest's
+// 5000 ms per-test budget; on a saturated CI shard that cold boot alone ran
+// past it (5021 ms on `main`). Paying it once here, under this hook's own
+// explicit budget, leaves every case timing only its own work. The driver is
+// the same `SqliteWasmDriver` the cells construct, connected and closed, so
+// what is warmed is the module cache they read, and no case shares a database.
+const WASM_WARM_TIMEOUT_MS = 60_000;
+beforeAll(async () => {
+  const warm = new SqliteWasmDriver({ filename: ':memory:' });
+  await warm.connect();
+  await warm.disconnect();
+}, WASM_WARM_TIMEOUT_MS);
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {

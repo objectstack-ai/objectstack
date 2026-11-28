@@ -82,9 +82,9 @@
  * `domain:devx` seat and is not below 20 s. The reading: on `1f312fdfa` the 72
  * ceilings run 3.40, 3.69, 4.24, 5.18, 6.39, 9.10 and 16.23 s, then 22.71 s
  * and up, and 20 s sits in the widest gap of the low band (16.23 -> 22.71). The
- * seven packages under it then were knowledge-ragflow, service-cache,
- * observability, sdui-parser, knowledge-memory, embedder-openai and
- * client-react. A 3.4 s ceiling crossed by a 4.2 s run is noise, not a
+ * seven packages under it then were service-cache, observability,
+ * sdui-parser, knowledge-memory, embedder-openai, client-react and a
+ * knowledge adapter since retired, which held the lowest ceiling. A 3.4 s ceiling crossed by a 4.2 s run is noise, not a
  * regression. The floor is compared with the EFFECTIVE ceiling, so a ruled
  * raise to the floor or above grades the package again; the formula, its
  * x 1.25 and RULED_CEILING_RAISES are unchanged.
@@ -937,7 +937,7 @@ function selfTest() {
   });
 
   battery('the absolute floor: a ceiling under CEILING_FLOOR_SECONDS is never red, and prints "below floor"');
-  // The ruling's two readings: a 3.40 s ceiling (knowledge-ragflow's) crossed
+  // The ruling's two readings: a 3.40 s ceiling (the table's lowest then) crossed
   // at 4.2 s, and the lowest ceiling above the floor, 22.71 s, crossed at 25 s.
   const floorSet = dataset({
     packages: { ...dataset().packages, tiny: 2.72, small: 18.17, edge: 16 },

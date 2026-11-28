@@ -19,10 +19,12 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+import * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { PageShell } from './PageShell';
+import { StudioTitleRowProvider } from '../studio-design/studioTitleRow';
 
 afterEach(cleanup);
 
@@ -73,7 +75,7 @@ describe('PageShell compact header wraps instead of squeezing the breadcrumb (ob
     const meta = screen.getByTestId('page-shell-header-meta');
     expect(nav.nextElementSibling).toBe(meta);
     // The chips, the subtitle, the stats and the actions all live in it.
-    expect(meta).toContainElement(screen.getByText('Security'));
+    expect(meta).toContainElement(screen.getByText('Access'));
     expect(meta).toContainElement(screen.getByText('Can be added'));
     expect(meta).toContainElement(screen.getByText('Permission set'));
     expect(meta).toContainElement(screen.getByText('Objects granted'));
@@ -103,5 +105,108 @@ describe('PageShell compact header wraps instead of squeezing the breadcrumb (ob
     expect(actions).toContainElement(screen.getByText('Objects granted'));
     expect(classes(actions)).toEqual(expect.arrayContaining(['ml-auto', 'flex-wrap', 'justify-end']));
     expect(classes(actions)).not.toContain('shrink-0');
+  });
+});
+
+// objectstack#37455 put the page's Save and the AI assistant at the end of
+// PageShell's rows under Studio; objectstack#37520 pins them there (S2) and
+// the hairline before the assistant (N3). The surface hands the controls down
+// through `StudioTitleRowProvider`; stubs stand in for them here.
+const SAVE = (
+  <button type="button" data-testid="studio-save">
+    Save
+  </button>
+);
+const ASSISTANT = (
+  <button type="button" data-testid="topbar-ai-assistant">
+    AI
+  </button>
+);
+
+function renderUnderStudio(
+  shell: Partial<React.ComponentProps<typeof PageShell>>,
+  save: React.ReactNode = null,
+) {
+  render(
+    <MemoryRouter initialEntries={['/studio/com.acme.app/metadata/permission/showcase_contributor']}>
+      <StudioTitleRowProvider save={save} assistant={ASSISTANT}>
+        <PageShell entry={ENTRY as never} {...shell}>
+          <div>body</div>
+        </PageShell>
+      </StudioTitleRowProvider>
+    </MemoryRouter>,
+  );
+}
+
+const testIds = (el: Element) =>
+  Array.from(el.querySelectorAll('[data-testid]')).map((n) => n.getAttribute('data-testid'));
+
+const ACTION = <button type="button" data-testid="page-action">Clone to customize</button>;
+
+describe('PageShell under Studio: the page controls end its rows (objectstack#37520)', () => {
+  it('the compact row: the page\'s actions, then Save, the hairline and the assistant, in the right-aligned group', () => {
+    renderUnderStudio({ itemName: 'showcase_contributor', actions: ACTION }, SAVE);
+    const meta = screen.getByTestId('page-shell-header-meta');
+    const ai = within(meta).getByTestId('topbar-ai-assistant');
+    const group = screen.getByTestId('page-action').parentElement as HTMLElement;
+    expect(group).toContainElement(ai);
+    expect(testIds(group)).toEqual(['page-action', 'studio-save', 'studio-title-row-divider', 'topbar-ai-assistant']);
+    expect(screen.getAllByTestId('topbar-ai-assistant')).toHaveLength(1);
+  });
+
+  it('an embedded compact row (a page inside another page) draws neither Save nor the assistant', () => {
+    renderUnderStudio({ itemName: 'showcase_contributor', actions: ACTION, embedded: true }, SAVE);
+    expect(screen.getByTestId('page-shell-header-meta')).toContainElement(screen.getByTestId('page-action'));
+    expect(screen.queryByTestId('studio-save')).toBeNull();
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
+    expect(screen.queryByTestId('studio-title-row-divider')).toBeNull();
+  });
+
+  it('an embedded list row draws neither either', () => {
+    renderUnderStudio({ actions: ACTION, embedded: true }, SAVE);
+    expect(screen.getByTestId('page-action')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-save')).toBeNull();
+    expect(screen.queryByTestId('topbar-ai-assistant')).toBeNull();
+  });
+
+  it.each([
+    ['compact', { itemName: 'showcase_contributor' }],
+    ['list', {}],
+  ] as const)('N3 — a %s row with no stats, no actions and nothing unsaved: the assistant, no hairline before it', (_row, shell) => {
+    renderUnderStudio(shell);
+    expect(screen.getByTestId('topbar-ai-assistant')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-title-row-divider')).toBeNull();
+  });
+
+  it.each([
+    ['compact', { itemName: 'showcase_contributor' }],
+    ['list', {}],
+  ] as const)('N3 CONTROL — a %s row with stats of its own: the hairline before the assistant', (_row, shell) => {
+    renderUnderStudio({ ...shell, stats: [{ label: 'Objects granted', value: 9 }] });
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+  });
+
+  // ResourceEditPage's embedded frame passes actions without `embedded`: the
+  // actions alone, with no stats and nothing unsaved, bring the hairline.
+  it.each([
+    ['compact', { itemName: 'showcase_contributor' }],
+    ['list', {}],
+  ] as const)('N3 CONTROL — a %s row with actions of its own and no stats: the hairline before the assistant', (_row, shell) => {
+    renderUnderStudio({ ...shell, actions: ACTION });
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(screen.queryByTestId('studio-save')).toBeNull();
+    expect(ai.previousElementSibling).toHaveAttribute('data-testid', 'studio-title-row-divider');
+    expect(testIds(screen.getByTestId('page-action').parentElement as HTMLElement)).toEqual([
+      'page-action',
+      'studio-title-row-divider',
+      'topbar-ai-assistant',
+    ]);
+  });
+
+  it('N3 CONTROL — no actions but unsaved edits: Save, then the hairline, then the assistant', () => {
+    renderUnderStudio({ itemName: 'showcase_contributor' }, SAVE);
+    const ai = screen.getByTestId('topbar-ai-assistant');
+    expect(testIds(ai.parentElement as HTMLElement)).toEqual(['studio-save', 'studio-title-row-divider', 'topbar-ai-assistant']);
   });
 });

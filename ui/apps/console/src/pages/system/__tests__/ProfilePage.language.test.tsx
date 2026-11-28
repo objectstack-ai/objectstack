@@ -54,9 +54,12 @@
  * assertions are about the WRITE and not merely about something rendering.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import React from 'react';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Toaster, toast } from 'sonner';
 import { normaliseClientError } from '@object-ui/data-objectstack';
+import { builtInLocales } from '@object-ui/i18n/locales';
 
 const { user, updateUser, findOne, update, offerable, appContent, writable } = vi.hoisted(() => ({
   user: { value: { id: 'usr_1', name: 'Ada', email: 'ada@example.com' } as Record<string, unknown> | null },
@@ -99,8 +102,8 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
         String(options?.[name] ?? ''),
       ),
     offerableLanguages: offerable.value,
-    appContentLanguages: appContent.value,
   }),
+  useAppContentLanguages: () => appContent.value,
 }));
 
 /**
@@ -275,6 +278,86 @@ describe('ProfilePage — my language (objectui#7501)', () => {
   });
 });
 
+/**
+ * The language save's confirmation survives the remount a language change
+ * causes (objectstack#36972).
+ *
+ * Saving `sys_user.locale` reaches the signed-in user's locale reader through
+ * the data-invalidation bus; when the new value changes the interface
+ * language, the console shell remounts every page under `key={language}`, and
+ * the card's inline alert — local state — goes with it. The confirmation is
+ * also a toast, and the console's toaster sits above that key. The harness
+ * below draws the same shape: a real sonner `Toaster` outside a subtree keyed
+ * on the language, and a write whose settling changes that key.
+ */
+describe('ProfilePage — the language save confirms after a language remount (objectstack#36972)', () => {
+  const shell = { switchLanguage: (_next: string) => {} };
+
+  function Shell() {
+    const [language, setLanguage] = React.useState('en');
+    shell.switchLanguage = setLanguage;
+    return (
+      <>
+        <Toaster />
+        <div key={language} data-testid="keyed-subtree">
+          <ProfilePage />
+        </div>
+      </>
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    offerable.value = ['en', 'zh', 'ja'];
+    appContent.value = null;
+    writable.value = true;
+    findOne.mockResolvedValue({ id: 'usr_1' });
+    update.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    toast.dismiss();
+  });
+
+  it('a save that changes the interface language still shows its confirmation, after the remount', async () => {
+    // The write settles, and THEN the language changes, as the bus orders it.
+    update.mockImplementation(async () => {
+      setTimeout(() => shell.switchLanguage('ja'), 0);
+      return {};
+    });
+    render(<Shell />);
+    const select = await screen.findByTestId('profile-language-select');
+
+    await pick(select, '日本語');
+    fireEvent.submit(select.closest('form')!);
+
+    // The remount happened: the select that was used is gone, a new card stands.
+    await waitFor(() => expect(document.contains(select)).toBe(false));
+    await screen.findByTestId('profile-language-select');
+    // The confirmation is still on screen, in the toaster above the key.
+    const confirmation = await screen.findByText('Language preference updated.');
+    expect(confirmation.closest('[data-sonner-toaster]')).not.toBeNull();
+  });
+
+  it('control: a save that leaves the interface language alone shows its confirmation too', async () => {
+    render(<Shell />);
+    const select = await screen.findByTestId('profile-language-select');
+
+    await pick(select, 'English');
+    fireEvent.submit(select.closest('form')!);
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith('sys_user', 'usr_1', { locale: 'en' }));
+    await waitFor(() =>
+      expect(screen.getAllByText('Language preference updated.').length).toBeGreaterThan(0),
+    );
+    // No remount: the same select, and the card's own inline alert beside the toast.
+    expect(document.contains(select)).toBe(true);
+    expect(screen.getByRole('alert')).toHaveTextContent('Language preference updated.');
+  });
+});
+
 describe('ProfilePage — a stored spelling of a table language (objectstack#30514)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -342,5 +425,38 @@ describe('ProfilePage — a stored spelling of a table language (objectstack#305
     await renderProfile();
 
     expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The card's description is the only place the page says what this control
+ * does. Both the card and the globe menu write `sys_user.locale`, and the
+ * shell applies that column as the interface language (`useUserLocale` in
+ * `@object-ui/app-shell`), so the text must name ONE setting: a description
+ * that offers the card as "notifications only" makes a user who picks a
+ * language for their email switch the whole console. The English pack is held
+ * to the call site's own fallback so the two cannot drift apart again.
+ */
+describe('ProfilePage — the language card names one setting with the globe menu', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    offerable.value = ['en', 'zh', 'ja'];
+    appContent.value = null;
+    writable.value = true;
+    findOne.mockResolvedValue({ id: 'usr_1' });
+  });
+
+  it('says the globe menu is the same setting, not a separate interface language', async () => {
+    await renderProfile();
+    const description = screen.getByText((_content, el) =>
+      el?.tagName !== 'BODY' && /globe menu/.test(el?.textContent ?? '') && el?.children.length === 0,
+    );
+    const text = description.textContent ?? '';
+
+    expect(text).toMatch(/interface/);
+    expect(text).toMatch(/same setting as the globe menu/);
+    expect(text).not.toMatch(/separately/);
+    expect(text).toBe(builtInLocales.en.profile.language.description);
   });
 });

@@ -218,6 +218,48 @@ export function readRootMembers(ast: CelAstNode, roots: readonly string[]): Root
 }
 
 /**
+ * The member `node` ITSELF reads on one of `roots` — `record.tags`,
+ * `record.?tags`, `record['tags']`, `previous[?'tags']` — or `undefined` when
+ * `node` is anything else: a deeper read (`record.a.b`), a call, a literal, a
+ * computed key (`record[someVar]`).
+ *
+ * The same {@link asMember} spellings {@link readRootMembers} collects, asked
+ * of one node instead of gathered from a tree, for a check that judges an
+ * OPERAND rather than every read: `validateExpression`'s list-equality pass
+ * asks whether one side of a `==` is a field read, and gets the answer the
+ * field-existence pass would give for the same spelling.
+ */
+export function rootMemberOf(node: unknown, roots: readonly string[]): { readonly root: string; readonly field: string } | undefined {
+  const member = asMember(node);
+  if (!member) return undefined;
+  const receiver = member.receiver as { op?: unknown; args?: unknown } | null | undefined;
+  if (!receiver || typeof receiver !== 'object') return undefined;
+  const { op, args } = receiver;
+  return op === 'id' && typeof args === 'string' && roots.includes(args) ? { root: args, field: member.name } : undefined;
+}
+
+/**
+ * [#36237] The ONE-HOP read `node` itself is — `record.account.labels`,
+ * `record['account']['labels']`, any mix of the {@link asMember} spellings —
+ * as `{ root, field, leaf }`, or `undefined` when `node` is anything else: a
+ * read of the root's own member (`record.labels`, {@link rootMemberOf}'s
+ * answer), a deeper read (`record.a.b.c`), a call, a literal.
+ *
+ * {@link rootMemberOf} one segment further, for a check that judges an
+ * OPERAND reached through a relationship: `@objectstack/lint`'s hop pass asks
+ * whether one side of a `==` is a read of the hop target's field.
+ */
+export function hopMemberOf(
+  node: unknown,
+  roots: readonly string[],
+): { readonly root: string; readonly field: string; readonly leaf: string } | undefined {
+  const member = asMember(node);
+  if (!member) return undefined;
+  const read = rootMemberOf(member.receiver, roots);
+  return read ? { ...read, leaf: member.name } : undefined;
+}
+
+/**
  * Analyse one authored CEL source for the hops it takes through `root`.
  *
  * Returns `null` when the source does not parse or blows the platform's bounds

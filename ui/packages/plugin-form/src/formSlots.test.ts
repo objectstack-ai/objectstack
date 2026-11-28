@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { FormSlotStore, formSlotGroupIndex, placeFormSlots, type FormSlotRequest } from './formSlots';
+import { FormSlotStore, formSlotGroupIndex, formSlotRow, placeFormSlots, type FormSlotRequest } from './formSlots';
 
 // objectstack#35889 — a collection a field group places sits at that group in
 // the header form, by the record page's rule (`bodyTablePlacement`).
@@ -81,5 +81,20 @@ describe('FormSlotStore (objectstack#35889)', () => {
     const v = store.getVersion();
     store.claim(['d0']);
     expect(store.getVersion()).toBe(v);
+  });
+
+  it('a refusal on a collection marks its slot row until it is retired, and an equal refusal changes nothing', () => {
+    const store = new FormSlotStore();
+    const request = { id: 'd0', childObject: 'po_line' };
+    expect(formSlotRow(request, store).slotRefused).toBeUndefined();
+    store.refuse(['d0', 'd0']);
+    expect(formSlotRow(request, store).slotRefused).toBe(true);
+    expect(formSlotRow({ id: 'd1', childObject: 'po_line' }, store).slotRefused).toBeUndefined();
+    const v = store.getVersion();
+    store.refuse(['d0']);
+    expect(store.getVersion()).toBe(v);
+    store.refuse([]);
+    expect(formSlotRow(request, store).slotRefused).toBeUndefined();
+    expect(store.getVersion()).toBe(v + 1);
   });
 });

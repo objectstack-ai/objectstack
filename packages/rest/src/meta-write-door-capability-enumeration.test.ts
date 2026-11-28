@@ -68,6 +68,7 @@ import '@objectstack/objectql';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
+import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 /**
  * The unscoped mount base, and the `/meta` prefix on it. The `DOORS` table
@@ -652,6 +653,96 @@ describe('ADR-0131 D6 — `manage_org_presentation` is refused, and no door thre
 });
 
 /**
+ * [ADR-0161 K4, guard two] Source admission at save: the save door asks the
+ * environment's knowledge service whether the AUTHOR may search what the
+ * source would index (`authoredKnowledgeSourceRefusal`), after its capability
+ * gates and before the protocol writes.
+ */
+describe('ADR-0161 K4 — the save door asks the knowledge service to admit the source for its author', () => {
+    const SAVE = DOORS.find((d) => d.protocolMethod === 'saveMetaItem')!;
+    const OTHER_ITEM_DOORS = DOORS.filter((d) => !['saveMetaItem', 'migrateStoredMetadata'].includes(d.protocolMethod));
+    const SOURCE = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body', 'salary'] } };
+    const AUTHOR = { userId: 'u_admin', systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] };
+    const REFUSAL = {
+        admitted: false, status: 403, code: 'PERMISSION_DENIED',
+        message: "The knowledge source 'faq' was not saved: you may not query field 'salary' of object 'article'.",
+    };
+    const asSource = (door: Door, body: unknown = SOURCE): Door => ({
+        ...door, params: { ...door.params, type: 'knowledge_source', name: 'faq' }, body,
+    });
+    /** Boot with a `knowledge` service on the request's environment. */
+    function bootWith(context: Record<string, unknown>, admit: (item: unknown, ctx: unknown) => unknown) {
+        const stack = boot(context);
+        const admitAuthoredSource = vi.fn(async (item: unknown, ctx: unknown) => admit(item, ctx));
+        (stack.rest as any).kernelServiceProvider = async (name: string) => (name === 'knowledge' ? { admitAuthoredSource } : undefined);
+        return { ...stack, admitAuthoredSource };
+    }
+
+    it('a source its author may not search is refused 403 FORBIDDEN with the gate\'s sentence, and nothing is saved', async () => {
+        const stack = bootWith(AUTHOR, () => REFUSAL);
+        const out = await stack.knock(asSource(SAVE));
+        expect(out.status).toBe(403);
+        expect(out.body).toEqual({ error: { code: 'FORBIDDEN', message: REFUSAL.message } });
+        expect(stack.calls.saveMetaItem).toBe(0);
+        // Asked with the item the door would save and the author's own context.
+        expect(stack.admitAuthoredSource).toHaveBeenCalledWith(SOURCE, AUTHOR);
+    });
+
+    it('the item is judged unwrapped: an `{ item }` or `{ metadata }` envelope is the same save', async () => {
+        for (const body of [{ item: SOURCE }, { metadata: SOURCE }]) {
+            const stack = bootWith(AUTHOR, () => REFUSAL);
+            const out = await stack.knock(asSource(SAVE, body));
+            expect(out.status).toBe(403);
+            expect(stack.admitAuthoredSource).toHaveBeenCalledWith(SOURCE, AUTHOR);
+            expect(stack.calls.saveMetaItem).toBe(0);
+        }
+    });
+
+    it('fails closed: a verdict that throws is 503 SERVICE_UNAVAILABLE, and nothing is saved', async () => {
+        const stack = bootWith(AUTHOR, () => { throw new Error('registry unavailable'); });
+        const out = await stack.knock(asSource(SAVE));
+        expect(out.status).toBe(503);
+        expect(out.body).toMatchObject({ error: { code: 'SERVICE_UNAVAILABLE' } });
+        expect(stack.calls.saveMetaItem).toBe(0);
+    });
+
+    it('CONTROL: an admitted source is saved; with no knowledge service the save goes on', async () => {
+        const admitted = bootWith(AUTHOR, () => ({ admitted: true }));
+        expect((await admitted.knock(asSource(SAVE))).status).not.toBe(403);
+        expect(admitted.calls.saveMetaItem).toBe(1);
+
+        const none = boot(AUTHOR);
+        expect((await none.knock(asSource(SAVE))).status).not.toBe(403);
+        expect(none.calls.saveMetaItem).toBe(1);
+    });
+
+    it('the gate is behind the capability gates, and is not asked for another type', async () => {
+        // `manage_metadata` without `manage_knowledge_sources`, and the reverse.
+        for (const systemPermissions of [['manage_metadata'], ['manage_knowledge_sources']]) {
+            const uncapable = bootWith({ userId: 'u_half', systemPermissions }, () => REFUSAL);
+            expect((await uncapable.knock(asSource(SAVE))).status).toBe(403);
+            expect(uncapable.admitAuthoredSource).not.toHaveBeenCalled();
+            expect(uncapable.calls.saveMetaItem).toBe(0);
+        }
+
+        const object = bootWith(AUTHOR, () => REFUSAL);
+        await object.knock(SAVE); // the table's own params: type 'object'
+        expect(object.admitAuthoredSource).not.toHaveBeenCalled();
+        expect(object.calls.saveMetaItem).toBe(1);
+    });
+
+    it.each(OTHER_ITEM_DOORS.map((d) => [d.label, d] as const))(
+        '%s → writes no new item body, so it does not ask',
+        async (_label, door) => {
+            const stack = bootWith(AUTHOR, () => REFUSAL);
+            await stack.knock(asSource(door, door.body));
+            expect(stack.admitAuthoredSource).not.toHaveBeenCalled();
+            expect(stack.calls[door.protocolMethod]).toBe(1);
+        },
+    );
+});
+
+/**
  * [#30675] The data doors' own refusal cases. Booted with NO data engine, so a
  * caller the gate admits gets `501 NOT_IMPLEMENTED` — the answer that tells the
  * gate's verdict apart from the refusal, the role the protocol call count plays
@@ -702,4 +793,67 @@ describe('#30675 — the data doors refuse on their own capability, not `manage_
             }
         },
     );
+});
+
+/**
+ * [objectstack#36409] Only an administrator makes a list view everyone sees.
+ * A shared view is `view` metadata, so the door that shares one is this
+ * surface's save (the Console saves `?mode=draft` and publishes at once), the
+ * publish promotes it, and the delete removes it. Driven
+ * with the systemPermissions the SHIPPED sets grant, not hand-written ones: a
+ * member (`member_default`), an organization administrator (that baseline
+ * plus `organization_admin`, which withholds `manage_metadata`) and the
+ * platform administrator (`admin_full_access`, the control). The Console asks
+ * the same capability before it offers Shared (`useCanAuthorMetadata`), so the
+ * organization administrator's refusal here is why that control is hidden.
+ */
+describe('#36409 — sharing a list view is an administrator\'s act', () => {
+    const grants = (...names: string[]): string[] => {
+        const held = new Set<string>();
+        for (const name of names) {
+            const set = securityDefaultPermissionSets.find((ps) => ps.name === name);
+            if (!set) throw new Error(`no shipped permission set named ${name}`);
+            for (const capability of set.systemPermissions ?? []) held.add(capability);
+        }
+        return [...held];
+    };
+    const VIEW = { type: 'view', name: 'account.team_pipeline' };
+    const viewDoor = (protocolMethod: string): Door => {
+        const door = DOORS.find((d) => d.protocolMethod === protocolMethod)!;
+        return {
+            ...door,
+            params: { ...VIEW },
+            ...(protocolMethod === 'saveMetaItem'
+                ? { body: { name: VIEW.name, object: 'account', viewKind: 'list', label: 'Team pipeline', config: { type: 'grid', data: { provider: 'object', object: 'account' } } } }
+                : {}),
+        };
+    };
+    const SHARE_DOORS = ['saveMetaItem', 'publishMetaItem', 'deleteMetaItem'].map(viewDoor);
+
+    it.each([
+        ['a member', ['member_default']],
+        ['an organization administrator', ['member_default', 'organization_admin']],
+    ] as const)('%s is refused each share door 403 FORBIDDEN, and nothing is written', async (_who, sets) => {
+        const systemPermissions = grants(...sets);
+        expect(systemPermissions).not.toContain('manage_metadata');
+        for (const door of SHARE_DOORS) {
+            const stack = boot({ userId: 'u_member', systemPermissions });
+            const out = await stack.knock(door);
+            expect(out.status, door.label).toBe(403);
+            expect(out.body, door.label).toMatchObject({ error: { code: 'FORBIDDEN' } });
+            expect(stack.calls[door.protocolMethod], door.label).toBe(0);
+        }
+    });
+
+    it('the control: the platform administrator reaches each share door', async () => {
+        const systemPermissions = grants('admin_full_access');
+        expect(systemPermissions).toContain('manage_metadata');
+        for (const door of SHARE_DOORS) {
+            const stack = boot({ userId: 'u_admin', systemPermissions });
+            const out = await stack.knock(door);
+            expect(out.status, door.label).not.toBe(403);
+            expect(out.status, door.label).not.toBe(401);
+            expect(stack.calls[door.protocolMethod], door.label).toBe(1);
+        }
+    });
 });

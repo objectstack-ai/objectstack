@@ -47,6 +47,10 @@ function richArtifact(edit?: (stack: Bag) => void): Bag {
   const fixture = DEFAULT_METADATA_EVAL_CORPUS.find((c) => c.id === 'project_with_tasks')!.fixture;
   const stack = structuredClone(fixture) as Bag;
   stack.objects[0].fields.sponsor = { type: 'user', label: 'Sponsor' };
+  // The tasks are edited inline the supported way: a field group of the
+  // project names them, and the FK declares no `inlineEdit` at all.
+  stack.objects[0].fieldGroups = [{ key: 'tasks', label: 'Tasks', relatedList: 'task' }];
+  delete stack.objects[1].fields.project.inlineEdit;
   stack.objects[1].fields.blocked_by = { type: 'lookup', label: 'Blocked By', reference: 'task' };
   stack.objects[1].fields.estimate_days = { type: 'formula', label: 'Estimate (days)', expression: 'record.estimate_hours / 8', returnType: 'number' };
   stack.objects[1].validations = [
@@ -151,7 +155,11 @@ const TAG_DEGRADATIONS: Record<string, Record<string, (a: Bag) => void>> = {
     'dangling lookup target': (a) => { field(a, 'task', 'blocked_by').reference = 'no_such_object'; },
   },
   'records-forms.master-detail-inline-edit': {
-    'master-detail not edited inline': (a) => { delete field(a, 'task', 'project').inlineEdit; },
+    'master-detail not edited inline': (a) => { delete (a.objects[0] as Bag).fieldGroups; },
+    'master-detail carrying only the retired `inlineEdit: true`': (a) => {
+      delete (a.objects[0] as Bag).fieldGroups;
+      field(a, 'task', 'project').inlineEdit = true;
+    },
     'dangling master-detail target': (a) => { field(a, 'task', 'project').reference = 'no_such_object'; },
   },
   'records-forms.roll-up-summary': {
@@ -254,6 +262,8 @@ const ACTION_DEGRADATIONS: Record<string, (a: Bag) => void> = {
   'action:task.delete_task->exists': (a) => { a.actions = a.actions.filter((x: Bag) => x.name !== 'delete_task'); },
   'action:task.set_task_status->ai-exposed': (a) => { a.actions[0].ai.exposed = false; },
   'action:task.delete_task->confirm-gated': (a) => { delete a.actions[1].ai.requiresConfirmation; },
+  // Over-gating: the card has the agent set a task's status at once.
+  'action:task.set_task_status->not-confirm-gated': (a) => { a.actions[0].ai.requiresConfirmation = true; },
 };
 
 describe('the closed tag table', () => {
@@ -294,7 +304,7 @@ describe('capability tags — discrimination over a rich build', () => {
   it('passes every row of the table, and every agent action, on the intact build', () => {
     expect(intact.tags.map((t) => [t.tag, t.status])).toEqual(ALL_TAGS.map((t) => [t, 'pass']));
     expect(intact.agentActions.every((c) => c.pass)).toBe(true);
-    expect(intact.agentActions).toHaveLength(5);
+    expect(intact.agentActions).toHaveLength(6);
     expect(intact.score).toBe(1);
   });
 
@@ -385,6 +395,7 @@ describe('agent actions — a declared action the build does not expose fails', 
     expect(s.agentActions.map((c) => [c.check, c.pass])).toEqual([
       ['action:task.set_task_status->exists', false],
       ['action:task.set_task_status->ai-exposed', false],
+      ['action:task.set_task_status->not-confirm-gated', false],
       ['action:task.delete_task->exists', false],
       ['action:task.delete_task->ai-exposed', false],
       ['action:task.delete_task->confirm-gated', false],
@@ -413,6 +424,49 @@ describe('agent actions — a declared action the build does not expose fails', 
 const grade = (a: Bag, tag: string, card: ScenarioArtifactCard = CARD, namespace?: string) =>
   gradeCapabilityTags(readArtifactFacts(a), { ...card, capabilities: [tag] }, namespace === undefined ? {} : { namespace })[0]!;
 const pairs = (v: { checks: Array<{ check: string; pass: boolean }> }) => v.checks.map((c) => [c.check, c.pass]);
+
+describe('master-detail inline edit — placed by a field group of the master, never by `inlineEdit` alone', () => {
+  const inline = (a: Bag) => grade(a, 'records-forms.master-detail-inline-edit').checks.find((c) => c.check === 'master-detail-inline-edit');
+  const noGroup = (a: Bag) => { delete (a.objects[0] as Bag).fieldGroups; return a; };
+
+  it('credits a child a field group of its master names, by child object or by `object.field`, with no `inlineEdit`', () => {
+    expect(field(richArtifact(), 'task', 'project').inlineEdit).toBeUndefined();
+    expect(inline(richArtifact())).toEqual({ check: 'master-detail-inline-edit', pass: true, detail: '1 edited inline' });
+    const dotted = richArtifact((stack) => { stack.objects[0].fieldGroups[0].relatedList = 'task.project'; });
+    expect(inline(dotted)?.pass).toBe(true);
+  });
+
+  it('does not credit a group on the CHILD, or a group naming the child on an FK a group may not place', () => {
+    const onChild = noGroup(richArtifact());
+    (onChild.objects[1] as Bag).fieldGroups = [{ key: 'tasks', label: 'Tasks', relatedList: 'task' }];
+    expect(inline(onChild)?.pass).toBe(false);
+    const tab = richArtifact();
+    field(tab, 'task', 'project').relatedList = true;
+    expect(inline(tab)?.pass).toBe(false);
+  });
+
+  it('does not credit the retired `inlineEdit: true` alone', () => {
+    const a = noGroup(richArtifact());
+    field(a, 'task', 'project').inlineEdit = true;
+    expect(inline(a)).toEqual({ check: 'master-detail-inline-edit', pass: false, detail: '0 edited inline' });
+  });
+
+  it("does not credit a form factor, `'grid'` or `'form'`, with no placing group (it inlines nothing at runtime)", () => {
+    for (const mode of ['grid', 'form']) {
+      const a = noGroup(richArtifact());
+      field(a, 'task', 'project').inlineEdit = mode;
+      expect(inline(a)?.pass).toBe(false);
+    }
+  });
+
+  it("credits a placed child whatever form factor it declares, `'grid'` or `'form'`", () => {
+    for (const mode of ['grid', 'form']) {
+      const a = richArtifact();
+      field(a, 'task', 'project').inlineEdit = mode;
+      expect(inline(a)?.pass).toBe(true);
+    }
+  });
+});
 
 describe('formula field — a computed field whose expression compiles', () => {
   const formula = (a: Bag) => grade(a, 'records-forms.formula-field');
@@ -788,12 +842,15 @@ describe('persona grants — what the card has each persona read and write, agai
     expect(personaGrantNeeds(PROJECT).find((n) => n.verb === 'create')!.requiredBy).toEqual(['operation add_task']);
   });
 
-  it('a grant present: every check passes', () => {
+  it('a grant present: every check passes, but a delete of a detail row, which the master gate decides', () => {
+    // `task` is a `controlled_by_parent` detail: the platform hands its
+    // owner-only delete floor to the master's gate, which the artifact cannot
+    // judge without the master row.
     expect(verdicts(built(GRANTED))).toEqual([
       ['persona-grant:contractor:task:read', true],
       ['persona-grant:contractor:task:create', true],
       ['persona-grant:contractor:task:update', true],
-      ['persona-grant:contractor:task:delete', true],
+      ['persona-grant:contractor:task:delete', 'not-measured'],
       ['persona-grant:client_viewer:task:update', true],
     ]);
   });
@@ -838,7 +895,8 @@ describe('persona grants — what the card has each persona read and write, agai
     );
     const s = scoreScenarioArtifact(artifact(READ_ONLY), WAITING);
     const g = scoreScenarioArtifact(artifact(GRANTED), WAITING);
-    expect([s.total, s.passed]).toEqual([g.total - 1, g.passed - 3]);
+    // Both builds leave the delete to the run (here the route, there the master gate on the detail).
+    expect([s.total, s.passed]).toEqual([g.total, g.passed - 2]);
     // The card's action without `confirm` is no designed route: the check is measured.
     const unconfirmed: ScenarioArtifactCard = {
       ...WAITING,
@@ -849,6 +907,39 @@ describe('persona grants — what the card has each persona read and write, agai
     // ships applies `drop_packing` (the maintainer's 2026-11-16 ruling), so its contractor must hold the grant.
     expect(PROJECT.run.operations!.find((o) => o.id === 'drop_packing')!.outcome.kind).toBe('applied');
     expect(verdicts(facts)[3]).toEqual(['persona-grant:contractor:task:delete', false]);
+  });
+
+  it("an applied write the card routes through its own action (`via`), withheld and the action declared: not measured, named, never a pass", () => {
+    // The card names set_task_status (not confirm-gated) as start_qa's route,
+    // the shape of a manager deciding an approval step through the card's
+    // decide action. The rich build declares set_task_status.
+    const ROUTED: ScenarioArtifactCard = {
+      ...PROJECT,
+      run: { ...PROJECT.run, operations: PROJECT.run.operations!.map((o) => (o.id === 'start_qa' ? { ...o, via: 'set_task_status' } : o)) },
+    };
+    const UPDATE = 'persona-grant:contractor:task:update';
+    const facts = built(READ_ONLY);
+    expect(verdicts(facts, ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, 'not-measured']);
+    expect(gradePersonaGrants(facts, ROUTED).find((c) => c.check === UPDATE)!.notMeasured).toBe(
+      "contractor grants no update on task, and the build declares the card's agent action each write names as its route (`via`) or its confirm-gated one, a door that writes as the platform: whether operation start_qa through set_task_status goes through it is the run's to observe",
+    );
+    // Counted in neither figure: one check fewer than the same build scored on the card without `via`.
+    const routed = scoreScenarioArtifact(artifact(READ_ONLY), ROUTED);
+    const plain = scoreScenarioArtifact(artifact(READ_ONLY), PROJECT);
+    expect([routed.total, routed.passed]).toEqual([plain.total - 1, plain.passed]);
+    // A set that grants the verb still passes, as without `via`.
+    expect(verdicts(built(GRANTED), ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, true]);
+    // The build does not declare the named action: measured, and the withheld grant fails.
+    expect(verdicts(built(READ_ONLY, withoutAction('set_task_status')), ROUTED).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
+    // Without `via` the same write stays measured (the card as it ships).
+    expect(verdicts(facts).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
+    // A second write of the same verb that names no route keeps the grant measured.
+    const { via: _route, ...unrouted } = ROUTED.run.operations!.find((o) => o.id === 'start_qa')!;
+    const MIXED: ScenarioArtifactCard = {
+      ...ROUTED,
+      run: { ...ROUTED.run, operations: [...ROUTED.run.operations!, { ...unrouted, id: 'start_qa_again' }] },
+    };
+    expect(verdicts(facts, MIXED).find(([c]) => c === UPDATE)).toEqual([UPDATE, false]);
   });
 
   it('edit and delete are read ∧ grant, as the enforcement door folds them', () => {
@@ -884,8 +975,8 @@ describe('persona grants — what the card has each persona read and write, agai
       expect(refused({ objects: EDITS_TASKS, fields: { 'task.status': { readable: true, editable: false } } })).toBe(true);
       // A lock on a field the write does not name refuses nothing.
       expect(refused({ objects: EDITS_TASKS, fields: { 'task.title': { readable: true, editable: false } } })).toBe(false);
-      // Modify All votes every field editable, so the lock is overridden.
-      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true, modifyAllRecords: true } }, fields: { 'task.status': { readable: true, editable: false } } })).toBe(false);
+      // [v19 #36055] Modify All casts no field vote, so the lock beside it still refuses the write.
+      expect(refused({ objects: { project: { allowRead: true }, task: { allowRead: true, modifyAllRecords: true } }, fields: { 'task.status': { readable: true, editable: false } } })).toBe(true);
     });
 
     it('is not measured when only a row rule could refuse it, and counts in neither figure', () => {
@@ -919,7 +1010,8 @@ describe('persona grants — what the card has each persona read and write, agai
 
   it("reads the platform's fold: a '*' wildcard covers a public object and not a private one", () => {
     const wildcard = { ...GRANTED, contractor: { objects: { '*': ALL_TASK_VERBS } } };
-    expect(verdicts(built(wildcard)).slice(0, 4).map(([, v]) => v)).toEqual([true, true, true, true]);
+    // The detail's delete is the master gate's (see 'a grant present'): not measured, whatever covers the grant.
+    expect(verdicts(built(wildcard)).slice(0, 4).map(([, v]) => v)).toEqual([true, true, true, 'not-measured']);
     const privateTask = built(wildcard, (stack) => {
       (stack.objects as Bag[]).find((o) => o.name === 'task')!.access = { default: 'private' };
       withoutAction('delete_task')(stack);
@@ -932,7 +1024,7 @@ describe('persona grants — what the card has each persona read and write, agai
     expect(verdicts(facts, PROJECT, 'demoproject').map(([, v]) => v)).toEqual([false, false, false, false, false]);
     expect(gradePersonaGrants(facts, PROJECT, { namespace: 'demoproject' })[0]!.detail).toBe('the build declares no permission set demoproject_contractor');
     const renamed = built({ demoproject_contractor: GRANTED.contractor, demoproject_client_viewer: GRANTED.client_viewer });
-    expect(verdicts(renamed, PROJECT, 'demoproject').map(([, v]) => v)).toEqual([true, true, true, true, true]);
+    expect(verdicts(renamed, PROJECT, 'demoproject').map(([, v]) => v)).toEqual([true, true, true, 'not-measured', true]);
   });
 
   it('counts in the card score, and a card pick without questions or operations derives none', () => {
@@ -942,5 +1034,93 @@ describe('persona grants — what the card has each persona read and write, agai
     const { questions: _q, operations: _o, ...run } = PROJECT.run;
     expect(gradePersonaGrants(facts, { ...PROJECT, run })).toEqual([]);
     expect(scoreScenarioArtifact(richArtifact(), CARD).personaGrants).toEqual([]);
+  });
+});
+
+describe("persona grants — a delete the set grants, read against the platform's owner-only delete floor", () => {
+  // leave_balances: the hr_officer deletes withdrawn requests LR-0100
+  // (`delete_withdrawn_request`, applied) and LR-0003 (waiting on
+  // confirmation). Both are seed rows no persona owns: the runner loads them as
+  // the admin's. The platform's `owner_only_deletes` floor refuses a delete of a
+  // row the caller did not create, and only the sharing service's delete
+  // `allow` (ownership, Modify All, a write depth of `org`) on an object it
+  // enforces on lifts it (plugin-security `platform-ownership-policies.ts`,
+  // plugin-sharing `SharingService.checkDelete`).
+  const { card: loaded, refusals } = loadScenarioFile(resolve(SCENARIOS_DIR, 'leave_balances.json'), { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  if (!loaded) throw new Error(refusals.map(formatRefusal).join('\n'));
+  const LEAVE = loaded.card;
+  const DELETE = 'persona-grant:hr_officer:leave_request:delete';
+  const facts = (opts: { entry?: Bag; sharingModel?: string; ownership?: string; rowLevelSecurity?: Bag[]; actions?: Bag[] } = {}) =>
+    readArtifactFacts({
+      objects: [
+        {
+          name: 'leave_request',
+          label: 'Leave Request',
+          sharingModel: opts.sharingModel ?? 'private',
+          ...(opts.ownership ? { ownership: opts.ownership } : {}),
+          fields: { name: { type: 'text', label: 'Name' }, status: { type: 'text', label: 'Status' } },
+          ...(opts.actions ? { actions: opts.actions } : {}),
+        },
+      ],
+      permissions: [
+        {
+          name: 'hr_officer',
+          label: 'HR officer',
+          objects: { leave_request: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, ...opts.entry } },
+          ...(opts.rowLevelSecurity ? { rowLevelSecurity: opts.rowLevelSecurity } : {}),
+        },
+      ],
+    });
+  const grade = (f: ReturnType<typeof readArtifactFacts>, c: ScenarioArtifactCard = LEAVE) => gradePersonaGrants(f, c).find((x) => x.check === DELETE)!;
+  const state = (r: { pass: boolean; notMeasured?: string }) => (r.notMeasured === undefined ? r.pass : 'not-measured');
+
+  it('the card deletes rows the admin owns, as the hr_officer', () => {
+    const ops = LEAVE.run.operations!.filter((o) => o.kind === 'delete' && o.actingAs === 'hr_officer');
+    expect(ops.map((o) => [o.id, o.target])).toEqual([['delete_withdrawn_request', 'lr_100'], ['delete_zoes_withdrawn_request', 'lr_003']]);
+  });
+
+  it('⛔ allowDelete without Modify All fails: the floor refuses a delete of a row the persona does not own', () => {
+    const r = grade(facts());
+    expect(state(r)).toBe(false);
+    expect(r.detail).toContain('lr_100');
+    expect(r.detail).toContain('lr_003');
+  });
+
+  it('Modify All, or a write depth of org, lifts the floor on an object the sharing service enforces on', () => {
+    expect(state(grade(facts({ entry: { modifyAllRecords: true } })))).toBe(true);
+    expect(state(grade(facts({ entry: { writeScope: 'org' } })))).toBe(true);
+  });
+
+  it('⛔ on a public org-wide default, or with no record owner, nothing lifts it: the sharing service abstains, Modify All included', () => {
+    expect(state(grade(facts({ sharingModel: 'public_read_write', entry: { modifyAllRecords: true } })))).toBe(false);
+    expect(state(grade(facts({ ownership: 'none', entry: { modifyAllRecords: true } })))).toBe(false);
+  });
+
+  it('an authored delete policy beside the floor, or a detail whose master gate decides, leaves the write to the run', () => {
+    const policy = { name: 'hr_deletes_withdrawn', object: 'leave_request', operation: 'delete', using: "status == 'withdrawn'" };
+    expect(state(grade(facts({ rowLevelSecurity: [policy] })))).toBe('not-measured');
+    expect(state(grade(facts({ rowLevelSecurity: [{ ...policy, operation: 'select' }] })))).toBe(false);
+    expect(state(grade(facts({ sharingModel: 'controlled_by_parent' })))).toBe('not-measured');
+  });
+
+  it("the waiting delete routed through the card's confirm-gated action the build declares is the run's; the applied one stays measured", () => {
+    const action = { name: 'delete_leave_request', label: 'Delete', type: 'script', target: 'delete_leave_request', ai: { exposed: true, requiresConfirmation: true } };
+    const WAITING: ScenarioArtifactCard = { ...LEAVE, run: { ...LEAVE.run, operations: LEAVE.run.operations!.filter((o) => o.id !== 'delete_withdrawn_request') } };
+    expect(state(grade(facts({ actions: [action] }), WAITING))).toBe('not-measured');
+    expect(state(grade(facts({ actions: [action] })))).toBe(false);
+  });
+
+  it('a row the persona owns passes on the grant: ownership is the sharing service\'s own allow', () => {
+    // A card copy whose hr_officer is the person LR-0100 names (e04), so the runner loads the row as theirs.
+    const persona = LEAVE.run.personas.find((p) => p.id === 'hr_officer')!;
+    const OWNER: ScenarioArtifactCard = {
+      ...LEAVE,
+      run: {
+        ...LEAVE.run,
+        personas: LEAVE.run.personas.map((p) => (p === persona ? { ...p, record: { object: 'employee', id: 'e04' } } : p)),
+        operations: LEAVE.run.operations!.filter((o) => o.id !== 'delete_zoes_withdrawn_request'),
+      },
+    };
+    expect(state(grade(facts(), OWNER))).toBe(true);
   });
 });

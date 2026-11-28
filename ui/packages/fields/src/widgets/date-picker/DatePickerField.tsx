@@ -44,6 +44,7 @@ import {
   fromLocalDay,
 } from './localeDateText.js';
 import { useFieldTranslation } from '../useFieldTranslation.js';
+import { isImeKey } from '../imeKey.js';
 
 /**
  * The `date` and date-time controls of the form field widgets
@@ -91,6 +92,16 @@ import { useFieldTranslation } from '../useFieldTranslation.js';
  * today. Every pick goes through `fromDateTimeInputValue`, the same write the
  * text box uses. The `date` face is unchanged: no time row, and a day pick
  * closes the popover.
+ *
+ * ## A click in the text box opens the calendar too
+ *
+ * Outside a grid cell, a click in the text box opens the same popover its
+ * calendar button opens, and the box keeps the focus: typing still edits the
+ * text, Enter commits it and closes the popover, Escape closes it, and Tab
+ * moves on without entering it. Only a click opens it: focus arriving by Tab
+ * does not, so tabbing through a form never pops a calendar. Closing returns
+ * the focus to the box when nothing else took it. The grid's in-cell face is
+ * not this face: it shows the calendar beneath the box already.
  */
 export function DatePickerField(props: FieldWidgetComponentProps<string>) {
   return <TemporalPicker {...props} withTime={false} />;
@@ -125,8 +136,12 @@ function TemporalPicker({
   const locale = useDisplayLocale();
   const { t } = useFieldTranslation();
   const noticeId = React.useId();
-  // The grid's cell editor opens with its calendar showing (objectstack#35688).
-  const [open, setOpen] = React.useState(!!inCell && !readonly);
+  const [open, setOpen] = React.useState(false);
+  // Whether the popover was opened by a click in the text box, which keeps
+  // the focus there, rather than by the calendar button.
+  const [openedFromBox, setOpenedFromBox] = React.useState(false);
+  const panelId = React.useId();
+  const boxRef = React.useRef<HTMLInputElement>(null);
   const hourRef = React.useRef<HTMLButtonElement>(null);
   const rootRef = React.useRef<HTMLDivElement>(null);
 
@@ -188,13 +203,15 @@ function TemporalPicker({
     if (next !== nativeValue) onChange(stored);
   };
 
+  /** Reads the typed text; `false` when it names no date. */
   const commitText = () => {
     const parsed = parseLocaleDateText(text, locale, withTime);
     if (parsed === null) {
       setBadText(text);
-      return;
+      return false;
     }
     write(parsed);
+    return true;
   };
 
   /**
@@ -251,37 +268,167 @@ function TemporalPicker({
     ? [domProps['aria-describedby'], noticeId].filter(Boolean).join(' ')
     : domProps['aria-describedby'];
 
+  /**
+   * The text box: the value as the reader's locale writes it, typeable. With
+   * `opensPopover` a click in it opens the calendar popover too.
+   */
+  const textBox = (className: string, opensPopover = false) => (
+    <Input
+      {...domProps}
+      ref={boxRef}
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      className={className}
+      placeholder={pattern}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={(e) => {
+        commitText();
+        domProps.onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        // objectstack#35996 — an Enter that picks an input-method candidate
+        // does not commit the half-typed text.
+        if (isImeKey(e)) return;
+        if (e.key === 'Enter') {
+          // Commit, and keep a bare Enter from submitting the form with
+          // the text not yet read.
+          e.preventDefault();
+          if (commitText() && opensPopover) setOpen(false);
+        }
+      }}
+      onClick={opensPopover ? (e) => {
+        domProps.onClick?.(e);
+        if (open || disabled) return;
+        setOpenedFromBox(true);
+        setOpen(true);
+      } : domProps.onClick}
+      disabled={disabled}
+      // After the DOM spread, the objectui#3222 idiom `DateField` follows.
+      aria-invalid={!!error || impossible || badText !== null}
+      aria-describedby={describedBy}
+      // The popover relationship Radix gives the calendar button.
+      aria-haspopup={opensPopover ? 'dialog' : undefined}
+      aria-expanded={opensPopover ? open : undefined}
+      aria-controls={opensPopover && open ? panelId : undefined}
+    />
+  );
+
+  /** The calendar, the time on the `datetime` face, and the quick picks. */
+  const panel = (
+    <>
+      {/* Opens on the value's month, and on today's with no value. */}
+      {/* Below `sm` each day and month arrow is a 44 px cell: seven fit a 375 px screen. */}
+      <Calendar
+        mode="single"
+        defaultMonth={selected}
+        selected={selected}
+        onSelect={pickDay}
+        // Opened from the text box, the focus stays in the box.
+        autoFocus={!inCell && !openedFromBox}
+        className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
+      />
+      {withTime ? (
+        <div
+          role="group"
+          aria-label={t('fields.datePicker.time', { defaultValue: 'Time' })}
+          className="flex items-center gap-1.5 border-t p-2"
+          data-testid="date-picker-time"
+        >
+          <Clock className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Select value={hour} onValueChange={(h) => pickTime(h, minute ?? '00')}>
+            <SelectTrigger
+              ref={hourRef}
+              className={cn('h-8 w-[5.75rem]', PHONE_TOUCH_HEIGHT)}
+              aria-label={t('fields.datePicker.hour', { defaultValue: 'Hour' })}
+              data-testid="date-picker-hour"
+            >
+              <SelectValue placeholder="--" />
+            </SelectTrigger>
+            <SelectContent className="max-h-64">
+              {HOURS.map((h) => {
+                const v = String(h).padStart(2, '0');
+                return (
+                  <SelectItem key={v} value={v}>
+                    {localeHourLabel(h, locale)}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground" aria-hidden="true">:</span>
+          <Select value={minute} onValueChange={(m) => pickTime(hour ?? '00', m)}>
+            <SelectTrigger
+              className={cn('h-8 w-[4.25rem]', PHONE_TOUCH_HEIGHT)}
+              aria-label={t('fields.datePicker.minute', { defaultValue: 'Minute' })}
+              data-testid="date-picker-minute"
+            >
+              <SelectValue placeholder="--" />
+            </SelectTrigger>
+            <SelectContent className="max-h-64">
+              {minuteOptions(DATE_TIME_MINUTE_STEP, minute).map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+      <div className="flex items-center gap-2 border-t p-2">
+        <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(0)}>
+          {t('fields.datePicker.today')}
+        </Button>
+        <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(1)}>
+          {t('fields.datePicker.tomorrow')}
+        </Button>
+        {inCell ? (
+          <>
+            {/* Seven days from today (ruling of record 7057128455). */}
+            <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(7)} data-testid="date-picker-next-week">
+              {t('fields.datePicker.nextWeek')}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={clearAndCommit} data-testid="date-picker-clear-pick">
+              {t('fields.datePicker.clearPick')}
+            </Button>
+          </>
+        ) : null}
+      </div>
+    </>
+  );
+
+  const noticeLine = notice ? (
+    <p id={noticeId} className="text-xs text-destructive" data-testid="date-picker-notice">
+      {notice}
+    </p>
+  ) : null;
+
+  if (inCell) {
+    // The grid's cell editor (objectstack#36023): one panel under the cell,
+    // the typeable box on top and the calendar always showing beneath it.
+    return (
+      <div
+        ref={rootRef}
+        // The calendar takes the panel's own surface, centred over the wider
+        // row of quick picks.
+        className="w-max space-y-1 [&_[data-slot=calendar]]:mx-auto [&_[data-slot=calendar]]:bg-transparent"
+        data-slot="date-picker"
+        data-in-cell-face="panel"
+      >
+        <div className="p-2 pb-0">{textBox('h-8')}</div>
+        {panel}
+        {noticeLine ? <div className="px-2 pb-2">{noticeLine}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <div ref={rootRef} className="space-y-1" data-slot="date-picker">
       <div className="relative">
-        <Input
-          {...domProps}
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          // Below `sm` the two buttons inside grow to the touch floor, so the
-          // text stops short of both (2 x 44 px plus the gap).
-          className={cn(PHONE_TOUCH_HEIGHT, 'pr-24 sm:pr-16', domProps.className)}
-          placeholder={pattern}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={(e) => {
-            commitText();
-            domProps.onBlur?.(e);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              // Commit, and keep a bare Enter from submitting the form with
-              // the text not yet read.
-              e.preventDefault();
-              commitText();
-            }
-          }}
-          disabled={disabled}
-          // After the DOM spread, the objectui#3222 idiom `DateField` follows.
-          aria-invalid={!!error || impossible || badText !== null}
-          aria-describedby={describedBy}
-        />
+        {/* Below `sm` the two buttons inside grow to the touch floor, so the
+            text stops short of both (2 x 44 px plus the gap). */}
+        {textBox(cn(PHONE_TOUCH_HEIGHT, 'pr-24 sm:pr-16', domProps.className), true)}
         <div className="absolute inset-y-0 right-1 flex items-center gap-0.5">
           {!disabled && (text || nativeValue) ? (
             <Button
@@ -296,7 +443,14 @@ function TemporalPicker({
               <X className="h-3.5 w-3.5" />
             </Button>
           ) : null}
-          <Popover open={open} onOpenChange={setOpen}>
+          <Popover
+            open={open}
+            onOpenChange={(next) => {
+              // Only the calendar button and a dismissal come through here.
+              if (next) setOpenedFromBox(false);
+              setOpen(next);
+            }}
+          >
             <PopoverTrigger asChild>
               <Button
                 type="button"
@@ -305,108 +459,38 @@ function TemporalPicker({
                 className={cn('h-7 w-7', PHONE_TOUCH_SQUARE)}
                 disabled={disabled}
                 aria-label={t('fields.datePicker.openCalendar')}
+                aria-controls={open ? panelId : undefined}
                 data-testid="date-picker-trigger"
               >
                 <CalendarDays className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
             <PopoverContent
+              id={panelId}
               className="w-auto p-0"
-              align={inCell ? 'start' : 'end'}
-              // In a grid cell the text box keeps the caret while the calendar
-              // shows, and a press on the box does not close the calendar.
-              onOpenAutoFocus={inCell ? (e) => e.preventDefault() : undefined}
-              onInteractOutside={inCell
-                ? (e) => {
-                    if (rootRef.current?.contains(e.target as Node)) e.preventDefault();
-                  }
-                : undefined}
+              align="end"
+              onOpenAutoFocus={(e) => {
+                if (openedFromBox) e.preventDefault();
+              }}
+              // A click or focus in the text box is not a click outside.
+              onInteractOutside={(e) => {
+                if (boxRef.current?.contains(e.target as Node)) e.preventDefault();
+              }}
+              onCloseAutoFocus={(e) => {
+                if (!openedFromBox) return;
+                // Not to the calendar button: back to the box, unless the
+                // close moved the focus somewhere else on purpose.
+                e.preventDefault();
+                const active = document.activeElement;
+                if (!active || active === document.body) boxRef.current?.focus();
+              }}
             >
-              {/* Opens on the value's month, and on today's with no value. */}
-              {/* Below `sm` each day and month arrow is a 44 px cell: seven fit a 375 px screen. */}
-              <Calendar
-                mode="single"
-                defaultMonth={selected}
-                selected={selected}
-                onSelect={pickDay}
-                autoFocus={!inCell}
-                className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
-              />
-              {withTime ? (
-                <div
-                  role="group"
-                  aria-label={t('fields.datePicker.time', { defaultValue: 'Time' })}
-                  className="flex items-center gap-1.5 border-t p-2"
-                  data-testid="date-picker-time"
-                >
-                  <Clock className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <Select value={hour} onValueChange={(h) => pickTime(h, minute ?? '00')}>
-                    <SelectTrigger
-                      ref={hourRef}
-                      className={cn('h-8 w-[5.75rem]', PHONE_TOUCH_HEIGHT)}
-                      aria-label={t('fields.datePicker.hour', { defaultValue: 'Hour' })}
-                      data-testid="date-picker-hour"
-                    >
-                      <SelectValue placeholder="--" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-64">
-                      {HOURS.map((h) => {
-                        const v = String(h).padStart(2, '0');
-                        return (
-                          <SelectItem key={v} value={v}>
-                            {localeHourLabel(h, locale)}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                  <span className="text-muted-foreground" aria-hidden="true">:</span>
-                  <Select value={minute} onValueChange={(m) => pickTime(hour ?? '00', m)}>
-                    <SelectTrigger
-                      className={cn('h-8 w-[4.25rem]', PHONE_TOUCH_HEIGHT)}
-                      aria-label={t('fields.datePicker.minute', { defaultValue: 'Minute' })}
-                      data-testid="date-picker-minute"
-                    >
-                      <SelectValue placeholder="--" />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-64">
-                      {minuteOptions(DATE_TIME_MINUTE_STEP, minute).map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : null}
-              <div className="flex items-center gap-2 border-t p-2">
-                <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(0)}>
-                  {t('fields.datePicker.today')}
-                </Button>
-                <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(1)}>
-                  {t('fields.datePicker.tomorrow')}
-                </Button>
-                {inCell ? (
-                  <>
-                    {/* Seven days from today (ruling of record 7057128455). */}
-                    <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(7)} data-testid="date-picker-next-week">
-                      {t('fields.datePicker.nextWeek')}
-                    </Button>
-                    <Button type="button" variant="ghost" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={clearAndCommit} data-testid="date-picker-clear-pick">
-                      {t('fields.datePicker.clearPick')}
-                    </Button>
-                  </>
-                ) : null}
-              </div>
+              {panel}
             </PopoverContent>
           </Popover>
         </div>
       </div>
-      {notice ? (
-        <p id={noticeId} className="text-xs text-destructive" data-testid="date-picker-notice">
-          {notice}
-        </p>
-      ) : null}
+      {noticeLine}
     </div>
   );
 }

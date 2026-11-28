@@ -25,7 +25,8 @@
  *     reports a bare one of the first kind as a Build finding, so every
  *     authoring prompt (build, iterate, template iterate) states it;
  *   - the structure the Build half checks by exact name beyond the seed
- *     ({@link structureLines}): each lookup's target, each single-choice field
+ *     ({@link structureLines}): each lookup's target (a row marked
+ *     `masterDetail` named as a master-detail, never as a lookup), each single-choice field
  *     with its minimum option count, each dashboard, each app navigation
  *     target, and each dataset with its members and their vocabulary. Every Build check traces to text the prompt carries, so a
  *     faithful build never fails for not guessing a name; an iterate prompt
@@ -43,10 +44,14 @@
 
 import type { LoadedScenario } from '../loader.js';
 import { PERSON_USER_FIELD, scenarioNamespace, type LocalizedText, type ScenarioCard, type ScenarioExpect } from '../schema.js';
+import { personLookups, rowOwner, userHandleFields } from '../row-owner.js';
 import { permissionSetName } from './namespace.js';
 import { cycleText, referenceCycles } from './seed.js';
 
 type Card = ScenarioCard;
+
+// The seed rows' owners, read by the scorer too: kept where both reach them, re-exported here for the runner.
+export { rowOwner, userHandleFields };
 type Persona = Card['run']['personas'][number];
 
 const code = (name: string): string => `\`${name}\``;
@@ -200,7 +205,9 @@ export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>):
 /**
  * One line per kind of structure row the exact-name scorer (`scoreGraph`)
  * checks and the seed does not already state: a lookup's target
- * (`lookup:<object>.<field>-><to>`), a single-choice field's minimum option
+ * (`lookup:<object>.<field>-><to>`; a row marked `masterDetail` gets its own
+ * master-detail line, since the inline-edit tag credits only a `master_detail`
+ * field), a single-choice field's minimum option
  * count (`select:<object>.<field>>=<n>opts`), a dashboard (`dashboard:<name>`)
  * and an app navigation target (`nav:<name>->exists`). On a card carrying
  * the select-options tag, one more line holds every single-choice field the
@@ -209,8 +216,17 @@ export function datasetLines(datasets: NonNullable<ScenarioExpect['datasets']>):
  */
 export function structureLines(rows: StructureRows, card: Card): string[] {
   const out: string[] = [];
-  if (rows.lookups?.length) {
-    out.push(`- Lookups, each referencing the object shown: ${rows.lookups.map((l) => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`).join(', ')}.`);
+  const relation = (l: NonNullable<StructureRows['lookups']>[number]) => `${code(`${l.object}.${l.field}`)} → ${code(l.to)}`;
+  const lookups = rows.lookups?.filter((l) => l.masterDetail !== true) ?? [];
+  const masterDetails = rows.lookups?.filter((l) => l.masterDetail === true) ?? [];
+  if (lookups.length) {
+    out.push(`- Lookups, each referencing the object shown: ${lookups.map(relation).join(', ')}.`);
+  }
+  if (masterDetails.length) {
+    out.push(
+      `- Master-detail relationships, each a \`master_detail\` field (not a \`lookup\`) on the detail object referencing its master, ` +
+        `the detail's rows entered inline on the master's form: ${masterDetails.map(relation).join(', ')}.`,
+    );
   }
   if (rows.selectFields?.length) {
     out.push(
@@ -282,50 +298,6 @@ export function personaRecords(card: Card): Map<string, string> {
   return out;
 }
 
-/** The declared lookups (`expect.lookups`) that point at a person object, the object of some persona's `record` (`ticket.assignee` → `agent`). */
-function personLookups(card: Card): Array<{ object: string; field: string; to: string }> {
-  const people = new Set(card.run.personas.flatMap((p) => (p.record ? [p.record.object] : [])));
-  return (card.expect.lookups ?? []).filter((l) => people.has(l.to)).map(({ object, field, to }) => ({ object, field, to }));
-}
-
-/**
- * The persona a seed row is loaded as owned by (`owner_id`), or undefined
- * when it names no person and the inserter (the admin) keeps it. A row names a
- * persona when it IS that persona's record, when a declared direct lookup on
- * it holds that record's id (`ticket.assignee` = `a02`), or when a declared
- * user-handle field on it holds that persona's handle (`account.owner` =
- * `u_sam`). The first persona in `run.personas` order the row names owns it.
- * An option value (`ticket_comment.visibility` = `public`), a row id scope
- * (`department.id` = `dep_sales`) and a lookup to a row no persona is (a
- * department, a group) name nobody.
- */
-export function rowOwner(card: Card, object: string, row: Readonly<Record<string, unknown>>): string | undefined {
-  const lookups = personLookups(card).filter((l) => l.object === object);
-  const handles = userHandleFields(card);
-  for (const p of card.run.personas) {
-    const rec = p.record;
-    if (rec !== undefined) {
-      if (rec.object === object && row.id === rec.id) return p.id;
-      if (lookups.some((l) => l.to === rec.object && row[l.field] === rec.id)) return p.id;
-    }
-    for (const sc of p.scope ?? []) {
-      if (sc.object === object && !sc.field.includes('.') && handles.has(`${object}.${sc.field}`) && row[sc.field] === sc.value) return p.id;
-    }
-  }
-  return undefined;
-}
-
-/**
- * The seed fields whose values are user handles, `object.field`: the card's
- * declared `run.userHandleFields`, read and never inferred. In the crm card
- * that is `account.owner` (`u_sam`, `u_tia`). Every other field holds a row id
- * or an option value (`asset.custodian` = `e06`, an employee row;
- * `ticket_comment.visibility` = `public`), which the seed loads verbatim.
- */
-export function userHandleFields(card: Card): Set<string> {
-  return new Set((card.run.userHandleFields ?? []).map((h) => `${h.object}.${h.field}`));
-}
-
 /** The handles a seed row names in a {@link userHandleFields} field that no persona signs in as (`u_tia`): the seed loads each as the admin user. */
 export function unheldHandles(card: Card): string[] {
   const held = personaHandles(card);
@@ -361,9 +333,15 @@ function personaLine(card: Card, p: Persona): string {
     ...(p.hidden.objects ?? []).map((o) => `the object \`${o}\``),
     ...(p.hidden.fields ?? []).map((f) => `the field \`${f.object}.${f.field}\``),
   ];
+  const rollups = (p.withheldRollups ?? []).map((r) => `\`${r.object}.${r.field}\``);
   const scope = (p.scope ?? []).map((s) => `\`${s.object}\` rows whose \`${s.field}\` is ${JSON.stringify(s.value)}`);
   return (
     `- \`${permissionSetName(card, p.id)}\` for \`${p.id}\` (${p.role}): must not read ${hides.join(' or ')}` +
+    (rollups.length
+      ? rollups.length > 1
+        ? `; the roll-up fields ${rollups.join(' and ')} summarise what it must not read, so they are withheld too: its set must not read them either`
+        : `; the roll-up field ${rollups[0]} summarises what it must not read, so it is withheld too: its set must not read it either`
+      : '') +
     (scope.length ? `; sees only ${scope.join(' and ')}` : '') +
     '.'
   );
@@ -420,16 +398,60 @@ function rowOwnership(card: Card): string[] {
   return lines;
 }
 
+/**
+ * What a confirm-gated agent action's line asks of the build. The gate
+ * (`ai.requiresConfirmation`) guards the action's own door only, and it is not
+ * widened to the raw data door (`update_record`), so without a lock an agent
+ * that meets the gate can write the target state directly. The lock is the one
+ * the objectstack-ai skill teaches (pitfall "Gating the action, not the
+ * state"): the fields made not editable for the people who run the action,
+ * written elevated by the action itself.
+ *
+ * Two limits keep it from denying a card's own operations: it is scoped to the
+ * stage the action acts on (a field permission `when`), so the same people's
+ * other changes to those fields still land (a team lead's resolve, refused by
+ * validation, meets no lock before the ticket is resolved); and an action that
+ * deletes its row locks nothing, since the same people's plain deletes are
+ * applied operations on several cards.
+ */
+const CONFIRM_FIRST_LOCK =
+  'confirm first; the confirmation guards this action’s own door only, so also lock the change it makes: ' +
+  'if it changes fields of its row, make those fields not editable for each person who runs it, at the stage it acts on ' +
+  '(a field permission `when` in their permission set), and have the action write them elevated, ' +
+  'so a plain record update cannot make that change while those people’s other changes to the same fields still land; ' +
+  'an action that deletes its row locks nothing, and those people keep their delete right';
+
+/**
+ * How the runner loads the seed, as the build must expect it: through the
+ * platform's own seed path (`seedApp` in `orchestrate.ts`), not the data API a
+ * person writes through. The rows are established facts: the state machine's
+ * entry check is skipped, every other validation rule and hook judges each
+ * row, and no record-triggered flow fires on it. So a field a build derives
+ * with an after-save flow stays empty on every loaded row (asset_lifecycle's
+ * department scoping fields left a manager seeing none of the department's
+ * rows), and a rule that judges a row against a total the loaded rows already
+ * count (a payment against its invoice's balance) refuses the history.
+ */
+export const SEED_POSTURE =
+  'The rows are loaded through the platform’s seed path as established facts, not as new records entering their lifecycle: ' +
+  'each row is still judged by every validation rule and hook except the state machine’s entry check, and no record-triggered flow fires on it. ' +
+  'So a value derived from other fields or rows (a department copied from a related row to scope access, an amount, a flag) must be a formula or a field computed by an expression when written, ' +
+  'never set by a record-triggered flow, or every loaded row keeps it empty. ' +
+  'And a loaded row is already counted in the stored totals of the rows it relates to (a payment in its invoice’s balance), ' +
+  'so a validation rule must not refuse it by comparing it with such a total.';
+
 /** The runner's contract, appended to every build prompt. */
 export function dataContract(card: Card): string {
   const lines: string[] = [];
   lines.push('## What the app will be loaded with and used by');
   lines.push('');
   lines.push(
-    'After you finish, a test runner loads the rows below through the data API and signs each person in. ' +
+    'After you finish, a test runner loads the rows below and signs each person in. ' +
       'Use these object and field machine names exactly (lookup values are the `id` of the referenced row), ' +
       'and make every value shown valid for its field. The object names already carry this app’s namespace prefix.',
   );
+  lines.push('');
+  lines.push(SEED_POSTURE);
   lines.push('');
   lines.push(namingRule(card));
   lines.push('');
@@ -460,8 +482,8 @@ export function dataContract(card: Card): string {
   }
   if (card.run.agentActions?.length) {
     lines.push('');
-    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked):');
-    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ' (confirm first)' : ''}`);
+    lines.push('Business actions an AI agent may call (expose each to AI; ask before acting where marked, and only there: an unmarked action runs at once, with no confirmation gate):');
+    for (const a of card.run.agentActions) lines.push(`- \`${a.name}\` on \`${a.object}\`: ${a.summary}${a.confirm ? ` (${CONFIRM_FIRST_LOCK})` : ''}`);
   }
   return lines.join('\n');
 }

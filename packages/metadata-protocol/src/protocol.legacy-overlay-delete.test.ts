@@ -78,6 +78,8 @@
  * either.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// Paid during collection, not inside a clocked case: the diagnostics `import()` it in a function body (`scripts/check-test-source-alias.mjs`).
+import '@objectstack/lint';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
 // refuses. Imported from `@objectstack/metadata-core` and not from
@@ -272,8 +274,11 @@ describe('#6960 — the registry is the tier boundary, and it is DATA', () => {
      * is what stops the two tiers from silently merging.
      */
     it('names the rolled-back overlayable tier exactly as the registry declares it', () => {
+        // [ADR-0160 D1] `ai_context` registers like `skill`, overlay allowed, so it joins the tier.
+        // [ADR-0161 K4] `knowledge_source` registers with `ai_context`'s flags, so it joins too.
+        // [ADR-0159 D2] So does `form`: overlay-capable through a package's pair, no environment overlay.
         expect([...ROLLED_BACK_OVERLAYABLE_TYPES]).toEqual([
-            'app', 'book', 'dataset', 'page', 'permission', 'position', 'skill', 'tool',
+            'ai_context', 'app', 'book', 'dataset', 'form', 'knowledge_source', 'page', 'permission', 'position', 'skill', 'tool',
         ]);
         // The six commit ee58392e1 named, all present.
         for (const t of ['permission', 'position', 'page', 'app', 'dataset', 'book']) {

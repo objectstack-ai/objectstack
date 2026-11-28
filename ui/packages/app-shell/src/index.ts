@@ -85,6 +85,31 @@ export {
   LoadingFallback,
 } from './console/ConsoleShell.js';
 
+// objectstack#36732 — what a host draws above the Setup app's first page (the
+// console's first-run checklist, now that the desktop's home page retired).
+export { SetupFirstPageSlotProvider, type SetupFirstPageSlot } from './console/setupFirstPageSlot.js';
+
+// objectstack#36739 — what a host draws at the bottom of an app's sidebar (the
+// console's 「Get started n/m」 pill), and after the app's menu on a phone.
+export {
+  SidebarFooterSlotProvider,
+  type SidebarFooterSlot,
+  type SidebarFooterSlotPlace,
+} from './layout/sidebarFooterSlot.js';
+
+// objectstack#37150 — the shell sidebar's place for an app's docs navigation,
+// drawn by the console's docs pages (the provider and the target are the
+// shell's side, mounted by `ConsoleLayout` and `UnifiedSidebar`); and the page
+// header's two shell slots (the top-right button group and the sidebar's
+// expand button), for a docs page, which draws no `ConsolePageHeader`.
+export {
+  SidebarDocsNav,
+  SidebarDocsNavSlotProvider,
+  SidebarDocsNavTarget,
+  useSidebarDocsNavSlot,
+} from './layout/sidebarDocsNavSlot.js';
+export { useShellPageActionsSlot, useShellSidebarExpandSlot } from './layout/shellPageActionsSlot.js';
+
 // Host-app route policy (ADR-0048) — which app's `/apps/<segment>/…` URL a
 // framework-owned, app-INDEPENDENT page should build, and the two predicates it
 // is defined in terms of. Published from the package root (objectui#4280)
@@ -128,7 +153,7 @@ export {
 // emptiness heuristic on top of the SAME declaration reader the chrome's Home
 // affordances use, so the post-login landing and the top-bar logo cannot name
 // two different homes.
-export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from './utils/index.js';
+export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from './utils/index.js';
 
 // `a810bb2ae` — ONE read of the ADR-0112 failure envelope, published so a
 // consumer OUTSIDE this package inherits the pinned rule instead of writing a
@@ -298,7 +323,7 @@ export { AppContent as DefaultAppContent } from './console/AppContent.js';
 export { MarketplacePage } from './console/marketplace/MarketplacePage.js';
 export { MarketplacePackagePage } from './console/marketplace/MarketplacePackagePage.js';
 export { LoginPage as DefaultLoginPage } from './console/auth/LoginPage.js';
-export { signInRefusalMessages } from './console/auth/signInRefusalMessages.js';
+export { signInRefusalMessages, passwordDoorRefusalMessages } from './console/auth/signInRefusalMessages.js';
 export { RegisterPage as DefaultRegisterPage } from './console/auth/RegisterPage.js';
 export {
   signUpCaptchaFailedMessage,
@@ -341,6 +366,9 @@ export {
 export { useInvitationSignUpJoin, type InvitationSignUpJoin } from './console/auth/invitationSignUpJoin.js';
 export { ForgotPasswordPage as DefaultForgotPasswordPage } from './console/auth/ForgotPasswordPage.js';
 export { HomeLayout as DefaultHomeLayout, HomeLayout } from './console/home/HomeLayout.js';
+// objectstack#37197 — the docs portal's frame: the app-less shell from 768 px up.
+export { DocsPortalShell } from './console/docs/DocsPortalShell.js';
+export type { DocsPortalShellProps } from './console/docs/DocsPortalShell.js';
 export { HomePage as DefaultHomePage, HomePage } from './console/home/HomePage.js';
 // Whether the signed-in person has connected an AI assistant (or holds a
 // working API key), and where Connect an AI Assistant opens: the one read and
@@ -383,6 +411,9 @@ export {
   type ChatDockControl,
 } from './layout/chatDockControl.js';
 export type { ChatDockTarget } from './layout/chatDockTarget.js';
+// objectstack#36999 — the one setter every entry point pins a record through
+// (the page chip's pin, the record drawer, the `ask_ai` action); chat-free.
+export { setChatFocus, type ChatFocus } from './layout/chatFocus.js';
 // Conversation-history hydration helpers — reused by the public read-only
 // share page (`/s/:token`) so a shared transcript renders identically to the
 // live chat (tool cards included) instead of dumping raw envelopes.
@@ -582,19 +613,34 @@ export {
 export {
   registerStudioCanvasPreview,
 } from './views/studio-design/studio-canvas-preview.js';
-// The builder's front door: pick/create a writable package → pillar builder.
-// Standalone at `/studio` and embedded via the `studio:builder` component ref.
-export { BuilderLanding } from './views/studio-design/BuilderLanding.js';
+// objectstack#36908 — bare `/studio` draws no page: it opens the package the
+// author was last in, else the package list. A host that declares the
+// `/studio` routes mounts it as their index.
+export { StudioEntryRedirect } from './views/studio-design/StudioEntryRedirect.js';
+// objectstack#36909 — a retired pillar address (`/studio/<package>`,
+// `/studio/<package>/data`, `/automations`, `/access`, `/interfaces`,
+// `/studio/~org/...`) lands on the page that replaced it in one redirect. A
+// host that declares the `/studio` routes mounts it on `:packageId` and
+// `:packageId/:tab`, with the builder as its children.
+export { StudioPillarRedirect } from './views/studio-design/StudioPillarRedirect.js';
+// The capability set that host's Studio entry gate read, provided around the
+// `/studio` subtree so every Studio exit that names no package lands where the
+// principal may go (Setup → Packages, else the "All metadata" area).
+export {
+  StudioEntryPermissionsProvider,
+  useStudioEntryPermissions,
+} from './views/studio-design/studioEntryPermissions.js';
 // The one Studio scope that is not a package (objectui#11553): the
-// organization's own package-less flows, at `/studio/~org/automations`. A host
-// that declares the `/studio` routes reads the reserved segment from here.
+// organization's own package-less flows, listed at
+// `/studio/~org/metadata/flow?source=runtime` (objectstack#36903; the old
+// `/studio/~org/automations` redirects there). A host that declares the
+// `/studio` routes reads the reserved segment from here.
 export {
   STUDIO_ORG_SCOPE_SEGMENT,
-  STUDIO_ORG_SCOPE_PILLAR,
   studioOrgScopePath,
 } from './views/studio-design/studioScope.js';
-// Studio's "All metadata" area (objectstack ADR-0146 D1): per package beside
-// the pillars, at `/studio/<package>/metadata/*`, and across packages at the
+// Studio's "All metadata" area (objectstack ADR-0146 D1): per package, at
+// `/studio/<package>/metadata/*`, and across packages at the
 // reserved `/studio/~all/metadata/*`. A host that declares the `/studio` routes
 // reads the segments from here, and mounts the cross-package leg's area.
 export {
@@ -607,6 +653,23 @@ export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js'
 // area (the datasource's stays in Setup). A host whose legacy aliases forward
 // onto Setup's metadata routes lands them in one hop through this.
 export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
+// objectstack#36908 — Setup → Packages, the package list's administration
+// face: where a host's legacy redirects that name no package land, now that
+// Studio has no home page.
+export { SETUP_PACKAGES_PATH } from './views/metadata-admin/packageSource.js';
+// objectstack#37565 — Setup → Access control → Positions and permissions: the
+// environment directory that left Studio's cross-package leg. A host's bare
+// `/studio/~all` route lands here in one hop, for whoever may open Setup
+// (`holdsSetupAccess`); anyone else keeps the cross-package leg.
+export { ACCESS_DIRECTORY_PATH, holdsSetupAccess } from './views/setup/accessDirectoryRef.js';
+// objectstack#36895 — the one builder of Studio addresses. A host that
+// declares the `/studio` routes, or links into them, spells every address
+// through these, never by hand (`studioAddress.guard.test.ts`).
+export {
+  STUDIO_ROOT_PATH,
+  studioLandingPath,
+  studioPackagePath,
+} from './views/studio-design/studioAddress.js';
 
 
 // AI assistant bus — connects the metadata designers to the global chat.

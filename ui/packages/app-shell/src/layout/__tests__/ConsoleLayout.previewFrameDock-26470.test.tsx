@@ -50,16 +50,17 @@ vi.mock('../../hooks/useAiSurface', () => ({
 
 // Chrome this card does not touch.
 vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => null }));
-// objectstack#34608 — the launcher is the top-bar robot: the header stand-in
-// draws the real one.
-vi.mock('../AppHeader', async () => {
-  const { AssistantTopBarButton } = await import('../AssistantTopBarButton');
-  return { AppHeader: () => <div data-testid="app-header-stub"><AssistantTopBarButton /></div> };
-});
+// objectstack#34608 — the launcher is the robot; from 768 px up the page
+// header's group draws it (objectstack#36112), so the page below mounts the
+// real one and the phone's bar is a stand-in.
+vi.mock('../AppHeader', () => ({ AppHeader: () => <div data-testid="app-header-stub" /> }));
 vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: () => null }));
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
+// The drawer's chat body reaches `import('@object-ui/plugin-grid')`; pay its
+// first load at collection, never inside a clocked case (`check:test-source-alias`).
+import '@object-ui/plugin-grid';
 import { ConsoleLayout } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 import { DOCK_EXPANDED_STORAGE_KEY } from '../chatDockState';
@@ -71,6 +72,10 @@ function mountConsole() {
     <MemoryRouter initialEntries={['/apps/crm?preview=draft']}>
       <NavigationProvider>
         <ConsoleLayout activeAppName="crm" activeApp={APP} onAppChange={vi.fn()} objects={[]}>
+          {/* From 768 px up the entry sits in the page header's button group
+              (objectstack#36111), not in a top bar (objectstack#36112); this
+              page draws no header, so the layout's own corner entry is the
+              one under test (objectstack#37858, `ShellAssistantFallback`). */}
           <div data-testid="route-content">page</div>
         </ConsoleLayout>
       </NavigationProvider>

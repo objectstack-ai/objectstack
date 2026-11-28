@@ -12,6 +12,7 @@ import type {
   IAuditCheckpointSink,
   IAuthService,
   IClusterService,
+  ICommentDoorsService,
   ICryptoProvider,
   IDataEngine,
   IHttpServer,
@@ -20,6 +21,8 @@ import type {
   ISharingService,
 } from '@objectstack/spec/contracts';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
+import type { AuditExpiryRequest, AuditExpiryRun } from './audit-seal/expiry.js';
+import { registerSealedWindowFloors, type SealedFloorRegistrar } from './audit-seal/retention-floor.js';
 import { AuditSealer, type AuditSealerEngine } from './audit-seal/sealer.js';
 import { LocalCheckpointSigner } from './audit-seal/signer.js';
 import {
@@ -42,7 +45,7 @@ import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // @objectstack/service-storage for the same ownership reason (ADR-0052 §3: a
 // file↔record link belongs with storage, not the compliance ledger).
 import { installAuditWriters, type AuditActorSnapshot, type AuditI18nSurface, type MessagingEmitSurface } from './audit-writers.js';
-import { MENTION_EMAIL_TEMPLATES } from './mention-email.js';
+import { MENTION_EMAIL_TEMPLATES, REPLY_EMAIL_TEMPLATES } from './mention-email.js';
 import { createAppActivityWriter } from './app-activity-door.js';
 import { installReadAuditWriter, type ReadAuditWriterHandle } from './read-audit.js';
 import { createAuthEventAuditSink } from './auth-event-audit.js';
@@ -63,6 +66,14 @@ import {
   registerCommentReactionRoutes,
   type CommentReactionEngine,
 } from './comment-reaction-routes.js';
+import {
+  COMMENT_REMOVE_ROUTE,
+  COMMENT_RESOLUTION_ROUTE,
+  registerCommentDoorsRoutes,
+  type CommentDoorsEngine,
+  type CommentPostingGate,
+} from './comment-routes.js';
+import { createCommentDoorMember } from './comment-doors-member.js';
 import { admitMentionRecipients } from './mention-recipient-gate.js';
 import { installActivityReadVisibility } from './activity-read-visibility.js';
 import { installActivityFieldRedaction } from './activity-field-redaction.js';
@@ -340,6 +351,13 @@ export class AuditPlugin implements Plugin {
   private datasetQueryWriter: DatasetQueryAuditWriter | null = null;
   /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
   private sealer: AuditSealer | null = null;
+  /** [ADR-0154 D8] Takes the sealer's expiry back off the lifecycle service, on `destroy()`. */
+  private unregisterExpiryPrefix: (() => void) | null = null;
+  /**
+   * [ADR-0154 D8] Registers each sealed object's retention floors at its declared window
+   * (`audit-seal/retention-floor.ts`); set beside the expiry, run before every sealer pass.
+   */
+  private refreshSealedFloors: (() => void) | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -521,6 +539,16 @@ export class AuditPlugin implements Plugin {
       ...createAppActivityWriter({ getEngine: getLedgerEngine, getActorSnapshot: () => this.actorSnapshotOf }),
     });
 
+    // [#36469] The comment doors on the `comments` slot, transport-neutrally
+    // (`ICommentDoorsService.handleCommentDoor`): the runtime dispatcher's
+    // `/comments` domain forwards to it on a kernel with no `http.server` (a
+    // hosted tenant kernel), where `mountCommentDoors` has nothing to mount
+    // on. Same registration as the mount; nothing is read until a request.
+    const commentDoors: ICommentDoorsService = {
+      handleCommentDoor: createCommentDoorMember((http) => registerCommentDoors(http, ctx)),
+    };
+    ctx.registerService('comments', commentDoors);
+
     // ADR-0029 D8 — contribute this plugin's object translations to the i18n
     // service on kernel:ready (the i18n plugin may register after this one).
     if (typeof (ctx as any).hook === 'function') {
@@ -541,7 +569,7 @@ export class AuditPlugin implements Plugin {
   }
 
   async start(ctx: PluginContext): Promise<void> {
-    this.mountUnreactDoor(ctx);
+    this.mountCommentDoors(ctx);
     // ObjectQL engine is only resolvable after the kernel is ready.
     ctx.hook('kernel:ready', async () => {
       let engine: IDataEngine | null = null;
@@ -650,6 +678,17 @@ export class AuditPlugin implements Plugin {
           messagingAtReady.registerBuiltinTemplates(MENTION_EMAIL_TEMPLATES);
         } catch (err: any) {
           ctx.logger.warn('AuditPlugin: the @mention e-mail templates were NOT registered — mention e-mails carry the notification title and comment preview with no link to the record', {
+            error: err?.message ?? String(err),
+          });
+        }
+      }
+      // [#36074] The reply e-mail's text: the mention e-mail's shape under the
+      // reply topic, registered on its own so one refusal leaves the other.
+      if (messagingAtReady && typeof messagingAtReady.registerBuiltinTemplates === 'function') {
+        try {
+          messagingAtReady.registerBuiltinTemplates(REPLY_EMAIL_TEMPLATES);
+        } catch (err: any) {
+          ctx.logger.warn('AuditPlugin: the comment reply e-mail templates were NOT registered — reply e-mails carry the notification title and comment preview with no link to the record', {
             error: err?.message ?? String(err),
           });
         }
@@ -822,14 +861,16 @@ export class AuditPlugin implements Plugin {
             return undefined;
           }
         };
-        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
-        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#26167] …and each kept row's summary is composed in the READER's
-        // language from the code the writer stored beside it. Registered after
-        // the redaction, so it runs inside it: the redaction judges the
-        // composed text by the same declared sources as the stored one.
+        // language from the code the writer stored beside it. [#36290]
+        // Registered BEFORE the redaction, so the redaction runs inside it: the
+        // redaction judges the stored text by its declared sources and narrows
+        // the field-change code to this reader first, and the summary is then
+        // composed from what it kept.
         installActivitySummaryLocale(engine as any, getI18n);
         ctx.logger.info('AuditPlugin: sys_activity reader-language summaries installed');
+        installActivityFieldRedaction(engine as any, getSecurity, ctx.logger);
+        ctx.logger.info('AuditPlugin: sys_activity field redaction installed');
         // [#21155] The compliance ledger's before/after snapshots take the same
         // narrowing, through the same answer and the same resolver: a ledger
         // reader is not field-unrestricted by default. An auditor who must see
@@ -886,8 +927,66 @@ export class AuditPlugin implements Plugin {
       sink: () => seam<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
       cluster: () => seam<IClusterService>('cluster'),
       logger: ctx.logger,
+      beforePass: () => this.refreshSealedFloors?.(),
     });
+    // With no crypto provider nothing is sealed and no expiry can be signed: the
+    // lifecycle service then keeps the sealed rows and says so (ADR-0154 D8).
+    if (crypto) this.registerExpiryPrefix(this.sealer, sealEngine, ctx);
     this.sealer.start();
+  }
+
+  /**
+   * [ADR-0154 D8] Hand the sealer's expiry to the lifecycle service, which
+   * then expires each sealed object by whole checkpoints, each run's signed
+   * `expiry` amendment written first. Reached duck-typed, as every reap guard
+   * is (`ctx.getService('lifecycle')`). No lifecycle service ⇒ nothing sweeps,
+   * so nothing expires. A lifecycle service with no sealed expiry keeps a
+   * sealed object's rows past their policy and says so.
+   *
+   * Beside it, a retention floor for each sealed object at its declared window
+   * (`audit-seal/retention-floor.ts`): on a sealed object, a retention override
+   * cannot shorten the declared window. Registered now and again before every
+   * sealer pass, so the floors follow the registry as the pass does. A lifecycle
+   * service without floors gets no expiry either: its sealed rows are kept.
+   */
+  private registerExpiryPrefix(sealer: AuditSealer, engine: AuditSealerEngine, ctx: PluginContext): void {
+    type LifecycleLike = SealedFloorRegistrar & {
+      registerExpiryPrefix?: (expiry: { plan(request: AuditExpiryRequest): Promise<AuditExpiryRun[]> }) => () => void;
+    };
+    let lifecycle: LifecycleLike | undefined;
+    try {
+      lifecycle = ctx.getService<LifecycleLike>('lifecycle');
+    } catch {
+      return;
+    }
+    if (!lifecycle || typeof lifecycle.registerExpiryPrefix !== 'function') return;
+    if (typeof lifecycle.registerRetentionFloor !== 'function') {
+      ctx.logger.error(
+        'AuditPlugin: the lifecycle service takes a sealed-object expiry but no retention floors, so the sealed ' +
+          "objects' expiry is NOT registered and their rows are kept past their window. Fix: run a lifecycle " +
+          'service that supports retention floors (the one @objectstack/objectql ships).',
+      );
+      return;
+    }
+    const floors = lifecycle as Required<SealedFloorRegistrar>;
+    let failed: string | null = null;
+    this.refreshSealedFloors = () => {
+      try {
+        registerSealedWindowFloors(floors, engine.registry);
+        failed = null;
+      } catch (err) {
+        const fault = String((err as Error)?.message ?? err);
+        if (failed === fault) return;
+        failed = fault;
+        ctx.logger.error(
+          `AuditPlugin: registering the sealed objects' retention floors FAILED (${fault}); until it succeeds a ` +
+            'retention override may shorten a sealed object\'s declared window. Retried before every sealer pass.',
+        );
+      }
+    };
+    this.refreshSealedFloors();
+    // Called as a method: the service's registration reads its own state.
+    this.unregisterExpiryPrefix = lifecycle.registerExpiryPrefix({ plan: (request) => sealer.expire(request) });
   }
 
   /**
@@ -1051,14 +1150,23 @@ export class AuditPlugin implements Plugin {
   }
 
   /**
-   * Mount the unreact door (`comment-reaction-routes.ts`) on the kernel's HTTP
-   * server: a member removes their own comment reaction, and only theirs,
-   * without an object-level `delete` grant (maintainer ruling 6422861164,
-   * letter A). Every service the door reads is read per request, so a provider
-   * that registers after this hook is still seen. A kernel with no HTTP server
-   * mounts nothing, and says so.
+   * Mount the comment doors on the kernel's HTTP server:
+   *
+   *  - the unreact door (`comment-reaction-routes.ts`): a member removes their
+   *    own comment reaction, and only theirs, without an object-level `delete`
+   *    grant (maintainer ruling 6422861164, letter A);
+   *  - the resolution door and the own-comment delete door
+   *    (`comment-routes.ts`): whoever can read a thread resolves and reopens
+   *    it, and a member removes a comment they wrote (ruling records
+   *    7063285032 and 7069889899), past the row floor and without a `delete`
+   *    grant.
+   *
+   * Every service the doors read is read per request, so a provider that
+   * registers after this hook is still seen. A kernel with no HTTP server (a
+   * hosted tenant kernel) mounts nothing here: the `comments` slot serves the
+   * same doors to the dispatcher (#36469), and the line says so.
    */
-  private mountUnreactDoor(ctx: PluginContext): void {
+  private mountCommentDoors(ctx: PluginContext): void {
     const optional = <T>(name: string): T | undefined => {
       try {
         return ctx.getService<T>(name) ?? undefined;
@@ -1069,22 +1177,22 @@ export class AuditPlugin implements Plugin {
     // `http.server` is the canonical name; `http-server` the deprecated alias.
     const http = optional<IHttpServer>('http.server') ?? optional<IHttpServer>('http-server');
     if (!http) {
-      ctx.logger.warn(
-        `AuditPlugin: no HTTP server is registered, so the unreact door (DELETE ${COMMENT_REACTION_REMOVE_ROUTE}) ` +
-          'is not mounted, and a member whose grants carry no delete on sys_comment_reaction cannot remove their own reaction.',
+      // [#36469] The hosted shape: a tenant kernel owns no socket. The doors
+      // are not lost there: the `comments` slot (registered in `init()`) serves
+      // them to the runtime dispatcher's `/comments` domain, which the host's
+      // `createHonoApp` reaches.
+      ctx.logger.info(
+        `AuditPlugin: comment doors mounted on the 'comments' service for the dispatcher's /comments domain ` +
+          `(no HTTP server on this kernel): DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +
+          `and DELETE ${COMMENT_REMOVE_ROUTE}`,
       );
       return;
     }
-    const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
-    registerCommentReactionRoutes(http, {
-      getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
-      resolveCaller: platformCallerResolver({
-        getEngine,
-        getAuth: () => optional<IAuthService>('auth'),
-        tenancy: tenancyServiceResolver(ctx),
-      }),
-    });
-    ctx.logger.info(`AuditPlugin: unreact door mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}`);
+    registerCommentDoors(http, ctx);
+    ctx.logger.info(
+      `AuditPlugin: comment doors mounted at DELETE ${COMMENT_REACTION_REMOVE_ROUTE}, PUT ${COMMENT_RESOLUTION_ROUTE} ` +
+        `and DELETE ${COMMENT_REMOVE_ROUTE}`,
+    );
   }
 
   /**
@@ -1102,6 +1210,9 @@ export class AuditPlugin implements Plugin {
     // before the process lets go, and never starts again.
     const sealer = this.sealer;
     this.sealer = null;
+    this.unregisterExpiryPrefix?.();
+    this.unregisterExpiryPrefix = null;
+    this.refreshSealedFloors = null;
     await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;
@@ -1110,6 +1221,38 @@ export class AuditPlugin implements Plugin {
     this.datasetQueryWriter = null;
     if (datasetQueryWriter) await datasetQueryWriter.stop();
   }
+}
+
+/**
+ * Register the three comment doors on `http`, over this kernel's services, each
+ * read per request. The ONE registration both faces run: the self-hosted mount
+ * on the kernel's `http.server` (`mountCommentDoors`) and the private table
+ * behind the `comments` slot's `handleCommentDoor` (`comment-doors-member.ts`),
+ * so the two cannot answer a request differently.
+ */
+function registerCommentDoors(http: IHttpServer, ctx: PluginContext): void {
+  const optional = <T>(name: string): T | undefined => {
+    try {
+      return ctx.getService<T>(name) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const getEngine = () => optional<IDataEngine>('objectql') ?? optional<IDataEngine>('data');
+  const resolveCaller = platformCallerResolver({
+    getEngine,
+    getAuth: () => optional<IAuthService>('auth'),
+    tenancy: tenancyServiceResolver(ctx),
+  });
+  registerCommentReactionRoutes(http, {
+    getEngine: () => getEngine() as unknown as CommentReactionEngine | undefined,
+    resolveCaller,
+  });
+  registerCommentDoorsRoutes(http, {
+    getEngine: () => getEngine() as unknown as CommentDoorsEngine | undefined,
+    resolveCaller,
+    getSecurity: () => optional<CommentPostingGate>('security'),
+  });
 }
 
 /**

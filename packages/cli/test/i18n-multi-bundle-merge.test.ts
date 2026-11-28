@@ -35,7 +35,7 @@ import { computeI18nCoverage, mergeTranslationBundles } from '../src/utils/i18n-
 import { authoringRuleUnionStack } from '../src/utils/stack-collections.js';
 
 const I18N = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
-const engines = { protocol: '^18' };
+const engines = { protocol: '^19' };
 
 const object = (name: string, label: string) => ({
   name, label, pluralLabel: label, sharingModel: 'private',
@@ -140,8 +140,10 @@ const zhIssueKeys = (config: Record<string, unknown>) =>
 describe('the fixture is the card\'s shape (#27087)', () => {
   it('gives each package its own bundle for every family the false findings named', () => {
     const families = (paths: string[][]) => [...new Set(paths.map((p) => p[0]))].sort();
-    expect(families(APP_PATHS)).toEqual(['apps', 'dashboards', 'datasets', 'flows', 'objects', 'pages', 'reports']);
-    expect(families(MODULE_PATHS)).toEqual(['apps', 'dashboards', 'datasets', 'flows', 'objects', 'pages', 'reports']);
+    // `packages` is each package's own name (`packages.MANIFEST_ID.name`, #35513):
+    // every package walks one, and each bundle carries its own.
+    expect(families(APP_PATHS)).toEqual(['apps', 'dashboards', 'datasets', 'flows', 'objects', 'packages', 'pages', 'reports']);
+    expect(families(MODULE_PATHS)).toEqual(['apps', 'dashboards', 'datasets', 'flows', 'objects', 'packages', 'pages', 'reports']);
     // The module's only `apps` keys are the navigation ids it contributes.
     expect(MODULE_PATHS.filter((p) => p[0] === 'apps').map((p) => p.join('.')))
       .toEqual(['apps.mba_desk.navigation.nav_cases.label']);

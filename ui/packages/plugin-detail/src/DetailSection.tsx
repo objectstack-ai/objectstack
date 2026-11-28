@@ -25,16 +25,17 @@ import {
   useIsMobile,
   LazyIcon,
 } from '@object-ui/components';
-import { ChevronDown, ChevronRight, Copy, Check, Eye, EyeOff, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Copy, Check, Eye, EyeOff, Pencil } from 'lucide-react';
 import {
   SchemaRenderer,
   toRenderableSchema,
   useInlineEdit,
   usePrintPage,
   usePredicateScope,
+  useRecordContext,
   useRecordPagePreferences,
 } from '@object-ui/react';
-import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
+import { fieldReadOnlyByHand, resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
 import {
@@ -51,18 +52,22 @@ import {
   TextAreaField,
   TextCellRenderer,
   TextField,
+  ReferenceChipContext,
 } from '@object-ui/fields';
 import type { DetailViewSection as DetailViewSectionType, DetailViewField, FieldMetadata } from '@object-ui/types';
-import { applyDetailAutoLayout } from './autoLayout';
+import { applyDetailAutoLayout, isWideDetailField } from './autoLayout';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
+import { FieldInPlaceEditor, isToggleFieldType, type FieldInPlaceWriter } from './FieldInPlaceEditor';
+import { FieldHistoryButton, fieldHistoryOffered } from './FieldHistory';
 import { headerColorClass } from './headerColor';
 import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
 import { useReportBodyFields } from './recordBodyFields';
+import { useRecordFieldList, useReportEmptyFields } from './recordFieldList';
 import {
   enrichDetailField,
   isComputedDetailField,
@@ -142,6 +147,22 @@ export function framelessSpanClass(span: number | undefined, columns: 1 | 2 | 3)
  */
 const ignoreReadOnlyChange = (): void => {};
 
+/**
+ * The inline-edit pencil beside a field. A real Tab stop, revealed on keyboard
+ * focus as well as on hover (objectstack#25883); a touch screen has no hover,
+ * so there it is always drawn, and below `sm` it is a 44 px target
+ * (objectstack#29071).
+ */
+const PENCIL_CLASS =
+  'h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0';
+
+/**
+ * The field list draws no pencil (objectstack#36147): a click or a tap on the
+ * value is the way in, and the button stays only as the keyboard's way in,
+ * drawn while it has focus.
+ */
+const FIELD_LIST_PENCIL_CLASS = 'sr-only h-px w-px focus-visible:not-sr-only focus-visible:h-6 focus-visible:w-6 shrink-0';
+
 /** What a section reports while it draws no row of the page's record. */
 const NO_REPORTED_FIELDS: readonly string[] = [];
 
@@ -164,6 +185,19 @@ const NO_REPORTED_FIELDS: readonly string[] = [];
  * one predicate. ⛔ Not a `stopPropagation` on each link instead: that fixes
  * one descendant kind at a time and leaves the next one cancelled.
  */
+/**
+ * Whether a click on a field row belongs to something inside the value — a
+ * link, a button, a control — or ends a text selection the reader is making,
+ * rather than to the row (objectstack#36147: the row's click enters edit).
+ */
+function clickBelongsElsewhere(e: React.MouseEvent<HTMLElement>): boolean {
+  const target = e.target instanceof Element ? e.target : null;
+  const control = target?.closest('a, button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"]');
+  if (control && control !== e.currentTarget && e.currentTarget.contains(control)) return true;
+  const selection = typeof window !== 'undefined' ? window.getSelection?.() : null;
+  return !!selection && !selection.isCollapsed && !!selection.anchorNode && e.currentTarget.contains(selection.anchorNode);
+}
+
 function isRowActivationKey(e: React.KeyboardEvent<HTMLElement>): boolean {
   if (e.target !== e.currentTarget) return false;
   return e.key === 'Enter' || e.key === ' ';
@@ -231,8 +265,14 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // drawn frameless: a title, a hairline and the field grid, no card. Paper
   // keeps the card face (objectui#12732), so a print page never takes it.
   const frameless = useDefaultRecordPage() && !isPrintPage;
-  // The record page's two-column tier caps the grid at two (objectstack#27524).
+  // The record page's layout caps the grid (objectstack#27524); at 1 the
+  // section is a row of the record's one field list (objectstack#36147).
   const framelessColumnCap = React.useContext(DetailsColumnCapContext);
+  const listFace = frameless && framelessColumnCap === 1;
+  // objectstack#36147 — on the laid-out record page every group folds its
+  // empty rows into the field list's one last row, not a toggle of its own.
+  const fieldList = useRecordFieldList();
+  const foldsIntoList = frameless && fieldList !== null;
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState<number | undefined>(undefined);
   // objectstack#25883 — "Show N empty fields" is the reader's choice for the
@@ -282,6 +322,41 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
    * beside this record (objectui#11815) — the scope the grid reads too.
    */
   const predicateScope = usePredicateScope();
+  /**
+   * The fields of this section being edited in place (objectstack#36475): on
+   * the record page's field face a click on an editable value edits that
+   * value alone and saves it on its own (`FieldInPlaceEditor`), where the
+   * record the page shows can be written. The whole-record session (the
+   * header's Edit) draws every field as an input and closes these.
+   */
+  const [fieldsInPlace, setFieldsInPlace] = React.useState<string[]>([]);
+  const recordCtx = useRecordContext();
+  const inPlaceWriter = React.useMemo<FieldInPlaceWriter | null>(() => {
+    if (!recordCtx?.dataSource || recordCtx.recordId == null) return null;
+    if (objectName && recordCtx.objectName !== objectName) return null;
+    return {
+      dataSource: recordCtx.dataSource,
+      objectName: recordCtx.objectName,
+      recordId: recordCtx.recordId,
+      refresh: recordCtx.reread ?? recordCtx.refresh,
+    };
+  }, [recordCtx?.dataSource, recordCtx?.recordId, recordCtx?.objectName, recordCtx?.reread, recordCtx?.refresh, objectName]);
+  React.useEffect(() => {
+    if (isEditing) setFieldsInPlace([]);
+  }, [isEditing]);
+  /**
+   * objectstack#36290 — the record a field's change history is read for: the
+   * page's own record, as `inPlaceWriter` reads it, so a section drawing
+   * another record (or none) offers no history button.
+   */
+  const historyRecord =
+    recordCtx?.dataSource && recordCtx.recordId != null && recordCtx.recordId !== ''
+      && objectName && recordCtx.objectName === objectName
+      ? { dataSource: recordCtx.dataSource, objectName, recordId: recordCtx.recordId }
+      : null;
+  const closeInPlace = React.useCallback((name: string) => {
+    setFieldsInPlace((open) => open.filter((n) => n !== name));
+  }, []);
 
   /**
    * What the copy affordance WRITES (objectui#8395).
@@ -405,6 +480,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const AUTO_HIDE_RATIO = isMobile ? 0.2 : 0.25;
   const filledCount = section.fields.length - emptyCount;
   const shouldAutoHideEmpty =
+    !foldsIntoList &&
     !isPrintPage &&
     !isEditing &&
     section.fields.length >= AUTO_HIDE_MIN_FIELDS &&
@@ -442,8 +518,18 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // which would be a new defect rather than a restored behaviour. What the
   // contract governs is what a READER sees, and that is what this leaves
   // unchanged.
+  //
+  // objectstack#36593 — the hide holds only WHILE THE READER HIDES EMPTY
+  // FIELDS. Once they show them (the field list's one 「显示 N 个空字段」 row,
+  // or the per-object choice a section's own toggle writes), the section draws
+  // like any kept all-empty one, and in the field list its rows are counted by
+  // that row before it is pressed. Authored `true` and the renderer default
+  // read the same here: nothing tells them apart, and the default page's
+  // declared groups carry the default. A print page has no toggle, so paper
+  // keeps the hide.
   const allFieldsEmpty = section.fields.length > 0 && filledCount === 0;
-  const hideAllEmptySection = section.hideEmpty === true && allFieldsEmpty && !isEditing;
+  const readerShowsEmpty = !isPrintPage && (foldsIntoList ? fieldList?.showEmpty === true : showEmptyOverride);
+  const hideAllEmptySection = section.hideEmpty === true && allFieldsEmpty && !isEditing && !readerShowsEmpty;
 
   // objectui#13386 (ruling C, batch #7 item 4, maintainer 2026-10-23) — what a
   // KEPT all-empty section draws for a reader: its heading plus ONE fold row,
@@ -464,14 +550,20 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // renders every row as an input (the ruling leaves it unchanged), and a print
   // page prints every declared row with no toggle (objectui#12717).
   const foldAllEmptySection =
-    allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
+    !foldsIntoList && allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
 
-  // The authored all-empty hide is not the reader's to undo: it applies
-  // whatever the reader's "show empty fields" choice is, now that the choice is
-  // one per object and reaches sections that never drew the toggle
-  // (objectstack#25883).
+  // The all-empty hide yields to the reader's "show empty fields" choice
+  // (objectstack#36593, above); that choice is one per object and reaches
+  // sections that never drew the toggle (objectstack#25883).
   const hideEmptyEffective =
-    hideAllEmptySection || (!showEmptyOverride && (shouldAutoHideEmpty || foldAllEmptySection));
+    hideAllEmptySection ||
+    (foldsIntoList
+      ? fieldList?.showEmpty !== true && !isEditing
+      : !showEmptyOverride && (shouldAutoHideEmpty || foldAllEmptySection));
+  // In a field list the group's empty rows are the list's to count, hidden
+  // or shown: an all-empty group then draws nothing until they are shown,
+  // `hideEmpty` on or off (objectstack#36593).
+  useReportEmptyFields(foldsIntoList && !isEditing ? emptyCount : 0);
 
   // Filter out empty fields when the auto-hide heuristic kicked in, when an
   // all-empty section is folded, or when one is hiding itself (its early
@@ -556,7 +648,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // framework flags `readonly:true` even when the view schema doesn't). And
     // never offer inline edit on immutable audit/identity fields by name
     // (created_at / id / …), in case a schema surfaces one as a section row.
-    const isReadonly = field.readonly === true || objectDefField?.readonly === true;
+    // The object field's lock goes through the one hand-lock verdict — `readonly`,
+    // `readonlyWhen`, `uiReadonly`, `uiReadonlyWhen` over this record
+    // (`fieldReadOnlyByHand`, `@object-ui/core`) — never `readonly` alone.
+    const isReadonly = field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { scope: predicateScope });
     const isSystemField = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
     // Types the fields package excludes from in-place editing — the SAME
     // alias-aware contract the grid consults, not a second list (objectui#4221).
@@ -583,9 +678,34 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     const fieldEditable =
       !isReadonly && !isComputedField && !isSystemField && !isInlineExcluded && isWriteGranted;
     const canInlineEditField = fieldEditable && !!onEnterInlineEdit;
+    // On the field face a value is edited alone and saved on its own
+    // (objectstack#36475); elsewhere, and where the page's record cannot be
+    // written from here, the gesture enters the whole-record session.
+    const editsInPlace = frameless && canInlineEditField && !!inPlaceWriter;
+    const inPlace = editsInPlace && !isEditing && fieldsInPlace.includes(field.name);
+    const enterEdit = () => {
+      if (!editsInPlace) {
+        onEnterInlineEdit?.(field.name);
+        return;
+      }
+      setFieldsInPlace((open) => (open.includes(field.name) ? open : [...open, field.name]));
+    };
+    const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
     const displayValue = (() => {
       const isEmpty = !hasCellValue(value);
+      // On the record page's field face an empty value the reader can fill in
+      // reads "Set <label>", light, and the row's one click opens its editor.
+      // Only where a click edits: a read-only field, a field without the
+      // write grant and a record that is not inline-editable keep the shared
+      // placeholder below, and so does every face that edits on a double-click.
+      if (isEmpty && frameless && canInlineEditField) {
+        return (
+          <span className="text-muted-foreground/70" data-detail-set-field="">
+            {t('detail.setField', { field: fieldLabelText, defaultValue: 'Set {{field}}' })}
+          </span>
+        );
+      }
       if (isEmpty) {
         // The SHARED placeholder (objectui#8506). The span that stood here
         // spelled its own em-dash and resolved its own `aria-label` from
@@ -799,18 +919,29 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // (the desktop row, its Enter/Space, its hover button, and the mobile
     // grouped-inset row's click and Enter/Space).
     const copyOffered = canCopy && !isMaskedField;
-    // An editable field surfaces the pencil (edit) affordance instead of the
-    // copy affordance, and reserves single-click for text selection — so
-    // click-to-copy only applies to non-editable fields.
-    const copyInteractive = copyOffered && !canInlineEditField;
+    // An editable field surfaces the pencil (edit) affordance, and its click
+    // is never a copy — so click-to-copy only applies to non-editable fields.
+    // Off the field face the pencil stands instead of the copy button; on it
+    // the copy button stands beside the keyboard-only pencil.
+    // The frameless face (the record page's field list, objectstack#36147)
+    // takes no click on a read-only row: a click there selects text, and the
+    // value is copied from its hover / focus button. An editable row's click
+    // enters edit instead.
+    const copyInteractive = copyOffered && !canInlineEditField && !frameless;
+    // The edit hint names the gesture the face takes: a click on the field
+    // list (objectstack#36147), a double-click elsewhere. The pencil, its
+    // tooltip and the value's title read it, so a screen reader hears the
+    // gesture that works.
+    const editHintLabel = frameless
+      ? t('detail.clickToEdit', { defaultValue: 'Click to edit' })
+      : t('detail.editInlineHint');
     const isCopied = copiedField === field.name;
-    const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
     // iOS-style grouped-inset row (mobile, read mode): label left, value right,
     // hairline-separated rows inside the section card. The native-feeling
     // settings/detail form for the mobile target. Editing falls back to the
     // stacked layout below so inputs have room.
-    if (isMobile && !(isEditing && fieldEditable)) {
+    if (isMobile && !frameless && !(isEditing && fieldEditable)) {
       return (
         <div
           key={field.name}
@@ -824,6 +955,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           } : undefined}
           role={copyOffered ? 'button' : undefined}
           tabIndex={copyOffered ? 0 : undefined}
+          data-detail-field={field.name}
         >
           <span className="text-[15px] text-muted-foreground shrink-0">{fieldLabelText}</span>
           <span className="text-[15px] text-foreground text-right break-words min-w-0 leading-snug">{displayValue}</span>
@@ -839,14 +971,32 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // The frameless face (the default record page) draws a dense row: the
     // label left in a fixed-width 12 px muted column, the value right at
     // 13 px, one 32 px line for a one-line value.
+    // objectstack#37801 — a WIDE field (long text, markdown, html, rich text,
+    // a multi-file list: the one `isWideDetailField` predicate the auto layout
+    // spans by, never a second type list) draws its label ABOVE the value
+    // instead, and the value takes the column's whole width rather than what a
+    // 112 px label column leaves of it. The row keeps its attributes and its
+    // click target; only its direction moves.
+    const labelOnTop =
+      frameless && isWideDetailField(enrichedField as DetailViewField, objectSchema?.fields);
     return (
       <div
         key={field.name}
         className={cn(
-          frameless ? 'group flex min-w-0 items-start gap-3' : 'space-y-1.5 group min-w-0',
+          frameless
+            ? labelOnTop
+              ? 'group flex min-w-0 flex-col'
+              : 'group flex min-w-0 items-start gap-3'
+            : 'space-y-1.5 group min-w-0',
           frameless ? framelessSpanClass(field.span, framelessColumns) : spanClass,
+          // The field list (objectstack#36147): one row under the other, a
+          // hairline between them.
+          listFace && 'border-b border-border/50 py-1.5 last:border-b-0',
         )}
         data-detail-field-row={frameless ? '' : undefined}
+        // The field this row draws: how a page finds a field's place, e.g. to
+        // open a record at a cited section of its body (ADR-0160 D9).
+        data-detail-field={field.name}
       >
         {/* The label as authored, in the header highlights' style: no case
             transform, which only Latin text takes, so a translated label and
@@ -854,7 +1004,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         <div
           className={
             frameless
-              ? 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
+              ? labelOnTop
+                ? 'truncate pt-1 text-xs leading-6 text-muted-foreground'
+                : 'w-28 shrink-0 truncate py-1 text-xs leading-6 text-muted-foreground'
               : 'text-xs font-medium text-muted-foreground'
           }
           title={frameless ? fieldLabelText : undefined}
@@ -902,12 +1054,22 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             frameless && "min-w-0 flex-1",
             copyInteractive && "cursor-pointer active:bg-muted/60 transition-colors",
             // Editable fields hint interactivity on hover and enter edit on
-            // double-click (Salesforce/Airtable pattern). The negative margin
-            // keeps the hover highlight flush with the label above.
+            // double-click (Salesforce/Airtable pattern), on the frameless
+            // face on a click (objectstack#36147). The negative margin keeps
+            // the hover highlight flush with the label above.
             canInlineEditField && "cursor-pointer hover:bg-muted/40 transition-colors -mx-1.5 px-1.5"
           )}
-          onClick={copyInteractive ? () => handleCopyField(field.name, value) : undefined}
-          onDoubleClick={canInlineEditField ? () => onEnterInlineEdit?.(field.name) : undefined}
+          onClick={
+            copyInteractive
+              ? () => handleCopyField(field.name, value)
+              : frameless && canInlineEditField
+                ? (e: React.MouseEvent<HTMLElement>) => {
+                    if (inPlace || clickBelongsElsewhere(e)) return;
+                    enterEdit();
+                  }
+                : undefined
+          }
+          onDoubleClick={canInlineEditField && !frameless ? () => onEnterInlineEdit?.(field.name) : undefined}
           onKeyDown={copyInteractive ? (e: React.KeyboardEvent<HTMLElement>) => {
             if (isRowActivationKey(e)) {
               e.preventDefault();
@@ -916,46 +1078,68 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           } : undefined}
           role={copyInteractive ? "button" : undefined}
           tabIndex={copyInteractive ? 0 : undefined}
-          title={canInlineEditField ? t('detail.editInlineHint') : undefined}
+          title={canInlineEditField ? editHintLabel : undefined}
         >
           <div
             className={cn(
               'flex-1 min-w-0 break-words',
-              frameless ? 'py-1 text-[13px] leading-6' : 'text-sm py-1',
+              frameless ? 'relative py-1 text-sm leading-6' : 'text-sm py-1',
             )}
           >
             {displayValue}
+            {inPlace && inPlaceWriter && (
+              <FieldInPlaceEditor
+                name={field.name}
+                field={enrichedField}
+                record={data}
+                writer={inPlaceWriter}
+                toggle={isToggleFieldType(enrichedField.type)}
+                onClose={() => closeInPlace(field.name)}
+              />
+            )}
           </div>
-          {canInlineEditField ? (
+          {canInlineEditField && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    // A real Tab stop, so it is revealed on keyboard focus as
-                    // well as on hover — itself, or anything in its field
-                    // (objectstack#25883). The Button's own ring marks it.
-                    // A touch screen has no hover, so there it is always
-                    // drawn, and below `sm` it is a 44 px target
-                    // (objectstack#29071): otherwise a phone has no way into
-                    // inline edit it can see.
-                    className="h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0"
-                    aria-label={t('detail.editInlineHint')}
+                    // The Button's own ring marks it on focus.
+                    className={frameless ? FIELD_LIST_PENCIL_CLASS : PENCIL_CLASS}
+                    aria-label={editHintLabel}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onEnterInlineEdit?.(field.name);
+                      enterEdit();
                     }}
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {t('detail.editInlineHint')}
+                  {editHintLabel}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : copyOffered ? (
+          )}
+          {/* objectstack#36290 — the field's change history, opened in place,
+              for a field of the object whose changes are recorded with their
+              values and that the reader may read. */}
+          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name, objectSchema) && (
+            <FieldHistoryButton
+              dataSource={historyRecord.dataSource}
+              objectName={historyRecord.objectName}
+              recordId={historyRecord.recordId}
+              field={field.name}
+              objectSchema={objectSchema}
+              className={frameless ? 'pointer-coarse:hidden' : undefined}
+            />
+          )}
+          {/* On the field face an editable value is copied from the same
+              hover / focus button a read-only one is: its click is the
+              way into edit, so the button is the way to copy. Elsewhere
+              an editable row keeps the pencil alone. */}
+          {copyOffered && (!canInlineEditField || frameless) && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -964,7 +1148,14 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                     size="icon"
                     // A real Tab stop, so it is revealed on keyboard focus as
                     // well as on hover, like the pencil above (objectstack#26329).
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                    // On the field list a touch screen draws no copy icon
+                    // (objectstack#36147, ruling 1): a tap sets `:hover`, which
+                    // would reveal it; the reader long-presses the value instead.
+                    className={cn(
+                      "h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0",
+                      frameless && "pointer-coarse:hidden",
+                    )}
+                    data-detail-copy=""
                     // objectui#12625 — an icon-only button; the tooltip is
                     // closed at rest, so without this it has no name.
                     aria-label={t('detail.copyToClipboard')}
@@ -985,7 +1176,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          ) : null}
+          )}
         </div>
         )}
       </div>
@@ -1037,7 +1228,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
 
   const content = (
     <>
-      {renderedFields.length === 0 ? null : isMobile ? (
+      {renderedFields.length === 0 ? null : isMobile && !frameless ? (
         <div className="flex flex-col divide-y divide-border/60">
           {renderedFields.map(renderField)}
         </div>
@@ -1087,27 +1278,26 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
 
   // objectstack#27055 — the frameless face of the default record page: the
   // section's title row over a hairline, then the field grid. No card border,
-  // no shadow. A collapsible section collapses from its title row (a native
+  // no shadow. Every titled section folds from its title row (a native
   // button carrying `aria-expanded`, as the card face's disclosure does,
-  // objectui#12625); a section its group declares `collapse: 'none'` keeps a
-  // plain heading — the author's declaration holds on every face. An untitled
-  // section is the grid alone.
+  // objectui#12625), whatever its group's `collapse`: on this page folding a
+  // group is the reader's action, and `collapse` only picks the first state
+  // (`defaultCollapsed`), so `'none'` and `'expanded'` both start open
+  // (objectstack#36269). Forms, the designer preview and every other face
+  // keep reading `collapsible`. An untitled section is the grid alone.
   if (frameless) {
-    const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground';
+    const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-sm font-medium text-foreground';
     return (
-      <section className={cn('@container min-w-0', className)} data-detail-section-face="frameless">
-        {section.title && !section.collapsible && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
-            <h3 className={titleRow}>
-              <span className="flex min-w-0 items-center gap-2">
-                {section.icon && <SectionIcon name={section.icon} />}
-                <span className="truncate">{section.title}</span>
-              </span>
-            </h3>
-          </div>
-        )}
-        {section.title && section.collapsible && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
+      <ReferenceChipContext.Provider value>
+      <section
+        className={cn('@container min-w-0', className)}
+        data-detail-section-face="frameless"
+        data-detail-section-list={listFace ? '' : undefined}
+      >
+        {section.title && (
+          // The disclosure sits inside the group's heading, so heading
+          // navigation still finds every titled group.
+          <h3 className={cn('border-b border-border', headerColorClass(section.headerColor))}>
             <button
               type="button"
               aria-expanded={!isCollapsed}
@@ -1118,19 +1308,22 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 {section.icon && <SectionIcon name={section.icon} />}
                 <span className="truncate">{section.title}</span>
               </span>
+              {/* At the row's right end, pointing down while the group is
+                  folded and up while it is open (objectstack#36147). */}
               {isCollapsed ? (
-                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              ) : (
                 <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              ) : (
+                <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               )}
             </button>
-          </div>
+          </h3>
         )}
         {section.description && !isCollapsed && (
           <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>
         )}
         {!isCollapsed && <div className={cn(section.title ? 'pt-2.5 pb-1' : '')}>{content}</div>}
       </section>
+      </ReferenceChipContext.Provider>
     );
   }
 
@@ -1152,7 +1345,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
       <Card className={cn(section.showBorder === false ? 'border-none shadow-none' : '', className)}>
         {section.title && (
           <CardHeader className={cn('py-3 px-4 sm:py-4 sm:px-6', headerColorClass(section.headerColor))}>
-            <CardTitle className="flex items-center justify-between text-base font-semibold tracking-tight">
+            <CardTitle className="flex items-center justify-between text-base font-medium tracking-tight">
               <div className="flex items-center gap-2">
                 {section.icon && <SectionIcon name={section.icon} />}
                 <span>{section.title}</span>
@@ -1197,7 +1390,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           "relative py-3 px-4 sm:py-4 sm:px-6 cursor-pointer hover:bg-muted/50 transition-colors",
           headerColorClass(section.headerColor)
         )}>
-          <CardTitle className="text-base font-semibold tracking-tight">
+          <CardTitle className="text-base font-medium tracking-tight">
             <CollapsibleTrigger asChild>
               <button
                 type="button"

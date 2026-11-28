@@ -1,11 +1,12 @@
 /**
  * deriveRelatedLists — the read-side mirror of `attachInlineSubforms`.
  *
- * Where `inlineEdit: true` on a child's `master_detail`/`lookup` field pulls
- * that child INTO the parent's entry form (write side), the detail-page
+ * Where a field group of the parent that names a child's `master_detail`/
+ * `lookup` field pulls that child INTO the parent's entry form (write side;
+ * objectstack#35889 — the FK's `inlineEdit` only picks the form factor), the detail-page
  * RELATED LIST is the read-side counterpart: a child collection surfaced on the
- * parent's record DETAIL page. Both intents live on the relationship in the
- * data model — not in a hand-authored page.
+ * parent's record DETAIL page. Both intents live in the data model — not in a
+ * hand-authored page.
  *
  * This helper scans every object for fields whose `reference`
  * points back at the parent object and produces one related-list descriptor per
@@ -57,11 +58,44 @@
  *   - ORDER is the parent's declared business order first: the parent object's
  *     `relatedLists` (objectstack#27069) names inbound relationships — a child
  *     object, or `object.field` for one FK — and those lists come first, in
- *     that order ({@link resolveRelatedListOrder}). Every unlisted list follows
- *     in the derived order: owned (`master_detail`) children before plain
- *     `lookup` children, preserving discovery order within each group. The
- *     primary flag places a list and no longer orders it; consumers that split
- *     body tables from side cards keep this order within each half.
+ *     that order ({@link resolveRelatedListOrder}). Undeclared, every list
+ *     follows in the derived order: owned (`master_detail`) children before
+ *     plain `lookup` children, preserving discovery order within each group.
+ *     The primary flag places a list and no longer orders it; consumers that
+ *     split body tables from side cards keep this order within each half.
+ *   - VISIBILITY (objectstack#35897): a DECLARED `relatedLists` is the record
+ *     page's tab list, so a side list no entry names is not derived at all
+ *     (the authoring surface, `includeHidden`, keeps it flagged
+ *     `isUnlisted`). A body table (`isPrimary`) is the field groups' to place
+ *     and is kept, after the listed ones, with no tab of its own (no
+ *     `keepsTab`) unless an entry names it. Undeclared or empty: every list, as
+ *     before. A side list ANOTHER package brings (the child and the parent
+ *     belong to different packages, objectstack#35901) is the exception: the
+ *     declared list does not hide it; that package places it (the server
+ *     splices its `place` into `relatedLists`), and an unplaced one is kept
+ *     after the listed ones, so the page draws it at the end of the tabs.
+ *     The three built-in tab names (`RECORD_PAGE_BUILTIN_TABS` in
+ *     `@objectstack/spec/data`) name the page's own tabs, never a child list;
+ *     the synthesized page places those (`buildDefaultTabs`).
+ *   - THE ENVIRONMENT'S TAB LIST (ADR-0146 D10): where the base's paired
+ *     `.custom` package arranges the tabs, the server writes its list into the
+ *     served `relatedLists` and says two more things beside it, in the served
+ *     read's `_relatedListsArrangement` decoration (read through the spec's
+ *     `readRelatedListsArrangement`), because only this derivation knows which
+ *     lists exist for the reader. `hidden`: a side list one of those names
+ *     names is not derived, whichever package brings it and whether or not
+ *     `relatedLists` is declared (the authoring surface keeps it, flagged
+ *     `isUnlisted`); a body table stays at its group and loses the tab it
+ *     keeps. `unlisted: 'shown'`: a list no entry names is kept after the
+ *     listed ones, as the automatic list the arrangement replaced showed it.
+ *     `unlisted: 'hidden'`: the served list is a DECLARED one even when it is
+ *     empty (the environment hid every tab of it), so a list no entry names
+ *     follows the declared rule and a list the owner left out stays hidden.
+ *     With no decoration, nothing in this derivation changes.
+ *   - An entry's own TITLE and COLUMNS (objectstack#35899): the object form
+ *     `{ list, label, columns }` wins over the FK's `relatedListTitle` /
+ *     `relatedListColumns`, for every list that entry names first, wherever
+ *     the list is drawn (its tab, or the body table a field group places).
  *   - A child object the data API does not expose (`enable.apiEnabled:
  *     false`, e.g. a credential or device table) yields no record-page list:
  *     every read of its records answers `404 OBJECT_API_DISABLED`. The
@@ -75,9 +109,16 @@
  *     server-side; this closes the UI/DX gap.
  */
 
-import { fieldGroupsPlaceRelationship, isBodyTableRelationship, isGroupPlaceableRelationship } from '@objectstack/spec/data';
+import {
+  fieldGroupsPlaceRelationship,
+  isBodyTableRelationship,
+  isGroupPlaceableRelationship,
+  isRecordPageBuiltinTab,
+  readRelatedListsArrangement,
+  relatedListEntryName,
+} from '@objectstack/spec/data';
 import { convertSortToQueryParams } from '@object-ui/core';
-import { relatedListEntryNames } from '@object-ui/plugin-detail';
+import { relatedListEntryNames } from '@object-ui/plugin-detail/core';
 
 /** Audit/ownership FKs that exist on nearly every object — never related lists. */
 const AUDIT_FK_FIELDS = new Set(['created_by', 'updated_by', 'owner_id']);
@@ -141,7 +182,10 @@ export interface DerivedRelatedList {
   /**
    * Present (true) on a body table that a parent field group MAKES one: a
    * `master_detail` FK declaring no `relatedList` that a group names. Such a
-   * table keeps its tab on the record page too (objectstack#35889 item 4). A
+   * table keeps its tab on the record page too (objectstack#35889 item 4),
+   * unless the parent DECLARES `relatedLists` and no entry names it: a declared
+   * list decides the tabs (objectstack#35897), so the table stays at its group
+   * with no tab. A
    * `'primary'` table is a body table without a group and keeps no tab, as
    * before, whether or not a group positions it.
    */
@@ -171,6 +215,25 @@ export interface DerivedRelatedList {
    * The record page never asks, so a hidden list never reaches it.
    */
   isHidden?: true;
+  /**
+   * True when the parent DECLARES `relatedLists` and no entry names this side
+   * list (objectstack#35897), so the record page shows no tab for it — present
+   * only when the caller asked for hidden relationships
+   * ({@link DeriveRelatedListsOptions.includeHidden}), as `isHidden` is. Never
+   * on a list another package brings (objectstack#35901): that one shows,
+   * unless the environment's tab list hides it (ADR-0146 D10), which flags
+   * any side list it names, whichever package brings it.
+   */
+  isUnlisted?: true;
+  /**
+   * The package the child object belongs to, when it is another package than
+   * the parent's (objectstack#35901): a list that package brings, which the
+   * parent's `relatedLists` does not hide and the package places itself.
+   * Present only for the authoring surface
+   * ({@link DeriveRelatedListsOptions.includeHidden}), which shows it read-only
+   * with its source.
+   */
+  fromPackage?: string;
 }
 
 /**
@@ -199,11 +262,19 @@ interface MergedObjectLike {
   name?: string;
   label?: string;
   /**
-   * The spec's optional `relatedLists` (objectstack#27069): the business order
-   * of THIS object's related lists, read when it is the parent. Each entry is
-   * a child object name or `object.field`; see {@link resolveRelatedListOrder}.
+   * The spec's optional `relatedLists` (objectstack#27069, objectstack#35897,
+   * objectstack#35899): THIS object's record-page tabs, read when it is the
+   * parent. Each entry is a child object name, `object.field`, a built-in tab
+   * name, or `{ list, label?, columns? }`; see {@link resolveRelatedListOrder}.
    */
-  relatedLists?: string[];
+  relatedLists?: unknown[];
+  /**
+   * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
+   * present when the base's paired `.custom` package arranges this object's
+   * tabs: `{ packageId, hidden, unlisted }`. Read only through the spec's
+   * `readRelatedListsArrangement`.
+   */
+  _relatedListsArrangement?: unknown;
   /**
    * The spec's optional `fieldGroups`, read when this object is the parent: a
    * group's `relatedList` names the related list it places (objectstack#35889).
@@ -231,6 +302,34 @@ interface MergedObjectLike {
    * records can never be read on any record page.
    */
   enable?: { apiEnabled?: boolean };
+  /**
+   * The package that owns the object, as the server serves it (the registry
+   * stamps its owner's package id; `'sys_metadata'` marks a definition bound
+   * to no package). Read to tell a child list another package brings
+   * (objectstack#35901).
+   */
+  _packageId?: unknown;
+}
+
+/** The package an object belongs to, or `undefined` for none (absent, empty, or bound to no package). */
+function packageOf(object: MergedObjectLike | null | undefined): string | undefined {
+  const id = object?._packageId;
+  return typeof id === 'string' && id !== '' && id !== NO_PACKAGE ? id : undefined;
+}
+
+/** The `_packageId` the server stamps on a definition bound to no package. */
+const NO_PACKAGE = 'sys_metadata';
+
+/**
+ * objectstack#35901 — does `child` come from another package than `parent`?
+ * Both must belong to a package, and the two differ. A child of the parent's
+ * own package, or one no package owns, is not: those stay the parent's to
+ * list (objectstack#35897).
+ */
+function isOtherPackageChild(child: MergedObjectLike, parent: MergedObjectLike): boolean {
+  const childPackage = packageOf(child);
+  const parentPackage = packageOf(parent);
+  return childPackage !== undefined && parentPackage !== undefined && childPackage !== parentPackage;
 }
 
 /**
@@ -290,18 +389,47 @@ export function resolveRelatedListOrder<T extends { childObject: string; referen
   lists: readonly T[],
   declared: readonly unknown[] | null | undefined,
 ): T[] {
-  if (!Array.isArray(declared) || declared.length === 0) return [...lists];
-  const placed = new Set<T>();
-  const head: T[] = [];
+  const naming = relatedListNamingEntries(lists, declared);
+  if (!naming) return [...lists];
+  const head = [...naming.keys()];
+  return [...head, ...lists.filter((list) => !naming.has(list))];
+}
+
+/** The object form of one `relatedLists` entry, as a reader of a stored row sees it. */
+interface RelatedListEntryObjectLike {
+  list: string;
+  label?: unknown;
+  columns?: unknown;
+}
+
+/**
+ * Each list a declared `relatedLists` names, mapped to the FIRST entry naming
+ * it, in the declared order (a Map keeps insertion order). `null` when nothing
+ * is declared (absent, or empty). An entry is read through the spec's
+ * `relatedListEntryName` (a bare name, or the object form's `list`); a
+ * built-in tab name names no list here.
+ */
+function relatedListNamingEntries<T extends { childObject: string; referenceField: string }>(
+  lists: readonly T[],
+  declared: readonly unknown[] | null | undefined,
+): Map<T, unknown> | null {
+  if (!Array.isArray(declared) || declared.length === 0) return null;
+  const naming = new Map<T, unknown>();
   for (const entry of declared) {
-    if (typeof entry !== 'string') continue;
+    const name = relatedListEntryName(entry);
+    if (name === undefined || isRecordPageBuiltinTab(name)) continue;
     for (const list of lists) {
-      if (placed.has(list) || !relatedListEntryNames(entry, list)) continue;
-      placed.add(list);
-      head.push(list);
+      if (naming.has(list) || !relatedListEntryNames(name, list)) continue;
+      naming.set(list, entry);
     }
   }
-  return [...head, ...lists.filter((list) => !placed.has(list))];
+  return naming;
+}
+
+/** Is `entry` the object form of a `relatedLists` entry (objectstack#35899)? */
+function isEntryObject(entry: unknown): entry is RelatedListEntryObjectLike {
+  return typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+    && typeof (entry as { list?: unknown }).list === 'string';
 }
 
 /**
@@ -356,7 +484,8 @@ export interface DeriveRelatedListsOptions {
  * Derive the detail-page related lists for `objectDef` from the full object
  * registry. Returns the lists `objectDef.relatedLists` names first, in that
  * order, then the rest: owned (`master_detail`) children, then `lookup`
- * children; deterministic and side-effect free (safe to memoize).
+ * children — of which, when `relatedLists` is declared, only the body tables
+ * (objectstack#35897); deterministic and side-effect free (safe to memoize).
  */
 export function deriveRelatedLists(
   objectDef: MergedObjectLike | null | undefined,
@@ -369,7 +498,7 @@ export function deriveRelatedLists(
   // Working entries carry the FK label and the list's name so we can
   // disambiguate multi-FK children after the full sweep; both are stripped
   // from the returned descriptors.
-  type Working = DerivedRelatedList & { _fkLabel: string; _listLabel: string };
+  type Working = DerivedRelatedList & { _fkLabel: string; _listLabel: string; _otherPackage: boolean };
   const owned: Working[] = [];
   const referenced: Working[] = [];
 
@@ -394,6 +523,8 @@ export function deriveRelatedLists(
     // rather than once per FK.
     const inheritedSort = inheritedListViewSort(child.list);
     const childLabel = child.label || child.name;
+    // objectstack#35901 — a list another package brings is not the parent's to hide.
+    const otherPackage = isOtherPackageChild(child, objectDef);
     const childListLabel = (listLabel && listLabel(child as MergedObjectLike & { name: string })) || childLabel;
     for (const [fieldName, fieldDef] of fieldEntries(child.fields)) {
       if (!fieldDef) continue;
@@ -432,6 +563,8 @@ export function deriveRelatedLists(
         ...(hidden ? { isHidden: true as const } : {}),
         _fkLabel: (typeof fieldDef.label === 'string' && fieldDef.label) || fieldName,
         _listLabel: childListLabel,
+        _otherPackage: otherPackage,
+        ...(otherPackage && options?.includeHidden ? { fromPackage: packageOf(child) } : {}),
         ...(typeof fieldDef.relatedListTitle === 'string' && fieldDef.relatedListTitle
           ? { title: fieldDef.relatedListTitle }
           : {}),
@@ -454,7 +587,78 @@ export function deriveRelatedLists(
     }
   }
 
-  const all = resolveRelatedListOrder([...owned, ...referenced], objectDef.relatedLists);
+  // objectstack#35897 — a declared `relatedLists` is the tab list: the lists it
+  // names come first, in its order, and a side list it does not name is not
+  // derived (the authoring surface keeps it, flagged). A body table is the
+  // field groups' to place, so it stays, after the listed ones.
+  // objectstack#35899 — the naming entry's own `label` / `columns` win over
+  // the FK's `relatedListTitle` / `relatedListColumns`.
+  // ADR-0146 D10 — what the paired `.custom` package's tab list says beside
+  // the served `relatedLists`: the lists it hides, and whether a list no
+  // entry names still shows. `undefined` (no such arrangement) changes nothing.
+  const arrangement = readRelatedListsArrangement(objectDef);
+  const hiddenByArrangement = (list: Working): boolean =>
+    arrangement !== undefined && arrangement.hidden.some((name) => relatedListEntryNames(name, list));
+  const unlistedShown = arrangement?.unlisted === 'shown';
+  const derived = [...owned, ...referenced];
+  // An empty `relatedLists` reads as "none declared". Beside `unlisted:
+  // 'hidden'` it is a declared list whose every tab the environment hid: no
+  // entry names a list, so the declared rule decides each one.
+  const naming = relatedListNamingEntries(derived, objectDef.relatedLists)
+    ?? (arrangement?.unlisted === 'hidden' ? new Map<Working, unknown>() : null);
+  const all: Working[] = [];
+  for (const list of resolveRelatedListOrder(derived, objectDef.relatedLists)) {
+    if (hiddenByArrangement(list)) {
+      // The environment hides this list's tab: a body table stays at its
+      // group with no tab, a side list is not derived, whichever package
+      // brings it. The authoring surface keeps it, flagged.
+      if (list.isPrimary) {
+        const { keepsTab: _hiddenTab, ...bodyOnly } = list;
+        all.push(bodyOnly);
+      } else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
+      continue;
+    }
+    if (!naming) {
+      all.push(list);
+      continue;
+    }
+    const entry = naming.get(list);
+    if (!naming.has(list)) {
+      // ADR-0146 D10 — the environment's list replaced the AUTOMATIC one, in
+      // which every list shows: a list it does not name still does, after
+      // the listed ones, with the tab it had.
+      if (unlistedShown) {
+        all.push(list);
+        continue;
+      }
+      // A body table no entry names stays at its group, with no tab: a
+      // declared `relatedLists` decides the tabs, so the tab a group-placed
+      // `master_detail` table keeps on the default page goes (the seat's
+      // reading of objectstack#35897 against #35889 item 4).
+      if (list.isPrimary) {
+        const { keepsTab: _unlistedTab, ...bodyOnly } = list;
+        all.push(bodyOnly);
+      } else if (list._otherPackage) {
+        // objectstack#35901 — a side list another package brings is not
+        // hidden by the parent's list: that package places it with its object
+        // extension's `place` (which the server splices into `relatedLists`,
+        // so a placed one is named above); unplaced, it shows at the end of
+        // the tabs (`arrangeDeclaredTabs`). Sales ruling 7073014077 flips the
+        // hiding objectstack#35897 shipped (ruling 7072511859).
+        all.push(list);
+      } else if (options?.includeHidden) all.push({ ...list, isUnlisted: true });
+      continue;
+    }
+    if (!isEntryObject(entry)) {
+      all.push(list);
+      continue;
+    }
+    all.push({
+      ...list,
+      ...(typeof entry.label === 'string' && entry.label ? { title: entry.label } : {}),
+      ...(Array.isArray(entry.columns) && entry.columns.length > 0 ? { columns: entry.columns } : {}),
+    });
+  }
   // Multi-FK disambiguation: when a child object points here through more than
   // one relationship and gave no explicit title, suffix the FK label so the two
   // lists are distinguishable (e.g. "Opportunities · Partner Account"; the list
@@ -462,7 +666,7 @@ export function deriveRelatedLists(
   const counts: Record<string, number> = {};
   for (const r of all) counts[r.childObject] = (counts[r.childObject] || 0) + 1;
 
-  return all.map(({ _fkLabel, _listLabel, ...rest }) => {
+  return all.map(({ _fkLabel, _listLabel, _otherPackage, ...rest }) => {
     if (!rest.title && counts[rest.childObject] > 1) {
       return { ...rest, title: `${_listLabel} · ${_fkLabel}` };
     }

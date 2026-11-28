@@ -111,6 +111,22 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   // caller's own organization's connection, and the holder never sees a
   // token.
   { name: 'manage_connector_connections', label: 'Manage Connector Connections', description: 'Connect, reconnect and revoke the holder’s organization’s connection of an OAuth2 connector instance, and read its status. A connection authorizes the platform to call the vendor on the organization’s behalf; no token is ever shown to the holder.', scope: 'org' },
+  // [ADR-0161 K4, guard one; ruling Q2 = B on #37304] The knowledge source
+  // capability. Saving a `knowledge_source` sends the fields it lists, for
+  // every record it selects, to the embedding provider, and the first build is
+  // billed — an act of another weight than editing a layout. So every door
+  // that creates, changes or removes an item of that type (Studio and REST
+  // `/meta`, the dispatcher, the MCP draft door), and every write door of an
+  // existing package that holds one (`/packages/:id/…`), asks this capability
+  // BESIDE `manage_metadata`, never instead of it. The install door is not
+  // asked: a packaged source arrives by that door's own admission. Nor is the
+  // ensure-customization door, which writes nothing of the package it names
+  // and creates an empty pair. Held by default by platform
+  // administrators only (`ADMIN_FULL_ACCESS_CAPABILITIES`); every other
+  // position, organization administrators included, only by explicit grant.
+  // A grant on the indexed object's records does not imply it. `platform`:
+  // the item is environment metadata, as `manage_metadata`'s subjects are.
+  { name: 'manage_knowledge_sources', label: 'Manage Knowledge Sources', description: 'Create, change and remove knowledge sources, together with Manage Metadata. A knowledge source sends the fields it lists, for every record it selects, to the embedding provider and starts an index build that may be billed.', scope: 'platform' },
 ];
 
 /** Set of built-in capability names, for fast membership checks (lint, gating). */

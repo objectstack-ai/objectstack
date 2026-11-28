@@ -21,8 +21,9 @@ import type { ConversionNotice, ConversionTodoNotice } from '../conversions/type
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
-import type { FlowInnerRefusal } from '../api/automation-api.zod';
+import type { FlowInnerRefusal, RecordUpdateStart } from '../api/automation-api.zod';
 import type { DroppedFieldsEvent } from '../data/data-engine.zod';
+import type { FieldError } from '../api/errors.zod';
 
 /**
  * The write a record-triggered run was dispatched inside (#28251) — see
@@ -691,6 +692,20 @@ export interface AutomationResult {
      */
     code?: 'PERMISSION_DENIED' | 'INVALID_SIGNAL' | 'RUN_NOT_FOUND' | 'STORE_UNAVAILABLE' | 'RESUME_IN_PROGRESS' | 'RESUME_CHILD_PENDING' | 'INVALID_SCREEN_INPUT' | 'FLOW_DISABLED' | 'FLOW_NO_START_NODE' | 'FLOW_INPUT_SCHEMA_INVALID';
     /**
+     * [#37526] The field-addressed findings behind an `'INVALID_SCREEN_INPUT'`
+     * refusal, one entry per violated field: the screen field's `name`, the
+     * `FieldErrorCode` it broke (ADR-0114 D2: `required`, `invalid_type`,
+     * `invalid_value`, `min_value`, `max_value`, `unknown_field`) and the
+     * engine's English line for it. Set with that code only; absent otherwise.
+     *
+     * It is what lets a runner place the refusal AT the field, in its own
+     * language, by the label it shows, instead of reading `error`: `error`
+     * keeps the whole sentence, with the screen's declared field names, for
+     * logs and API callers. A transport serves it as `error.details.fields`,
+     * the slot `VALIDATION_FAILED` already uses for the same entries.
+     */
+    fields?: FieldError[];
+    /**
      * Lifecycle status. `'paused'` means the run suspended at a node (e.g.
      * an Approval node awaiting a human decision, ADR-0019) and can be
      * continued later with {@link IAutomationService.resume}. Absent or
@@ -946,6 +961,34 @@ export interface ResumeSignal {
      * ignored entirely on nodes that declare `'any'`.
      */
     [RESUME_AUTHORITY_SERVICE]?: true;
+}
+
+/**
+ * [#35928] The input of {@link IAutomationService.listRecordUpdateStarts}: one
+ * record of `object` as it stands (`previous`) and as the proposed update
+ * would leave it (`record`, the stored fields with the update's fields
+ * applied). The caller reads the record; the engine reads nothing.
+ *
+ * Of the writer it carries the user id and tenant only. A live save also
+ * binds the writer's positions, request params and expand into the run, so a
+ * start condition reading those is judged here without them, and the preview
+ * can differ from the save in either direction.
+ */
+export interface RecordUpdateStartsInput {
+    /** Machine name of the record's object. */
+    object: string;
+    /** The record as the proposed update would leave it. */
+    record: Record<string, unknown>;
+    /** The record as it stands before the update. */
+    previous: Record<string, unknown>;
+    /**
+     * The user who would write the update — `current_user` in a start
+     * condition, as the record-change trigger forwards the writer on a live
+     * save. Absent, `current_user` is `null`.
+     */
+    userId?: string;
+    /** The writer's active organization, as the trigger forwards it (`current_user.organizationId`). */
+    tenantId?: string;
 }
 
 /**
@@ -2247,6 +2290,29 @@ export interface IAutomationService {
      * @returns One entry per registered flow
      */
     getFlowRuntimeStates?(): FlowRuntimeState[];
+
+    /**
+     * [#35928] Which flows a proposed update of one record would start — the
+     * preview the stage-change confirms show before the reader confirms the
+     * save (ruling record 7073655354).
+     *
+     * A flow is listed when it is enabled, armed on a record-change trigger of
+     * `input.object` whose token binds an update (the spec's
+     * `recordChangeTriggerFiresOnUpdate`, the grammar the trigger binds by),
+     * and its start condition holds for `input.record` against
+     * `input.previous`, evaluated by the ONE start-condition gate a live run
+     * passes. A condition that cannot be evaluated against the record is not
+     * listed; nothing runs and nothing is written. Each entry carries the
+     * flow's name, its authored label and whether it holds an approval node
+     * (ADR-0019); hooks are not flows and are never listed (ADR-0077 §2).
+     *
+     * Who may ask is the caller's question, not this method's: the dispatcher
+     * door reads the record as its caller first.
+     *
+     * Optional: an automation implementation without it leaves the door
+     * answering 501, never a guess.
+     */
+    listRecordUpdateStarts?(input: RecordUpdateStartsInput): RecordUpdateStart[];
 
     /**
      * This engine's verdict on ONE flow name — whether it holds a registration

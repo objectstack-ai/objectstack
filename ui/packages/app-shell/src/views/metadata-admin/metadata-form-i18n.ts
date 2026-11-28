@@ -20,7 +20,7 @@
  * The strings belong to the spec, and the platform already declares how they
  * are translated: `metadataForms.<type>.{label,description}`,
  * `.sections.<section>.{label,description}`,
- * `.fields.<dot.path>.{label,helpText,placeholder}` — resolved by
+ * `.fields.<dot.path>.{label,helpText,placeholder,options}` — resolved by
  * `resolveMetadataFormLabels` from `@objectstack/spec/system`, which the
  * framework's own `/meta/types` handler calls to localize the very same forms
  * before serving them. This module supplies a bundle to THAT function rather
@@ -111,28 +111,41 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           layout: { label: '布局', description: '栅格尺寸与刷新频率。' },
           widgets: { label: '组件', description: '放在栅格上的卡片与图表。' },
           filters: { label: '筛选', description: '应用到全部组件的默认筛选与全局筛选。' },
+          access: { label: '访问权限', description: '谁可以查看此仪表盘。' },
           advanced: { label: '高级', description: '无障碍与性能调优。' },
         },
         fields: {
-          name: { label: '名称', helpText: 'snake_case 唯一标识' },
-          label: { label: '显示名称', helpText: '展示给使用者的名称' },
+          name: { label: '名称', helpText: '仪表盘的唯一内部名称：使用小写字母、数字和下划线，以字母开头（例如 sales_overview）。' },
+          label: { label: '显示名称', helpText: '使用者看到的仪表盘标题。' },
           description: { label: '描述' },
-          columns: { label: '列数', helpText: '栅格列数（默认 12）' },
-          // The spec's own hint reaches for developer vocabulary to say this —
-          // `Grid gap (Tailwind units)` before 17.4.0, and "Space between
-          // widgets, in steps of 0.25rem (4 = 1rem)" since. Either way it names
-          // a unit only a developer can act on, so this row says what the author
-          // can decide rather than transliterating it (objectui#8785).
-          gap: { label: '间距', helpText: '组件之间的间距，数值越大越松' },
-          refreshIntervalSeconds: { label: '自动刷新', helpText: '自动刷新间隔（秒），0 表示不自动刷新' },
-          header: { label: '页眉', helpText: '页眉设置：标题、描述与操作按钮' },
+          columns: { label: '列数', helpText: '组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。' },
+          // The hints of these nine rows are the platform's zh-CN wording
+          // (`zh-CN.metadata-forms.generated.ts`), copied when the spec's own
+          // hints were rewritten in author language (objectstack#36816). Before
+          // that the English gap hint named a unit only a developer can act on
+          // (`Grid gap (Tailwind units)`, then "in steps of 0.25rem"), and this
+          // row was hand-worded instead of transliterated (objectui#8785).
+          gap: { label: '间距', helpText: '组件之间留出的空间。数值越大越松散；留空则使用标准间距。' },
+          refreshIntervalSeconds: { label: '自动刷新', helpText: '仪表盘重新加载数据的频率（秒）。留空或填 0 表示不自动刷新。' },
+          header: { label: '页眉', helpText: '仪表盘顶部显示的内容：标题、描述和操作按钮。' },
           // All three children of the `header` composite — see the ⛔ note above.
           'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表盘名称' },
           'header.showDescription': { label: '显示描述', helpText: '在页眉中显示仪表盘描述' },
           'header.actions': { label: '操作按钮', helpText: '显示在页眉里的操作按钮' },
-          widgets: { label: '组件', helpText: '仪表盘组件，含位置与尺寸' },
-          dateRange: { label: '日期范围', helpText: '默认的日期范围选择器' },
-          globalFilters: { label: '全局筛选', helpText: '应用到全部组件的筛选条件' },
+          widgets: { label: '组件', helpText: '仪表盘上的图表、数字和表格，以及每一项所在的位置。' },
+          dateRange: { label: '日期范围', helpText: '打开仪表盘时默认的时间段，以及查看者能否自选日期。' },
+          // All three children of the `dateRange` composite — see the ⛔ note above.
+          'dateRange.field': { label: '日期字段', helpText: '时间段筛选所依据的日期字段。留空则按创建日期筛选。' },
+          'dateRange.defaultRange': {
+            label: '默认时间段',
+            helpText: '打开仪表盘时显示的时间段。',
+            // Option names: the platform pack's map, pinned byte-equal by
+            // `metadata-form-option-names.test.ts`.
+            options: { today: '今天', yesterday: '昨天', this_week: '本周', last_week: '上周', this_month: '本月', last_month: '上月', next_month: '下月', this_quarter: '本季度', last_quarter: '上季度', next_quarter: '下季度', this_year: '今年', last_year: '去年', last_7_days: '近 7 天', last_30_days: '近 30 天', last_90_days: '近 90 天', next_30_days: '未来 30 天', custom: '自定义…' },
+          },
+          'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许查看者自己选择开始和结束日期。' },
+          globalFilters: { label: '全局筛选', helpText: '查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。' },
+          requiredPermissions: { label: '所需权限', helpText: '谁能看此仪表盘：查看者必须持有的能力，列出的每一项都要具备。能力由权限集授予，岗位通过其权限集获得这些能力。留空则所有人都能看到此仪表盘。要给多类人看，请选一个能力并授予每类人的权限集。由服务器强制执行：其他人在列表中看不到此仪表盘，直接打开也会被拒绝。这也适用于你自己：列出你未持有或拼错的能力后，你也将无法再打开此仪表盘。' },
         },
       },
     },

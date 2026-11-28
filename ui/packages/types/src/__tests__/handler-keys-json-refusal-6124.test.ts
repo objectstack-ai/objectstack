@@ -84,7 +84,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 
-import { retirementTombstone } from '../zod/tombstone.zod';
+import { handlerKeyRefusal, retirementTombstone } from '../zod/tombstone.zod';
 // objectui#6576 — the first handler arm on an `objectql` mirror, ledgered here
 // like the 58 it joins.
 // objectui#7804 added the second pair on this mirror: the `object-kanban` face
@@ -233,7 +233,7 @@ const objectOf = (mirror: z.ZodType, key: string): z.ZodObject<z.ZodRawShape> =>
 };
 
 /**
- * 60 keys whose function value REACHES a renderer at runtime — the TypeScript
+ * 61 keys whose function value REACHES a renderer at runtime — the TypeScript
  * interface keeps the function type (36 at the objectui#6124 census; 38 since
  * `ObjectDataTableSchema.onRowClick`, objectui#6576, and `AlertDialogSchema.onAction`,
  * objectui#7104, joined; 44 since objectui#7655 gave `chatbot-enhanced` and
@@ -241,7 +241,8 @@ const objectOf = (mirror: z.ZodType, key: string): z.ZodObject<z.ZodRawShape> =>
  * registration forwards; 51 since objectui#7804's `DataTableSchema` slice
  * declared the seven keys that arm's renderer had been reading undeclared;
  * 60 since the same card's `objectql.ts` slice declared nine more across four
- * arms in that one mirror file).
+ * arms in that one mirror file; 61 since objectstack#35955 declared
+ * `DataTableSchema.onColumnHide`, the column menu's "Hide column" handler).
  * ⛔ Do not add a delta to this figure — the pin that cannot rot is
  * `expect(RUNTIME_SLOT).toHaveLength(…)` below; count the constant.
  * Channel measured per key on this tree:
@@ -293,6 +294,9 @@ const RUNTIME_SLOT: readonly Site[] = [
   ['data-display.zod.ts', 'DataTableSchema', 'onRowDelete', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onSelectionChange', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onColumnsReorder', DataTableZod],
+  // objectstack#35955 — `data-table` calls `schema.onColumnHide(columnKey)` when
+  // the column menu's "Hide column" is picked; `ObjectGrid` supplies it.
+  ['data-display.zod.ts', 'DataTableSchema', 'onColumnHide', DataTableZod],
   // ⭐ objectui#7804 — the `DataTableSchema` slice, seven keys the REGISTERED
   // `data-table` renderer read off the authored document while this arm declared
   // none of them, so `BaseSchema.passthrough()` ACCEPTED and KEPT an authored
@@ -300,11 +304,12 @@ const RUNTIME_SLOT: readonly Site[] = [
   //
   // Each channel measured on its own, and they do NOT all share one — which is
   // why six siblings are not evidence for the seventh:
-  //   - `onAddRecord` / `onBatchSave` / `onCellChange` / `onRowSave` are React
-  //     props on `ObjectGridComponentProps`; `ObjectGrid` puts them on the
-  //     `data-table` node it builds (`onRowSave ?? defaultRowSave` and
-  //     `onBatchSave ?? defaultBatchSave` install a dataSource-backed default
-  //     only when the host wired none);
+  //   - `onAddRecord` / `onCellChange` / `onRowSave` are React props on
+  //     `ObjectGridComponentProps`; `ObjectGrid` puts them on the `data-table`
+  //     node it builds (`onRowSave ?? defaultRowSave` installs a
+  //     dataSource-backed default only when the host wired none);
+  //   - `onBatchSave`, the seventh, LEFT this half for `RETIRED` below
+  //     (objectstack#35827 retired the staged editing model that called it);
   //   - `onRowActionDef` is `RelatedList`'s own `onRowAction` React prop,
   //     forwarded onto the node it builds;
   //   - `onRowClick` has THREE suppliers — `ObjectGrid`'s `navigation.handleClick`,
@@ -318,7 +323,6 @@ const RUNTIME_SLOT: readonly Site[] = [
   //     `'retired'` would have published "no renderer reads this key" for a read
   //     objectui#6175 wired on purpose.
   ['data-display.zod.ts', 'DataTableSchema', 'onAddRecord', DataTableZod],
-  ['data-display.zod.ts', 'DataTableSchema', 'onBatchSave', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onCellChange', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onColumnResize', DataTableZod],
   ['data-display.zod.ts', 'DataTableSchema', 'onRowActionDef', DataTableZod],
@@ -488,9 +492,22 @@ const RETIRED: readonly Site[] = [
   ['objectql.zod.ts', 'ObjectKanbanSchema', 'onQuickAdd', ObjectKanbanZod],
   ['overlay.zod.ts', 'AlertDialogSchema', 'onConfirm', AlertDialogZod],
   ['overlay.zod.ts', 'AlertDialogSchema', 'onCancel', AlertDialogZod],
+  // ⭐ objectstack#35827 — `DataTableSchema.onBatchSave`, MOVED here from
+  // `RUNTIME_SLOT` above. "Save All" of the staged editing model called it; that
+  // model is retired, so the table saves each committed cell through
+  // `onRowSave` and no renderer reads this key.
+  ['data-display.zod.ts', 'DataTableSchema', 'onBatchSave', DataTableZod],
 ];
 
 const ALL_SITES: readonly Site[] = [...RUNTIME_SLOT, ...RETIRED];
+
+/** Retired keys that carry their OWN remedy (`handlerKeyRefusal`'s
+ *  `retirement` argument) in place of the node-type one, with the spellings
+ *  that remedy must name. A key retired with a host-supplied save path has a
+ *  successor, and the node-type remedy would point its author at a toast. */
+const OWN_RETIREMENT_REMEDY: Readonly<Record<string, readonly string[]>> = {
+  onBatchSave: ['`onBatchSave` → `onRowSave` on `object-grid`', '`GridCellSelectionProvider`', 'Delete the key.'],
+};
 
 /** The nine mirror files the census covers; `base.zod.ts` is not among them —
  *  it declares no named handler key. The record-valued `EventHandlersSchema`
@@ -568,7 +585,7 @@ describe('census: no on* key in the eight mirrors is declared z.function() (obje
     expect([...spelled.matchAll(NON_ON_FUNCTION)].map((m) => m[1])).toEqual(['cell']);
   });
 
-  it('82 sites are ledgered, 60 runtime slots + 22 retired, with no key filed twice', () => {
+  it('83 sites are ledgered, 61 runtime slots + 22 retired, with no key filed twice', () => {
     // 58 from objectui#6124; the 59th is `ObjectDataTableSchema.onRowClick`,
     // minted with its arm by objectui#6576 / #6914; the 60th is
     // `AlertDialogSchema.onAction`, declared by objectui#7104 for a key the
@@ -618,10 +635,18 @@ describe('census: no on* key in the eight mirrors is declared z.function() (obje
     // `ObjectKanbanSchema.onQuickAdd` from the runtime-slot half to the retired
     // half. A move between halves holds `ALL_SITES` at the same size, so the two
     // half lengths are the readings that see it, and both are pinned here.
+    //
+    // ⭐ 60 + 22 → 61 + 22: objectstack#35955 declared
+    // `DataTableSchema.onColumnHide`, a runtime slot the `data-table` renderer
+    // calls from its column menu.
+    //
+    // ⭐ 61 + 22 → 60 + 23, total unchanged: objectstack#35827 MOVED
+    // `DataTableSchema.onBatchSave` to the retired half with the staged editing
+    // model it served.
     expect(RUNTIME_SLOT).toHaveLength(60);
-    expect(RETIRED).toHaveLength(22);
+    expect(RETIRED).toHaveLength(23);
     const ids = ALL_SITES.map(([file, schema, key]) => `${file}#${schema}.${key}`);
-    expect(new Set(ids).size).toBe(82);
+    expect(new Set(ids).size).toBe(83);
   });
 
   it.each(ALL_SITES)('%s %s.%s is DECLARED on the mirror shape, with the objectui#6124 guidance as its description', (_file, _schema, key, mirror) => {
@@ -649,9 +674,16 @@ describe('a JSON author is refused BY NAME and pointed at the node-type spelling
     expect(issue!.path).toEqual([key]);
     expect(issue!.message).toContain(`\`${key}\``);
     expect(issue!.message).not.toContain('expected function');
-    // The remedy: the node-type spelling PR #6498 established (Q1, option C).
-    expect(issue!.message).toContain('"type"');
-    expect(issue!.message).toContain('action:button');
+    const own = OWN_RETIREMENT_REMEDY[key];
+    if (own) {
+      // A retirement's own FROM → TO, and not the node-type remedy beside it.
+      for (const spelling of own) expect(issue!.message).toContain(spelling);
+      expect(issue!.message).not.toContain('action:button');
+    } else {
+      // The remedy: the node-type spelling PR #6498 established (Q1, option C).
+      expect(issue!.message).toContain('"type"');
+      expect(issue!.message).toContain('action:button');
+    }
     // BOTH channels, one string — the runtime message and the `.describe()`
     // metadata cannot drift apart (the `retirementTombstone()` invariant).
     expect(issue!.message).toBe(describeOf(mirror, key));
@@ -689,6 +721,34 @@ describe('a JSON author is refused BY NAME and pointed at the node-type spelling
     expect(ButtonZod.safeParse({ type: 'button', label: 'Save' }).success).toBe(true);
     expect(ToastZod.safeParse({ type: 'toast', title: 'Saved' }).success).toBe(true);
     expect(DialogZod.safeParse({ type: 'dialog', title: 'Confirm' }).success).toBe(true);
+  });
+});
+
+describe('a retired key\'s own remedy replaces the node-type one, and only where it is passed', () => {
+  it('every key with its own remedy is a retired site of the ledger', () => {
+    const retiredKeys = new Set(RETIRED.map(([, , key]) => key));
+    for (const key of Object.keys(OWN_RETIREMENT_REMEDY)) expect(retiredKeys.has(key), key).toBe(true);
+  });
+
+  it('without the argument the message is the node-type remedy, byte for byte as before', () => {
+    const generic = handlerKeyRefusal('onExample', 'retired', 'Example handler').description;
+    expect(generic).toBe(
+      'Example handler — `onExample` is RETIRED (objectui#6124, ADR-0049): JSON has no function value, and no '
+        + 'renderer reads this key, so nothing could ever run it. Author behaviour as a NODE TYPE instead — e.g. '
+        + '{ "type": "toast", ... } or an action:button node with a declared action, the spelling PR #6498 established.',
+    );
+  });
+
+  it('with it, the remedy is the retirement\'s sentence and the node-type sentence is gone', () => {
+    const own = handlerKeyRefusal('onExample', 'retired', 'Example handler', '`onExample` → `onOther`. Delete the key.').description;
+    expect(own).toBe(
+      'Example handler — `onExample` is RETIRED (objectui#6124, ADR-0049): JSON has no function value, and no '
+        + 'renderer reads this key, so nothing could ever run it. `onExample` → `onOther`. Delete the key.',
+    );
+  });
+
+  it('a runtime slot refuses a retirement remedy at declaration', () => {
+    expect(() => handlerKeyRefusal('onExample', 'runtime-slot', 'Example handler', 'x')).toThrow(/'retired' key/);
   });
 });
 
@@ -767,6 +827,8 @@ export type assertionRetiredKeysAreTombstoned = [
   Expect<RetiredIsNever<AlertDialogSchema['onCancel']>>,
   // objectui#11234 — moved here from the runtime-slot block below.
   Expect<RetiredIsNever<ObjectKanbanSchema['onQuickAdd']>>,
+  // objectstack#35827 — moved here from the runtime-slot block below.
+  Expect<RetiredIsNever<DataTableSchema['onBatchSave']>>,
 ];
 
 export type assertionRuntimeSlotsKeepTheirFunctionType = [
@@ -784,10 +846,11 @@ export type assertionRuntimeSlotsKeepTheirFunctionType = [
   Expect<KeepsFunction<DataTableSchema['onRowDelete']>>,
   Expect<KeepsFunction<DataTableSchema['onSelectionChange']>>,
   Expect<KeepsFunction<DataTableSchema['onColumnsReorder']>>,
+  // objectstack#35955 — the column menu's "Hide column" handler.
+  Expect<KeepsFunction<DataTableSchema['onColumnHide']>>,
   // objectui#7804 — the `DataTableSchema` slice. Each TS twin stays callable
   // because the function value REACHES the renderer; the mirror refuses by name.
   Expect<KeepsFunction<DataTableSchema['onAddRecord']>>,
-  Expect<KeepsFunction<DataTableSchema['onBatchSave']>>,
   Expect<KeepsFunction<DataTableSchema['onCellChange']>>,
   Expect<KeepsFunction<DataTableSchema['onColumnResize']>>,
   Expect<KeepsFunction<DataTableSchema['onRowActionDef']>>,

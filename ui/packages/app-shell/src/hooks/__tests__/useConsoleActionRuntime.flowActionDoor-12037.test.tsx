@@ -58,7 +58,7 @@ const DECLARED = {
   label: 'Reassign…',
   type: 'flow',
   target: FLOW,
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   requiredPermissions: ['showcase.reassign'],
 };
 const OBJECTS = [{ name: OBJECT, label: 'Task', fields: {}, actions: [DECLARED] }];
@@ -138,7 +138,7 @@ describe('objectui#12037 — a declared flow action is started through the actio
     const { result, url } = await click(ROW_CLICK);
 
     expect(url).toBe(`/api/v1/actions/${OBJECT}/showcase_bulk_reassign`);
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'New Assignee' })).toBeTruthy();
 

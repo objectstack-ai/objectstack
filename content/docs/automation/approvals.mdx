@@ -408,6 +408,42 @@ never deadlock against itself. The exemption is keyed on run identity rather tha
 elevation, so a `runAs:'user'` run stays row-level-security scoped while it
 writes — it does not become a system write.
 
+**The record's lines are locked with it.** Rows of a `master_detail` child of the
+locked record (an expense claim's lines, an opportunity's products) refuse insert,
+update and delete with the same `409 RECORD_LOCKED`, and so does moving a row into
+or out of the record. The record lock's exemptions carry over: system writes and
+the run that opened the request still write the lines. Children joined by a plain
+`lookup` are not locked.
+
+**Deleting the record while it is pending** is not refused: the delete lands and
+its pending request is cancelled (`status: 'cancelled'`, with `cancel_reason` on
+the row), and the request's timeline says so in a system note, in the reader's
+language. The delete removes the record's `master_detail` lines with it. In the
+cases below the server refuses the whole delete with `409 RECORD_LOCKED` instead, and
+the record, its lines and its pending request all stay:
+
+- the line object has a second relation that also cascades on delete (a `lookup`
+  with `deleteBehavior: 'cascade'`, or a second `master_detail`), so the server
+  cannot tell which record's delete removes the line;
+- the delete does not run inside an open transaction. This covers a datasource
+  that declares `supports.transactionsUnsupported`, a cascade that spans more
+  than one datasource, a record and its lines that sit together on a datasource
+  other than the default one (the server opens its cascade transaction on the
+  default datasource only), and a delete that carries the handle of a
+  transaction that has already finished (for example from an `async` after-hook).
+  The lines would be removed one by one, and a later refusal (a `restrict`
+  reference to the record) would leave the record locked with its lines gone.
+
+Inside a transaction the refusal is what keeps the lines: server code that owns
+the transaction must not catch the refused delete and commit anyway, or the
+lines are gone while the record stays locked.
+
+Deleting a different record never removes a locked record's line, with one
+exception: when the locked record is itself the child of a record whose delete
+cascades to it (a `master_detail` child, or a `lookup` child with
+`deleteBehavior: 'cascade'`), deleting that parent removes the locked record and
+its lines, and cancels its request.
+
 **Reading the lock.** Anyone who can read the record can ask whether it is
 locked, including a member who is not on the approval and so is served no
 request row:
@@ -415,19 +451,60 @@ request row:
 ```bash
 curl -b cookies.txt \
   "https://your-app.example.com/api/v1/approvals/records/expense/rec_123/lock"
-# → { "success": true, "data": { "locked": true } }
+# → { "success": true, "data": { "locked": true, "lockSource": "record" } }
 ```
 
-The answer is `locked` and nothing else: no request, approvers or history,
-which stay behind the object's `approvalsVisibleToReaders` switch. `locked` is
-`true` while a pending request's node has `lockRecord` other than `false`. That
-is the same check the server applies when it refuses an edit with `409
-RECORD_LOCKED`, so a page that reads it never offers an edit the server will
-refuse. The record is read as the caller: a record they cannot read answers
+The answer is `locked` and, on a locked record, `lockSource`, and nothing else:
+no request, approvers or history, which stay behind the object's
+`approvalsVisibleToReaders` switch. `locked` is `true` while a pending request's
+node has `lockRecord` other than `false`. That is the same check the server
+applies when it refuses an edit with `409 RECORD_LOCKED`, so a page that reads
+it never offers an edit the server will refuse. Asked of a line, it answers
+`true` while the record the line belongs to is locked.
+
+`lockSource` says which approval holds the record, and so which delete the
+server refuses. `"record"`: the record's own request holds it, and deleting the
+record still goes through and cancels the request. `"master"`: the record is a
+line of a locked record, and the server refuses its delete as well as its edit.
+A line under a locked record that also has a pending request of its own answers
+`"master"`. An unlocked record answers `{ "locked": false }` with no
+`lockSource`.
+
+The record is read as the caller: a record they cannot read answers
 `404 RECORD_NOT_FOUND`, the same body a record id that does not exist gets. The
 SDK call is `client.approvals.getRecordLock(object, recordId)`, and the service
 member is `IApprovalService.getRecordLock`. An approvals service without that
 member answers `501`.
+
+**Reading the locks of a page of records.** A list asks for every row on screen
+in one request rather than one per row:
+
+```bash
+curl -b cookies.txt -X POST -H 'Content-Type: application/json' \
+  -d '{"recordIds":["rec_123","rec_456","rec_789"]}' \
+  "https://your-app.example.com/api/v1/approvals/records/expense/locks"
+# → { "success": true, "data": { "records": [
+#      { "recordId": "rec_123", "locked": true, "lockSource": "record" },
+#      { "recordId": "rec_456", "locked": false },
+#      { "recordId": "rec_789", "locked": null } ] } }
+```
+
+Each entry is what the single-record read answers for that id, in the order the
+ids were sent; `null` stands where that read answers `404`, so a record the
+caller cannot read and one that does not exist look the same. Send the ids as
+the server spelled them: an id the database matches only under another spelling
+(a different letter case, `07` for `7`) answers `null` here. The single-record
+read does find such a record and answers for it, but it looks up the record's
+own request by the id as sent, so it may answer `{ "locked": false }` for a
+record its own request holds; a line of a locked record still answers
+`"master"`. The two reads keep these different rules on purpose (seat ruling
+7152650156 on #37151). One request
+carries at most 200 ids (`APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`); a longer list,
+an empty one or any other body key is refused with `400 VALIDATION_ERROR`. The
+SDK call is `client.approvals.getRecordLocks(object, recordIds)`, the service
+member `IApprovalService.getRecordLocks`, and an approvals service without it
+answers `501`. A list that edits in place reads it when a cell is first
+selected, and holds an edit asked before the answer arrives until it does.
 
 Only `approvers` is required on the node; everything else has a default
 (`behavior: 'first_response'`, `lockRecord: true`, `maxRevisions: 3`).
@@ -593,7 +670,9 @@ administrator is its submitter on a step that sets `excludeSubmitter`. The
 server logs a warning, and the request's timeline and a notice to its submitter
 say that no one else can approve it yet and that an organization administrator
 must add a member who can (one who holds the unstaffed position, when the slate
-names one). Only the admin override decides it, and never its submitter's own.
+names one). The timeline's note names that position the way the note above
+does: by its label for a reader, by its name in the text the row stores. Only the
+admin override decides it, and never its submitter's own.
 
 ### The approver finds it in their queue
 
@@ -672,6 +751,12 @@ side, and both objects declare `schemaReadDelegate: 'approvals'`, so
 `GET /api/v1/meta/object/sys_approval_action` (and the object list) serves it
 to a caller who can see at least one request by the rule above. A member who
 can see none is answered `404` for it.
+
+Whoever reads `sys_approval_action` rows on the data side (Setup's Approval
+Actions list, an action's record page, an export) is served each row's step
+label and system note in their own language, by the same render as the
+request's timeline. The row itself keeps the authored step label and the
+English note.
 </Callout>
 
 <Callout type="info">
@@ -717,7 +802,10 @@ and neither does a decision whose flow moves on to another approval step: on
 a two-step flow the first step's decision is silent and the decision that ends
 the run is the one that notifies. Whether a later step opened is read from the
 run, not from the flow's graph, so when a decision node routes around the
-later step, the first decision is the outcome and notifies.
+later step, the first decision is the outcome and notifies. The run here is
+the one that carries the request's record: a step decided inside a `subflow`
+whose parent then opens the next step is silent too, while each record of a
+`map` over records is told its own outcome when its last step is decided.
 
 Two cases tell nobody by design. A submitter who decided their own request
 already knows. An SLA `auto_approve` or `auto_reject` is told by the
@@ -874,7 +962,7 @@ continuity levers on the same request. All are `POST
 | Verb | Route | Who | Effect |
 |:---|:---|:---|:---|
 | `approve` / `reject` | `/approve` `/reject` | pending approver | Records the decision (finalizes per `behavior`). Accepts `comment` (a reject's reason — required at every human door, see below), `attachments`, and — when the node declares `decisionOutputs` — structured `outputs` handed to the flow as `<nodeId>.<key>` variables. |
-| `reassign` | `/reassign` | pending approver | Hands one slot to another user (`to`); the request stays pending. |
+| `reassign` | `/reassign` | pending approver | Hands their own slot to another user (`to`); the request stays pending. A `from` naming a slot the acting approver does not hold is refused `403 FORBIDDEN`; an administrator (the override) or the system may move any pending slot. |
 | `revise` (send back) | `/revise` | pending approver | Ends this round as **`returned`**, unlocks the record for rework (ADR-0044). |
 | `request-info` | `/request-info` | pending approver | Asks the submitter for more info; the request **stays pending**. `comment` required. |
 | `remind` | `/remind` | submitter | Nudges the pending approvers (publishes a notification topic). |
@@ -944,9 +1032,9 @@ declares its `comment` param required, so the action door, MCP `run_action` and 
 dialog refuse a reject whose `comment` is missing or blank (`400`, the declared
 param contract's `required` refusal), and `ApprovalService.decide()`, behind the
 `/reject` route and the SDK's `client.approvals.reject`, refuses one the same
-way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The one
-exception is the email action link, which still records the fixed text "Via
-action link" instead of the approver's reason (tracked in #35722).
+way (`400 VALIDATION_ERROR`); the inbox keeps Reject disabled until a reason is typed. The email
+action link asks too: its reject confirm page has a required reason field, and a reject sent with a
+blank one is answered the page again (`400`) with the link still unused.
 
 On the record itself, a record with approval requests grows an **Approvals** tab
 beside Details and Related, with a request-count badge: the current step, decision
@@ -1090,7 +1178,11 @@ no terminal run record exists either, skipping (never condemning) any row whose
 store could not be read. It deliberately **does not rewrite** them — the decision
 really happened, and rolling it back automatically would put the audit trail at
 odds with the facts — so it names the stuck requests, their step, and the stale
-mirrored status for an operator to act on.
+mirrored status for an operator to act on. Each sweep reads the 500 most
+recently decided requests, so a new strand is named on the next sweep, plus
+the next 500 of a walk over every decided request by id that resumes where the
+previous sweep stopped, so an older one is named within one pass of the walk
+however many decided requests a deployment holds.
 </Callout>
 
 ### Progress and notification deep links
@@ -1137,6 +1229,41 @@ out-edges, a loop back or a `subflow` / `map` / `loop` node, and `ahead` reads
 `undecided`. `ahead` is `end` when the walk reached the flow's end, and
 `decided` for a request already decided. The older `flow_steps` member is the
 graph's first branch at every decision, not the route; nothing draws it.
+
+A decided request's route also says where the record's approval stands now,
+in `outcome`, so its step line can answer "what happened next":
+
+```jsonc
+// getRequest, for the manager's request after the manager approved:
+"flow_route": {
+  "steps": [{ "id": "manager_review", "label": "Manager", "state": "done" }],
+  "ahead": "decided",
+  "outcome": {
+    "step": { "id": "finance_only", "label": "Finance" },  // the run's latest, later request
+    "status": "pending",                                     // it waits on its decision
+    "ended": false                                           // the run goes on
+  }
+}
+```
+
+`step` is the run's latest request opened after this one (a pending one first),
+and is absent when none was opened; `status` is that request's status, or this
+request's own without a `step`; `ended` is `true` only when the record's
+approval is known to have stopped: the request's run is a root run (an approval
+inside a `subflow` or a `map` item runs in a child run, whose end is not the
+approval's), the flow body the run ran holds no `subflow` or `map` node
+anywhere (a child run files its requests under its own run, so the root run's
+requests cannot show what it decided), and the run has stopped for good. The
+body the run ran is known only while the flow has not been registered again
+since the run started: after an edit, a rollback or a restart, older runs are
+not judged by today's body, and their requests are not served "ended". `false`
+means not known to have stopped, including a run that cannot be read. So on a
+flow that starts a child run, a decided request's line names the later steps of
+its own run but never says the approval ended. `outcome` is left out when nothing past
+the request is known: no later request and the approval not known to have
+ended, or several later requests pending at once. Every reader of the request
+gets it; it names only the later step and its status, never that request's
+approvers, comments or field values.
 
 Approval **notifications deep-link into the request**: `notify()` rewrites the
 inbox action URL to `/system/approvals?request=<id>`, so clicking the bell opens

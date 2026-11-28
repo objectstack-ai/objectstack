@@ -7,11 +7,10 @@ import type { RowCrudPredicates } from './object.zod';
 /**
  * Which objects offer the dedicated Change Owner action: the structural test,
  * the object switch `userActions.transfer`, and the one resolution the server's
- * Change Owner endpoint and the console's action will both read (maintainer
- * ruling 7000907189, point 1). Neither reader exists yet — they are the server
- * card #35402 and the console card #35403 — so nothing at runtime reads the
- * switch today; the liveness ledger grades it `planned` and warns an author
- * who sets it to `true` or uses the object form.
+ * Change Owner endpoint, the console's action and the offboarding hand-over all
+ * read (maintainer ruling 7000907189, point 1). The server's endpoint (`@objectstack/core`'s
+ * `change-record-owner.ts`, card #35402) refuses an object this resolves off;
+ * the console's action is card #35403.
  *
  * ## Visibility is three facts, and only two live here
  *
@@ -53,10 +52,19 @@ import type { RowCrudPredicates } from './object.zod';
  * Closing the switch there restates what the structure already says and is
  * accepted.
  *
- * The switch gates the dedicated action — single, bulk and cascade — and not
- * the raw write: a plain `owner_id` update stays governed by `allowTransfer`
- * alone, so import mappings and hooks are unaffected (ruling point 2). An author
- * who wants a hard block declares `owner_id` read-only.
+ * The switch gates two consumers: the dedicated action — single, bulk and
+ * cascade — and the offboarding hand-over of a user's assigned work
+ * (`@objectstack/core`'s `user-assigned-work.ts`). Where an eligible object's
+ * switch resolves off, the hand-over's count reports the object's `owner_id`
+ * rows as held (`transfer_off`) and its transfer leaves their owner where it
+ * is; the hand-over reads only the resolved on/off, not the per-record
+ * predicates. An `owner_id` the platform does not provide (an object the
+ * platform gives no owner column, declaring its own `owner_id` user field) is
+ * app-authored work and is handed over like any other user field; a read-only
+ * `owner_id` is not handed over, or counted, at all. It
+ * does not gate the raw write: a plain `owner_id` update stays governed by
+ * `allowTransfer` alone, so import mappings and hooks are unaffected (ruling
+ * point 2). An author who wants a hard block declares `owner_id` read-only.
  *
  * Tolerant of bare, un-parsed metadata records (the same contract as
  * {@link resolveInjectedSystemColumns}), so a runtime reading a registered
@@ -195,10 +203,13 @@ function derivedTransferDefault(obj: AnyRec): boolean {
  * `sharingModel` implies, the same collapse the CRUD entries take onto their
  * `managedBy` default.
  *
- * The one resolution, for the two readers still to come (cards #35402 and
- * #35403): the server's Change Owner endpoint will refuse an object this
- * answers `enabled: false` for, and the console will show the action only where
- * it answers `true` — both then asking the caller's transfer verdict per record.
+ * The one resolution, for its three readers: the server's Change Owner endpoint
+ * (card #35402) refuses an object this answers `enabled: false` for, and the
+ * console (card #35403) shows the action only where it answers `true` — both
+ * then asking the caller's transfer verdict per record; the offboarding
+ * hand-over (`@objectstack/core`'s `user-assigned-work.ts`) counts an eligible
+ * object's `owner_id` rows as held, and leaves them, where it answers
+ * `enabled: false`.
  */
 export function resolveUserActionTransfer(def: unknown): UserActionTransferResolution {
   if (!isTransferEligible(def)) return { enabled: false };
@@ -217,4 +228,36 @@ export function resolveUserActionTransfer(def: unknown): UserActionTransferResol
   if (visibleWhen != null) predicates.visibleWhen = visibleWhen;
   if (disabledWhen != null) predicates.disabledWhen = disabledWhen;
   return { enabled, predicates };
+}
+
+/**
+ * [ruling 7000907189 point 4] Why `def` — the CHILD object of a relationship —
+ * cannot take a Change Owner cascade (`transferBehavior: 'cascade'` on one of
+ * its reference fields), as one clause, or `undefined` when it can.
+ *
+ * A cascade moves the child's rows by the same action, so the child must offer
+ * Change Owner itself (point 1's object facts: structurally eligible, and its
+ * switch on). A `controlled_by_parent` detail is refused whatever its switch
+ * says: its access already follows its master, so it is not cascaded for
+ * access (point 4). The caller's transfer verdict on the child — point 1's
+ * third fact — is per caller and per row, and is the write path's at the
+ * cascade.
+ *
+ * The one test: `ObjectSchema` refuses the declaration with it at parse, and
+ * the Change Owner endpoint (`@objectstack/core`'s `change-record-owner.ts`)
+ * offers and runs only the relationships whose child it answers `undefined`
+ * for.
+ */
+export function transferCascadeIneligibilityReason(def: unknown): string | undefined {
+  const structural = transferIneligibilityReason(def);
+  if (structural !== undefined) return structural;
+  // `sharingModel` read where `ObjectSchema` declares it, as `derivedTransferDefault` reads it.
+  if (asRecord(def)?.sharingModel === 'controlled_by_parent') {
+    return 'it is a controlled_by_parent detail, whose access already follows its master, so it is not ' +
+      'cascaded for access';
+  }
+  if (!resolveUserActionTransfer(def).enabled) {
+    return 'its userActions.transfer is off, so it does not offer Change Owner itself';
+  }
+  return undefined;
 }

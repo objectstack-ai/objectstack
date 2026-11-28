@@ -2,9 +2,10 @@
 
 /**
  * objectstack#28561 — the "All metadata" area in the builder (ADR-0146 D1):
- * the header links it beside the four pillars, and the builder's body is the
- * area on its route (`/studio/<package>/metadata/*`), which the console mounts
- * as `<StudioDesignSurface area="metadata" />`.
+ * the builder's body is the area on its route (`/studio/<package>/metadata/*`),
+ * which the console mounts as `<StudioDesignSurface area="metadata" />`. Since
+ * objectstack#36899 the left menu is the way in: each type entry links that
+ * type's list in the area, and the area's pages mark their type current.
  *
  * The surface and the area are real here, and so is the one package-list read
  * both make (`GET /api/v1/packages`). The metadata-admin pages are stubs that
@@ -17,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
+import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits';
 
 const PACKAGE_ID = 'app.r34d';
 const KERNEL_ID = 'com.objectstack.platform';
@@ -28,7 +30,7 @@ vi.mock('sonner', () => ({
 }));
 
 const mockClient = {
-  list: vi.fn(async () => []),
+  list: vi.fn(async (_type?: string): Promise<unknown[]> => []),
   listDrafts: vi.fn(async () => []),
   layered: vi.fn(async (_t: string, name: string) => ({ effective: { name } })),
   getDraft: vi.fn(async () => null),
@@ -41,7 +43,16 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return {
     ...actual,
     useMetadataClient: () => mockClient,
-    useMetadataTypes: () => ({ loading: false, error: null, entries: [] }),
+    // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      loading: false,
+      error: null,
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+        { type: 'permission', domain: 'security' },
+      ],
+    }),
   };
 });
 
@@ -52,11 +63,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+
+/** objectstack#36900 — the item page holds unsaved edits, registered with the shell's seam as `ResourceEditPage` does. */
+const itemPage = vi.hoisted(() => ({ dirty: false }));
+const ITEM_QUESTION = 'Discard the edits on this item?';
 
 function PageStub({ page }: { page: string }) {
   const host = useMetadataAreaHost();
+  useRegisterUnsavedEdits(page === 'item' && itemPage.dirty, ITEM_QUESTION);
   return <div data-testid="area-page" data-page={page} data-host={JSON.stringify(host)} />;
 }
 vi.mock('../metadata-admin/index.js', () => ({
@@ -96,9 +111,15 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
 }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { t } from '../metadata-admin/i18n';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid here too.
+import '@object-ui/plugin-detail';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one writable app package and one kernel package. */
 function servePackages() {
@@ -148,16 +169,17 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Where />
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        <Route path="/studio" element={<div data-testid="studio-entry" />} />
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
 const where = () => screen.getByTestId('where').textContent;
-const nav = () => within(screen.getByTestId('studio-pillar-nav'));
+const menu = () => within(screen.getByTestId('studio-menu'));
+const current = () => menu().getByRole('link', { current: 'page' });
 async function areaPage() {
   const el = await screen.findByTestId('area-page');
   return { page: el.getAttribute('data-page'), host: JSON.parse(el.getAttribute('data-host') ?? 'null') };
@@ -182,13 +204,13 @@ afterEach(() => {
 });
 
 describe('Studio: the "All metadata" area in the builder (objectstack#28561)', () => {
-  it('a pillar links the area beside the four pillars, not current', async () => {
+  it('on a pillar, the menu links each type\'s list in the area; the pillar\'s own type is current', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    const link = await waitFor(() => nav().getByRole('link', { name: t('engine.studio.pillar.metadata', 'en') }));
-    expect(link).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
-    expect(link).not.toHaveAttribute('aria-current');
-    expect(nav().getByRole('link', { current: 'page' })).toHaveAttribute('href', `/studio/${PACKAGE_ID}/data`);
+    const flows = await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
+    expect(flows).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
+    expect(flows).not.toHaveAttribute('aria-current');
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:object');
   });
 
   it('the area\'s route: the area is current, no pillar is, and its body is the package\'s directory', async () => {
@@ -199,10 +221,10 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
       host: { packageId: PACKAGE_ID, readOnly: false, basePath: `/studio/${PACKAGE_ID}/metadata` },
     });
     expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata?package=${PACKAGE_ID}`);
-    const current = nav().getByRole('link', { current: 'page' });
-    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
-    // The builder's header stays: the package chip, its pillars, the area.
-    expect(nav().getAllByRole('link')).toHaveLength(5);
+    // objectstack#37360 — rewritten on purpose: the directory is 全部类型 All types' page, the 高级 fold's
+    // last row. It read "The directory is no one entry's page". The builder's menu stays beside it.
+    expect(menu().getByRole('link', { current: 'page' })).toHaveAttribute('data-testid', 'studio-menu-entry-allTypes');
+    expect(menu().getByTestId('studio-menu-group-data')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     // The surface and the area share the one package-list read.
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/packages')).toHaveLength(1);
@@ -210,9 +232,9 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
 
   it('the pages below the area\'s root are the area\'s too', async () => {
     servePackages();
-    renderAt(`/studio/${PACKAGE_ID}/metadata/translation?package=${PACKAGE_ID}`);
+    renderAt(`/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
     expect((await areaPage()).page).toBe('list');
-    expect(nav().getByRole('link', { current: 'page' })).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
   });
 
   it('a kernel package the switcher hides opens its area read-only', async () => {
@@ -228,7 +250,7 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
     servePackages();
     renderAt(`/studio/${PHANTOM}/metadata`);
     expect(await screen.findByTestId('studio-package-not-found')).toBeInTheDocument();
-    expect(nav().queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryByTestId('studio-menu')).toBeNull();
     expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
   });
 });
@@ -256,9 +278,156 @@ describe('the area\'s form editor in the builder (objectstack#28569)', () => {
     renderAt(`/studio/${PACKAGE_ID}/metadata/translation/ui_en?package=${PACKAGE_ID}`);
     const editor = await screen.findByTestId('form-editor', undefined, { timeout: 8000 });
     expect(editor).toHaveAttribute('data-customization', 'null');
-    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    expect(screen.queryByTestId('studio-menu-overview-pending')).toBeNull();
     fireEvent.click(within(editor).getByRole('button', { name: 'save a draft' }));
     // The header counts the draft the save wrote, before its own re-read answers.
-    expect(await screen.findByTestId('studio-changes-count')).toHaveTextContent('1');
+    expect(await screen.findByTestId('studio-menu-overview-pending')).toHaveTextContent('1');
+  });
+});
+
+/**
+ * objectstack#36900 — ⌘K on the builder's pages: the surface mounts the
+ * command palette with its own groups, on a package's pillars and area and on
+ * the cross-package leg, and a pick leaves through the surface.
+ */
+describe('⌘K on the builder (objectstack#36900)', () => {
+  const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
+  const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
+
+  it("on a package's page, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
+    servePackages();
+    // objectstack#36904, objectstack#36903 — the Data and Automations pillars
+    // are retired: the package's object list in the area hosts the palette.
+    renderAt(`/studio/${PACKAGE_ID}/metadata/object?package=${PACKAGE_ID}`);
+    await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
+    expect(overlay()).toBeNull();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    expect(new URL(where(), 'http://x').searchParams.get('palette')).toBe('1');
+    await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
+    expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
+
+    fireEvent.click(paletteItem('studio-entry type:flow')!);
+    expect((await areaPage()).page).toBe('list');
+    expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
+    expect(overlay()).toBeNull();
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
+  });
+
+  // objectstack#37565 — the leg's root redirects to Setup now, and the menu has no environment entry:
+  // the leg's cross-package list is a page it still draws, and its menu is the environment's.
+  it('on the cross-package leg, Ctrl+K opens the palette again, with the environment menu', async () => {
+    servePackages();
+    renderAt('/studio/~all/metadata/flow?package=all');
+    await areaPage();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    await waitFor(() => expect(paletteItem('studio-entry orgFlows')).not.toBeNull());
+    expect(paletteItem('studio-entry environment')).toBeNull();
+    expect(paletteItem('studio-entry diagnostics')).toBeNull();
+  });
+
+  it('a package that is not there has no menu, and its palette lists the packages instead', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data?palette=1`);
+    expect(await screen.findByTestId('studio-package-not-found')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[cmdk-item][data-value^="studio-package Field Ops "]')).not.toBeNull());
+    expect(document.querySelector('[cmdk-item][data-value^="studio-entry "]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36900 (L1 M1, S5) — a pick from the palette leaves through the
+ * shell's unsaved-edits seam, so an editor below the surface that registers
+ * its own edits (the "All metadata" item page) is asked about too, and so is
+ * the header's Back to app; Default sharing picked on the Access pillar
+ * remounts the pillar on its own deep link.
+ */
+describe('⌘K and the header ask before they drop edits the item page holds (objectstack#36900)', () => {
+  const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
+  const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
+  const ITEM_URL = `/studio/${PACKAGE_ID}/metadata/agent/a1?package=${PACKAGE_ID}`;
+  let confirmSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    itemPage.dirty = true;
+    confirmSpy = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirmSpy);
+  });
+  afterEach(() => {
+    itemPage.dirty = false;
+  });
+
+  async function pickFlowList() {
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
+    fireEvent.click(paletteItem('studio-entry type:flow')!);
+  }
+
+  it("a palette pick asks the item page's question: Cancel keeps the page, OK leaves", async () => {
+    servePackages();
+    renderAt(ITEM_URL);
+    expect((await areaPage()).page).toBe('item');
+
+    await pickFlowList();
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(confirmSpy).toHaveBeenCalledWith(ITEM_QUESTION);
+    await waitFor(() => expect(overlay()).toBeNull());
+    expect(where()).toBe(ITEM_URL);
+    expect((await areaPage()).page).toBe('item');
+
+    confirmSpy.mockReturnValue(true);
+    await pickFlowList();
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect((await areaPage()).page).toBe('list');
+    expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
+  });
+
+  it("the header's Back to app asks the item page's question too: Cancel keeps the page", async () => {
+    servePackages();
+    renderAt(ITEM_URL);
+    expect((await areaPage()).page).toBe('item');
+    fireEvent.click(await screen.findByTestId('studio-package-back'));
+    expect(confirmSpy).toHaveBeenCalledWith(ITEM_QUESTION);
+    expect(where()).toBe(ITEM_URL);
+  });
+
+  it('CONTROL — a clean item page: the pick leaves at once and asks nothing', async () => {
+    itemPage.dirty = false;
+    servePackages();
+    renderAt(ITEM_URL);
+    expect((await areaPage()).page).toBe('item');
+    await pickFlowList();
+    expect((await areaPage()).page).toBe('list');
+    expect(confirmSpy).not.toHaveBeenCalled();
+  });
+
+  // objectstack#36905 — a permission set opens full-screen at its metadata address and the
+  // overview has its own route, so the pick leaves the set's page for the overview's.
+  it("Default sharing picked on a permission set's page opens the overview at its own route", async () => {
+    itemPage.dirty = false;
+    mockClient.list.mockImplementation(async (type?: string) =>
+      type === 'permission' ? [{ name: 'sales_rep', label: 'Sales Rep', _packageId: PACKAGE_ID }] : [],
+    );
+    try {
+      servePackages();
+      renderAt(`/studio/${PACKAGE_ID}/metadata/permission/sales_rep?package=${PACKAGE_ID}`);
+      await screen.findByTestId('studio-permission-set-page');
+      expect(screen.queryByTestId('owd-overview')).toBeNull();
+
+      fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+      await waitFor(() => expect(paletteItem('studio-entry owd')).not.toBeNull());
+      fireEvent.click(paletteItem('studio-entry owd')!);
+
+      expect(await screen.findByTestId('owd-overview')).toBeInTheDocument();
+      expect(where()).toBe(`/studio/${PACKAGE_ID}/owd`);
+      expect(screen.queryByTestId('studio-permission-set-page')).toBeNull();
+      expect(overlay()).toBeNull();
+      expect(confirmSpy).not.toHaveBeenCalled();
+    } finally {
+      mockClient.list.mockImplementation(async () => []);
+    }
   });
 });

@@ -33,7 +33,7 @@
       {"object": "leave_request", "field": "employee", "to": "employee"},
       {"object": "leave_request", "field": "leave_type", "to": "leave_type"},
       {"object": "leave_request", "field": "balance", "to": "leave_balance"},
-      {"object": "leave_day", "field": "request", "to": "leave_request"},
+      {"object": "leave_day", "field": "request", "to": "leave_request", "masterDetail": true},
       {"object": "approval_step", "field": "request", "to": "leave_request"},
       {"object": "approval_step", "field": "approver", "to": "employee"}
     ],
@@ -795,7 +795,7 @@
       },
       {
         "id": "sick_by_medical_note",
-        "ask": {"zh": "病假单按就诊说明分别有多少张?", "en": "How many sick-leave requests are there for each medical note?"},
+        "ask": {"zh": "病假单按就诊说明里写的内容分别有多少张?(按说明本身,不是按是否附有医疗证明)", "en": "How many sick-leave requests are there for each medical note, counted by what the note itself says (not by whether a medical certificate is attached)?"},
         "object": "leave_request",
         "truth": {
           "kind": "count",
@@ -918,6 +918,7 @@
         "target": "as_102_1",
         "values": {"decision": "approved", "decided_on": "2026-09-30"},
         "actingAs": "dept_manager",
+        "via": "decide_approval_step",
         "outcome": {
           "kind": "applied",
           "state": [

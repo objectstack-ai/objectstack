@@ -437,7 +437,10 @@ the app document's `navigation` items (`{ "type": "app", "navigation": [...] }`,
 `objectui validate` accepts), drawn by the shell — the console's sidebar, or
 `AppSchemaRenderer` (the whole shell from metadata, above). Both hand the items to the
 `NavigationRenderer` component, and its items are JSON-shaped: `icon` really is a string
-name there, resolved by `resolveIcon`. There is no page node for navigation:
+name there, resolved by `resolveIcon`. Every row draws its icon on a tile of one size: an
+`object` entry (with or without a `viewName`) on its object's colour tile (`ObjectIconTile`),
+every other entry on the light grey `NeutralIconTile`, with the entry's own `icon` else its
+kind's (`NAV_KIND_ICON`). There is no page node for navigation:
 `navigation-renderer` was retired (objectui#11441), so a node written with that type
 renders the same "Unknown component type" panel.
 

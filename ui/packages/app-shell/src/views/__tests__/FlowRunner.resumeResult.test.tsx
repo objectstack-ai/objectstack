@@ -240,7 +240,9 @@ describe('#5417 — a RETRYABLE refusal still offers the retry', () => {
     const { onClose } = setup(authFetch);
     await fillAndSubmit();
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('discount must be a number'));
+    // The catalog's sentence, never the engine's (objectstack#37526).
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Some values on this step weren't accepted."));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('discount must be a number');
     expect(screen.getByRole('button', { name: 'Submit' })).toBeEnabled();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -303,5 +305,227 @@ describe('#5417 — a successful run is visible on the page it wrote to', () => 
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledTimes(1));
     expect(toastSuccess.mock.calls).toEqual([['流程「quote_generation」已完成']]);
+  });
+});
+
+/**
+ * objectstack#36831 — a step the run already LEFT is never submitted again.
+ *
+ * HotCRM's two-step `quote_generation` (a details screen, then a result screen
+ * declaring only the `quoteLink` record link) created the quote on Next, and
+ * the dialog stayed on step one; the next Next sent step one's three values to
+ * the result screen, and the engine refused them with its own English
+ * sentence, field names and all.
+ *
+ * Reproduced against the runner as it stood: the console does not double
+ * submit (Next is disabled while the resume is in flight, and the shared
+ * authenticated fetch never retries), and a `paused` answer DOES move the
+ * dialog to the next screen. The hole is the answer that never arrives intact
+ * — a gateway timeout, or a connection dropped, while the server finishes the
+ * resume. The runner read every such answer as "the suspension was not
+ * consumed" and kept step one with Next live, so the user's next press resent
+ * step one to whatever screen the run had moved on to.
+ *
+ * So a resume whose outcome the runner cannot know, or that the engine refused
+ * as retryable, re-reads where the run actually is through the paused-screen
+ * read (`GET .../runs/RUN/screen`) before offering a retry. Another screen
+ * there: the dialog shows it, with a readable notice and no engine sentence.
+ * No screen at all: the run is not waiting on this dialog any more, so Next is
+ * withdrawn. The same screen: a real retry, kept exactly as before.
+ */
+describe('objectstack#36831 — a step the run already left is never submitted again', () => {
+  type Spec = import('../FlowRunner').ScreenSpec;
+
+  const QUOTE_DETAILS: Spec = {
+    nodeId: 'screen_1',
+    title: 'Quote Details',
+    fields: [
+      { name: 'quoteName', label: 'Quote Name', type: 'text', required: true, defaultValue: 'Acme renewal' },
+      { name: 'expirationDays', label: 'Valid For (Days)', type: 'number', required: true, defaultValue: 30, min: 1 },
+      { name: 'discount', label: 'Discount %', type: 'number', defaultValue: 0, min: 0, max: 20 },
+    ],
+    progress: { nextScreen: 'certain', step: 1, stepCount: 2 },
+  };
+  const QUOTE_CREATED: Spec = {
+    nodeId: 'result',
+    title: 'Quote Created',
+    fields: [{ name: 'quoteLink', label: 'Quote', type: 'record_link', reference: 'crm_quote', defaultValue: 'quo_1' }],
+    progress: { nextScreen: 'none', step: 2, stepCount: 2 },
+  };
+  const RUN = 'run_9c1';
+  const TWO_STEP: ScreenFlowState = { flowName: 'quote_generation', runId: RUN, screen: QUOTE_DETAILS };
+
+  /** The engine's refusal of step one's bag against the result screen, as the card quotes it. */
+  const ENGINE_SENTENCE =
+    'Invalid screen input: Unknown screen field "quoteName" — not declared on this screen; '
+    + 'Unknown screen field "expirationDays" — not declared on this screen; '
+    + 'Unknown screen field "discount" — not declared on this screen — declared fields: \'quoteLink\'';
+
+  const ALREADY_SUBMITTED = 'Your previous submission went through. The flow has moved on to this step.';
+  const NO_LONGER_WAITING = 'This step may already have been processed. Close this dialog and check the record before trying again.';
+
+  /**
+   * The run behind the two doors the runner calls, as the engine keeps it: a
+   * resume whose values this screen declares advances the run (the quote is
+   * written, the run pauses on `result`, or ends after it); a bag naming a
+   * field the paused screen does not declare is refused `400
+   * INVALID_SCREEN_INPUT` and moves nothing. `firstAnswer` replaces only what
+   * the BROWSER receives for the first resume — the server has done the work.
+   * `GET .../screen` answers the screen the run waits on, or `404` once it
+   * waits on none, exactly as the route does.
+   */
+  function twoStepRun(options: { firstAnswer?: () => Promise<Response>; startAt?: Spec | null; afterResult?: Spec | null } = {}) {
+    let at: Spec | null = options.startAt === undefined ? QUOTE_DETAILS : options.startAt;
+    let resumed = 0;
+    const posted: Array<Record<string, unknown>> = [];
+    const authFetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url === `/api/v1/automation/quote_generation/runs/${RUN}/screen` && (init?.method ?? 'GET') === 'GET') {
+        return at
+          ? jsonResponse({ success: true, data: { runId: RUN, screen: at } })
+          : jsonResponse({ success: false, error: { code: 'NOT_FOUND', message: 'No pending screen for run', httpStatus: 404 } }, 404);
+      }
+      if (url === `/api/v1/automation/quote_generation/runs/${RUN}/resume` && init?.method === 'POST') {
+        const inputs = JSON.parse(String(init.body)).inputs as Record<string, unknown>;
+        posted.push(inputs);
+        const declared = (at?.fields ?? []).filter((f) => f.type !== 'record_link').map((f) => f.name);
+        if (!at || Object.keys(inputs).some((k) => !declared.includes(k))) {
+          return jsonResponse({ success: false, error: { code: 'INVALID_SCREEN_INPUT', message: ENGINE_SENTENCE, httpStatus: 400 } }, 400);
+        }
+        at = at.nodeId === 'screen_1' ? (options.afterResult === undefined ? QUOTE_CREATED : options.afterResult) : null;
+        resumed += 1;
+        if (resumed === 1 && options.firstAnswer) return options.firstAnswer();
+        return at
+          ? jsonResponse({ success: true, data: { success: true, status: 'paused', runId: RUN, screen: at } })
+          : jsonResponse({ success: true, data: { success: true, status: 'completed' } });
+      }
+      throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+    return { authFetch, posted };
+  }
+
+  const gatewayTimeout = async () =>
+    new Response('504 Gateway Time-out', { status: 504, headers: { 'Content-Type': 'text/html' } });
+  const droppedConnection = async (): Promise<Response> => { throw new TypeError('Failed to fetch'); };
+
+  function renderRun(authFetch: (url: string, init?: RequestInit) => Promise<Response>, language?: string) {
+    const onClose = vi.fn();
+    const onComplete = vi.fn();
+    const runner = (
+      <FlowRunner
+        state={TWO_STEP}
+        authFetch={authFetch}
+        baseUrl=""
+        onClose={onClose}
+        onComplete={onComplete}
+        dataSource={{
+          find: vi.fn(async () => ({ data: [] })),
+          findOne: vi.fn(async (_object: string, id: string) => ({ id, name: id })),
+          getObjectSchema: vi.fn(async (object: string) => ({ name: object, nameField: 'name', fields: { name: { type: 'text' } } })),
+        }}
+        objects={[{ name: 'crm_quote' }]}
+      />
+    );
+    render(language
+      ? <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>{runner}</I18nProvider>
+      : runner);
+    return { onClose, onComplete };
+  }
+
+  /** Nothing the user can read carries the engine's sentence: not the dialog, not a toast. */
+  function expectNoEngineSentence() {
+    expect(screen.queryByText(/Invalid screen input/)).toBeNull();
+    expect(toastError.mock.calls.flat().join('\n')).not.toMatch(/Invalid screen input|quoteName/);
+  }
+
+  it('a gateway timeout on step one, after the run moved on, shows the result screen instead of step one', async () => {
+    const { authFetch, posted } = twoStepRun({ firstAnswer: gatewayTimeout });
+    renderRun(authFetch);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Quote Created')).toBeInTheDocument();
+    expect(screen.getByText(ALREADY_SUBMITTED)).toBeInTheDocument();
+    expect(screen.queryByText('Quote Details')).toBeNull();
+    // Step one went out once, and nothing on screen offers to send it again.
+    expect(posted).toEqual([{ quoteName: 'Acme renewal', expirationDays: 30, discount: 0 }]);
+    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a dropped connection on step one, after the run moved on, shows the result screen too', async () => {
+    const { authFetch, posted } = twoStepRun({ firstAnswer: droppedConnection });
+    renderRun(authFetch);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Quote Created')).toBeInTheDocument();
+    expect(screen.getByText(ALREADY_SUBMITTED)).toBeInTheDocument();
+    expect(posted).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+  });
+
+  it('a stale step-one submit is answered with the step the run is on and a readable notice, never the engine sentence', async () => {
+    // The run already waits on the result screen while the dialog still shows step one.
+    const { authFetch, posted } = twoStepRun({ startAt: QUOTE_CREATED });
+    renderRun(authFetch);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Quote Created')).toBeInTheDocument();
+    expect(screen.getByText(ALREADY_SUBMITTED)).toBeInTheDocument();
+    expectNoEngineSentence();
+    expect(posted).toHaveLength(1);
+    // Done completes the run from the screen it really waits on.
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toEqual({});
+  });
+
+  it('reads that notice in the display language', async () => {
+    const { authFetch } = twoStepRun({ startAt: QUOTE_CREATED });
+    renderRun(authFetch, 'zh');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '下一步' }));
+
+    expect(await screen.findByText('Quote Created')).toBeInTheDocument();
+    expect(screen.getByText('上一步已提交成功，流程已进入当前步骤。')).toBeInTheDocument();
+    expectNoEngineSentence();
+  });
+
+  it('a run that waits on no screen any more withdraws Next and says why, in words', async () => {
+    // The run ended after step one; its answer was lost on the way back.
+    const { authFetch, posted } = twoStepRun({ firstAnswer: gatewayTimeout, afterResult: null });
+    renderRun(authFetch);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText(NO_LONGER_WAITING)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(footerCloseButton()).toBeInTheDocument();
+    expect(posted).toHaveLength(1);
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('a refusal from the screen the run still waits on keeps a refusal banner and Next — a real retry', async () => {
+    const BAD_INPUT = 'Invalid screen input: Valid For (Days) must be at least 1 — declared fields: \'quoteName\', \'expirationDays\', \'discount\'';
+    const authFetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.endsWith('/screen')) return jsonResponse({ success: true, data: { runId: RUN, screen: QUOTE_DETAILS } });
+      if (init?.method === 'POST') {
+        return jsonResponse({ success: false, error: { code: 'INVALID_SCREEN_INPUT', message: BAD_INPUT, httpStatus: 400 } }, 400);
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+    renderRun(authFetch);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    // The refusal banner is the catalog's sentence, never the engine's, which
+    // names the screen's API field names (objectstack#37526).
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Some values on this step weren't accepted."));
+    expect(screen.getByRole('alert')).not.toHaveTextContent('declared fields');
+    expect(screen.getByText('Quote Details')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    expect(screen.queryByText(ALREADY_SUBMITTED)).toBeNull();
   });
 });

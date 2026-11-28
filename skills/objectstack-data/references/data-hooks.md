@@ -17,12 +17,10 @@ data hooks.
 
 ### What Are Hooks?
 
-Hooks are **event handlers** that execute during the ObjectQL data access lifecycle.
-They intercept operations at specific points (before/after) — see [Before vs After](#before-vs-after-hooks).
+Hooks are **event handlers** in the ObjectQL data access lifecycle, run before or
+after an operation — see [Before vs After](#before-vs-after-hooks).
 
 ### Hook Lifecycle Events
-
-ObjectStack provides lifecycle events organized by operation type:
 
 | Event | When It Fires | Use Cases |
 |:------|:--------------|:----------|
@@ -66,12 +64,11 @@ ObjectStack provides lifecycle events organized by operation type:
 
 ## Hook Definition Schema
 
-Every hook must conform to the `HookSchema`. Author it with `defineHook()` —
-preferred over a bare `: Hook` literal (the same rule as `defineDatasource`):
-it validates when the module is imported, so constraint-level mistakes a bare
-annotation can't catch — a non-`snake_case` `name`, a misspelled key routed
-through a spread — fail while you author instead of at deploy, and the export
-carries defaults already materialized.
+Every hook must conform to `HookSchema`. Author it with `defineHook()`, not a
+bare `: Hook` literal (the same rule as `defineDatasource`): it validates when the
+module is imported, so constraint-level mistakes an annotation can't catch — a
+non-`snake_case` `name`, a misspelled key routed through a spread — fail while you
+author, not at deploy, and the export carries defaults already materialized.
 
 <!-- os:check -->
 ```typescript
@@ -125,19 +122,14 @@ const myHook = defineHook({
 
 #### `condition` — Declarative Filtering
 
-Skip the hook if the condition is false. Author it as a **CEL
+Skips the hook when false. Author it as a **CEL
 predicate** over `record` and `previous` (use `P\`...\`` from
 `@objectstack/spec`; SQL-style `=` / `AND` / `IN (...)` is not CEL):
 
 ```typescript
-// Only run for high-value accounts
 condition: P`record.annual_revenue != null && record.annual_revenue > 1000000`
 
-// Only run for specific statuses
 condition: P`record.status in ['pending', 'in_review']`
-
-// Complex conditions
-condition: P`record.type == 'enterprise' && record.region == 'APAC' && record.is_active == true`
 
 // A TRANSITION — fires only on the update that completes the task,
 // not on later updates of an already-done record
@@ -164,8 +156,7 @@ in neither). So:
   is not in hand, which fails closed rather than reading an update as an
   insert. The `before*` dispatch of a predicate (`multi: true`) write is
   **not** such a case: `beforeUpdate` / `beforeDelete` dispatch once per
-  matched row, each on a single-record-shaped context whose `previous` is that
-  row's pre-image and whose `input.id` (`handler`; a `body`: `ctx.previous.id`) names the row (ADR-0058 Addendum II,
+  matched row, each with that row's pre-image as `previous` (ADR-0058 Addendum II,
   D1/D2), so a transition condition evaluates there exactly as on a
   single-record write, and `record` is that row's state, stored ⊕ payload. Only
   the *payload* stays batch-scoped (D3):
@@ -181,8 +172,8 @@ in neither). So:
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
   `has(record.spent) && record.spent > record.budget` still faults on
-  `null > null`. `has()` answers "is this key declared at all", which is a
-  question about your spelling, not about your data.
+  `null > null`. `has()` asks whether the key is declared at all: your
+  spelling, not your data.
 
 ⚠️ **An unevaluable condition ABORTS the operation.** A typo'd key
 (`record.stauts`), a column read off `previous` on an insert, or a comparison
@@ -248,7 +239,9 @@ The sandbox is handed a **JSON snapshot** of these (built by
 
 (Action bodies additionally receive `ctx.recordId` and `ctx.record`, and their
 wrap is `(async (input, ctx) => { … })(input, ctx)` — the action params arrive as
-the first arg.)
+`input`. Both are already bound: `const input = ctx.input || {};` or `let ctx`
+is `action-body-does-not-compile`, refused
+[like a hook body's](#sandbox-restrictions).)
 
 ### `ctx.api.object(name)` — the cross-object repo
 
@@ -279,15 +272,12 @@ await ctx.api.object('task').find({ where: { $and: [{ done: false }, { owner_id:
 
 > `filter:` is tolerated as an **object-valued** alias (normalised to `where`),
 > but prefer `where`. Do **not** pass an array-of-triples such as
-> `[['id', '=', x]]` — that is not a supported value shape and silently matches
-> nothing.
+> `[['id', '=', x]]` — an unsupported shape that silently matches nothing.
 
-**`findOne` must say which record it wants.** It reads a single row, so an
-absent or empty predicate does not come back as `null` — it comes back as the
-object's **first row**: a real, plausible-looking record with nothing to do with
-what you asked for, which your `if (!row)` cannot catch. So `findOne()`,
-`findOne({})` and `findOne({ where: {} })` **throw**. Be specific in one
-of three ways:
+**`findOne` must say which record it wants.** An absent or empty
+predicate would return not `null` but the object's **first row**, an unrelated
+record your `if (!row)` cannot catch. So `findOne()`, `findOne({})`
+and `findOne({ where: {} })` **throw**. Be specific in one of three ways:
 
 ```js
 await ctx.api.object('candidate').findOne({ where: { id } });    // by predicate
@@ -297,15 +287,14 @@ await ctx.api.object('audit')
 await ctx.api.object('candidate').find({ limit: 1 });            // any row will do
 ```
 
-An unpredicated `find` / `count` is fine — returning or counting every row is an
-honest answer.
+An unpredicated `find` / `count` is fine: every row is an honest answer.
 
 ### Capabilities — the complete list
 
 A body may only touch a `ctx` API it declared in `capabilities`. Calling an
 undeclared one **throws inside the VM** — `capability '<token>' not granted to
-hook '<name>' …` — which surfaces as a hook error (see Troubleshooting). The full
-set of legal tokens (`HookBodyCapability`) is exactly seven:
+hook '<name>' …` — which surfaces as a hook error (see Troubleshooting). The legal
+tokens (`HookBodyCapability`) are exactly seven:
 
 | Token | Unlocks |
 |:--|:--|
@@ -337,15 +326,15 @@ The body runs in an isolated QuickJS VM, **not** Node:
   a name bound at module scope, e.g. a `const slugify = …` helper sitting next to
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
   hook as a bundled (deprecated) `handler`.
-- **Refused when it does not compile:** a `js` source is compiled, unrun, inside
-  its `(async (ctx) => { … })` wrapper, where `ctx` is already declared. So
-  `const ctx = ctx.input || {};` (or `let ctx`, one name declared twice, any
-  syntax error) is `hook-body-does-not-compile`: an **error** from `os validate`,
-  `os build`, `os lint` and a runtime hook save (`422 INVALID_METADATA`), naming
-  the hook, the `SyntaxError` and its line. Fix: use `ctx` as it is, or rename
-  the local (`const input = ctx.input || {};`). A job's `js` body runs in the
-  same wrapper: `job-body-does-not-compile`, from the three commands. A regex
-  pattern the checking engine refuses is a warning: the runtime may accept it.
+- **Refused when it does not compile:** a `js` source compiles, unrun, in a
+  wrapper that declares `ctx`, so `const ctx = ctx.input || {};` (or `let ctx`,
+  one name declared twice, any syntax error) is `hook-body-does-not-compile`: an
+  **error** from `os validate`, `os build`, `os lint` and a runtime save
+  (`422 INVALID_METADATA`). Fix: use `ctx` or rename the local. A job's `js`
+  body, same wrapper: `job-body-does-not-compile`, from the three commands. A
+  regex pattern the runtime refuses too is that error; only a duplicate named
+  group, a modifier group (`(?i:a)`) or a Unicode property name only the runtime
+  knows (any refused one on a pre-17.0-Unicode host) warns.
 
 > **A deadline stamped from an hours table is wall-clock hours** — nights, weekends and
 > holidays count. Name it `*_WALL_CLOCK_HOURS`, add `hours * 3_600_000` ms, never label it
@@ -423,17 +412,14 @@ export default fillPositionOnHire;
   `log` capability the call **throws** (surfaces as a hook error); (2) **with** the
   capability it emits only when the runtime wired a logger into the hook context —
   otherwise it is a **silent no-op**. Treat `ctx.log` as best-effort diagnostics,
-  not a reliable side-channel or proof a hook ran; to observe an effect, assert on
-  the data it writes.
+  never proof a hook ran; to observe an effect, assert on the data it writes.
 
 ---
 
 ## Hook Context API
 
-> The `ctx` below is the deprecated in-process `handler`'s; a `body` sees the
-> [sandbox subset](#what-lives-on-the-sandbox-ctx).
-
-The engine's `HookContext` provides:
+> The `ctx` below, the engine's `HookContext`, is the deprecated in-process
+> `handler`'s; a `body` sees the [sandbox subset](#what-lives-on-the-sandbox-ctx).
 
 ### Context Properties
 
@@ -503,7 +489,7 @@ const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 
 ### `input` — Operation Parameters
 
-The structure of `ctx.input` varies by event:
+`ctx.input` varies by event:
 
 **Insert operations:**
 ```typescript
@@ -512,7 +498,6 @@ The structure of `ctx.input` varies by event:
   // All field values being inserted
   name: 'Acme Corp',
   industry: 'Technology',
-  annual_revenue: 5000000,
   ...
 }
 ```
@@ -769,7 +754,6 @@ ctx.ql.registerHook('beforeInsert', async (hookCtx) => { /* ... */ },
 file, default-exported, then listed in the stack's `hooks` array (method 1). This is
 the layout both real hook modules in the repo use.
 
-
 ---
 
 ## Best Practices
@@ -790,7 +774,6 @@ hook (its `ctx.api` writes roll back with the write) or record it in the caller,
 where the write is made; assume `ctx.session` exists — system operations carry
 no user.
 
-
 ---
 
 ## Error Handling
@@ -801,10 +784,9 @@ A throw aborts the operation and rolls back its transaction; `onError: 'log'`
 ### Declared refusals (`refusals`)
 
 A hook that enforces a business rule declares a `refusals` catalogue, one
-SCREAMING_SNAKE code per rule, and the hook throws the code. Without one, a `body`'s
-throw is answered `HOOK_ABORTED`, the platform's code: fine for a failure you did not
-plan, not for a rule the user can act on. A cross-object guard a validation rule
-cannot read:
+SCREAMING_SNAKE code per rule, and throws the code. Without one, a `body`'s
+throw is answered `HOOK_ABORTED`, the platform's code: fine for an unplanned failure, not
+for a rule the user can act on. A cross-object guard a validation rule cannot read:
 
 <!-- os:check -->
 ```typescript
@@ -839,15 +821,21 @@ export default defineHook({
 - A `js` `body` or a `handler` (inline or named) can declare one; an
   `expression` body, or neither, is refused at save.
 - The wire `code` is the status's (default 400), with the hook's as `declaredCode`.
-- `reasons` (snake_case, thrown as `reason`) add sentences that keep the code's wire
-  `code` and status.
-- `params` names what a `{{ name }}` hole may fill (thrown as `params`); a hole
-  over any other name, or any hole with no `params`, is refused.
+- `reasons` maps a snake_case reason (thrown as `reason`) to `{ message }` only: a
+  sentence under the code's wire `code` and status; another status needs another code.
+- `params` names what a `{{ name }}` hole, a reason's too, may fill (thrown as
+  `params`); a hole over any other name, or any hole with no `params`, is refused.
+- For several reasons throw `reasons: [{ reason: 'on_loan', params: { due } }, …]`, not
+  `reason`: one translated line each, filled from its own `params`. `userMessage` joins
+  them by newlines and ends with the entry's `message`, filled from the throw's
+  top-level `params` (else its holes are empty); the HTTP doors answer
+  `details.refusals: [{ reason, message }]`, absent for a single `reason`.
 - Translated via `hooks.<hook>.refusals.<CODE>.message` (or
   `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
-- An undeclared code (or none), or a reason missing from a code's `reasons`, is
-  refused: at save if thrown literally, else as a `500`. Unchanged `ctx.api`
-  errors and crashes pass through.
+- An undeclared code (or none), or a reason missing from a code's `reasons` (a listed
+  one even when the code declares none), is refused: at save if thrown literally, else
+  as a `500`. A `reasons` not a non-empty list of `{ reason, params? }`, or beside
+  `reason`, is a `500`. Unchanged `ctx.api` errors and crashes pass through.
 
 ### Declared texts (`texts`)
 

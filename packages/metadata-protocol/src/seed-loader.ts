@@ -629,9 +629,11 @@ function seedRowTenantColumn(definition: unknown): string | null {
  * its definition declares, plus `owner_id` when the system-column pass injects
  * it and the object does not declare it.
  *
- * The definition the loader resolves is the metadata service's, which is what
- * the author wrote. An object that relies on the platform's owner has no
- * `owner_id` there: objectql adds it at registration, from the same
+ * The definition the loader resolves is the engine's registered schema, which
+ * already carries the injected column, and otherwise the metadata service's
+ * copy ([#35254] `resolveObjectDefinition`), which is what the author wrote.
+ * An object that relies on the platform's owner has no `owner_id` in that
+ * copy: objectql adds it at registration, from the same
  * `resolveInjectedSystemColumns` plan read here, as {@link OWNER_FIELD_DEF} (a
  * `sys_user` lookup). Read from the declared fields alone, a seed value naming
  * a person in that column was written as the name itself, while a declared
@@ -774,6 +776,29 @@ function createOnlySeedColumns(dataset: Seed, externalId: string | string[]): Re
     if (policy?.applyOn === 'create' && !keyFields.has(column)) createOnly.add(column);
   }
   return createOnly;
+}
+
+/**
+ * [#35655] The roll-up `summary` fields the definition declares — every one,
+ * whatever its aggregate (`count`, `sum`, `min`, `max`, `avg`) and whether or
+ * not it is declared `readonly`. A seed never stores a value for one (maintainer
+ * ruling D, record 7063117450): the engine computes it from the child rows, so
+ * {@link SeedLoaderService} takes a seed record's value for it out before the
+ * replay compare and before the write, and says so in one `warn` per dataset.
+ *
+ * Keyed on `type === 'summary'` literally, as the engine's roll-up readers
+ * are (`summaryFieldsLockedOnWrite`, `getSummaryDescriptors`). A definition
+ * the loader cannot resolve declares none, and its records are written as
+ * authored: the engine is then the one to judge the columns.
+ */
+function summaryFieldNames(definition: unknown): readonly string[] {
+  const fields = (definition as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const names: string[] = [];
+  for (const [name, field] of Object.entries(fields as Record<string, unknown>)) {
+    if (field && typeof field === 'object' && (field as { type?: unknown }).type === 'summary') names.push(name);
+  }
+  return names;
 }
 
 /**
@@ -1635,30 +1660,54 @@ export class SeedLoaderService implements ISeedLoaderService {
   }
 
   /**
-   * Object definition for reference-graph construction: the metadata service
-   * first, then the engine's own schema registry.
+   * The object definition every per-field decision of a load reads: the
+   * reference graph, natural-key resolution, required-on-insert, the tenant
+   * column, the roll-up strip, the replay comparands. It is the object AS THE
+   * ENGINE SERVES IT — the engine's own schema registry, object extensions
+   * folded in — and the metadata service's copy only when the engine has no
+   * schema for the name.
    *
-   * The engine fallback matters for marketplace-installed packages: their
-   * objects are registered through the `manifest` service straight into the
-   * ObjectQL registry AFTER `bridgeObjectsToMetadataService` ran at boot, so
-   * the metadata service has never heard of them. Resolving only via metadata
-   * left the reference graph empty for those objects — every lookup /
-   * master_detail seed value was written verbatim (the raw externalId string,
-   * e.g. `crm_contact.crm_account = 'Acme Corporation'`) instead of the target
-   * record's id. Dangling references break parent joins, and under
+   * [#35254] The engine comes FIRST because it is the one store that holds the
+   * object a write lands on. A boot that ingests a compiled artifact (`os dev`,
+   * `os serve`, the cloud runtime) gives the metadata service each object as
+   * its package authored it, and the fields another package adds through
+   * `objectExtensions` (ADR-0130 D5) live only in the registry's fold. Read
+   * from that copy, a lookup an extension adds was no reference at all: no
+   * dependency edge, no natural-key resolution, and the raw key written into
+   * the foreign-key column — while the in-process boot, whose metadata service
+   * is bridged from the folded registry, resolved the same seed. The loader
+   * does not merge extensions itself: the registry's fold is the one source.
+   *
+   * The metadata service stays the fallback for an engine that exposes no
+   * schema registry (the `IDataEngine` contract does not require one) or does
+   * not know the name. The fallback the other way round predates this order:
+   * marketplace-installed packages register straight into the ObjectQL
+   * registry AFTER `bridgeObjectsToMetadataService` ran at boot, so the
+   * metadata service never hears of them, and resolving through it alone left
+   * their reference graph empty — every lookup / master_detail seed value
+   * written verbatim (e.g. `crm_contact.crm_account = 'Acme Corporation'`).
+   * Dangling references break parent joins, and under
    * `sharingModel: controlled_by_parent` RLS that makes the whole object
    * invisible to everyone, admins included.
    */
   private async resolveObjectDefinition(objectName: string): Promise<any> {
-    const fromMetadata = (await this.metadata.getObject(objectName)) as any;
-    if (fromMetadata?.fields) return fromMetadata;
+    const served = this.engineSchemaOf(objectName) as any;
+    if (served?.fields) return served;
+    return (await this.metadata.getObject(objectName)) as any;
+  }
+
+  /**
+   * The engine's own registered schema for `objectName` — the merged one,
+   * object extensions included — or `undefined` when the engine exposes no
+   * schema registry (or its read throws).
+   */
+  private engineSchemaOf(objectName: string): unknown {
     try {
-      const engineSchema = (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName) as any;
-      if (engineSchema?.fields) return engineSchema;
+      return (this.engine as { getSchema?(name: string): unknown }).getSchema?.(objectName);
     } catch {
-      // Engine may not expose a schema registry — the metadata result stands.
+      // Engine may not expose a schema registry — the caller's other source stands.
+      return undefined;
     }
-    return fromMetadata;
   }
 
   /**
@@ -2101,6 +2150,16 @@ export class SeedLoaderService implements ISeedLoaderService {
     // `organization_id`, as it keeps the stamp.
     const organizationColumn = seedRowTenantColumn(objectDefinition) ?? DEFAULT_TENANT_FIELD;
     this.warnOnUndeclaredSeedColumns(dataset, objectDefinition);
+    // [#35655] The roll-up columns a seed never writes (`summaryFieldNames`),
+    // the values this dataset's records supplied for them, and which of them
+    // did — reported once, after the record loop. Read from the resolved
+    // definition, which is the engine's merged schema whenever the engine has
+    // one ([#35254] `resolveObjectDefinition`), so a roll-up an object
+    // extension contributes, which the engine computes, is never written by a
+    // seed either.
+    const summaryFields = summaryFieldNames(objectDefinition);
+    let summaryValuesDropped = 0;
+    const summaryFieldsDropped = new Set<string>();
     // How a replay compares each field (`isNoOpReplay`): [#24562] a temporal
     // field in its stored form, [#24624] a field the read path masks never by
     // its set value, [#29277] a seed blank the write door stores as `null` as
@@ -2236,6 +2295,20 @@ export class SeedLoaderService implements ISeedLoaderService {
         continue;
       }
       const record = { ...(seedResult.value as Record<string, unknown>) };
+      // [#35655] A seed never stores a roll-up (ruling D, record 7063117450).
+      // Taken out here, before anything reads the record, so every path below
+      // sees it gone: the no-op replay compare (a stored total that differs
+      // from the seed's is no difference to undo), the insert (the engine
+      // starts the column at its empty-child-list value and the child rows
+      // compute it) and the update (the row keeps the value it holds).
+      for (const field of summaryFields) {
+        if (!Object.prototype.hasOwnProperty.call(record, field)) continue;
+        if (record[field] !== undefined) {
+          summaryValuesDropped++;
+          summaryFieldsDropped.add(field);
+        }
+        delete record[field];
+      }
       // [#22301] The stored form, not a `Date`, before any hook can see it.
       seedValuesInStoredForm(record, objectDefinition);
       /**
@@ -3186,6 +3259,24 @@ export class SeedLoaderService implements ISeedLoaderService {
         .map(([, id]) => id),
     )];
 
+    // [#35655] Once per dataset, naming the object, the fields and the count:
+    // the seed asked for a total the platform did not store. This notice IS
+    // the report (ruling D as analysed in 7062334196, point (e); the seat's
+    // correction 7064615114): no load-result key carries it. `warn`, not
+    // `error`: nothing claimed persisted is lost — a roll-up is never the
+    // seed's to write, and the rest of every record landed.
+    if (summaryValuesDropped > 0) {
+      const fields = [...summaryFieldsDropped];
+      this.logger.warn(
+        `[SeedLoader] The ${objectName} seed supplies ${summaryValuesDropped} value(s) for the roll-up summary ` +
+          `field(s) ${fields.map((f) => `\`${f}\``).join(', ')}, which a seed never stores: the values are not ` +
+          `written, the rest of each record is, and each roll-up is computed from its child rows, so a record ` +
+          `with no children reads the empty-child-list value (0 for count and sum, empty for min, max and avg). ` +
+          `Seed the child rows the total counts, and leave the summary field out of the ${objectName} seed.`,
+        { object: objectName, fields, droppedValues: summaryValuesDropped },
+      );
+    }
+
     if (this.loadProgress) this.loadProgress.loading = undefined;
     return {
       object: objectName,
@@ -3639,17 +3730,16 @@ export class SeedLoaderService implements ISeedLoaderService {
    * The one question {@link resolveFromDatabase} must be able to answer before
    * it may add the `name` leg to its probe chain. Answered from the SAME
    * definition resolver the reference graph is built from
-   * ({@link resolveObjectDefinition} — the metadata service first, then the
-   * engine's own schema registry), so the loader cannot form one opinion about
+   * ({@link resolveObjectDefinition} — the engine's own schema registry first,
+   * then the metadata service), so the loader cannot form one opinion about
    * an object's columns here and a different one two methods up. That resolver
    * is already imported and already called at boot, so this asks the registry
    * a question it is standing right next to; no new dependency, no new seam.
    *
    * **`true` on an unknown**, deliberately. Three populations reach here: an
-   * object the metadata service knows (authoritative), one only the engine's
-   * registry knows (marketplace-installed packages — the reason
-   * `resolveObjectDefinition` has its fallback at all), and one NEITHER can
-   * describe. For the third the honest answer is "unknown", and an unknown is
+   * object the engine's registry knows (the served object), one only the
+   * metadata service knows (an engine with no schema registry), and one
+   * NEITHER can describe. For the third the honest answer is "unknown", and an unknown is
    * not a denial: keeping the leg preserves today's behaviour exactly, and the
    * probe against a genuinely absent object fails on its first leg regardless.
    * Answering `false` there would be this file making up a column list.

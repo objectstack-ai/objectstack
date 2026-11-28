@@ -15,8 +15,12 @@
  *    person's own row (`ownRowId`), a create otherwise. The server's own-row
  *    policy refuses anything else.
  *
- * There is no "reset to the organization's default": that needs a delete,
- * which the member grant does not carry (ruled out of this page).
+ * Digest and quiet hours each go back to following the organization by an
+ * update of the person's own `(*, *)` row that empties the field
+ * ({@link followOrganizationWrite}): an empty field is "not set" (objectstack
+ * ruling 7073270426). The row itself stays, and so does its `enabled`; a
+ * per-cell row is never removed here either. Removing a row is a delete, which
+ * the member grant does not carry (objectstack ruling 6968686390).
  */
 
 /** The door the page reads. */
@@ -178,39 +182,48 @@ export function cellWrite(userId: string, topic: PreferenceTopic, cell: Preferen
 }
 
 /**
- * What a stored value on the person's own row does, measured against the
- * resolver (`preference-resolver.ts`, `parseDigest` / `parseQuietHours`):
+ * What a stored value on the person's own row does (objectstack ruling
+ * 7073270426 on #35123), as the resolver reads it (`preference-resolver.ts`,
+ * `parseDigest` / `parseQuietHours`): each of `digest` and `quiet_hours` is
+ * one of three states, and only a value the person wrote decides.
  *
- *  - `digest` takes effect only as `'daily'` or `'weekly'`. A stored `'none'`
- *    (the field's default), an empty value or any other value is read as "no
- *    opinion", and the lookup falls through to the next row — the
- *    organization's default when there is one.
- *  - `quiet_hours` takes effect only as a window with both a `start` and an
- *    `end`. An empty value falls through the same way.
+ *  - not set (empty): the next row decides, in the end the organization's default;
+ *  - explicitly off: `digest: 'none'` ("No digest"), `quiet_hours: { off: true }`
+ *    ({@link QUIET_HOURS_OFF}, "no quiet hours");
+ *  - a value: `daily` / `weekly`, or a complete window.
  *
- * So saving `'none'` or an empty window never turns off a digest or quiet
- * hours that is in force: it only lets the next row decide, and the door
- * cannot say what that row holds. The page therefore offers only the values
- * that override — the two cadences and a complete window — and the writes
- * below accept nothing else.
+ * So every digest choice takes effect when saved, and so does clearing quiet
+ * hours: a cleared window is saved as the explicit off, never as empty. Empty
+ * hands the decision back to the organization, and only the page's "Follow
+ * organization setting" action writes it ({@link followOrganizationWrite}).
  */
-export type OverridingDigest = Exclude<DigestCadence, 'none'>;
+export const QUIET_HOURS_OFF: Readonly<{ off: true }> = Object.freeze({ off: true });
 
-/** The digest choices that take effect when saved: the two cadences, plus `none` only while nothing is in force (it is then the current value, and saving it changes nothing). */
-export function digestChoices(general: GeneralPreferences): DigestCadence[] {
-  return general.digest.value === 'none' ? ['none', 'daily', 'weekly'] : ['daily', 'weekly'];
+/** The digest choices the page offers: all three take effect when saved. */
+export function digestChoices(): DigestCadence[] {
+  return ['none', 'daily', 'weekly'];
 }
 
-/** True when `draft` is a quiet-hours window that takes effect when saved: a complete window, never an empty one. */
-export function quietHoursSaveable(draft: QuietHoursWindow | null | undefined): draft is QuietHoursWindow {
+/**
+ * True when the quiet-hours draft can be saved: a complete window, or a
+ * cleared one (`null`), which is saved as {@link QUIET_HOURS_OFF}. A draft
+ * with one time and not the other is never saved; `undefined` is no draft.
+ */
+export function quietHoursSaveable(draft: QuietHoursWindow | null | undefined): draft is QuietHoursWindow | null {
+  if (draft === null) return true;
   return !!draft && typeof draft.start === 'string' && draft.start !== '' && typeof draft.end === 'string' && draft.end !== '';
+}
+
+/** The stored `quiet_hours` value for a saveable draft: the window, or the explicit off for a cleared one. */
+export function quietHoursStored(draft: QuietHoursWindow | null): QuietHoursWindow | Readonly<{ off: true }> {
+  return draft === null ? QUIET_HOURS_OFF : draft;
 }
 
 /**
  * The write that changes the person's digest or quiet hours: their own
  * `(*, *)` row. Created when they have none, with `enabled` set to what is in
- * force at that level now, so the new row changes only what was asked. Only
- * values that override are accepted (see {@link OverridingDigest}).
+ * force at that level now, so the new row changes only what was asked; the
+ * field it does not name stays unset and keeps following the organization.
  *
  * ⚠️ A person's `(*, *)` row comes before the organization's rows in the
  * lookup, so once it exists it decides every cell neither a more specific row
@@ -221,13 +234,29 @@ export function quietHoursSaveable(draft: QuietHoursWindow | null | undefined): 
 export function generalWrite(
   userId: string,
   general: GeneralPreferences,
-  patch: { digest?: OverridingDigest; quiet_hours?: QuietHoursWindow },
+  patch: { digest?: DigestCadence; quiet_hours?: QuietHoursWindow | Readonly<{ off: true }> },
 ): PreferenceWrite {
   if (general.ownRowId) return { kind: 'update', id: general.ownRowId, data: { ...patch } };
   return {
     kind: 'create',
     data: { user_id: userId, topic: PREFERENCE_WILDCARD, channel: PREFERENCE_WILDCARD, enabled: general.enabled.value, ...patch },
   };
+}
+
+/** A field of the person's own `(*, *)` row that can go back to following the organization. */
+export type FollowableField = 'digest' | 'quiet_hours';
+
+/**
+ * The write that returns one field to following the organization: the person's
+ * own `(*, *)` row, updated with that field empty (ruling 7073270426: empty is
+ * "not set", so the next row decides, in the end the organization's default).
+ * `null` when there is nothing to clear: no own `(*, *)` row, or the field is
+ * not the person's own answer now (the door says where it comes from).
+ */
+export function followOrganizationWrite(general: GeneralPreferences, field: FollowableField): PreferenceWrite | null {
+  const setting = field === 'digest' ? general.digest : general.quietHours;
+  if (!general.ownRowId || setting.source !== 'own') return null;
+  return { kind: 'update', id: general.ownRowId, data: { [field]: null } };
 }
 
 /** The data door the writes go through (the console's adapter). */

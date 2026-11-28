@@ -65,7 +65,9 @@ export const WidgetColorVariantSchema = lazySchema(() => z.enum([
  *
  * Derived rather than restated: a type added to `ActionType` is dispatchable
  * from a header action the moment the runner implements it, with no second list
- * to remember.
+ * to remember. The one member a header cannot serve — `ask_ai`, which runs on
+ * a record (ADR-0160 D7) — stays in the vocabulary and is refused by
+ * `DashboardHeaderActionSchema` with the reason, not by a narrower enum.
  */
 export const WidgetActionTypeSchema = lazySchema(() => ActionType.describe('Widget action type'));
 
@@ -112,6 +114,28 @@ function refuseUnopenableHeaderActionUrl(
 }
 
 /**
+ * ADR-0160 D7 — `ask_ai` is an action on ONE record: it focuses the in-app
+ * assistant on the record it runs on. A dashboard header runs on no record,
+ * so the runner could only refuse the click ("select a row first"), and the
+ * button would parse clean and never work. Refused here, on the one member of
+ * the derived vocabulary a header cannot serve; the rest stay derived.
+ */
+function refuseRecordlessAskAi(
+  data: { actionType?: string },
+  ctx: z.core.$RefinementCtx,
+): void {
+  if (data.actionType !== 'ask_ai') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['actionType'],
+    message:
+      "A dashboard header action cannot be `actionType: 'ask_ai'`: that type focuses the in-app assistant on "
+      + 'the one record an action runs on, and a dashboard header runs on none. Put an `ask_ai` action on the '
+      + "object (`locations: ['record_page']` or `['record']`), where it runs on the record shown.",
+  });
+}
+
+/**
  * Dashboard Header Action Schema
  * An action button displayed in the dashboard header area.
  *
@@ -125,7 +149,7 @@ function refuseUnopenableHeaderActionUrl(
  * bundle names the same column through
  * `metadataForms.dashboard.fields['header.actions.<field>'].label`, which
  * `resolveMetadataFormSchemaTitles` (`system/i18n-resolver.ts`) overlays onto
- * the derived schema. `dashboard.form.ts` declares the same four children with
+ * the derived schema. `dashboard.metadata-form.ts` declares the same four children with
  * the same labels so the extractor emits those keys; `dashboard.test.ts` pins
  * the two spellings equal.
  */
@@ -157,7 +181,7 @@ export const DashboardHeaderActionSchema = lazySchema(() => strictObject({
 
   /** Icon identifier */
   icon: z.string().optional().describe('Icon identifier for the action button').meta({ title: 'Icon' }),
-}).superRefine(refuseUnopenableHeaderActionUrl).describe('Dashboard header action'));
+}).superRefine(refuseUnopenableHeaderActionUrl).superRefine(refuseRecordlessAskAi).describe('Dashboard header action'));
 
 /**
  * Dashboard Header Schema
@@ -1796,8 +1820,11 @@ export const DashboardSchema = lazySchema(() => strictObject({
   /** Collection of widgets */
   widgets: z.array(DashboardWidgetSchema).describe('Widgets to display'),
 
-  /** Grid column count — defaults to 12 for a standard 12-column grid */
-  columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns (default 12)'),
+  /**
+   * Grid column count. Absent, the renderer infers it from the widgets: 12 when
+   * any widget's layout reaches past column 4 (`x + w > 4`), otherwise 4.
+   */
+  columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns. When absent, inferred from the widgets: 12 if any widget layout reaches past column 4 (x + w > 4), otherwise 4'),
 
   /** Space between widgets, in steps of 0.25rem (4 = 1rem) */
   gap: z.number().int().min(0).optional().describe('Space between widgets, in steps of 0.25rem (4 = 1rem)'),

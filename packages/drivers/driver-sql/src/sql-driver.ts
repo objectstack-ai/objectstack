@@ -1954,10 +1954,12 @@ export class SqlDriver implements IDataDriver {
    * the object's lifetime in this driver (re-registering the object forgets
    * it). A failed catalog read records nothing: the statement is then bound as
    * before, and the next read asks again. A no-op on every other dialect, and
-   * for an object that was never registered as external.
+   * for an object that was never registered as external. Given the door's
+   * `where`, it primes the object of every composed `ReadableIds` leaf in it
+   * too, whose scope compiles against that object's own table.
    */
-  protected async primeOracleRawUuidColumns(object: string): Promise<void> {
-    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object);
+  protected async primeOracleRawUuidColumns(object: string, where?: unknown): Promise<void> {
+    return FieldMappingFacet.primeOracleRawUuidColumns.call(fieldMappingHost.of(this), object, where);
   }
 
   /** The catalog read behind {@link primeOracleRawUuidColumns}: the remote table's `RAW(16)` column names. */
@@ -5762,8 +5764,8 @@ export class SqlDriver implements IDataDriver {
    * column divergence that cannot lose data and cannot fail on existing rows:
    * the `safe` column entries — a `date` column under a field now declared
    * `datetime` (`widen_date_to_datetime`), a varchar narrower than a declared
-   * `maxLength` (`widen_varchar`), a runtime-token column DEFAULT
-   * (`drop_column_default`) — and a NOT NULL column under a field that
+   * `maxLength` (`widen_varchar`), a stale column DEFAULT (`drop_column_default`,
+   * `set_column_default`) — and a NOT NULL column under a field that
    * declares `storage: { notNull: false }` in words (`relax_not_null`, which
    * stays `needs_confirm` for dev auto-reconcile, ADR-0113 D5: the publish of
    * that declaration is the deliberate relax). Index entries are left to the
@@ -5960,7 +5962,7 @@ export class SqlDriver implements IDataDriver {
    * the physical DEFAULT is what makes this safe both ways: the token default
    * the op targets is gone because metadata never declared it, and a sibling
    * `defaultValue: 'NOW()'` column keeps the default it always had instead of
-   * silently losing it to the rebuild.
+   * silently losing it to the rebuild. `set_column_default` (#36245) is that same re-emission.
    *
    * Unique field-level constraints and declared indexes are recreated from
    * metadata afterwards (the source of truth). DB-level foreign keys declared
@@ -7146,8 +7148,10 @@ export class SqlDriver implements IDataDriver {
    *
    * `driver-turso`'s remote transport asks the same question through this
    * method, so both faces of one `TursoDriver` word one refusal.
+   *
+   * [#36190] PUBLIC: the analytics host compiles its own SQL over these tables and cannot read this deployment fact.
    */
-  protected jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
+  public jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
     return FilterHelpersFacet.jsonColumnFieldClass.call(filterHelpersHost.of(this), table, localField);
   }
@@ -8955,10 +8959,10 @@ export class SqlDriver implements IDataDriver {
     name: string,
     field: any,
     keyed?: { unique: boolean },
-    tenantColumn: boolean = false,
+    tenantColumn: boolean = false, addedToPopulatedTable: boolean = false,
   ): void {
     // [#29520 codemod] The body moved to `sql-driver-column-creation.ts` (see `ColumnCreationHost`).
-    return ColumnCreationFacet.createColumn.call(columnCreationHost.of(this), table, name, field, keyed, tenantColumn);
+    return ColumnCreationFacet.createColumn.call(columnCreationHost.of(this), table, name, field, keyed, tenantColumn, addedToPopulatedTable);
   }
 
   /**
@@ -9027,12 +9031,12 @@ export class SqlDriver implements IDataDriver {
    * not reading `options` either. Pinned by
    * `sql-driver-option-default-ddl.test.ts`.
    */
-  protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string): void {
+  protected applyDeclaredColumnDefault(col: Knex.ColumnBuilder, field: any, type: string, expressionForm: boolean = false): void {
     // [#25521 cut 19] The body moved to `sql-driver-schema-sync.ts` (see `SchemaSyncHost`).
     const host: ThisParameterType<typeof applyDeclaredColumnDefault> = {
-      nowColumnDefault: (...a) => this.nowColumnDefault(...a),
+      knex: this.knex, nowColumnDefault: (...a) => this.nowColumnDefault(...a),
     };
-    return applyDeclaredColumnDefault.call(host, col, field, type);
+    return applyDeclaredColumnDefault.call(host, col, field, type, expressionForm);
   }
 
   // ── Database helpers ────────────────────────────────────────────────────────

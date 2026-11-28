@@ -16,11 +16,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
-import { isExpressionComputedField } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast, FormSectionNavContext } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
@@ -1005,7 +1006,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           required: isRequiredInForm(field, isCreateFormMode(schema)),
           // `_draftOnly`: a field only the draft declares, under the console's
           // draft preview — drawn, never fillable (see `fromObjectSchema`).
-          disabled: schema.readOnly || schema.mode === 'view' || field.readonly || field._draftOnly === true,
+          // `uiReadonly` is the hand lock: drawn, never filled by a person.
+          disabled: schema.readOnly || schema.mode === 'view' || fieldStaticallyReadOnlyByHand(field) || field._draftOnly === true,
           placeholder: field.placeholder,
           // The help line under the control: the spec's `inlineHelpText`,
           // else `description`, through the one read `fromObjectSchema`
@@ -1018,6 +1020,8 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // engine (same dialect the server enforces). Undefined when absent.
           visibleWhen: field.visibleWhen,
           readonlyWhen: field.readonlyWhen,
+          // The hand lock's predicate, folded with `readonlyWhen` by the form renderer.
+          uiReadonlyWhen: field.uiReadonlyWhen,
           requiredWhen: field.requiredWhen,
           // Field-group membership (Field.group → object.fieldGroups[].key).
           // Carried through so the form can auto-derive sections from the
@@ -1587,7 +1591,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   if (error) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{error.message}</p>
       </div>
     );
@@ -1844,6 +1848,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         <FormSectionNavContext.Provider value={sectionNav.sink}>
         <div className="w-full @container">
           {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
           {/* Sticky, so the sections stay one click away down a long page. */}
           <FormSectionNav items={sectionNav.items} className="sticky top-0 z-10 mb-4 bg-background" />
           <SchemaRenderer
@@ -2043,6 +2055,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         data-mobile-form={mobileOpts ? 'true' : undefined}
       >
         {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
         <SchemaRenderer schema={formSchema} />
         <UploadInFlightNotice gate={uploadGate} />
         {conflictDialog}

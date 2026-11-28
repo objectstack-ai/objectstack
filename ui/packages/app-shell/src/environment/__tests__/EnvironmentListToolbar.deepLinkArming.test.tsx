@@ -43,14 +43,14 @@ const CREATE = {
   label: 'Create Environment',
   type: 'api',
   variant: 'primary',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 /** A perfectly ordinary second toolbar action — the one the old predicate counted. */
 const REFRESH = {
   name: 'refresh_environments',
   label: 'Refresh',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const st = (o: Partial<EnvironmentEntitlementsState>): EnvironmentEntitlementsState =>

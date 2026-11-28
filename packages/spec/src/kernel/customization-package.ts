@@ -322,6 +322,9 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   translation: listed,
   email_template: listed,
   page: listed,
+  // [ADR-0159 D4] `form` is `view`'s form half: overridable on the terms a form
+  // `view` item is today, so a declared override switches an installed form off.
+  form: listed,
   app: listed,
   dataset: listed,
   doc: listed,
@@ -364,6 +367,12 @@ export const OVERRIDE_TYPE_CLASSIFICATION = {
   datasource: { disposition: 'excluded', basis: 'setup_owned_connection' },
   tool: behaviouralSwitchFirst,
   skill: behaviouralSwitchFirst,
+  // [ADR-0160 D1] A context pack does not join D2's list ("an override of a
+  // packaged pack" is later work): excluded on the `skill` row's basis.
+  ai_context: behaviouralSwitchFirst,
+  // [ADR-0150 addendum 2026-11-25, Overlays] A knowledge source joins no
+  // declared-override list: excluded on the `skill` row's basis.
+  knowledge_source: behaviouralSwitchFirst,
 } as const satisfies Record<MetadataType, OverrideTypeClassification>;
 
 /** The metadata types a declared override applies to (`disposition: 'overridable'`). */

@@ -187,7 +187,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 21,
+      "revision": 22,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -213,7 +213,7 @@
         "capture the create request/response (expect POST /api/v1/data/showcase_account). The payload also carries the select defaults of fields the step leaves untouched — sales_region:'amer' (its AMER option is default:true, examples/app-showcase/src/data/objects/account.object.ts) — so expect that key in the body you diff (QA run #24556)",
         "re-read server-side: GET /api/v1/data/showcase_account?$filter=[[\"name\",\"=\",\"os-qa-<runid>\"]] — field-by-field vs the submitted payload",
         "open the record detail; edit exactly one field, annual_revenue, to a new positive number; submit it (an edit form's button reads 'Update'); capture the PATCH /api/v1/data/showcase_account/<id>; re-read the full row via GET /api/v1/data/showcase_account/<id>. annual_revenue is the field because showcase_account has no rule-free TEXT field the later steps can spare: `name` is the key steps[3] and steps[8] filter on, and tax_id, billing_email and churn_reason are each judged by a validation rule (account.object.ts: tax_id_format, billing_email_format, churn_reason_consistency); annual_revenue carries none (its only constraint is the field's min 0). ⛔ Not `hq`: it is a location field (Field.location), whose input takes 'latitude, longitude', and text that is not a coordinate pair clears the stored value while the save still reports success (#32139) — a defect of its own, not this clause's subject",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the Activity (动态) tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595). Open it from that tab, from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card shows only the newest three lines, read-only, with no chips, and can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload, not off the card. Screenshot first, then read the change lines",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the Activity (动态) tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595). showcase_account's 'primary' Invoices and Projects tables sit among its details, so its full page never pins the details in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890): the tab row, 详情 first, at every width. Open the stream from its Activity tab or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890). The stream can lag the update line until a fresh read (QA run #28545): read the change lines on the Activity tab after a reload. Screenshot first, then read the change lines",
         "clone the record: POST /api/v1/data/showcase_account/<id>/clone (optionally with {overrides:{name:'os-qa-<runid>-clone'}}); capture the 201 result (new id ≠ source, sourceId, record); re-read the clone via GET /api/v1/data/showcase_account/<new id>",
         "RLS probe on clone: as a persona WITHOUT read on the source row (a permission-zoo persona, or a non-owner under owner-RLS), POST the same clone route and capture the refusal — expect 404 RECORD_NOT_FOUND, never a silent duplicate (record blocked(fixture) if no non-reading persona is bound on this boot)",
         "delete via the record header's 'More actions' (⋯) menu → Delete (the menu also holds Refresh / Add to favorites / Share; detail.moreActions), or the list row's menu; confirm the dialog; re-read via the filtered GET. ⚠️ If clause 7's recipe gave the member an own-row invoice pointing at THIS account, the delete answers 409 DELETE_RESTRICTED: the invoice's account lookup is required, and the engine turns a required set_null into restrict (packages/objectql/src/engine.ts). Point that invoice at a seeded account instead (the recipe's step 5 says so)",
@@ -247,7 +247,7 @@
         {
           "clause": "the record's field-change history (the record page's sys_audit_log read, shown as the timeline stream's Changes chip) reflects the create and the update with display values (option labels, localized dates, real actor), not raw audit payloads or phantom value→null rows",
           "oracle": "dom",
-          "verify": "after a fresh read of the page (the Overview rail's 最近动态 card can lag the update line, QA run #28545), open the stream by the Activity tab, the 最近动态 card's title or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
+          "verify": "after a fresh read of the page (the stream can lag the update line until one, QA run #28545), open the stream by the Activity tab or ?related=timeline (steps[5]); after a screenshot confirms the Changes chip is selected on the account's timeline stream, read its change lines — same contract ui/e2e/live/record-history-display.spec.ts pins on showcase_account, the showcase's enable.trackHistory object, at 1440×900 (its option labels, the localized Customer Since date and the resolved owner). The page reads sys_audit_log only for an object whose enable.trackHistory is true (ui/packages/app-shell/src/views/RecordDetailView.tsx, historyEnabled), and the rows reach the stream as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The chip also lists the stream's sys_activity created/updated rows, so attribute a line to the audit read before scoring it. ⛔ Never look for a tab named History: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts the default tabs carry neither Activity nor History), so its absence fails a working product. The spec is a live Playwright spec in this checkout, run from ui/ with `pnpm test:e2e:live` against a backend on port 3000 and the console dev server on port 5180",
           "evidence": "screenshot + entries"
         },
         {
@@ -409,6 +409,12 @@
           "date": "2026-11-20",
           "change": "steps[5] and acceptance[4].verify re-pointed to the record page's tab rules and right rail (#35595, #35596): every related list is a tab of its own in its order, an empty one muted with no number, the width the row's only fold ('More N'), Activity last; the 动态 panel of the right column became the Overview rail's 最近动态 card (newest three, read-only), whose title opens the Activity tab. Supersedes the records-first row of #28469 (partitionRecordTabsByRecords is retired). No clause changed: the change lines are still read on the Activity tab after a reload. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 22,
+          "date": "2026-11-22",
+          "change": "steps[5] and acceptance[4].verify re-pointed after #35890 retired the right rail: the Overview rail's 最近动态 card is gone and the first tab reads 详情 (Details); showcase_account's 'primary' body tables keep its full page from pinning the details in a left column (recordPagePinsDetails), so the tab row stands at every width. The stream opens from its Activity tab or ?related=timeline. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -621,7 +627,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 16,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -657,12 +663,12 @@
         "open the tabular saved view (sort [{field: 'estimate_hours', order: 'desc'}] — the array form: #17053 retired the bare string clause 'estimate_hours desc' platform-wide, so the objectui#2601 string-crash fixture no longer exists on stock); confirm it renders and the request carries the sort as sort=-estimate_hours",
         "load a list past its first window. No stock list holds more rows than the 50-row window (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email + message each — showcase_inquiry requires `message` too, and a name + email body answers 400 \"Message is required\", QA run #24616). A list view that declares no `pagination` (the stock Inquiries list) draws NO pager since #35554: it loads as it scrolls, so scroll the Inquiries list to its end and capture `top`/`skip` on every data request (top=50, then top=50&skip=50); the count beside the view name reads the server total. Then page a view that DECLARES `pagination` (stage one: PUT a view with pagination: {pageSize: 50} on showcase_inquiry) past page 1 and capture the same; confirm no unpaged full fetch on either",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
-        "on in_progress, with the export grant from fixtures.requires[3] bound, open the 视图设置 (View settings) popover beside the view name — the Display popover, named 选项 (Options) until objectstack#35878 moved it there — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
+        "on in_progress, with the export grant from fixtures.requires[3] bound, open the 视图设置 (View settings) popover beside the view name — the Display popover, named 选项 (Options) until objectstack#35878 moved it there — Export sits in its footer ('Export as CSV / XLSX / JSON') and, since objectstack#36113, also in the 「导入 / 导出」 button at the view bar's end (the same formats, two doors) — and export each declared format (csv, xlsx, json) from either; capture the requests and files. Without the grant the Export entries are absent from both and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
         "on bulk_actions, select rows that are NOT done and run showcase_mark_done (per-record) — its visible gate, has(record.done) && record.done != true, judges each selected row, so a done row in the selection drops Mark Done from the selection actions the floating selection bar shows (since #35678 one bar floats at the bottom centre of the list and the view bar does not change on selection; over three actions the rest are under 「更多」), or, over a mixed selection, the confirm reports the done rows not eligible and skipped (QA run #27438); either way the dispatch count stops matching the selection — and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, which the console sends through the action door, POST /api/v1/actions/showcase_task/showcase_recalc_selection with body {params:{_selectedIds:[…]}}; the server forwards those params flat to the action's own target /api/v1/apps/showcase/recalc in-process, buildApiActionRequest in packages/runtime/src/action-execution.ts, so the browser's network log shows the door request and no /recalc request); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal",
-        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: no page bar (objectstack#35878): a 40px view bar with the object's icon and name, 「/」, ONE switcher trigger reading type icon → view name → record count → caret, and 「视图设置」 on the left, and the search icon, 「+ 新建」 and ⋮ (description, import, favorite) last on the right; under it a 40px condition row that is always drawn — dashed 「排序」 and 「筛选」 while no condition is set, one 「按 X 排序」 chip (with +N) and the filter chips once set — so the table's header does not move when a condition is set or reset; on the grid a 32px header and 33px rows at 13px; and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same two rows (objectstack#35548; the count beside the view name returns, after objectstack#34603 removed it)",
-        "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 视图设置 → 添加列): the view bar's object icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last control, ⋮, ends its icon 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
+        "at 1280×800 on a zh-CN session, read the list frame on All Tasks, then on its kanban view: a 44px page bar with the object's icon and name (objectstack#36113), ended by the shell's button group where it is on; under it a 40px view bar with ONE switcher trigger reading type icon → view name → record count → caret, and 「视图设置」 on the left, and the search icon, 「导入 / 导出」 (import and each export format), 「+ 新建任务」 and ⋮ (description, favorite) last on the right; under it a 40px condition row that is always drawn — dashed 「排序」 and 「筛选」 while no condition is set, one 「按 X 排序」 chip (with +N) and the filter chips once set — so the table's header does not move when a condition is set or reset; on the grid a 36px header and 36px rows (objectstack#36048), the header labels at 12px and the cells and bar buttons at 14px (objectstack#36047's two-tier type scale); and, on a view whose columns declare a `summary`, each total under its own column with 「计数 N」 leftmost and no doubled colon. The kanban view draws the same three rows (objectstack#35548, objectstack#36113; the count beside the view name returns, after objectstack#34603 removed it)",
+        "at 1280×800 with the sidebar open, read the left edges of the list page on All Tasks (a list whose columns fit) and on a list that scrolls sideways (stage one by showing every field of showcase_task through 视图设置 → 添加列): the page bar's object icon, the view switcher's icon, the header's select-all box, each row's checkbox and the footer's record count each start 16px from the main area's left; the selection column is 40px on both lists and stays 40px, pinned at the left, after scrolling to the far right and back; no row shows a number and each row's checkbox shows without a hover; the view bar's last control, ⋮, ends its icon 16px from the right; at 375 wide no leading item sits closer than 12px to the left (objectstack#35663)"
       ],
       "acceptance": [
         {
@@ -726,15 +732,15 @@
           "evidence": "menu screenshot + dispatch traces"
         },
         {
-          "clause": "the list frame holds its geometry: no page bar, view bar 40, condition row 40 and always drawn (the header's top does not move when a condition is set or reset), header 32, rows 33, 13px on the header, the cells and the bar buttons, the first data row top at or above 168px under the 48px shell bar, the switcher read type icon → name → count → caret, every column total's right edge on its column's (±1px), no doubled colon in the summary row, and the kanban view under the same two rows",
+          "clause": "the list frame holds its geometry: page bar 44 (the object's icon and name), view bar 40, condition row 40 and always drawn (the header's top does not move when a condition is set or reset), header 36, rows 36, 12px on the header labels and 14px on the cells and the bar buttons (objectstack#36047's two tiers: body 14, labels and section headings 12), the table header's top at 172px and the first data row top at or above 212px under the 48px shell bar, the switcher read type icon → name → count → caret, every column total's right edge on its column's (±1px), no doubled colon in the summary row, and the kanban view under the same three rows",
           "oracle": "dom",
-          "verify": "read getBoundingClientRect and the computed font size of each part at 1280×800 zh-CN (the geometry and order halves are pinned by ui/e2e/list-frame-geometry-35548.spec.ts over the real class strings; the kanban half by ui/packages/plugin-list/src/__tests__/ListView.viewBarLeading-35548.test.tsx); the summary half needs a view whose columns declare `summary`, which task.view.ts does not, so stage one in the showcase's customization pair as negative[0] does",
+          "verify": "read getBoundingClientRect and the computed font size of each part at 1280×800 zh-CN (the geometry, order and font-size halves are pinned by ui/e2e/list-frame-geometry-35548.spec.ts over the real class strings compiled onto a transcribed element tree, not the live page, so the live reading is still driven by hand; the kanban half by ui/packages/plugin-list/src/__tests__/ListView.viewBarLeading-35548.test.tsx); the summary half needs a view whose columns declare `summary`, which task.view.ts does not, so stage one in the showcase's customization pair as negative[0] does",
           "evidence": "light and dark screenshots of the grid and the kanban, plus the measured heights"
         },
         {
-          "clause": "the list page has one left edge: the view bar's object icon, select-all box, row checkboxes and footer count each at 16px (±1) from the main area on a list that fits and on one that scrolls sideways; the selection column is 40px on both and keeps its width and its left pin after a sideways scroll and back, with no gap between frozen cells; no row numbers; every row checkbox visible at rest; at 375 no leading item closer than 12px",
+          "clause": "the list page has one left edge: the page bar's object icon, the view switcher's icon, select-all box, row checkboxes and footer count each at 16px (±1) from the main area on a list that fits and on one that scrolls sideways; the selection column is 40px on both and keeps its width and its left pin after a sideways scroll and back, with no gap between frozen cells; no row numbers; every row checkbox visible at rest; at 375 no leading item closer than 12px",
           "oracle": "dom",
-          "verify": "read getBoundingClientRect of each item from the main area's left at 1280×800 on both lists, and the computed opacity of the row checkboxes with the pointer off the table (pinned by ui/e2e/list-left-edge-35663.spec.ts over the real ObjectGrid and view-bar classes, the view bar's object name read off VIEW_BAR_OBJECT_NAME in objectViewPageHeader.tsx)",
+          "verify": "read getBoundingClientRect of each item from the main area's left at 1280×800 on both lists, and the computed opacity of the row checkboxes with the pointer off the table (pinned by ui/e2e/list-left-edge-35663.spec.ts over the real ObjectGrid and view-bar classes, the page bar's row read off PageHeader.tsx's list posture)",
           "evidence": "screenshots of both lists at rest and scrolled, plus the measured edges"
         }
       ],
@@ -833,7 +839,9 @@
           "ref": "#35663"
         },
         { "revision": 13, "date": "2026-11-20", "change": "steps[6], [8], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #35878: the list page draws two rows, not three. There is no page bar; the view bar leads with the object's icon and name, then the switcher and 「视图设置」 (was 「选项」), and ends with search, 「+ 新建」 and ⋮ last (#35678). The condition row is always drawn at 40px, so the frame clause reads condition row 40 where it read 'no condition row height', and the left-edge clause's first item is the view bar's object icon where it was the page bar's (the view icon no longer leads the bar). Filter N and Sort N left the bar for the condition row", "ref": "#35878" },
-        { "revision": 14, "date": "2026-11-21", "change": "steps[8] follows #35678: the selection actions are in one bar floating at the bottom centre of the list, and the view bar no longer changes on selection; what Mark Done's visible gate does is unchanged", "ref": "#35678" }
+        { "revision": 14, "date": "2026-11-21", "change": "steps[8] follows #35678: the selection actions are in one bar floating at the bottom centre of the list, and the view bar no longer changes on selection; what Mark Done's visible gate does is unchanged", "ref": "#35678" },
+        { "revision": 15, "date": "2026-11-21", "change": "steps[6], [10], [11] and the clauses acceptance[10] and acceptance[11] follow #36113: the list page draws three rows again. A 44px page bar holds the object's icon and name (ended by the shell's button group where it is on); the view bar leads with the switcher and ends with search, 「导入 / 导出」, 「+ 新建{对象}」 and ⋮. Export is offered in 「导入 / 导出」 as well as the 视图设置 footer, so steps[6] reads two doors. The frame clause reads page bar 44, the table header at 172 and the first row at or above 212 where it read 'no page bar' and 168, and header 36 / rows 36 where it read 32 / 33 (#36048, which the clause had not caught up with); the kanban view sits under the same three rows. The left-edge clause's first items are the page bar's object icon and the view switcher's icon, where it read the view bar's object icon", "ref": "#36113" },
+        { "revision": 16, "date": "2026-11-24", "change": "steps[6] and the clause acceptance[10] follow #36047's two-tier type scale (closed 2026-11-21 on the maintainer's 「同意」: body 14, labels and section headings 12): the header labels read 12px and the cells and bar buttons 14px, where the clause read 13px on all three (milestone acceptance #37020 read 12 and 14 live on main 305fe60e; set by ui/packages/plugin-grid/src/ObjectGrid.tsx's header text-xs and ui/packages/plugin-list/src/listToolbarRow.ts's text-sm trigger). acceptance[10]'s verify now says the e2e pin compiles the real classes onto a transcribed element tree, not the live page. No header or row height in the item still reads 32 / 33 outside revision 15's history row", "ref": "#37035" }
       ]
     },
     {
@@ -962,7 +970,7 @@
       "title": "Form-view gallery: every FormViewSchema layout type renders and submits",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -971,12 +979,15 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_task's default form (type simple — the `form` key) and its formViews tabbed / wizard / split / quick — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is now a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). The console reads ONLY the default (objectDef.form ?? formViews.default — RecordFormPage through selectRecordFormView), so a named formViews entry is reachable from no console door: each page-level variant is reached by overlaying the object's default form with that variant's type + sections (view is org-overridable, ADR-0005) and reverting afterwards. The overlay recipe goes through the customization pair (ADR-0146 D11; the package-less overlay PUT is the older shape): POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.form?package=com.example.showcase.custom&mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<variant>, sections:<that variant's sections>}} carrying overrides: { package: 'com.example.showcase', basedOn: <the showcase's version> }, then POST /api/v1/packages/com.example.showcase.custom/publish-drafts; revert with DELETE on the pair (DELETE /api/v1/meta/view/showcase_task.form?state=draft&package=com.example.showcase.custom, then the same without state). Once the pair exists, Studio Publish on the showcase leaves its read-only posture (#28562), so ux-conventions.disabled-control-reason variants[1] runs before this item creates it, or on a boot without it. Each variant's sections can be read from its own served view item — the container serves formViews as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<variant>, QA run #24572). ⚠ Item-level isDefault:true is REQUIRED: the console takes an object's default form — what /new and /edit render — ONLY from a form ViewItem that carries it (objectui packages/app-shell/src/providers/MetadataProvider.tsx applyViewItem, objectui#11539). Without it the publish succeeds, the flag is gone from the served row, and the page falls back to the all-fields layout, which reads like 'the variant does not render'",
-          "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list"
+          "showcase_task's default form (type simple — the `form` key, served as showcase_task.form) and its formViews tabbed / wizard / split / quick, served as showcase_task.tabbed / .wizard / .split / .quick (GET /api/v1/meta/view/showcase_task.<key>, QA run #24572) — examples/app-showcase/src/ui/views/task.view.ts. Since spec 18.3.0 a form view's `type` is its layout only, simple | tabbed | wizard (ADR-0050, packages/spec/src/ui/view.zod.ts#FormViewSchema): the showcase's `split` entry is a two-section tabbed form and `quick` a simple one, and the type values split, drawer and modal are refused by name (FORM_VIEW_TYPE_RETIRED). WHERE A FORM VIEW LOADS: only where it is opened by name, on the named-form page (ui/apps/console/src/components/FormPage.tsx; route /forms/NAME, and /apps/APP/forms/NAME from inside an app). The page reads GET /api/v1/meta/view/NAME, so each layout is walked at its own served name: /forms/showcase_task.form (simple), /forms/showcase_task.tabbed, /forms/showcase_task.wizard. With no query the page creates a record (one POST /api/v1/data/showcase_task); with ?recordId=ID it loads that record and edits it (one PATCH). The stock doors to it are the three type 'form' actions that target showcase_task.form: Log Time on a task's record header, which carries the record's id, the headless New Task, and the Overview page's Create Task button. The tabbed and wizard forms have no stock door and are reached by URL. Since #36425 (PR #36543) the console's record create and edit surfaces (RecordFormPage at /new and /record/ID/edit, the New / Edit dialog, an action-opened create or edit) load no form view and lay the record out by the object's fieldGroups (selectRecordFormView is deleted), so nothing on them is this item's observable, and no default-form overlay is needed to stage a layout",
+          "examples/app-showcase/src/ui/pages/task-desk.page.ts — the presentation surface: a JSX page whose ObjectForm opens with formType=\"drawer\" (edit, a side panel) and formType=\"modal\" (create, a dialog) over the task list",
+          "for steps[3] only, the write door that refuses a retired type, through the customization pair (ADR-0146 D11; the package-less overlay PUT is the older shape): POST /api/v1/packages/com.example.showcase/ensure-customization, then PUT /api/v1/meta/view/showcase_task.form?package=com.example.showcase.custom&mode=draft with the ViewItem {name:'showcase_task.form', object:'showcase_task', viewKind:'form', isDefault:true, config:{type:<the retired value>, sections:<any>}} carrying overrides: { package: 'com.example.showcase', basedOn: <the showcase's version> }, then POST /api/v1/packages/com.example.showcase.custom/publish-drafts when the draft PUT was accepted; revert with DELETE on the pair (DELETE /api/v1/meta/view/showcase_task.form?state=draft&package=com.example.showcase.custom, then the same without state). Once the pair exists, Studio Publish on the showcase leaves its read-only posture (#28562), so ux-conventions.disabled-control-reason variants[1] runs before this item creates it, or on a boot without it"
         ],
         "knownGaps": [
           "the drawer and modal PRESENTATIONS have one stock surface, task-desk.page.ts (ObjectForm formType=\"drawer\" to edit a task, formType=\"modal\" to create one). No form view can declare either any more: ADR-0050 took drawer and modal out of FormView.type in spec 18.3.0, and examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES lists the three layouts. If that page cannot be reached, record the presentation variant blocked(fixture) rather than ticking or silently skipping it",
-          "drawer and modal are presentation modes and split a list-beside-record mode, not page layouts (ADR-0050). Since spec 18.3.0 FormViewSchema refuses all three type values at parse, each with its prescription (packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), so a default-form overlay carrying one is refused at the metadata door instead of rendering anything (QA run #27441 measured 422). The New/Edit modal maps only tabbed (resolveFormViewLayout — a wizard degrades to a stacked section list there). So the page-level layouts are walked on the page routes (/new and /record/:id/edit, both RecordFormPage), the presentations on task-desk.page.ts, and the three retired values are scored as the refusal (steps[3], acceptance[5])"
+          "drawer and modal are presentation modes and split a list-beside-record mode, not page layouts (ADR-0050). Since spec 18.3.0 FormViewSchema refuses all three type values at parse, each with its prescription (packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), so a default-form overlay carrying one is refused at the metadata door instead of rendering anything (QA run #27441 measured 422). Since #36425 the New/Edit modal loads no form view at all (before it, the modal mapped only tabbed and a wizard degraded to a stacked section list there). So the page-level layouts are walked on the named-form page (/forms/NAME, fixtures.requires[0]), the presentations on task-desk.page.ts, and the three retired values are scored as the refusal (steps[3], acceptance[5])",
+          "the named-form page sets a field's width from its absolute `colSpan` alone and does not read the relative `span` (ui/apps/console/src/components/FormPage.tsx, where a field's colSpan comes from the form field's own colSpan or 1), so the default form's notes field (span: 'full', task.view.ts) is not expected to take the whole row there. Until revision 10 acceptance[2] scored that width on the record form, which no longer loads the form view. The width is not scored on this item: record what the page draws as a note, and neither tick nor fail acceptance[2] on it. The gap is reported with card #36798 for its own card",
+          "NOT YET RUN: revision 10 re-pointed this item from a source read at base 5dbcc02b, and no run has driven the named-form page for it. A first run's readings may correct the steps: file what differs as a checklist-accuracy finding, as RUNNER.md says"
         ]
       },
       "variants": [
@@ -987,20 +998,20 @@
         "modal"
       ],
       "steps": [
-        "open a task record's full-page edit form (…/showcase_task/record/<id>/edit — RecordFormPage) on the stock default form (type simple); screenshot; verify the declared section ('Task', 2 columns) and its field order",
-        "overlay the default form with the tabbed variant (type tabbed + the sections of formViews.tabbed, through the fixtures.requires[0] recipe with item-level isDefault:true); reopen the page form; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
-        "overlay the default form with the wizard variant; open the PAGE form (…/showcase_task/new, or the record's /edit route — RecordFormPage passes the type in both modes); walk Basics → Assignment → Schedule with next/back; verify back preserves values and submit happens ONCE at the end. The New/Edit MODAL renders a wizard as a stacked section list by design (resolveFormViewLayout), so the steps are walked on the page route",
-        "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[0] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
+        "open the simple layout on the named-form page for an existing task: /forms/showcase_task.form?recordId=<id> (a task record's header action Log Time opens the same page for that record); screenshot; verify the declared section ('Task', 2 columns), its field order, and that the record's stored values are loaded",
+        "open /forms/showcase_task.tabbed?recordId=<id>; verify the three tabs (Overview / Schedule / Details) and that switching tabs preserves entered values",
+        "open /forms/showcase_task.wizard with no recordId, which is a create; walk Basics → Assignment → Schedule with Next, Back and the step indicator; verify that Next on Basics is refused while the required title is empty and the field is named, that going back preserves values, and that the save happens ONCE, at the last step's submit. With no submitBehavior declared the page then lands on the created record (FormPage.tsx resolveSubmitBehavior)",
+        "RETIRED-TYPE refusal: put the default-form overlay of fixtures.requires[2] with type 'split', then 'drawer', then 'modal' (any sections), and capture each refusal: a 422 whose message names the retired value with its prescription (FORM_VIEW_TYPE_RETIRED). Record whether the draft PUT or its publish answered it. Then re-read GET /api/v1/meta/view/showcase_task.form and confirm none of the three landed. There is no split pane to look for: the showcase's formViews.split is now a two-tab tabbed form",
         "drawer and modal: open task-desk.page.ts; click a task's title (or select one of its cells and press Space) — ObjectForm formType=\"drawer\" opens as a side panel over the list with the task's fields; click New task — ObjectForm formType=\"modal\" opens as a dialog. These are the React block's containers, which ADR-0050 keeps (the block is the caller that opens the form); a form view can no longer name either (steps[3])",
-        "on the simple form, set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
-        "save an edit through each rendered variant; capture each save request; re-read via GET /api/v1/data/showcase_task/<id>. The page form's /new and /edit routes are reached by URL only: the record page's Edit opens the form as a modal (?form=ID, footer 'Update'), not the page (QA run #33861). A deep-linked page form saves and stays in the app: RecordFormPage's goBack goes back one entry only when the console pushed one (history.state.idx above 0) and otherwise replaces to the record page (edit) or the list (create) (ui/packages/app-shell/src/views/RecordFormPage.tsx)",
-        "revert the default-form overlay so the stock simple form is back — DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm it with a re-read of the view"
+        "on the simple form of steps[0], set priority to 'urgent' and verify the notes field appears (FormField.visibleWhen CEL); set it back and verify notes hides",
+        "save through each layout: on /forms/showcase_task.form?recordId=<id> and on /forms/showcase_task.tabbed?recordId=<id> change one field and submit, and take steps[2]'s create for the wizard; capture each save request (PATCH /api/v1/data/showcase_task/<id> for an edit, POST /api/v1/data/showcase_task for the create); re-read via GET /api/v1/data/showcase_task/<id>. Delete the task steps[2] created when the run is done",
+        "if any write of steps[3] landed, revert it — DELETE on the pair as fixtures.requires[2] names, or DELETE /api/v1/meta/view/showcase_task.form, the reset door, which restores the artifact default byte-identically (QA run #24572) — and confirm with a re-read of the view that the stock simple form is served"
       ],
       "acceptance": [
         {
           "clause": "PER-VARIANT: each page-level form layout the spec declares (simple / tabbed / wizard) renders its own layout mechanics, with a screenshot per variant; drawer and modal are presentation modes, not layouts (ADR-0050) — a drawer-presented form is proven on a surface that opens it as a side panel (task-desk.page.ts, a JSX ObjectForm formType=\"drawer\"), and the modal presentation on the same page's formType=\"modal\" dialog, or recorded blocked(fixture) if that page cannot be reached. split is no variant: spec 18.3.0 retired it, with drawer and modal, as a form type (acceptance[5]).",
           "oracle": "screenshot",
-          "verify": "one screenshot per page-level variant, each reached by overlaying the default form: tabbed shows tabs, wizard shows step chrome on the page route; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots",
+          "verify": "one screenshot per page-level variant, each on the named-form page at its own served name (fixtures.requires[0]): tabbed shows tabs, wizard shows the step indicator over one step's card; then the task-desk drawer (side panel over the list) and modal (dialog) screenshots",
           "evidence": "per-variant screenshots + the task-desk drawer and modal screenshots"
         },
         {
@@ -1010,7 +1021,7 @@
           "evidence": "the trace"
         },
         {
-          "clause": "view-level visibleWhen works live: notes renders only while priority == 'urgent', full-width via span 'full'",
+          "clause": "view-level visibleWhen works live on the named-form page: notes renders only while priority == 'urgent' (its width is not scored here, fixtures.knownGaps[2])",
           "oracle": "dom",
           "verify": "after screenshot, toggle priority and assert notes mounts/unmounts (same family as objectui e2e/live/field-conditional-rules.spec.ts)",
           "evidence": "before/after screenshots"
@@ -1030,13 +1041,14 @@
         {
           "clause": "the retired form types are refused at authoring, never rendered: a default-form overlay with type 'split', 'drawer' or 'modal' answers 422 with that value's prescription (ADR-0050, packages/spec/src/ui/view.zod.ts FORM_VIEW_TYPE_RETIRED), and the served default form is unchanged",
           "oracle": "api",
-          "verify": "the three refusal bodies of steps[3], each naming its retired value and its prescription; GET /api/v1/meta/view/showcase_task.form after them reads the form as it was. A 2xx that stores one of the three, or a page form that renders one, is a FAIL",
+          "verify": "the three refusal bodies of steps[3], each naming its retired value and its prescription; GET /api/v1/meta/view/showcase_task.form after them reads the form as it was. A 2xx that stores one of the three, or a named-form page that renders one, is a FAIL",
           "evidence": "the three refusal bodies + the re-read"
         }
       ],
       "negative": [
         "a wizard that lets Next past a required title with no named field error — or that silently writes per step — is a FAIL",
-        "counting the drawer or modal variant as passed off the record-form page or a form-view overlay is a FAIL — a form view can no longer declare either (acceptance[5]); each presentation is scored only on a surface that opens the form as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited"
+        "counting the drawer or modal variant as passed off the record-form page or a form-view overlay is a FAIL — a form view can no longer declare either (acceptance[5]); each presentation is scored only on a surface that opens the form as a side panel / dialog (task-desk.page.ts), or recorded blocked(fixture) with this item cited",
+        "scoring a layout off a record create or edit surface (/new, /record/ID/edit, the New / Edit dialog, an action-opened create or edit) is a FAIL of method: none of them loads a form view since #36425, so what renders there is the object's fieldGroups whatever the form view says"
       ],
       "traps": [
         "hydration-race",
@@ -1046,7 +1058,7 @@
         "packages/spec/src/ui/view.zod.ts#FormViewSchema (FormViewSchema type enum: simple|tabbed|wizard; split, drawer and modal refused by name since 18.3.0, FORM_VIEW_TYPE_RETIRED)",
         "examples/app-showcase/src/coverage.ts#FORM_VIEW_TYPES (FORM_VIEW_TYPES — the 3 layouts)",
         "examples/app-showcase/src/ui/views/task.view.ts#formViews (formViews incl. visibleWhen on notes)",
-        "objectui packages/app-shell/src/views/RecordFormPage.tsx (reads objectDef.form ?? formViews.default through selectRecordFormView; page-level layouts only) + packages/app-shell/src/utils/recordFormNavigation.ts (resolveFormViewLayout — the New/Edit modal maps only tabbed)",
+        "ui/apps/console/src/components/FormPage.tsx#resolveSubmitBehavior (the named-form page at /forms/NAME: loads the served form view by name, edits the record ?recordId= names, draws tabbed and wizard, saves a wizard once on its last step) + ui/packages/app-shell/src/views/RecordFormPage.tsx (since #36425 loads no form view: lays the record out by the object's fieldGroups)",
         "docs/adr/0050-form-layout-vs-presentation.md (drawer/modal leave FormView.type and split is removed, enacted in spec 18.3.0; where a form opens is the caller's open mode) + examples/app-showcase/src/ui/pages/task-desk.page.ts (ObjectForm formType drawer + modal)"
       ],
       "history": [
@@ -1059,7 +1071,7 @@
         {
           "revision": 2,
           "date": "2026-10-05",
-          "change": "clause 1 (drawer variant), steps 1-5, the fixtures, a new revert step, negative 2 and the sources re-pointed (assertion defect, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). RecordFormPage renders drawer/modal as simple by design ('presentation/open-modes, not record-page layouts', objectstack#1890), and resolveFormViewLayout maps only tabbed. The modelling decision is ADR-0050 (Proposed): drawer/modal leave FormView.type, and presentation belongs to NavigationMode / addRecord.mode / action type 'modal'. Named formViews are reachable from no console door, because every consumer reads objectDef.form ?? formViews.default, so the steps now overlay the default form. Measured differently from the card in two places. (1) The card has the wizard rendering as steps only on /new; RecordFormPage passes the type on the /edit page route as well, and only the New/Edit modal degrades it. (2) task-desk.page.ts hosts BOTH a formType=\"drawer\" and a formType=\"modal\" ObjectForm, so the modal presentation is scorable there, and blocked(fixture) stays only as the fallback. Re-read at objectui 9dfaca6543: unchanged",
+          "change": "clause 1 (drawer variant), steps 1-5, the fixtures, a new revert step, negative 2 and the sources re-pointed (assertion defect, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). RecordFormPage renders drawer/modal as simple by design ('presentation/open-modes, not record-page layouts', objectstack#1890), and the New/Edit modal's form-view layout step (deleted by #36425) mapped only tabbed. The modelling decision is ADR-0050 (Proposed): drawer/modal leave FormView.type, and presentation belongs to NavigationMode / addRecord.mode / action type 'modal'. Named formViews are reachable from no console door, because every consumer reads objectDef.form ?? formViews.default, so the steps now overlay the default form. Measured differently from the card in two places. (1) The card has the wizard rendering as steps only on /new; RecordFormPage passes the type on the /edit page route as well, and only the New/Edit modal degrades it. (2) task-desk.page.ts hosts BOTH a formType=\"drawer\" and a formType=\"modal\" ObjectForm, so the modal presentation is scorable there, and blocked(fixture) stays only as the fallback. Re-read at objectui 9dfaca6543: unchanged",
           "ref": "#21797"
         },
         {
@@ -1103,6 +1115,12 @@
           "date": "2026-11-21",
           "change": "steps[4] opens the edit drawer from a task's title link, or Space on a selected cell: the list is select-first since #35684, so a click on an assignee, status or priority cell only selects it. No clause changed. Read at base c00be39b",
           "ref": "#35794"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-26",
+          "change": "re-audit after #36425 (PR #36543): the layouts move from a default-form overlay on the record form routes to the named-form page, the one console surface that still loads a form view. fixtures.requires[0], steps[0]–[2] and [5]–[7], acceptance[0].verify, acceptance[5].verify, knownGaps[1] and source[3] are re-pointed to /forms/showcase_task.form, .tabbed and .wizard; the overlay recipe stays only for steps[3]'s retired-type refusal, as the new fixtures.requires[2]; negative[2] is new. acceptance[2] drops its full-width half: the named-form page does not read a form field's `span` (knownGaps[2]). The STALE marker of PR #36793 is removed. A source read, not a run (knownGaps[3]): FormPage.tsx, InternalFormRoute.tsx, RecordFormPage.tsx, ActionRunner.ts, task.view.ts and the showcase's actions, at base 5dbcc02b. A prior verdict on a layout scored from the record form routes does not carry",
+          "ref": "#36798"
         }
       ]
     },
@@ -1700,7 +1718,7 @@
       "title": "Related lists derive from the relationship and page on the server — never fetch every child row — and are read-gated on both ends",
       "since": "v16",
       "status": "active",
-      "revision": 14,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1721,14 +1739,14 @@
         ]
       },
       "steps": [
-        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the column-tier page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
-        "screenshot at a column-tier width (a record view of 760 px or wider, which a 1440×900 window gives; ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor); enumerate the related lists. The page draws the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) over the columns, so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables in the Overview tab's details column, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager; on Overview, the right rail's 其他相关 (Other related) group draws a card for each such list that HAS records, naming at most 3 rows with no pager (ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596) (packages/spec/src/data/field.zod.ts relatedList: 'true/absent = shown as a supporting list, a side card in the record's related column (the shared \"Related\" tab on the tabbed page)'). Below 760 px the same tab row draws over one column: the details, then the rail",
-        "open Contacts' whole list: its card's header or count chip enlarges it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
+        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~460 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the full page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
+        "screenshot at 1440×900; enumerate the related lists. The page draws the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables among the 详情 tab's details and take no tab, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager (packages/spec/src/data/field.zod.ts relatedList: 'true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList)', and for 'primary': 'a body table: part of the record's main content'). With those tables among its details the account's full page never pins the details in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890): the same tab row at every width, and no right rail (retired, #35890)",
+        "open Contacts' whole list: its tab opens it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
         "diff page-1 and page-2 row ids for overlap",
-        "read the Invoices body table in the details column (on the tabbed page it sits inside the Details tab); verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
+        "read the Invoices body table among the 详情 tab's details; verify its title and columns match the declaration on the lookup field (name, status, total, issued_on)",
         "capture every data request issued by the detail page and check each child query for a `top` bound (the console spells its list params without a `$` — top, skip, filter, sort — objectui data-objectstack's adapter; the server's own spelling $top is the same bound)",
-        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts card (or, on the tabbed page, its section of the Related tab) is ABSENT; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
+        "read-gate both-sides: sign in as showcase_contributor (reads showcase_account, NOT showcase_contact); open the Northwind account detail; screenshot and confirm the Contacts tab is ABSENT from the tab row and its 'More N' dropdown; then forge GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] as that persona and capture the 403",
         "repeat as showcase_manager (has showcase_contact read): confirm the Contacts section renders AND the same child query answers 200 with rows"
       ],
       "acceptance": [
@@ -1747,7 +1765,7 @@
         {
           "clause": "related lists are DERIVED from the relationship declaration with no hand-built page: the Account detail auto-renders them (Projects is the pinned example)",
           "oracle": "dom",
-          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables and the Contacts card at a column-tier width (under the Details and Related tabs below 760 px)",
+          "verify": "after screenshot, the relationship-derived lists exist on the stock detail page: the Projects and Invoices body tables among 详情's details and a Contacts tab on the tab row (or in its 'More N' dropdown), at every width",
           "evidence": "detail screenshot"
         },
         {
@@ -1765,7 +1783,7 @@
         {
           "clause": "related lists are READ-gated on BOTH ends: a persona WITHOUT read on the child object (showcase_contributor lacks showcase_contact read) sees NO Contacts section on the account detail (UI courtesy — deriveRelatedLists drops children the user cannot read, objectui#2359) AND a direct child query is refused server-side (403); a persona WITH child read (showcase_manager) sees the section AND the query 200s",
           "oracle": "api",
-          "verify": "as showcase_contributor: screenshot confirms the Contacts card is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the card renders and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
+          "verify": "as showcase_contributor: screenshot confirms the Contacts tab is absent, and the forged GET /api/v1/data/showcase_contact?$filter=[[\"account\",\"=\",\"<northwind id>\"]] returns 403; as showcase_manager: the tab is drawn and the identical query returns 200 with rows — the server is the authority (ADR-0124 D1, RUNNER rule 4), the UI drop is courtesy",
           "evidence": "both personas' detail screenshots + the 403 and the 200 child queries"
         }
       ],
@@ -1867,6 +1885,12 @@
           "date": "2026-11-20",
           "change": "steps[1] re-pointed (#35595, #35596): every related list is a tab of its own, empty or not, and the non-primary children are no longer compact cards in a related column — the Overview rail's 其他相关 group draws a 3-row card for each list with records, and the list's tab is its whole face with the pager. The shared Related tab below 760 px is gone: the same tab row draws over one column. No clause changed. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-22",
+          "change": "steps[0], [1], [2], [5], [7] and acceptance[2] and [5].verify re-pointed after #35890 retired the right rail: no 其他相关 cards, so Contacts is read as its tab (whose face is the whole list with its pager) and the gate's absence is the tab's; the first tab reads 详情 (Details), and the 'primary' Invoices and Projects tables keep the account's full page from pinning the details (recordPagePinsDetails), one tab row at every width. The field.zod.ts quote is today's relatedList describe: main's quote of it (d953558b9) kept verbatim, with the 'primary' clause beside it. No clause changed. Read from source at base 28ba01fe; the describe re-read at main 1cd47628e",
+          "ref": "#36188"
         }
       ]
     },
@@ -2932,7 +2956,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 12,
+      "revision": 15,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2953,11 +2977,12 @@
         "sign in as admin; open showcase_task and switch to the in_progress saved view (stored filter status=in_progress); screenshot",
         "open Filter in the condition row under the view bar (since objectstack#35878 the bar has no Filter or Sort button: the row is always there, with a dashed 「Filter」 button while no filter of the reader's own is set and a 「+」 after the filter chips once one is, both data-testid condition-add-filter; Sort is the row's first control, the dashed 「Sort」 button or, once sorted, the one sort chip 「Sorted by X +N」, data-testid condition-sort, ui/packages/plugin-list/src/conditions/ListConditionControls.tsx). Since objectstack#35549 / #35550 each opens the shared field list (the fields the view shows first, a search box, a type icon per row): Filter → a field → its values applies at once, with no Apply, and each condition shows as a chip in the condition row under the view bar; Sort → the direction on top → a field adds a level, the sort chip before the filter chips counting it as 「+N」. The full builders are one click further, behind the field list's footer: 「Advanced filter」 opens the FilterBuilder (no 「Where」 label any more) and 「All sort levels」 the SortBuilder. Add 2 conditions that leave at least TWO rows, so the sort clause has an order to read — on the stock seed priority = high AND estimate_hours > 4 leaves ONE row on in_progress, a single-datapoint for acceptance[1] (QA run #24616): check the count first and pick a pair that keeps ≥ 2; open the SortBuilder and add a sort (due_date desc); type a term into the list's quick search that keeps rows (acceptance[2] reads it back; QA run #29890 used 'pipeline'); capture the data request",
         "assert the request's `filter` param is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and `sort` carries the toolbar sort (e.g. sort=-due_date) — the console spells its list params without a `$`; the returned rows satisfy view-filter AND toolbar conditions",
-        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the toolbar filter + sort restored",
-        "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
-        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-state:* and list-filters:* keys from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND by the user-keyed row. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
+        "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress through the Tasks nav entry and the view switcher (it lands on /view/showcase_task.in_progress). ⛔ Not the sidebar's 'In-Progress Tasks' Data Slices link: it opens /showcase_task/data?filter[status]=in_progress, a different surface from the saved view; screenshot; confirm the list opens as the view declares it: no toolbar filter chip, the view's own sort, an empty search, and no 「Discard」/「Save」 at the condition row's end (objectstack#35955: opening another object drops the draft). Then build the two conditions, the sort and the search again, open a record from the list and come back with the browser's Back: confirm the conditions, the sort and the search are all still there, with 「Discard」 and 「Save」 at the condition row's end",
+        "read where the toolbar filter and sort are kept: nowhere durable. Since objectstack#35955 they are the list's DRAFT, held in this tab's memory (ui/packages/app-shell/src/views/listDraftStore.ts): no sys_user_preference row is written — no Console writes a ui.list.<object> row any more (GET /api/v1/data/sys_user_preference shows no ui.list.showcase_task row changed) — and localStorage gains no filter, sort or search: the one list key it holds for the reader is list-layout:<userId>:showcase_task, which carries only the column widths, the row height and the tab order (ui/packages/app-shell/src/views/listLayoutStore.ts). Reload the page: the list opens as the view declares it",
+        "sign out through the account menu (the avatar menu's Log out, user.logout in ui/packages/app-shell/src/layout/AppHeader.tsx; never by clearing storage). That Log out itself removes the signed-out user's list-layout:* keys (and any list-state:* or list-filters:* key an earlier Console left) from localStorage (purgeSignedOutUserClientState, ui/packages/auth/src/ActiveOrganizationStorage.ts, run by AuthProvider's sign-out), so the first account's keys are gone by the time the second signs in; the clause holds by that wipe AND because no filter is stored anywhere. Sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
-        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak"
+        "negative sweep: confirm tabs-element userFilters (preset chips, uf__tab) do NOT leak onto the bare object list view — dropdown chips the object view itself declares are allowed there (ADR-0047 amendment) and their uf_<field> params are not a leak",
+        "shared-view save (objectstack#35955): as the seeded admin on the in_progress saved view (a stored view the showcase package takes saves into), change the sort, pick Kanban in the Display panel's layout and a row colour, open a record and come back with Back (the layout and the row colour are part of the draft and are still there), then set the row height to Spacious on the options menu's Row height level. Press 「Save」 at the condition row's end (Save to this view): it asks once, 「Save to this view?」, saying everyone who uses the view will see the changes. Confirm; capture the two writes: PUT /api/v1/meta/view/<view> as a draft carrying If-None-Match: *, then POST /api/v1/meta/view/<view>/publish. The console toasts 「Saved, visible to everyone」 and the condition row's 「Discard」/「Save」 go away. Sign in as the second account and open the same view: it shows the saved sort and the Kanban layout, with the second account's own row height. Back as the admin, change something in the view settings and save it there as a draft without publishing it; change the sort and press 「Save」 again: the console says the view has unpublished changes, to publish or discard them in the view settings first, and writes nothing. Discard that settings draft afterwards"
       ],
       "acceptance": [
         {
@@ -2973,29 +2998,36 @@
           "evidence": "the request URL + row order"
         },
         {
-          "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
+          "clause": "the toolbar filter, sort and search are a DRAFT (objectstack#35955): they survive opening a record and coming back, and are dropped when another object (or view) is opened or the page reloads, so the list then opens as its view declares it; while a draft is held 「Discard」 and 「Save」 sit at the end of the condition row",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the condition row under the view bar shows the two conditions as filter chips and the sort as a sort chip (objectstack#35549 / #35550; the same rows also show in the FilterBuilder and SortBuilder behind the field list's footers), and the quick search box shows the term (kept under list-filters:<userId>:showcase_task:<viewId>, steps[4]); the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
-          "evidence": "before/after screenshots + the re-issued request"
+          "verify": "after a screenshot confirms the list rendered: on return through an in-app nav link from another object the condition row shows no filter chip, the sort chip is the view's own and the quick search box is empty, and the re-issued request carries only the view's filter; after a record opened from the list and Back, the condition row shows the two conditions as filter chips and the sort as a sort chip (objectstack#35549 / #35550), the quick search box shows the term, and the re-issued request carries the same merged `filter` param (the console spells it without a `$`; ui/packages/app-shell/src/views/listDraftStore.ts, objectViewListUrlState.ts)",
+          "evidence": "screenshots after each return (other object; record and Back) + the two re-issued requests"
         },
         {
-          "clause": "the list state is USER-SCOPED — it is the user's own sys_user_preference row (user_id = the signed-in user), and its localStorage cache key embeds the user id (list-state:<userId>:<object>), so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
+          "clause": "the list state is never shared across accounts — the draft is never written to the user's sys_user_preference row or to browser storage, so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
-          "evidence": "the two accounts' storage keys + B's clean toolbar"
+          "verify": "with account A's toolbar filter on screen, read A's sys_user_preference rows (no ui.list.* row written) and localStorage (no filter, sort or search in any key; list-layout:<A's user id>:showcase_task holds the widths, row height and tab order only), then sign A out through the account menu's Log out and sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter",
+          "evidence": "A's preference row + localStorage keys + B's clean toolbar"
         },
         {
           "clause": "uf_* URL params make a filtered list shareable and reproducible: uf_<field> params (comma-joined, each URI-encoded) reproduce the same rows on a fresh load and uf__tab carries the active preset (ADR-0047)",
           "oracle": "network",
           "verify": "opening the copied URL fresh issues the same filtered data request and returns the same rows (app-shell/src/views/userFilterUrlState.ts parseUserFilterParams/applyUserFilterParams)",
           "evidence": "the shared URL + the reproduced rows"
+        },
+        {
+          "clause": "Save to this view on a shared view (objectstack#35955) is offered only to a reader who may edit the view, asks once, then saves the draft and publishes it in one step so every reader sees it on their next read; it never writes the saver's row height into the view, and it never publishes a draft someone else left pending: with one pending it writes nothing and says so",
+          "oracle": "network",
+          "verify": "the confirmed save issues PUT /api/v1/meta/view/<view> (a draft, If-None-Match: *) then POST /api/v1/meta/view/<view>/publish, and the published view carries the new sort, the kanban type and the row colour but not rowHeight tall; the second account's read of the view shows them; with a settings draft pending the second Save issues no PUT and no publish (or only a PUT the server refuses 409 METADATA_CONFLICT) and the pending draft is still there, unpublished (ui/packages/app-shell/src/views/runtime-metadata-persistence.ts saveAndPublishRuntimeMetadata)",
+          "evidence": "the two captured writes + the published view body + the second account's screenshot + the refused second save"
         }
       ],
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
         "tabs-element userFilters (preset chips, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design, as amended by ADR-0047: on an object list view only `element: 'tabs'` userFilters (and quickFilters) are ignored — objectui app-shell warnSuppressedListNav.ts, which logs the suppression — while `element: 'dropdown'` value chips ARE allowed there (examples/app-showcase/src/ui/views/project.view.ts ships them on All Projects, QA run #24616) (the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
         "a cached toolbar filter from account A visible to account B on the same browser (A signed out through the account menu's Log out, never by clearing storage) is a FAIL — the key embeds the user id precisely to prevent that leak",
-        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
+        "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)",
+        "a Save to this view that publishes a view draft which was already pending before the save (saved from the view settings, by anyone) is a FAIL — the draft write carries the first-write pin, so a pending draft refuses it; a shared save that writes the saver's row height into the view is a FAIL too"
       ],
       "traps": [
         "hydration-race",
@@ -3008,7 +3040,7 @@
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
-        "objectui: packages/app-shell/src/context/ListPreferencesProvider.tsx (objectui#12418 — the per-user ui.list.<object> sys_user_preference row, cached in localStorage list-state:<user>:<object>); packages/app-shell/src/views/listFilterStorage.ts now keeps only the search term",
+        "objectui: packages/app-shell/src/views/listDraftStore.ts (objectstack#35955 — the list's draft: filters, sort, grouping, search and columns, held in the tab's memory for one reader, object and view); packages/app-shell/src/views/listLayoutStore.ts (objectstack#35955 — the reader's column widths, row height and tab order, kept in this browser only under list-layout:<user id>:<object>; the ui.list.<object> sys_user_preference row is retired)",
         "objectui: packages/app-shell/src/views/userFilterUrlState.ts (uf_* params, ADR-0047)",
         "ADR-0053 (userFilters belong to interface pages, suppressed on object list views); examples/app-showcase/src/ui/views/task.view.ts",
         "cross-ref: records-forms.list-view-capabilities (saved-view-filter / userFilters negative)"
@@ -3085,6 +3117,139 @@
           "date": "2026-11-20",
           "change": "steps[1] re-pointed to the two-row list toolbar (objectstack#35878): the view bar has no Filter or Sort button; Filter is the condition row's dashed 「Filter」 button or its 「+」 (condition-add-filter) and Sort its dashed 「Sort」 button or its one sort chip (condition-sort).",
           "ref": "#35878"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-21",
+          "change": "steps[3], steps[4], acceptance[2] (clause, verify, evidence), acceptance[3] (clause, verify, evidence) and source[1] re-pointed to the list draft (objectstack#35955): a toolbar filter, sort and search are a draft held in the tab's memory, kept on opening a record and coming back and dropped on opening another object or view or on a reload; they are no longer stored in the user's ui.list.<object> row. The in-app-navigation restore of revision 3 is replaced by the record round trip, and the user-scope clause now reads that nothing is stored at all. Not loosened: a second account must still see none of the first account's filters",
+          "ref": "#35955"
+        },
+        {
+          "revision": 14,
+          "date": "2026-11-21",
+          "change": "steps[8], acceptance[5] and negative[4] added for the shared-view save (objectstack#35955 PR 2): Save to this view on a stored view an administrator may edit asks once, then saves the draft and publishes it; the saver's row height stays theirs; a pending view draft is never published on anyone's behalf. steps[8] also reads the Display panel's layout and row colour back across a record round trip, since they are now part of the draft. Not loosened: every earlier clause is unchanged",
+          "ref": "#35955"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-21",
+          "change": "steps[4], steps[5], acceptance[3] (verify) and source[1] re-pointed (objectstack#35955 PR 3): the ui.list.<object> sys_user_preference row is retired, so no Console writes it; the one list key the reader keeps is list-layout:<user id>:<object> in this browser, with the widths, row height and tab order only, and sign-out removes it with any list-state:* / list-filters:* key an earlier Console left. Not loosened: nothing of a toolbar filter, sort or search is stored anywhere, and a second account still sees none of the first account's",
+          "ref": "#35955"
+        }
+      ]
+    },
+    {
+      "id": "records-forms.list-header-menu-and-sort-levels",
+      "title": "A list page's column header opens a menu (Sort ascending, Sort descending, Hide column) instead of sorting, a pick keeps every level of a multi-level sort, and the sort chip's panel reorders the levels by drag or arrow keys",
+      "since": "v18.7",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "showcase_task's All Tasks list (examples/app-showcase/src/ui/views/task.view.ts#TaskViews): columns Title, Project, Assignee, Status, Priority, Due Date, Progress, and no declared sort, so the list opens with no sort level",
+          "the 10 seeded tasks (examples/app-showcase/src/data/seed/index.ts), which give every sort below at least two rows to order",
+          "the Project column is a master_detail field (examples/app-showcase/src/data/objects/task.object.ts), which the list does not sort (a relational column is sortable: false in ui/packages/plugin-grid/src/ObjectGrid.tsx#withSortability): it is the non-sortable header",
+          "the English console, so the menu reads Sort ascending / Sort descending / Hide column and the sort panel Sort by / Then by / Add sort"
+        ]
+      },
+      "steps": [
+        "sign in as admin; open showcase_task's All Tasks list at 1440x900; the condition row's Sort is the dashed 「Sort」 button (data-testid condition-sort, data-levels 0); keep the network panel open from here on",
+        "click the Due Date column header's text; read what opens (data-testid column-context-menu, its entries role=menuitem) and whether a data request with a changed `sort` went out; click the same header again",
+        "open the Due Date header's menu again and choose 「Sort descending」; capture the data request and read the header's arrow and the sort chip",
+        "click the sort chip once: it opens every level in one panel (data-testid sort-chip-panel) and changes nothing by itself; choose 「Add sort」, set the new level's field (data-testid sort-builder-field) to Priority and leave its direction A → Z; press Esc and capture the data request; the headers now carry the numbered marks 1 and 2",
+        "with those two levels, open the Title header's menu and choose 「Sort ascending」; capture the request. Then open the Priority header's menu and choose 「Sort descending」; capture the request",
+        "keyboard: Tab to the Status header (a header that opens the menu is a tab stop) and press Enter; read where focus lands; press ArrowDown, then Esc; read the sort and where focus is. Repeat the open with Space and with ArrowDown on the header, and once choose an entry with Enter",
+        "click the Project header: read the menu's entries; choose 「Hide column」 and read the grid and the request's `sort`",
+        "click the sort chip (now 「Sorted by Priority」 with 「+2」) to open the panel; focus the second level's handle (aria-label 「Drag to reorder」, data-testid sort-builder-handle) and press ArrowUp; read the level order, the 「Sort by」 / 「Then by」 labels and which handle has focus; press ArrowUp again on the now-first handle; then drag the third level's handle onto the first row; press Esc and capture the data request after each move",
+        "remove levels with 「Remove sort」 until one is left, and read its handle"
+      ],
+      "acceptance": [
+        {
+          "clause": "a click on a column header opens the column menu below it and changes no sort; a second click on the same header shuts it (objectstack#35876)",
+          "oracle": "network",
+          "verify": "after steps[1]'s first click data-testid column-context-menu is visible with the entries Sort ascending, Sort descending and Hide column, the header carries aria-expanded=true, and no data request carries a `sort` different from the one before the click; after the second click the menu is gone",
+          "evidence": "the menu screenshot and the network log around the click"
+        },
+        {
+          "clause": "the entry chosen in the menu is the sort, ordered by the server: the request carries it and the chip names it",
+          "oracle": "network",
+          "verify": "after steps[2] the data request carries sort=-due_date (the console's `field,-other_field` shorthand, not $orderby) and the rows come back ordered by Due Date, newest first, over at least two rows; the chip reads 「Sorted by Due Date」 (data-levels 1)",
+          "evidence": "the request URL and the row order"
+        },
+        {
+          "clause": "a header pick over a sort of two levels or more keeps every level: the picked column becomes the first level, the others keep their order after it, and a column already in the sort moves up with the picked direction; over no sort or one level the pick replaces the sort",
+          "oracle": "network",
+          "verify": "steps[3] sends sort=-due_date,priority; steps[4]'s Title pick sends sort=title,-due_date,priority (three levels, title first) and its Priority pick sends sort=-priority,title,-due_date (still three levels); steps[2] over no sort sent the one level alone; the headers' numbered marks follow the request's order",
+          "evidence": "the three request URLs and a screenshot of the header marks"
+        },
+        {
+          "clause": "the menu is reachable from the keyboard: Enter, Space or ArrowDown on the focused header opens it with focus on its first entry, the arrows move through it, Enter chooses, and Esc shuts it without touching the sort and gives focus back to the header",
+          "oracle": "dom",
+          "verify": "in steps[5] document.activeElement is the menu's first role=menuitem after each open, the next entry after ArrowDown, and the Status header (th) after Esc; the request's `sort` is unchanged by the Esc",
+          "evidence": "the activeElement read after each key"
+        },
+        {
+          "clause": "a header that does not sort opens a menu with Hide column alone, and Hide column takes the column off the grid without changing the sort",
+          "oracle": "dom",
+          "verify": "in steps[6] the Project menu holds one role=menuitem, Hide column, and no Sort ascending or Sort descending; after it the grid has no th[data-column-key=project] and any request still carries the sort steps[4] left",
+          "evidence": "the menu screenshot and the header row after the hide"
+        },
+        {
+          "clause": "a click on the sort chip opens every level in one panel and never flips a direction",
+          "oracle": "network",
+          "verify": "after the chip click in steps[3] and steps[7] data-testid sort-chip-panel is visible with one data-testid sort-builder-row per level, and no data request with a changed `sort` went out on the click",
+          "evidence": "the panel screenshot and the network log around the click"
+        },
+        {
+          "clause": "the sort panel reorders the levels: ArrowUp / ArrowDown on a focused handle moves its level one place and the handle keeps focus, a drag of a handle onto another row moves the level there, an arrow past either end changes nothing, and the request's sort follows the new order",
+          "oracle": "network",
+          "verify": "in steps[7] ArrowUp on the second handle makes that level the first row (labelled 「Sort by」) and the same handle is document.activeElement; ArrowUp on the first handle leaves the order as it was; the drag puts the third level first; each move's data request lists the levels in the panel's order; in steps[8] the one remaining handle carries aria-disabled=true and tabindex=-1",
+          "evidence": "the panel order and the request URL after each move"
+        },
+        {
+          "clause": "the pins pass at the run subject sha",
+          "oracle": "test",
+          "verify": "from ui/ run with vitest ui/packages/components/src/renderers/complex/__tests__/data-table-header-menu-35876.test.tsx, ui/packages/plugin-list/src/__tests__/ListView.headerMenuSort-35876.test.tsx and ui/packages/components/src/__tests__/sort-builder-reorder-35876.test.tsx, and ui/e2e/list-condition-row-35549.spec.ts with Playwright (Chromium); each reports at least one test and 0 failed",
+          "evidence": "the vitest and Playwright summary lines, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a header click on the list page that sorts, or that sends a request with a changed `sort`, is a FAIL: the header opens the menu and the sort is the entry chosen there",
+        "a header pick that drops a level of a sort of two levels or more is a FAIL",
+        "Sort ascending or Sort descending in the menu of a header that does not sort (Project) is a FAIL",
+        "a sort chip click that reverses a direction is a FAIL: the chip opens the panel",
+        "a reorder that moves the panel's rows but leaves the request's `sort` in the old order is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "stale-console-bundle"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/components/src/renderers/complex/__tests__/data-table-header-menu-35876.test.tsx (the header opens the menu, the keyboard, a non-sortable header, Hide column, and click-to-sort outside the provider), ui/packages/plugin-list/src/__tests__/ListView.headerMenuSort-35876.test.tsx (the pick over zero, one and two levels, the chip, a handle's ArrowUp and a mouse drag), ui/packages/components/src/__tests__/sort-builder-reorder-35876.test.tsx (the handle, both ends, a drag, a single level), ui/e2e/list-condition-row-35549.spec.ts (a real handle drag in the chip's panel and a header menu pick in Chromium, on a mounted ListView with an in-memory data source, not a live stack); no pin reads the console's data request against a running server"
+      },
+      "source": [
+        "ui/packages/components/src/context/gridHeaderMenu.tsx#GridHeaderMenuProvider",
+        "ui/packages/components/src/renderers/complex/data-table.tsx#openHeaderMenu",
+        "ui/packages/core/src/utils/column-sortability.ts#withHeaderSortPick",
+        "ui/packages/plugin-list/src/ListView.tsx#handleHeaderSort",
+        "ui/packages/components/src/custom/sort-builder.tsx#moveItem",
+        "ui/packages/plugin-list/src/conditions/ListConditionControls.tsx",
+        "#35876",
+        "cross-ref: records-forms.adhoc-filter-sort-builder (building a filter and a sort, the view-filter merge and the draft)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-22",
+          "change": "initial — the column-header menu and the sort-level reorder that #35876 added (PR #35909), read from source at base 4e55e4eb; no live run made",
+          "ref": "#35922"
         }
       ]
     },
@@ -3583,7 +3748,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 11,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -3609,23 +3774,23 @@
       "steps": [
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row height on the Row height level of the list's options menu (the toolbar's options trigger, then 行高 / Row height: three choices, 紧凑 / 标准 / 宽松 — Compact / Standard / Spacious, ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx; a gallery's Row height level picks its card size the same way) — three modes, stored as rowHeight compact / medium / tall (the spec's five row heights compact/short/medium/tall/extra_tall narrow onto these three: objectui core normalize-list-view.ts DENSITY_MODE_TO_ROW_HEIGHT / ROW_HEIGHT_TO_DENSITY_MODE)",
-        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
-        "group-by status ('Add group field' pre-selects the first field, Title, and groups at once, so switch it to Status). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
+        "reload; confirm the column widths and row-height restored — they are kept in this browser for the signed-in user, localStorage list-layout:<userId>:showcase_task (perView.<view>.widths / rowHeight, objectstack#35955; before it the user's sys_user_preference ui.list.showcase_task row, objectui#12418). A column ORDER is not: since objectstack#35955 it is the list's unsaved draft, so a reload reopens on the view's own order unless it was saved into a view, with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also open the list in a FRESH browser context as the same user: the layout does NOT follow the user there — it opens on the view's own widths and row height, by design (objectstack#35955)",
+        "group-by status ('Add group field' adds no field and does not group: the field dropdown opens listing only the fields that can group, single select or radio, tick, person and linked record, so no Title, number or date, objectstack#36204; pick Status there. Closing it without a pick leaves the grid ungrouped, and a grid with no such field draws the button disabled with its reason). A runtime grouping lives in the list's URL (uf__group, ui/packages/app-shell/src/views/objectViewListUrlState.ts), not in sys_user_preference: reloading that URL keeps it, a reload of the bare list URL reopens on the view's own grouping by design, and steps[6] reads it that way (QA run #33861). Confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
         "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
         "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
-        "reload once more; confirm every personalization survives; capture a screenshot per variant"
+        "reload once more; confirm every personalization this item stores survives (column widths, row height); capture a screenshot per variant"
       ],
       "acceptance": [
         {
-          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: reorder persists across a reload only on a grid that enables it (score it there, or record n/a on the stock showcase_task list view); a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
+          "clause": "PER-VARIANT: column RESIZE persists across a reload — the widths restore from the column-state store (localStorage grid-columns-<object>[-<view>], or a persisted view override). Column REORDER and PIN are not stock list-view personalizations, and the clause does not assert them there. ObjectGrid enables drag-reorder only from `reorderableColumns` (default false), which is an object-grid component prop (packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema), not a ListView key. Pinning is AUTHOR-declared per column (`pinned`, packages/spec/src/ui/view.zod.ts#ListColumnSchema), with no runtime pin control, and the persisted column state carries widths and order, never pins. So: a column order is the list's unsaved draft since objectstack#35955 and does NOT persist across a reload (it is kept only by Save into a view); on a grid that enables reorder, score that the reload reopens on the view's order, or record n/a on the stock showcase_task list view; a column the view declares `pinned` renders pinned after the reload (n/a when the view declares none, as the stock task views do)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order only). The reorder and pin variants are judged as the clause scopes them",
+          "verify": "after a screenshot confirms render, the reloaded grid shows the same widths (ObjectGrid columnState priority: props override > localStorage > empty; saveColumnState persists widths and order, and the console hands the grid the reader's widths alone (objectViewListRenderer.tsx persistListColumnState), so the props override carries no order after a reload). The reorder and pin variants are judged as the clause scopes them",
           "evidence": "before/after-reload screenshots + the storage value"
         },
         {
           "clause": "the toolbar row height persists across reload (Compact / Standard / Spacious — the runtime control offers three modes over the spec's five rowHeight values)",
           "oracle": "dom",
-          "verify": "the reloaded grid renders at the chosen density (ObjectGrid rowHeightMode), and the preference row's rowHeight reads compact / medium / tall for the three modes",
+          "verify": "the reloaded grid renders at the chosen density (ObjectGrid rowHeightMode), and the list-layout entry's rowHeight reads compact / medium / tall for the three modes",
           "evidence": "before/after screenshots"
         },
         {
@@ -3641,10 +3806,10 @@
           "evidence": "post-reload screenshot"
         },
         {
-          "clause": "the column state follows the USER, not the browser: since objectui#12418 widths and row height persist in the user's own sys_user_preference row (ui.list.<object>, perView.<view>.columnState / rowHeight), so they restore for that user in a fresh browser and never for another account; the component's localStorage key grid-columns-<object>[-<view>] carries no user id and is only a cache under that row",
+          "clause": "the column state is the reader's in THIS browser: since objectstack#35955 widths and row height are kept in localStorage list-layout:<userId>:<object> (perView.<view>.widths / rowHeight), keyed by the signed-in user's id, so they restore for that user in this browser, never for another account here, and do not follow the user to a fresh browser; no sys_user_preference row is written. The component's own localStorage key grid-columns-<object>[-<view>] carries no user id and is only its cache: the page hands the grid the reader's layout, or none",
           "oracle": "dom",
-          "verify": "the sys_user_preference ui.list.showcase_task row carries the widths / row height under the signed-in user's user_id, and the same user in a fresh browser context sees them restored; a second account on the same browser does not (objectui app-shell/src/context/ListPreferencesProvider.tsx). The localStorage grid-columns-<object>[-<view>] key carries no user id and is only the cache",
-          "evidence": "the preference row + the fresh-context restore + the second account's default layout"
+          "verify": "localStorage list-layout:<userId>:showcase_task carries the widths / row height under the signed-in user's id, and GET /api/v1/data/sys_user_preference shows no ui.list.showcase_task row written; the same user in a fresh browser context opens on the view's own widths and row height; a second account on the same browser does not see the first account's (ui/packages/app-shell/src/views/listLayoutStore.ts)",
+          "evidence": "the list-layout entry + no preference row + the fresh-context default + the second account's default layout"
         }
       ],
       "negative": [
@@ -3658,7 +3823,7 @@
       "source": [
         "objectui: packages/plugin-grid/src/ObjectGrid.tsx (columnState + saveColumnState localStorage grid-columns-*, rowHeightMode, schema.grouping, useRowColor, useColumnSummary)",
         "objectui: packages/components/src/renderers/complex/data-table.tsx (the underlying table)",
-        "objectui: packages/app-shell/src/views/listFilterStorage.ts (documents grid-columns-* is NOT user-scoped by design)",
+        "objectui: packages/app-shell/src/views/listLayoutStore.ts (list-layout:<user id>:<object>, the reader's widths, row height and tab order in this browser, objectstack#35955); packages/plugin-grid/src/objectGridColumnState.ts (grid-columns-* is NOT user-scoped by design: the component's cache)",
         "examples/app-showcase/src/ui/views/task.view.ts",
         "packages/spec/src/ui/component.zod.ts#ObjectGridPropsSchema (reorderableColumns is a grid component prop, not a ListView key) + packages/spec/src/ui/view.zod.ts#ListColumnSchema (pinned is declared per column by the author) + objectui packages/plugin-grid/src/ObjectGrid.tsx (reorderableColumns defaults false; the persisted columnState holds widths and order)"
       ],
@@ -3710,6 +3875,24 @@
           "date": "2026-11-19",
           "change": "steps[1] and acceptance[1].clause re-pointed to the options menu's Row height level: three named choices (紧凑 / 标准 / 宽松, Compact / Standard / Spacious) replace the cycling density button, on a grid and on a gallery (its card size). Stored values unchanged (rowHeight compact / medium / tall). No clause's meaning changed.",
           "ref": "#35551"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-21",
+          "change": "steps[2], steps[6] and acceptance[0] (clause, verify) re-pointed to the list draft (objectstack#35955): a column order is the list's unsaved draft, kept only by Save into a view, so it no longer comes back after a reload; the widths and the row height still persist in the user's ui.list.<object> row. Not loosened: widths and row height must still survive a reload and follow the user to a fresh browser",
+          "ref": "#35955"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-21",
+          "change": "steps[2], acceptance[1] (verify), acceptance[4] (clause, verify, evidence) and source[2] re-pointed (objectstack#35955 PR3, Sales ruling D1 on #35955): column widths and row height are kept in this browser only, localStorage list-layout:<user id>:<object>, and the ui.list.<object> row is retired. Changed on purpose: they no longer follow the user to a fresh browser. Not loosened: they still survive a reload in the same browser and never reach another account",
+          "ref": "#35955"
+        },
+        {
+          "revision": 11,
+          "date": "2026-11-22",
+          "change": "steps[3] re-pointed (objectstack#36204): 'Add group field' no longer pre-selects the first column; it opens the field dropdown without grouping, the dropdown lists only fields that can group (single select or radio, tick, person, linked record), the grouping happens on the pick of Status, and with no such field the button is disabled with its reason. No clause changed.",
+          "ref": "#36204"
         }
       ]
     },
@@ -4083,7 +4266,7 @@
       "title": "Record edit undo: toast Undo / Ctrl+Z restores the prior value through the API and logs a revert; undo after a concurrent change must not silently clobber",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -4103,7 +4286,7 @@
       "steps": [
         "open a record; run the packaged undoable action (fixtures.requires[0]) on it; confirm the success toast shows an Undo button. An inline edit offers none by design",
         "click Undo (or press Ctrl+Z); capture the resulting update; re-read the record over the API and confirm the prior value is restored",
-        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). The rail card itself shows only the newest three lines, read-only, with no chips. Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
+        "read the record's field-change history on the record page's timeline stream, under its Changes chip (变更). Record page v3 draws no tab named History at any width (#27055). The stream's whole face, with its chips, is the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890). A full page wide enough pins the details in a left column with the other tabs beside them, and then the row has no 详情 tab (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails). Also read sys_audit_log for the record over the API, and confirm a revert entry was added (a forward write, not a silent rollback)",
         "press Ctrl+Shift+Z (redo); confirm the edited value is restored",
         "CONCURRENT-CLOBBER probe: in session A make the undoable edit; in session B change the SAME field and save; back in A, click Undo",
         "observe and FLAG whether A's undo carries an OCC guard or silently overwrites B's value"
@@ -4200,6 +4383,12 @@
           "date": "2026-11-20",
           "change": "fixtures.requires[0] and knownGaps[1] follow #35685: a list grid's cell save now offers its own Undo (the save toast's button and Ctrl+Z / Cmd+Z on a cell, a new If-Match update of the prior value), so 'inline grid edits push none' is narrowed to the shared globalUndoManager stack these clauses read. That Undo is the grid's own stack, with no redo, and is not this item's lifting fixture; `blocked` unchanged. No clause changed. Read at the PR's head",
           "ref": "#35898"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-22",
+          "change": "steps[2] re-pointed after #35890 retired the right rail: the stream opens from the Activity tab or ?related=timeline (the 最近动态 card is gone), the first tab reads 详情 (Details), and a wide full page pins the details left of the tabs with no 详情 tab (recordPagePinsDetails). No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
@@ -5621,10 +5810,10 @@
     },
     {
       "id": "records-forms.field-history-tracking",
-      "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
+      "title": "Field-change values: an edit lands the ADR-0052 §5b old→new timeline summary with display values unless the object or field turns them off (#36290), and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 14,
+      "revision": 16,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5645,7 +5834,7 @@
         "boot the showcase on its own port and DB; sign in as admin; open a seeded account record",
         "edit the TRACKED select `industry` (e.g. Technology → Finance); save; read the record's sys_activity rows over the API and open the timeline",
         "edit an UNTRACKED field (e.g. website) alone; save; re-read sys_activity for the record",
-        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Overview (概览), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), from the title of the Overview tab's 最近动态 (Recent activity) card, in the right rail beside the details (below them in one column under 760 px, ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPageTierFor; ui/packages/plugin-detail/src/RecordSummaryRail.tsx, #35596), or by ?related=timeline (#27524). QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
+        "record the network log from page load, open the account record and select its timeline stream's Changes chip (变更). Record page v3 has no History tab at any width (#27055). The chips are on the stream's whole face, the 动态 (Activity) tab: open it from the Activity tab of the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595) or by ?related=timeline (#27524); the right rail and its 最近动态 card are retired (#35890), and the account's 'primary' Invoices and Projects tables among its details keep its full page from pinning them in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails), so 详情 stays the first tab at every width. QA run #28656 read the tab row at 1440, 1000 and 700 px. Then open a seeded task's detail and read the network log again",
         "GET /api/v1/auth/me/permissions and compare apiOperations for showcase_account vs showcase_task"
       ],
       "acceptance": [
@@ -5656,15 +5845,15 @@
           "evidence": "the sys_activity row + a timeline screenshot"
         },
         {
-          "clause": "an UNtracked-field edit lands NO tracked-change summary — the activity (if any) falls back to the generic 'Updated <object>' with no per-field old→new for the untracked key (renderTrackedChangeSummary returns null when no tracked field changed)",
+          "clause": "an edit of a field that declares no trackHistory ALSO lands its old→new values: since #36290 they show for every changed field unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false (a field's trackHistory: false reads like absent) (changeValuesShownFor, packages/plugins/plugin-audit/src/audit-writers.ts). The label-only frame of a turned-off field is the unit pins' (audit-writers.test.ts '[#36290]'), since no showcase object turns values off",
           "oracle": "api",
-          "verify": "post-edit sys_activity for the website-only edit carries no field-diff summary naming website",
+          "verify": "post-edit sys_activity for the website-only edit carries 'Website: <old url> → <new url>', message key fieldChanges",
           "evidence": "the sys_activity read"
         },
         {
           "clause": "the record page's sys_audit_log field-change history gates on OBJECT-level enable.trackHistory, both ways: the account detail (flag true) reads sys_audit_log and its timeline stream's Changes chip lists the tracked edits as old → new lines with display values; the task detail (no enable block — per-field flags alone do not summon it) makes NO sys_audit_log read",
           "oracle": "network",
-          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, at every width: the Overview rail's 最近动态 card draws the stream at open, #35596; a drawer, which draws no rail, reads it when its Activity tab opens) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
+          "verify": "the network log after settle: one sys_audit_log read for the account record (at page load, whichever tab shows: a laid-out synthesized page reads it at open, historyConsumerOnScreen in ui/packages/app-shell/src/views/RecordDetailView.tsx, pinned by ui/packages/app-shell/src/views/RecordDetailView.recordOpenWaves-13010.test.tsx 'a trackHistory record reads the audit log at open'; the rail that drew the stream is retired, #35890) and none for the task; screenshot the account's Changes chip showing the industry edit. Gating ruled at ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled: enable.trackHistory explicitly true, sys_audit_log registered, the viewed object not sys_audit_log itself; and the read serves only the synthesized page's stream, never an assigned page); the read's rows reach the stream through RecordFieldChangesContext as field_change items (ui/packages/plugin-detail/src/recordTimelineStream.ts#auditEntriesToFeedItems). The task half is over-determined (knownGaps): record which gate the verdict rests on. ⛔ An empty Changes chip is never an absence oracle: the chip also lists the stream's sys_activity created/updated rows (ACTIVITY_TYPE_TO_FEED_TYPE maps both to field_change). Measured on a seeded account, the chip showed a sys_activity 'Updated Account …' row beside the audit read. ⛔ Nor is a History tab: record page v3 removed it at every width (#27055; buildDefaultPageSchema.test.ts asserts 'no Activity or History tab'), so looking for one fails a working product (QA run #27438)",
           "evidence": "the two network logs + the account's Changes screenshot"
         },
         {
@@ -5681,7 +5870,7 @@
         }
       ],
       "negative": [
-        "an untracked edit producing an old→new diff in the sys_activity summary is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note), and the per-field opt-in governs exactly that surface. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
+        "an edit of a field that declares no trackHistory landing WITHOUT its old→new values in the sys_activity summary is a FAIL (#36290: on unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false), and so is a value from a field with fieldHistory: false. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
         "a sys_audit_log read on the task detail is a FAIL — per-field flags without the object-level opt-in must not summon the field-change history; judged on the network log, never on an empty Changes chip or a missing tab (acceptance[2].verify says why)",
         "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that). To stage it on showcase_task's status, walk its state machine: a direct backlog → in_progress PATCH answers 400 invalid_transition, so PATCH backlog → todo → in_progress (examples/app-showcase/src/data/objects/task.object.ts, transitions)"
       ],
@@ -5691,11 +5880,11 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); ui/e2e/live/record-history-display.spec.ts (the record history's display contract, which the cross-ref in source[4] assigns to records-forms.crud-roundtrip. It runs only against the vite console dev server, LIVE_APP_URL, default http://localhost:5180 (ui/playwright.live.config.ts), never a built /_console boot: its page.goto paths are root-relative (/apps/…). At 1440×900, a column tier whatever the sidebar does, it opens the timeline stream's Changes chip on showcase_account in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true DOM half; it reads no network log and never opens the task detail, so the read gate both ways is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no sys_audit_log read from the task detail) stay live browser legs: they are judged on the network log of the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); ui/e2e/live/record-history-display.spec.ts (the record history's display contract, which the cross-ref in source[4] assigns to records-forms.crud-roundtrip. It runs only against the vite console dev server, LIVE_APP_URL, default http://localhost:5180 (ui/playwright.live.config.ts), never a built /_console boot: its page.goto paths are root-relative (/apps/…). At 1440×900, a column tier whatever the sidebar does, it opens the timeline stream's Changes chip on showcase_account in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true DOM half; it reads no network log and never opens the task detail, so the read gate both ways is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands 'Website: https://before.example → https://after.example', message key fieldChanges, #36290) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no sys_audit_log read from the task detail) stay live browser legs: they are judged on the network log of the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
-        "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
+        "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (values on unless enable.fieldHistory: false, #36290); packages/spec/src/data/api-derivation.ts",
         "ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled, the three-precondition gate on the sys_audit_log read; record page v3 hands its rows to the timeline stream, #27055)",
         "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)",
         "cross-ref records-forms.crud-roundtrip clause 5 (acceptance[4]) — it owns the record history's display contract on the create/update pair (option labels, localized dates, real actor); this item owns the tracked/untracked boundary and the two gating directions, so do not re-score that contract here"
@@ -5784,6 +5973,18 @@
           "date": "2026-11-20",
           "change": "steps[3] and acceptance[2].verify re-pointed (#35595, #35596): the tab row is Overview, one tab per related list, Attachments, Approvals, Activity; the right column's 动态 panel became the Overview rail's 最近动态 card, which draws the stream at open, so the audit read at page load stands; a drawer draws no rail and reads it when its Activity tab opens. No clause changed. Read from source at the PR's head.",
           "ref": "#35595"
+        },
+        {
+          "revision": 15,
+          "date": "2026-11-22",
+          "change": "steps[3] and acceptance[2].verify re-pointed after #35890 retired the right rail: the stream opens from the Activity tab or ?related=timeline, the first tab reads 详情 (Details), and the account's body tables keep its page from pinning (recordPagePinsDetails). The audit read at page load now rests on RecordDetailView's historyConsumerOnScreen (a laid-out synthesized page reads it at open) instead of the retired 最近动态 card; the drawer half, which named the rail, is dropped. No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-22",
+          "change": "title, acceptance[1], negative[0], automated.ref and source[1] re-pointed: field-change values now show by default (ruling 7076513167). A field with no trackHistory lands old → new; enable.fieldHistory: false (object) or fieldHistory: false (field) turns them off, and a field's trackHistory: false reads like absent; enable.trackHistory keeps the ledger read and the history op. The dogfood pin's website leg reads the values. Read at base SHA c448c615",
+          "ref": "#36290"
         }
       ]
     },
@@ -6643,7 +6844,7 @@
       "title": "A multi-currency invoice stores its home-currency amount at the rate in force on its document date, refuses a date no rate covers, and keeps a currency-less amount blank",
       "since": "v18.4",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -6658,14 +6859,14 @@
           "the console bundle for the browser legs (pnpm console:build)"
         ],
         "knownGaps": [
-          "invoice lines and the Subtotal (`total`) roll-up stay dynamic-mode currency: the showcase's invoice lines declare no record-mode amount, and a summary over a record-mode child amount is refused (packages/objectql/src/record-currency-aggregate-door.ts#RecordCurrencySummaryRefusedError). On a EUR or JPY invoice those two show the home currency's symbol while `amount` shows the record's own. That is the platform's current shape, not a failure of this item. A master_detail child following its parent's currency (currencyField PARENT_FIELD.CODE_FIELD) is admitted by the spec since #31956, but the engine does not project through the path at 43a51b55 (#31911 open): records-forms.master-detail-child-follows-parent-currency (planned) is where that lands",
+          "the invoice lines and the Subtotal (`total`) roll-up follow the invoice's currency since #36005: `showcase_invoice_line.unit_price` and `amount` declare currencyField `invoice.currency_code` and `total` declares the invoice's `currency_code` (examples/app-showcase/src/data/objects/invoice.object.ts, ADR-0144 D2 and D6 as amended). So every seed invoice with a line refuses a change of its `currency_code` (VALIDATION_FAILED, invalid_value on currency_code, naming showcase_invoice_line: the lock under D2), which is why steps[2] PATCHes a draft with no line, and a priced line under an invoice with no code is refused ERR_CURRENCY_CODE_REQUIRED. This item does not score either refusal; the planned item records-forms.master-detail-child-follows-parent-currency is where they are scored",
           "a host with no .env reader and no other currency source has no home currency, so every coded seed invoice is refused ERR_HOME_CURRENCY_UNSET and dropped by the seeder with a warning: the invoice list is empty. That is a fixture failure (requires[0]), scored blocked(fixture), never a FAIL of these clauses"
         ]
       },
       "steps": [
         "GET /api/v1/data/showcase_invoice?filter currency_code in EUR, JPY and read amount, currency_code, invoice_date, amount_home and amount_rate on each; GET /api/v1/data/sys_exchange_rate for the rows those dates select",
         "POST a showcase_invoice with no currency_code (name, account, status draft) and read it back",
-        "PATCH a USD draft invoice's currency_code to EUR and read amount_home / amount_rate again",
+        "POST a USD draft showcase_invoice with no line (name, account, status draft, currency_code USD), then PATCH its currency_code to EUR and read amount_home / amount_rate again. Not a seed draft: INV-1002 carries a line, so its code is locked (fixtures.knownGaps[0])",
         "POST a showcase_invoice with currency_code JPY and invoice_date 2024-06-01 (before any JPY rate)",
         "in the console, open a EUR invoice's detail page, then its edit form, and change currency_code and invoice_date on the form without saving"
       ],
@@ -6739,6 +6940,12 @@
           "date": "2026-11-14",
           "change": "fixtures.requires[2] (the seed line): every foreign invoice now carries a non-zero total, not only INV-1004 and INV-1008. PR #33376 seeded one line each under INV-1007, INV-1009 and INV-1010, so the per-invoice recomputation of acceptance[0] no longer passes on 0 ÷ rate for three of the five. Measured on a stock boot of PR #33376's head (2b2bca197): INV-1007 JPY 95400 → 629.7 at 151.5, INV-1009 EUR 2016 → 2191.3 at 0.92, INV-1010 EUR 276 → 300 at 0.92. No clause changed",
           "ref": "#33351"
+        },
+        {
+          "revision": 4,
+          "date": "2026-11-22",
+          "change": "fixtures.knownGaps[0] and steps[2]: the invoice lines and the Subtotal now follow the invoice's currency (#36005), so a seed invoice with a line locks its currency_code and the old steps[2] PATCH of the seed USD draft INV-1002 (one line) is refused. steps[2] now POSTs a USD draft with no line and PATCHes that; acceptance[3] reads the same id before and after, as before. Measured on a stock boot of this branch: PATCH INV-1010 EUR to USD answers 400 naming showcase_invoice_line; a lineless USD draft PATCHed to EUR answers 200. No clause changed",
+          "ref": "#36005"
         }
       ]
     },
@@ -7235,10 +7442,10 @@
     },
     {
       "id": "records-forms.master-detail-body-tables",
-      "title": "A master_detail child is a table in the record overview by default: above the field sections, drawn when empty, capped with show-all, totalled by the server, and never a tab or a side card",
+      "title": "A master_detail child is a tab of its parent's record page by default; a parent field group naming it also draws it as a body table at that group's position — drawn when empty, capped with show-all, totalled by the server — and that page never pins its details in a left column",
       "since": "v18.6",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -7248,74 +7455,86 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
-          "showcase_task.project is a master_detail FK to showcase_project with no relatedList and no inlineEdit, relatedListTitle 'Tasks' (examples/app-showcase/src/data/objects/task.object.ts); the seed gives 'Website Relaunch' five tasks",
-          "a project with no task: create one ('QA Empty Project') before step 3"
+          "showcase_expense_line.expense_report is a master_detail FK to showcase_expense_report declaring no relatedList, and the report's fieldGroups place it: report, then { key: 'lines', label: 'Expense Lines', relatedList: 'showcase_expense_line' }, then totals (examples/app-showcase/src/data/objects/expense-report.object.ts, #35921); the report declares no relatedLists, so the lines keep their tab. The seed gives EXP-2001 four lines (examples/app-showcase/src/data/seed/index.ts). Not showcase_invoice, whose group places its lines the same way: its default record page is the authored kind 'full' invoice document (examples/app-showcase/src/ui/pages/invoice-document.page.ts), drawn as written on the desktop full page",
+          "a report with no line: create one ('QA Empty Report') before step 3",
+          "the tab-only contrast: showcase_task.project is a master_detail FK no group names (examples/app-showcase/src/data/objects/task.object.ts), and the seed gives 'Website Relaunch' five tasks; read it in the drawer, which draws the standard page (skills/objectstack-ui/rules/record-page.md, step 4), since showcase_project's default record page is the authored kind 'full' project detail (examples/app-showcase/src/ui/pages/project-detail.page.ts)"
         ]
       },
       "steps": [
-        "open the 'Website Relaunch' project's full record page at a column-tier width (1440×900) and screenshot the overview",
-        "read the tab row and the right column",
-        "open 'QA Empty Project' the same way and screenshot the Tasks table",
-        "on 'Website Relaunch', click the Tasks table's ↗ button; read the address bar and the list",
-        "open 'Website Relaunch' from the project list in the record drawer and screenshot it"
+        "open EXP-2001's full record page (/_console/apps/com.example.showcase/showcase_expense_report/record/ID) at 1440×900 with the record's comment panel closed, and screenshot 详情 (Details)",
+        "read the tab row, its 'More N' (更多 N) dropdown, and the page's data-record-page-pinned and data-record-columns-shown markers",
+        "open 'QA Empty Report' the same way and screenshot its Expense Lines table",
+        "on EXP-2001, click the Expense Lines table's ↗ button; read the address bar and the list",
+        "open EXP-2001 from the expense report list in the record drawer and screenshot it",
+        "open 'Website Relaunch' from the project list in the record drawer; read its tab row and 详情"
       ],
       "acceptance": [
         {
-          "clause": "the Tasks table is drawn in the overview's left column, under the header strip's stage bar and key fields and above the first field section",
+          "clause": "the Expense Lines table is drawn in 详情 at the 'lines' group's position: after the Report section, before the Totals section",
           "oracle": "dom",
-          "verify": "in the details column the record:related_list node for showcase_task precedes the first record:details node (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
-          "evidence": "the overview screenshot"
+          "verify": "in the details the record:related_list node for showcase_expense_line follows the record:details node holding Report and precedes the one holding Totals (ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement)",
+          "evidence": "the 详情 screenshot"
         },
         {
-          "clause": "the body table has no tab of its own and no card in the right column",
+          "clause": "the group-placed table keeps its tab, with its count, and the page, its details holding a body table, never pins them in a left column: 详情 stays the first tab",
           "oracle": "dom",
-          "verify": "the tab row names no 'Tasks' tab (also not in its '+N' dropdown) and the right column holds no Tasks card",
-          "evidence": "the overview screenshot"
+          "verify": "the tab row (or its 'More N' dropdown) holds data-record-tab=\"showcase_expense_line.expense_report\" counting four; no data-record-page-pinned on the page, data-record-columns-shown reads 'details' and the row's first tab is data-record-tab=\"overview\", labelled 详情 (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890)",
+          "evidence": "the tab row read and the 详情 screenshot"
         },
         {
           "clause": "an empty body table still draws its column headers and one empty row with an add entry",
           "oracle": "dom",
-          "verify": "the Tasks table on 'QA Empty Project' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with a New button; clicking New opens a task create form with Project filled",
+          "verify": "the Expense Lines table on 'QA Empty Report' shows its headers and one row [data-body-table-empty-row] reading 'No related records found' with its add entry [data-body-table-empty-add]",
           "evidence": "the empty-project screenshot"
         },
         {
           "clause": "↗ opens the child list filtered to this parent",
           "oracle": "dom",
-          "verify": "the showcase_task list opens holding exactly the five Website Relaunch tasks",
+          "verify": "the showcase_expense_line list opens holding exactly EXP-2001's four lines",
           "evidence": "the list screenshot and the URL"
         },
         {
-          "clause": "the drawer draws the same overview: the Tasks table above the field sections",
+          "clause": "the drawer draws the same 详情: the Expense Lines table between the Report and Totals sections, and the lines' tab on its row",
           "oracle": "dom",
-          "verify": "the drawer's overview shows the Tasks table before the first field section",
+          "verify": "the drawer's 详情 shows the table after the Report section and before Totals, and its tab row holds data-record-tab=\"showcase_expense_line.expense_report\"",
           "evidence": "the drawer screenshot"
         },
         {
-          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList → body; false → hidden; true → side; lookup → side), and an authored page's master_detail list getting the body treatment",
+          "clause": "a master_detail child no group names is a tab only, not a body table",
+          "oracle": "dom",
+          "verify": "the 'Website Relaunch' drawer's tab row holds data-record-tab=\"showcase_task.project\" counting five, and its 详情 draws no Tasks table",
+          "evidence": "the drawer tab row read and its 详情 screenshot"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the default cap of 10 with 'Show all N' expanding in place, the total read from the parent's summary field or a server aggregate over every child row (never a sum of the rows shown), the rule cells (no relatedList: a tab, and also a body table where a parent group names it; true: a tab only, even named; false: hidden; 'primary': a body table with no tab; a declared relatedLists that leaves a group-placed table out drops its tab), an authored page's body-table list getting the body treatment, and a body-table page that does not pin",
           "oracle": "test",
-          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx, ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts, ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.relatedListsOrder-27069.test.ts, ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx and ui/packages/plugin-detail/src/__tests__/RecordPageColumns.test.tsx from ui/ with vitest, and packages/spec/src/data/related-list-body-table.test.ts with the spec vitest; each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary lines, with the subject sha"
         }
       ],
       "negative": [
-        "a Tasks tab on the tab row, or a Tasks card in the right column, is a FAIL: a body table is drawn once, in the overview",
-        "an empty Tasks table collapsing to a one-line sentence with no headers is a FAIL",
-        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown"
+        "the Expense Lines table missing from 详情, or drawn before the Report section or after Totals, is a FAIL: a group places its table at its own position",
+        "no lines tab on EXP-2001's row or in its 'More N', or the details pinned in a left column beside the tabs, is a FAIL",
+        "an empty Expense Lines table collapsing to a one-line sentence with no headers is a FAIL",
+        "a total that changes when 'Show all' is clicked is a FAIL: the total is over every child row, never the rows shown",
+        "a Tasks table in the 'Website Relaunch' drawer's 详情 is a FAIL: a master_detail child no group names is a tab only"
       ],
       "traps": [
         "hydration-race"
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type decides, objectstack#35597), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the overview"
+        "ref": "ui/packages/plugin-detail/src/__tests__/RelatedList.bodyTable-27055.test.tsx (cap, show-all, ↗, empty row, server totals), ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.bodyTables-27055.test.ts (placement at the group, and the tab a group-placed table keeps), ui/packages/app-shell/src/utils/__tests__/deriveRelatedLists.test.ts and deriveRelatedLists.relatedListsOrder-27069.test.ts (keepsTab, and the declared relatedLists that drops it), ui/packages/app-shell/src/views/RecordDetailView.harness.test.tsx (the relation type and the group decide, #35921), ui/packages/plugin-detail/src/__tests__/RecordPageColumns.test.tsx (a body-table page does not pin, #35890), packages/spec/src/data/related-list-body-table.test.ts (the rule cells); no live spec opens the page"
       },
       "source": [
         "packages/spec/src/data/related-list-body-table.ts#isBodyTableRelationship",
+        "packages/spec/src/data/related-list-body-table.ts#fieldGroupsPlaceRelationship",
         "ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts#bodyTablePlacement",
         "ui/packages/plugin-detail/src/RelatedList.tsx#useBodyTableTotals",
         "ui/packages/app-shell/src/utils/deriveRelatedLists.ts#authoredBodyTableIds",
-        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-19)",
-        "#35597"
+        "ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails",
+        "docs/adr/0035-config-driven-master-detail.md (Amended 2026-11-20, #35889, and its #35897 note)",
+        "#35921"
       ],
       "history": [
         {
@@ -7323,15 +7542,21 @@
           "date": "2026-11-19",
           "change": "initial — master_detail children are overview body tables by default (#35597, epic #35590), read from source on the PR branch; no live run made",
           "ref": "#35597"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-22",
+          "change": "rewritten to the tab-by-default rule of #35921 (rule of #35889): a plain master_detail child is a tab; a parent field group naming it also draws it as a body table at the group's position, keeping its tab unless a declared relatedLists leaves it out; such a page never pins its details (recordPagePinsDetails, #35890). The fixture moves from showcase_project's Tasks (now a tab only, and the project's default page is authored) to showcase_expense_report's group-placed Expense Lines; Tasks stays as the tab-only contrast in the drawer. The old 'above the field sections, never a tab or a side card' clauses are replaced, and the empty-row clause no longer opens a create form (its source was the task-on-project case). Covers released card #35846. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },
     {
       "id": "records-forms.related-tab-arrangement",
-      "title": "A reader moves a related list's tab left or right and hides it from the tab's own menu, and 「更多」's 「恢复默认顺序」 brings the default back — kept per reader and object, in a drawer too; 概览, 附件, 审批 and 动态 never move",
+      "title": "A reader moves a related list's tab left or right and hides it from the tab's own menu, and 「更多」's 「恢复默认顺序」 brings the default back — kept per reader and object, in a drawer too; 详情, 附件, 审批 and 动态 never move",
       "since": "v18.7",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -7341,16 +7566,16 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
-          "a showcase_account record whose synthesized page has at least three side related lists (the Northwind account: contacts, opportunities, invoices and the rest the showcase derives); the zh-CN console (语言 中文) so the menu reads 左移 / 右移 / 隐藏"
+          "a showcase_account record whose synthesized page has at least three side related lists (the Northwind account: Contacts, the Field Zoo lookups and the rest the showcase derives; its 'primary' Invoices and Projects are body tables in 详情 and take no tab); the zh-CN console (语言 中文) so the menu reads 左移 / 右移 / 隐藏"
         ]
       },
       "steps": [
-        "open the Northwind account's full record page at 1440×900 and read the tab row's order",
+        "open the Northwind account's full record page at 1440×900 and read the tab row's order; its details hold the 'primary' body tables, so the page never pins them in a left column and 详情 (Details) is the row's first tab (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890)",
         "open the second related list's tab, click it again to open its menu, choose 左移; then open the menu again and choose 右移",
         "open another related list's tab, open its menu and choose 隐藏; open 「更多」 and read its hidden lists",
         "reload the page and read the tab row and 「更多」",
         "open 「更多」 and choose 恢复默认顺序; read the tab row",
-        "open the 概览, 附件, 审批 (while a request exists) and 动态 tabs in turn and click each again",
+        "open the 详情, 附件, 审批 (while a request exists) and 动态 tabs in turn and click each again",
         "open the same account in the record drawer, hide one list there from its tab's menu, then choose 恢复默认顺序 from the drawer's 「更多」"
       ],
       "acceptance": [
@@ -7361,9 +7586,9 @@
           "evidence": "the tab row read before and after each move"
         },
         {
-          "clause": "隐藏 takes the open list off the row into 「更多」's hidden lists and returns the page to 概览",
+          "clause": "隐藏 takes the open list off the row into 「更多」's hidden lists and returns the page to 详情",
           "oracle": "dom",
-          "verify": "the hidden list has no role=tab on the row; 「更多」 lists it under 已隐藏 (data-record-tab-hidden); 概览 is aria-selected",
+          "verify": "the hidden list has no role=tab on the row; 「更多」 lists it under 已隐藏 (data-record-tab-hidden); 详情 (data-record-tab=\"overview\") is aria-selected",
           "evidence": "the 「更多」 screenshot"
         },
         {
@@ -7379,13 +7604,13 @@
           "evidence": "the tab row after the reset"
         },
         {
-          "clause": "概览, 附件, 审批 and 动态 are fixed: open, a second click opens no menu",
+          "clause": "详情, 附件, 审批 and 动态 are fixed: open, a second click opens no menu",
           "oracle": "dom",
           "verify": "none of the four tabs carries aria-haspopup, and no [data-record-tab-arrange-menu] opens",
           "evidence": "one screenshot per tab"
         },
         {
-          "clause": "the drawer, which has no rail, moves, hides and resets the same way from its tab row",
+          "clause": "the drawer, which never pins the details (not a full page), moves, hides and resets the same way from its tab row",
           "oracle": "dom",
           "verify": "the drawer's 「更多」 holds 恢复默认顺序 after the hide, and choosing it shows the list again",
           "evidence": "the drawer screenshot"
@@ -7393,12 +7618,12 @@
         {
           "clause": "the pins pass at the run subject sha",
           "oracle": "test",
-          "verify": "run ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx and ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts from ui/ with vitest, and ui/e2e/record-tabs-rail-35595.spec.ts with Playwright (Chromium); each reports ≥1 test and 0 failed",
+          "verify": "run ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx and ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts from ui/ with vitest, and ui/e2e/record-tabs-35595.spec.ts with Playwright (Chromium); each reports ≥1 test and 0 failed",
           "evidence": "the vitest and Playwright summary lines, with the subject sha"
         }
       ],
       "negative": [
-        "a menu on 概览, 附件, 审批 or 动态 is a FAIL: those tabs never move or hide",
+        "a menu on 详情, 附件, 审批 or 动态 is a FAIL: those tabs never move or hide",
         "an arrangement that is gone after a reload is a FAIL: it is kept per reader and object",
         "a drawer with a hidden list and no way to show it again is a FAIL"
       ],
@@ -7407,7 +7632,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx (move, hide, reset, the drawer, the fixed tabs), ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts (the merge rules), ui/e2e/record-tabs-rail-35595.spec.ts (move, hide and reset with real pointer events in Chromium); no live spec drives the stored preference across a reload"
+        "ref": "ui/packages/plugin-detail/src/__tests__/RecordPageColumns.readerArrangement-35595.test.tsx (move, hide, reset, the drawer, the fixed tabs), ui/packages/plugin-detail/src/synth/__tests__/relatedArrangement-27055.test.ts (the merge rules), ui/e2e/record-tabs-35595.spec.ts (move, hide and reset with real pointer events in Chromium); no live spec drives the stored preference across a reload"
       },
       "source": [
         "ui/packages/plugin-detail/src/RecordTabRow.tsx#RecordTabRow",
@@ -7421,6 +7646,12 @@
           "date": "2026-11-20",
           "change": "initial — reader arrangement moved from the related cards to the tabs (#35783, after #35595 retired the cards), read from source on the PR branch; no live run made",
           "ref": "#35783"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-22",
+          "change": "#35890 renamed the first tab 概览 to 详情 (Details) and the e2e spec record-tabs-rail-35595.spec.ts to record-tabs-35595.spec.ts; title, steps[0], steps[5], acceptance[1], [4], [5], [6].verify, negative[0] and automated.ref follow. steps[0] notes that Northwind's 'primary' body tables keep its page from pinning (recordPagePinsDetails), so 详情 is on the row; the fixture's example lists drop opportunities (no showcase object) and invoices (a body table, no tab). No clause changed. Read from source at base 28ba01fe",
+          "ref": "#36188"
         }
       ]
     },

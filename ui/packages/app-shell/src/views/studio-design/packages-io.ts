@@ -23,11 +23,10 @@
  * why the client cannot compute this and a "missing scope means read-only" rule
  * would have flipped every Studio base read-only.
  *
- * Kernel packages (scope `system` / `cloud`) are hidden from the switcher
+ * Kernel packages (scope `system` / `cloud`) are not offered to an author
  * whatever their verdict says: that filter is about visibility, not
  * writability. A manifest-scoped one is left out of this list; a flat-scoped
- * one stays in it, tagged `kernel`, and the switcher hides it
- * (`offeredPackages` in `PackageSwitcher.tsx`, ADR-0016 §3.8).
+ * one stays in it, tagged `kernel`, for its readers to hide (ADR-0016 §3.8).
  */
 
 import { EnsureCustomizationPackageResponseSchema } from '@objectstack/spec/api';
@@ -39,6 +38,12 @@ import {
 } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { whenQuiet } from '../../observability/settleSignal.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 export interface PkgEntry {
   id: string;
@@ -64,8 +69,7 @@ export interface PkgEntry {
    * flat with a kernel `scope` (`system` / `cloud`) at the top level. Such a
    * row stays in the list, because the app → Studio entries read this tag to
    * draw nothing for it (`useStudioEntryGate`), as for the manifest-scoped
-   * kernel packages this list leaves out. The Studio package switcher does
-   * not offer it (`offeredPackages`, ADR-0016 §3.8).
+   * kernel packages this list leaves out (ADR-0016 §3.8).
    */
   kernel?: true;
 }
@@ -94,8 +98,7 @@ export interface PkgEntry {
  *
  * `scope` is read in both positions, for two different answers: a manifest
  * kernel scope drops the row here, while a flat one keeps the row and tags it
- * `kernel` — the app → Studio entry gate reads that tag, and the switcher
- * hides the tagged row (`offeredPackages` in `PackageSwitcher.tsx`).
+ * `kernel` — the app → Studio entry gate reads that tag.
  */
 export function parsePackages(payload: unknown): PkgEntry[] {
   const root = (payload as { data?: unknown })?.data ?? payload;
@@ -164,6 +167,15 @@ export interface ListedPackageManifest {
   name: string;
   writable: boolean;
   manifest: Record<string, unknown>;
+  /**
+   * objectstack#37454 — the row's `enabled`, as served (the installed
+   * package's switch, turned in Setup → Packages); absent when the row
+   * carries no boolean there. Never guessed: 概览 draws no 使用中 / 已停用
+   * chip without it.
+   */
+  enabled?: boolean;
+  /** objectstack#37454 — the row's served `source` (`code`, `marketplace`, `authored`), read as is; absent when not a string. */
+  source?: string;
 }
 
 /**
@@ -184,7 +196,14 @@ export function parseListedPackageManifests(payload: unknown): ReadonlyMap<strin
     // The verdict rule of `parsePackages`: the server's, else the heuristic.
     const writable = typeof p.writable === 'boolean' ? p.writable : scope !== 'project';
     const name = typeof m.name === 'string' && m.name.trim() ? m.name : id;
-    out.set(id, { id, name, writable, manifest: m });
+    out.set(id, {
+      id,
+      name,
+      writable,
+      manifest: m,
+      ...(typeof p.enabled === 'boolean' ? { enabled: p.enabled } : {}),
+      ...(typeof p.source === 'string' && p.source ? { source: p.source } : {}),
+    });
   }
   return out;
 }
@@ -279,7 +298,7 @@ export interface EnsuredCustomizationPackage {
  * else in the app announces it.
  */
 export async function ensureCustomizationPackage(baseId: string): Promise<EnsuredCustomizationPackage> {
-  const res = await fetch(`/api/v1/packages/${encodeURIComponent(baseId)}/ensure-customization`, {
+  const res = await authFetch(`/api/v1/packages/${encodeURIComponent(baseId)}/ensure-customization`, {
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json' },
@@ -322,9 +341,8 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
  *
  * ⛔ The fallback stays `HTTP <status>`, unchanged and deliberately so: it is
  * what a body-less or unparseable failure (a proxy's HTML 502) still says, and
- * `StudioDesignSurface.packageListErrorPosture` / `manageSnapshotRefresh` pin
- * that the three-state switcher and the refresh report keep working when the
- * wire answers with nothing readable.
+ * `StudioDesignSurface.packageListErrorPosture` pins that the Studio top bar
+ * keeps working when the wire answers with nothing readable.
  *
  * Concurrent callers share one request — see {@link readPackagesPayload}.
  */
@@ -390,7 +408,7 @@ function readPackagesPayload(): Promise<unknown> {
   const pending = pendingPackageReads.get(transport);
   if (pending) return pending;
   const read = (async () => {
-    const res = await fetch('/api/v1/packages', {
+    const res = await authFetch('/api/v1/packages', {
       credentials: 'include',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -577,7 +595,7 @@ export async function duplicatePackage(sourceId: string, targetId: string, targe
   // before it, so a read asked after it must not join that one, nor be answered
   // by the session's held list (objectstack#29119). Forgotten however
   // the write ends: a failed duplicate may still have copied part of a package.
-  const res = await fetch(`/api/v1/packages/${encodeURIComponent(sourceId)}/duplicate`, {
+  const res = await authFetch(`/api/v1/packages/${encodeURIComponent(sourceId)}/duplicate`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

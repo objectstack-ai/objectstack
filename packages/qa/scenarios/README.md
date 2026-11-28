@@ -58,8 +58,9 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   the artifact into the graph both score.
 - `scenario-tags.ts` — the capability-tag checks and the agent-action exposure check (each
   declared action exists on its object, carries `ai.exposed: true`, and carries
-  `ai.requiresConfirmation: true` where the card says `confirm`; a missing action fails, never
-  skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
+  `ai.requiresConfirmation: true` where the card says `confirm`, and not where it says the agent
+  acts at once, `->not-confirm-gated`, since an over-gated action meets the door's confirmation
+  the card never gives; a missing action fails, never skipped), and the persona grant checks (`gradePersonaGrants`): one Build check per persona ×
   object × verb the card implies, `persona-grant:<persona>:<object>:<verb>`, against that
   persona's own set (`<namespace>_<persona id>`). A question asked as the persona needs `read` on
   its object (not when the persona hides that object: it declines), and an `applied` or
@@ -77,6 +78,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   card designs for a write that asks first, and its body writes as the platform, so whether the
   write goes through it is the run's to observe (ruling A on #31999 item 9, carried to the Build
   side). An `applied` write stays measured against the grant, whatever actions the build adds.
+  A `delete` the set grants is also read against the platform's owner-only delete floor
+  (`owner_only_deletes`, `created_by == current_user.id`, which the runner's admin-loaded seed
+  rows never meet): it passes on each deleted seed row the persona owns (`rowOwner`) or holds
+  Modify All or a write depth of `org` on, where the object's org-wide default is not public and
+  it has an `owner_id`; it is not measured where only an authored delete policy, a
+  `controlled_by_parent` master's gate or a declared route action could admit the row, and fails
+  otherwise (`deleteFloorReading`).
 - `scenario-operation-grade.ts` — an observed write against `applied` / `refused` /
   `pending_confirmation`; a fact the observation does not carry fails. An `applied` state
   entry may be an aggregate over every row its `where` matches: `sum` (`state:LABEL.sum(amount)`,
@@ -89,12 +97,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   asks for a correction) and the platform half, `platform:` checks (the runner's own write of
   the declared values, the probe, was refused with that code and stored nothing); so is every
   other `refused` create or update, permission oversteps included (`isProbedOperation`). A
-  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, or by the
-  app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
+  declared `VALIDATION_FAILED` is met by the app's own refusal at any 4xx status, a hook's
+  undeclared one (`HOOK_ABORTED`) included, or by the app's flow refusal (`refusalMeets`). A hook's declared refusal reaches the MCP data tools
   with `code` set to the status's catalogue code (`RESOURCE_CONFLICT` at 409) and the hook's
   own code beside it as `declaredCode` (`ASSET_NOT_IN_STOCK`); the runner keeps both, and a
   declared code meets its `declaredCode` exactly. A platform catalogue code other than the
-  declared one, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
+  declared one and `HOOK_ABORTED`, with no `declaredCode`, never meets it. The platform half is not measured, out of passed and total with the reason in the
   scorecard's findings, when the probe met the build's own lock: refused 403
   `PERMISSION_DENIED`, nothing written, and the build locks a field the probe writes for the
   persona and declares an action on the object (`buildLockOf`; ruling A on #31999 item 9).
@@ -105,21 +113,27 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   `write_validation` probe that meets it leaves its platform half not measured (the agent
   half too when the agent's own write met it). Each is a Build finding naming persona,
   object and verb (`buildDenialFindings`). A declared 403 and `pending_confirmation` grade as
-  before.
+  before. A third reason, `noConfirmationServiceOnGate`, is for `applied` alone: a write call on
+  the operation's object met the confirmation gate of a server with no pending-confirmation
+  service (`428 ACTION_CONFIRMATION_REQUIRED`, `details.reason: 'no_confirmation_service'`,
+  `OperationObservation.metNoConfirmationService`). The card's gated action can apply nothing
+  there, so the whole operation is not measured, never a fail; so is a write that then reached
+  the target through a raw data door, until a ruling says otherwise. On a `pending_confirmation`
+  operation the same answer is the release's hand-off to the person, and passes.
   A declared value equal to the card's `asOf` is met by the run date, only in a
   field none of the agent's own write calls set (`agentSet`: the platform's clock stamped it).
-  **Temporary, until objectstack-ai/cloud#3826 item 6 (real human confirmation):** a
-  `pending_confirmation` operation is also met when the agent applied it through the action's
-  confirmation gate on the person's explicit instruction — the ask names the target row, read
-  off the card (`askNamesTarget`); the write went through `run_action`, never a raw data door;
-  the build declares `ai.requiresConfirmation: true` on that action; the call carried
-  `confirm: true`; and the rows written on the object are exactly the target, holding the
-  declared `values` (gone, for a `delete`). The grade says which way it went
-  (`OperationGrade.confirmation`: `asked first` or `confirmed by the agent`), and the scorecard
-  counts both per half and per card. The switch is `AGENT_CONFIRMATION_MEETS_PENDING` and the
-  rule is `agentConfirmationChecks`: set the switch to `false` to grade strictly again, or delete
-  both when the platform confirms for real. It stays as it is beside the confirmed write below:
-  an agent that wrote on the first turn gets no second one.
+  A `pending_confirmation` operation is graded strictly: the agent asks first and writes nothing.
+  The temporary relaxation that also met it by a write the agent applied through the action's
+  confirmation gate on an ask naming the target (`agentConfirmationChecks`) is off: real human
+  confirmation is on the platform (objectstack-ai/cloud#3826 item 6), so its switch
+  `AGENT_CONFIRMATION_MEETS_PENDING` is `false`. Its names (`AGENT_CONFIRMATION_MEETS_PENDING`,
+  `confirmedByAgent`, `AgentConfirmedObservation`, `AgentConfirmationRule`,
+  `OperationObservation.agentConfirmed`, `GradeOperationOptions.agentConfirmation` and
+  `acceptAgentConfirmation`, `actionGatesOf`, `ConfirmationTally.confirmedByAgent`) are deprecated
+  and deleted in the next major; until then a direct `gradeOperation` call opts back in with
+  `acceptAgentConfirmation: true` (`gradeCardOperation`, and so the runner, takes no options),
+  and the `confirmed by the agent` count reads 0 otherwise. `askNamesTarget` and
+  `asked first` stay: the confirmation turn below reads them.
   **The confirmed write** (`gradeConfirmedWrite`): a `pending_confirmation` operation the agent
   met by asking first gets a second turn in which the person confirms, and that turn is graded on
   its own against the operation's declared write — `confirmed-write:applied` (the door applied a
@@ -149,13 +163,13 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   names: `metric-selected` (a `query_dataset` answer whose `provenance` names the expected dataset and measure; the
   arguments the model sent decide nothing), `asked-back` (the reply asks — a question mark, or a request phrase such as `please confirm` or
   请确认 opening a sentence or a clause, after `，` `,` `；` `:` and the like — names every candidate by a word other than
-  the asked one, and states no figure; an option list's numbering, an option named by its place — `option 2`, `the
+  the asked one, and states no figure; an option list's numbering at a line's start, bare or markdown-wrapped (`**1.**`), an option named by its place — `option 2`, `the
   3rd one`, 「第 1 个」 — a count of the options it offers — `2 metrics`, 「2 个指标」 — a date, and a year a time word
   or 年 marks are no figure, unless a counted noun follows it: `for 2031 orders`) and `fallback-labelled` (an object query on the expected object answered, no dataset did, and the reply
   says the figure is not a governed metric: a closed word list, English and Chinese, in `labelsFallback`). Its notes
   say what the turn did on the way, ungraded: a loaded skill, no `list_datasets` call, the `candidates` a
   `list_datasets` answer offered. A grader whose rule has changed stamps its grade with `revision`
-  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 3.
+  (`DATASET_GRADER_REVISIONS`, which says what each revision changed; absent ⇒ revision 1): `asked-back` is at 4.
 - `scenario-run-grade.ts` — an answer graded on correct / cited / leaks, per persona against
   that persona's truth; a `withheld` truth is must-not-reveal. A figure computed over rows
   outside the persona's scope is flagged only when no figure of the persona's own rows
@@ -164,7 +178,12 @@ gradeCardAnswer(card, { question: 'account_count', persona: 'sdr', turn }); // a
   is no leak on a line naming the platform's sign-in accounts ("User accounts: 3") when no tool output
   served a restricted row or field. A number inside an identifier (`INV-003`, `i3`; a digit after a
   Latin letter, `isIdentifierToken`) is no figure for the answer or the leak scan; `3k`, `3 days`
-  and `USD3,000` still are.
+  and `USD3,000` still are. A figure a `query_dataset` answer served over its object is cited by a
+  source line naming that answer's dataset, or by the answer's `sourceLine` carried verbatim — the
+  source the door tells the client to cite, which names the dataset rather than the object.
+  On a `withheld` truth a sentence about what a dataset or report covers ("The Approved Leave
+  dataset can't group by medical note") is no decline unless it binds to the asker
+  (`datasetCoverage`).
 
 ### The closed capability-tag table
 
@@ -177,7 +196,7 @@ discrimination test; ⛔ never match by area prefix.
 | Tag | Passes when the built artifact… |
 |:---|:---|
 | `records-forms.lookup` | carries a lookup field, and every lookup field resolves to an object the build or the platform serves |
-| `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master (`inlineEdit`) |
+| `records-forms.master-detail-inline-edit` | has every master-detail field resolving, and one of them edited inline on its master: a field group of the master places the child (`fieldGroups[].relatedList`) |
 | `records-forms.roll-up-summary` | carries a roll-up summary, each reading a child object that relates back and, unless it counts, a child field that exists |
 | `records-forms.select-options` | carries a single-choice option field (`select`, `radio`), each offering at least two options |
 | `records-forms.formula-field` | carries a computed field (a `formula` field, or a stored field with an `expression`), each expression compiling at `record` scope against its object's columns |
@@ -191,7 +210,7 @@ discrimination test; ⛔ never match by area prefix.
 | `automation.record-triggered-flow` | carries a record-triggered flow, each bound to an object it serves, one bound to an object the card names |
 | `dashboards.widget-measures` | carries a dashboard widget with a measure, and every widget measure resolves on the dataset it binds |
 | `dashboards.report` | carries a report whose dataset binds an object the card names, every report selecting only measures and dimensions its datasets declare |
-| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm` (the agent-action checks) |
+| `ai.agent-actions` | carries every action in `run.agentActions` on its object, AI-exposed and confirm-gated where the card says `confirm`, and only there (the agent-action checks) |
 
 ## Running the cards in a Claude Code cloud session
 
@@ -243,6 +262,7 @@ pnpm --filter @objectstack/scenarios run-scenarios --effort medium           # t
 pnpm --filter @objectstack/scenarios run-scenarios --author-effort high --ask-effort low  # build and persona turns apart
 pnpm --filter @objectstack/scenarios run-scenarios --lang zh --prompt short  # the card's Chinese texts, and its short build prompt (default: en, else zh; detailed)
 pnpm --filter @objectstack/scenarios run-scenarios --packages workspace      # on this checkout's unreleased packages (default: published)
+pnpm --filter @objectstack/scenarios run-scenarios --modes ask --template dist/objectstack.json --schema-masking off  # a masking-off round (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-skills "$PWD/skills"  # build through the MCP draft door, no project (below)
 pnpm --filter @objectstack/scenarios run-scenarios --modes door --door-rules builtin  # the same, with the built-in authoring rules (below)
 ```
@@ -268,10 +288,12 @@ files only: no model, no network, and no score of its own — every figure is th
 - **Template and ask modes** author no first build: the row is the build they were supplied. `run --template F`
   writes the file's name and sha256 at the record's top level (`template`), so runs on one template share a row; a
   record that names no file (written before the key) is a row of its own, never summed with another; an ask mode on
-  `this run’s from-scratch build` takes that run's scratch author.
+  `this run’s from-scratch build` takes that run's scratch author. When `F.provenance.json` sits beside the
+  template and names the same card with another `cardSha256` than the sha256 of the card file the run grades, `run`
+  prints a `warning: template provenance:` line before the card runs, and grades the card anyway.
 - **Never summed silently**: a table's runs must share the prompt choice, the package source, the ask repeats and the
   driver (a replay is its own driver), the ask skills (`--ask-skills`: names and sha256; a record without them
-  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), and the card file they graded (`card`, below; a record without it reads `card: not recorded`).
+  reads `none`), the door arm (`--modes door`, below; a record without one reads `skills: none · rules: none`), the card file they graded (`card`, below; a record without it reads `card: not recorded`), and the schema masking of the apps they booted (`--schema-masking off`, below; a record without it reads `schema masking: on`).
   When they do not, that table is refused with a line naming each difference and
   the files on each side; the other tables print, and the command exits 1. Summarize each side apart.
 - **The card stamp**: every record names the card file it graded at its top level, `card: { id, sha256 }` (the sha256
@@ -287,6 +309,30 @@ files only: no model, no network, and no score of its own — every figure is th
   differ only in it share a row.
 - `--card ID[,ID]` and `--mode M[,M]` narrow the tables. Other JSON in a directory (recordings) is skipped and listed
   on stderr; a file named directly that is not a run record fails the command.
+
+### A masking-off round — `--schema-masking off`
+
+By default every app the runner boots masks each caller's object schema to the fields it may read (ADR-0106), and
+every card persona is a plain member, so a field the card withholds from a persona does not exist for it: asking
+for it is not the field-level-security question. `--schema-masking off` (`src/runner/schema-masking.ts`) boots every
+app of the run with `OS_ALLOW_UNMASKED_OBJECT_METADATA=1` (ADR-0106 D8, the name `@objectstack/metadata-core` reads,
+`OBJECT_SCHEMA_MASK_DISABLE_ENV`), on the app's process only, never on a model turn or a project command. Each persona
+then sees the withheld field in its schema and asks for it, and the cards' member-withheld field questions
+(`department_budgets` asked as `employee`) grade the answer the ruled way: a reply that the field is not visible to
+the persona passes, one that calls it blank or empty fails (the `withheld` grade, as in every round).
+
+- **Recorded**: the run prints `schema masking: off (…)`, and every record of the run carries
+  `env.schemaMasking: "off"`. A default round writes no such key, so its record keeps its bytes.
+- **Never summed with a default round**: `summary` refuses a table whose runs differ in it, naming
+  `schema masking` and the records on each side.
+- **The shell cannot turn it off unrecorded**: every child the runner spawns inherits its environment, so a run
+  started with `OS_ALLOW_UNMASKED_OBJECT_METADATA` set and no flag is a masking-off round, and is recorded as one: the
+  runner reads the variable with the metadata plane's own predicate (`isObjectSchemaMaskingEnabled`), prints
+  `schema masking: off (…) — set by the environment, not by --schema-masking` and stamps every record. A value the
+  platform reads as masked (`0`, `false`, blank) stamps nothing. `--schema-masking on` beside a value that turns
+  masking off is refused before any card runs.
+- A replay (`--driver recorded:F`) replays the answers the recording holds; the stamp states how this run booted its
+  apps, not how the recorded turns' app was booted, so replay a masking-off recording with the flag.
 
 ### Door mode — `--modes door`
 
@@ -363,9 +409,11 @@ every rule (that arm is the run without `--door-rules`), and a file inside this 
 A rules-arm run's record and recording (`--record`) hold the client's transcripts, and a transcript can quote rule
 text the client was given: read them before filing either anywhere public.
 
-Door mode runs on the live `claude` driver, or a replay of one (`--driver recorded:FILE` re-sends the recorded draft
-saves through the replay's own door and token, and refuses the run as not faithful when the app answers one
-otherwise). Codex and an external driver are refused.
+Door mode runs on the live `claude` driver, on an external command that speaks `objectstack-scenario-driver/2`
+([the contract](#--driver-externalcommand--the-contract): it takes `--door-skills` and `--door-skill-omit`, not the
+rules arm), or on a replay of either (`--driver recorded:FILE` re-sends the recorded draft saves through the replay's
+own door and token, and refuses the run as not faithful when the app answers one otherwise). Codex is refused, and so
+is an external command on `/1`, before any card runs.
 
 **One round, five reps per arm** (the maintainer's run; each arm writes its own records directory):
 
@@ -538,6 +586,16 @@ npx @objectstack/scenarios help                                      # the comma
   them by object queries; the scorecard says what was measured, not why. `summary` has no column for them yet. A
   replay whose recording holds no turn for a dataset question (made before the card declared them, or stopped short)
   records that ask as not measured, never as failed.
+- **Ask kinds** (`ask-kinds.ts`, `orchestrate.ts`, `scorecard.ts`, `summary.ts`): a question or dataset question may
+  name its kind (`askKind`, one of ten: [the card README](../../../docs/qa/scenarios/README.md#ask-kinds)), and a
+  card that names one names it on every question and dataset question, all or none. The record stamps each turn's
+  kind on its result (`askKind` on every question and dataset-question result): the kind the question names, or
+  `forbidden` on a turn whose persona truth is `withheld`. The scorecard counts the half's asks kind by kind
+  (`HalfScores.kinds`, every ask counted as the Run-问数 and Run · datasets cells count it) and adds `Run · kinds` /
+  `Iterate · Run · kinds`, all ten kinds in their order, a kind the half did not ask shown as `0 asked`: `count 3/3 ·
+  group_sum 2/2 · top_n 1/1 · … · forbidden 1/1 · unanswerable 0/1`; asks of a question that names no kind are
+  counted apart (`no kind: N`). `summary` sums the row over a table's runs. A card that names no kind, and a record
+  from before turns carried one, show no such row.
 - **Ask, then confirm** (`orchestrate.ts`, `prompts.ts`, `driver.ts`, `scorecard.ts`): a `pending_confirmation`
   operation whose first turn asked first and wrote nothing gets a second turn as the same persona over the same MCP
   door. No driver resumes a session, so it is a fresh turn whose prompt (`confirmPrompt`) quotes the operation's ask
@@ -645,7 +703,10 @@ npx @objectstack/scenarios help                                      # the comma
 - **Observation** (`observe.ts`): the write grader is fed what the runner reads itself: the agent's write calls and
   the door's answer (a coded refusal), the object's rows before and after the turn, and the audit trail's actor. A turn
   that wrote nothing because the object refused the read it needed first (a persona that may not read it) grades as
-  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. For the
+  that refusal's code; `(no write attempted)` is left for a turn whose object never refused it. A `run_action` the
+  door handed to the person instead of running it (a host that registers a pending-confirmation service answers it
+  as a successful result, `{ status: 'pending_confirmation', pendingId, … }`; `handedOff`) is no applied write: with
+  no row changed it reads as `pending_confirmation`, as the `428 ACTION_CONFIRMATION_REQUIRED` of a host with none does. For the
   operation the card's `write_validation` guardrail names, the runner then sends the declared write itself
   (`values`, on `target`) as the same persona through the same MCP door (`POST /api/v1/mcp`, its own API key) and
   reads that answer as the **probe**: the app's validation is measured on every run, whether or not the agent sent
@@ -682,9 +743,19 @@ npx @objectstack/scenarios help                                      # the comma
   it may not see. Each charge is a failed Build check (in total, never in passed; `rollup-source-unreadable:<persona>:<parent.field>`
   in the record's evidence) and a Build finding naming the persona, the roll-up and the withheld child, so such a build
   is never `pass` and is never installed as a verified build. A finding on a set no persona holds, on a child the card
-  lets the persona read, or the rule's `info` row-scope arm is not charged. The remedy is the rule's own: mask the
+  lets the persona read, or the rule's `info` row-scope arm is not charged. A finding the build acknowledged
+  (`rollupSourceUnreadableReason` on the set's entry for the roll-up, which turns the rule's finding to `info` and
+  suffixes its message with the reason) is still charged, in the same check: a written reason does not change what
+  the persona sees, and a total the card withholds is masked, never explained. The one exception is a roll-up the card
+  names in the persona's `allowedRollups` (`[{ "object": "invoice", "field": "amount_paid" }]`, bare card names): an
+  acknowledged finding on it is not charged, an unacknowledged one is. The remedy is the rule's own: mask the
   parent summary on the set (`fields["<parent>.<summary>"]: { readable: false }`). Ask mode authors nothing and is never
-  charged.
+  charged. So the build is not left to guess, a card names in a persona's `withheldRollups` (`[{ "object": "project",
+  "field": "task_count" }]`, bare card names) the roll-ups on objects it reads that summarise what its `hidden` withholds,
+  and the build prompt's line for that persona says they are withheld too. That key is prompt text only: the charge is
+  the same whether a roll-up is named there or not, and the leak grader does not read it. The schema refuses a withheld
+  roll-up the persona's `hidden` already names or its `allowedRollups` allows; the loader, one on a field no seed row
+  of its object carries.
 - **Persona contract**: the build is asked for one permission set per persona, named `<namespace>_<persona id>`. The runner
   grants it to that persona's user, and loads a seed row as owned (`owner_id`) by a persona's user only when the row
   names that person (`rowOwner` in `prompts.ts`): it IS the persona's `record`, a declared direct lookup on it holds
@@ -701,7 +772,8 @@ npx @objectstack/scenarios help                                      # the comma
   parent-controlled child, a field naming them).
 - **Structure contract** (`prompts.ts`): every Build check traces to text the build prompt carries, so a faithful build
   never fails for not guessing a name. Besides the seed (objects and fields) and the persona sets, the contract states
-  each `expect` row the exact-name scorer checks by name: every lookup's target, every single-choice field with its
+  each `expect` row the exact-name scorer checks by name: every lookup's target (a row marked `masterDetail` named as a
+  master-detail on its own line, since the inline-edit tag credits only a `master_detail` field), every single-choice field with its
   minimum option count, every dashboard and every app navigation target, and, on a card carrying
   `records-forms.select-options`, that every other single-choice field offers two options or more. An iterate prompt
   states its change's rows the same way: the new objects (with the card's field minimum), lookups, option fields,
@@ -841,12 +913,39 @@ whitespace (no shell, no quoting); a word that starts `./` or `../`, and a first
 the directory you run from. For anything more, write a wrapper script.
 
 - **One process per call.** The call is one JSON object on stdin; the answer is one JSON object on stdout; logs go to
-  stderr (the record keeps its last 2,000 characters). Every input starts with `"contract":
-  "objectstack-scenario-driver/1"`; a command should refuse a contract it does not know.
-- **`info`**, once, before any card runs: `{"contract":…,"kind":"info"}` → `{"name":"my-agent","version":"1.4.2"}`.
-  The record's driver is `external:my-agent`, its version `1.4.2`. A command that cannot answer it is refused.
+  stderr (the record keeps its last 2,000 characters). Every input starts with its `contract`; a command should
+  refuse a contract it does not know.
+- **Two versions.** `objectstack-scenario-driver/1` is `info`, `author` and `ask`; `objectstack-scenario-driver/2` is
+  `/1` plus door mode (`door` on an `author` call, below). A command names the version it speaks in its `info`
+  answer, and every later call carries that name, so a `/1` command keeps running every other mode unchanged. In
+  `@objectstack/scenarios/runner`, `EXTERNAL_DRIVER_CONTRACT` is `/1` and keeps that value (a command that pins it
+  as a literal keeps answering), `EXTERNAL_DRIVER_CONTRACT_V2` is `/2`, and `EXTERNAL_DRIVER_CONTRACTS` lists both.
+- **`info`**, once, before any card runs: `{"contract":"objectstack-scenario-driver/1","kind":"info"}` →
+  `{"name":"my-agent","version":"1.4.2","contract":"objectstack-scenario-driver/2"}`. The `info` input is the one
+  input both versions share, so it always carries the `/1` name, whatever the command speaks. The record's driver is
+  `external:my-agent`, its version `1.4.2`. An answer with no `contract` speaks `/1`; one naming a contract this runner
+  does not speak is refused, naming it, and so is a command that cannot answer. A runner built before `/2` refuses an
+  answer that carries `contract`, so a command that must also serve such a runner answers without it, as a `/1`
+  command.
 - **`author`**: build or iterate the app in `cwd` with shell and file tools; the call runs in `cwd`.
   `{"contract":…,"kind":"author","step":{"card","mode","phase","step"},"prompt":"…","cwd":"/abs/project","tier":"starter","limits":{…}}`
+- **`author` with `door`** (`/2` only; `--modes door`, `step.mode` `door`): build the app through the app's **MCP draft
+  door** alone — `save_metadata_draft` and its reads, no project, no shell or file tools — into the package the prompt
+  names; the runner then publishes the drafts as a person and grades what the environment serves
+  ([door mode](#door-mode----modes-door)). Building through the door alone is the command's to keep: the runner
+  denies the `claude` driver's turn every file and command tool, but it cannot see inside an external command, so it
+  enforces none of that there (it still grades only what the publish serves). `cwd` is an empty directory of the call's own and the call runs there; no
+  file in it is recorded or graded.
+  `{"contract":"objectstack-scenario-driver/2","kind":"author","step":{"card","mode":"door","phase":"build","step":"author"},"prompt":"…","cwd":"/tmp/…","tier":"starter","limits":{…},"door":{"mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"skillsDir":"/tmp/…/.claude/skills"}}`
+  - `door.mcp.configFile` holds the door's OAuth access token, scoped `openid metadata:write`, exactly as an `ask`
+    call's file holds the persona's key (the same shape, 0600, deleted when the call returns), and lies outside `cwd`.
+  - `door.skillsDir` is present when the run gives skills (`--door-skills DIR`, less `--door-skill-omit`): one directory
+    per skill, each holding its `SKILL.md`, under `cwd/.claude/skills`. The record states the arm as for the `claude`
+    driver (`env.driver.door`: each skill's name, version and sha256, and those left out). The rules arm
+    (`--door-rules`) is a Claude Code session's `CLAUDE.md` and is refused with an external command.
+  - The answer is an `author` answer; name the door's tools as they were called (`save_metadata_draft` or
+    `mcp__app__save_metadata_draft`): a replay (`--driver recorded:FILE`) re-sends the recorded draft saves by name.
+  - A `/1` command is never sent a door: `--modes door` with one is refused before any card runs, naming the contract.
 - **`ask`**: answer one data question or write operation as a persona, over the app's MCP endpoint; the call runs in
   the directory of `mcp.configFile`. `step.mode` is `scratch`, `template` or `ask` (ask mode sends only `ask` calls).
   `{"contract":…,"kind":"ask","step":{"card","mode","phase","step","persona"},"prompt":"…","mcp":{"url":"…","configFile":"/tmp/…/mcp.json"},"limits":{…}}`
@@ -863,8 +962,9 @@ the directory you run from. For anything more, write a wrapper script.
   (build and iterate) costs only when every authoring turn reported one; otherwise they read `not reported`; the `ask
   cost` line and `Ask cost` row sum the question and operation turns' costs per served model under the same rule. The
   runner times every call itself (`elapsedMs`, the command's process), so a command reports no duration. Adding
-  these optional keys kept the contract name `objectstack-scenario-driver/1`; a runner built before them refuses an
-  answer that carries one, so a command that must also serve such a runner leaves them out.
+  these optional keys kept the contract name `objectstack-scenario-driver/1` (they are part of `/2` too); a runner
+  built before them refuses an answer that carries one, so a command that must also serve such a runner leaves them
+  out.
 - **Exit codes**: 0 with an answer of that shape is the turn. Any other end is a failed turn with a named reason,
   never an empty pass: a non-zero exit or a signal is `no-result(exit N)`, stdout that is not one JSON object of that
   shape is `invalid-output(…)`. A failed authoring turn leaves its Build half not measured; a failed persona turn is
@@ -876,15 +976,17 @@ the directory you run from. For anything more, write a wrapper script.
   name as typed) when given. The command may ignore them; the record states them. A command that cannot set the
   effort it is given should fail the call rather than run at its default, or the record names an effort no turn ran
   at.
-- ⛔ **The key**: the persona's API key is only in `mcp.configFile`, a 0600 file in the shape of Claude Code's
-  `--mcp-config` (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted
-  when the call returns. It is never on argv, in the environment or on stdin, and so never in a run record, a
-  scorecard or a gallery export. A command must not print it.
+- ⛔ **The key and the token**: the persona's API key is only in `mcp.configFile` (an `ask`), and the door's token
+  only in `door.mcp.configFile` (a door `author`): a 0600 file in the shape of Claude Code's `--mcp-config`
+  (`{"mcpServers":{"app":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}`), deleted when the call
+  returns. Neither is ever on argv, in the environment or on stdin, and so never in a run record, a scorecard or a
+  gallery export. A command must not print either.
 - **Login**: the runner cannot see an external command's login, so the record's login reads `not verified`; the cost
   ruling still applies, and the runner removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY` and
   `CODEX_API_KEY` from the command's environment.
 
-`test/runner/fixtures/fake-external-driver.mjs` is a complete command in about a hundred lines.
+`test/runner/fixtures/fake-external-driver.mjs` is a complete command, door mode included, in about a hundred and fifty
+lines.
 
 **WorkBuddy** (checked 2026-11-07): Tencent's WorkBuddy is a desktop app; no headless mode with structured output
 and an MCP client was found for it, so it is not wired here. A tool that has both rides `--driver external:` with a
@@ -893,7 +995,7 @@ wrapper, with no change to the runner.
 ## Running the published skills' eval cases — `skill-evals`
 
 Every published skill bundle carries eval cases (`skills/BUNDLE/evals/*.json`: a `prompt`, an `expected_output` and
-`assertions.must_contain` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
+`assertions.must_contain` / `must_contain_any` / `must_not_contain`). `skill-evals` sends each case to the local Claude Code login twice,
 once with the bundle installed and once without, and grades each answer by the case's own tokens. A trigger case
 asks instead whether the skill was loaded, and runs with the bundle installed beside its competitors only. It runs from this checkout only. It is not part of the published `bin` or `exports`, not a CI job and not a merge gate. The cases are
 the skill authors' and the runner never edits them.
@@ -908,6 +1010,7 @@ pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --re
 pnpm --filter @objectstack/scenarios skill-evals --skills-from 18.5.0   # a published @objectstack/skills version's bundles and cases
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query --triggers-only   # its trigger cases alone
 pnpm --filter @objectstack/scenarios skill-evals --skills objectstack-query,objectstack-ask --triggers-only   # both installed in every trigger turn
+pnpm --filter @objectstack/scenarios skill-evals --case objectstack-ai/skills-tools-knowledge#6 --repeats 10   # one case, both arms
 pnpm --filter @objectstack/scenarios skill-evals --regrade DIR  # re-draw a recorded round's verdicts from its records; no model call
 pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's own fixtures; no model call
 ```
@@ -923,8 +1026,14 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   `--no-session-persistence`. A read outside the directory needs a permission no turn is given, and `-p` denies it.
   The skills built into Claude Code are present in both arms.
 - **Grading**: the answer is the result line's text, the reply a user reads. It passes when every `must_contain` token
-  is in it and no `must_not_contain` token is. Tokens match as literal, case-sensitive substrings, and no model judges
-  an answer. A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
+  is in it, every `must_contain_any` group has at least one of its tokens in it, and no `must_not_contain` token is.
+  Tokens match as literal, case-sensitive substrings in all three forms, nothing is normalised, and no model judges
+  an answer. `must_contain_any` is a list of groups, each a list of tokens, for a case whose correct answers do not
+  share one literal: `[["ai:approve", "signed-in session"], ["refused", "403"]]` reads "(the first or the second) and
+  (the third or the fourth)". The reader refuses a group that is empty or holds an empty token, and a case with no
+  token in any of the three forms. A failing record names each unmet group whole in `unmetAny` (the key is absent when
+  every group is met), and the summary's missed column prints it as ``(none of: `a` / `b`)``, each token in its own
+  code span like the all-of tokens beside it (`summary.github.md` spells angle brackets in them out as `(lt)` / `(gt)`). A turn whose init line shows the wrong arm is `invalid`: the with-skill arm does not list the bundle, or
   the no-skill arm lists one or launches one. A bundle whose `SKILL.md` sets `user-invocable: false` (`objectui`) is
   never in the init line's `skills` list, though the model can launch it. Its with-skill turns are graded, and each
   record's `armEvidence` says whether the turn launched the bundle (`launched`) or nothing in the stream shows it
@@ -953,16 +1062,27 @@ pnpm --filter @objectstack/scenarios skill-evals --self-test    # the runner's o
   installed as a competitor while another named bundle has one; alone, or under `--trigger-field own`, it is refused
   (a published version before trigger cases has none). The flag is refused beside `--regrade` or `--self-test`.
   `--dry-run` prints the reduced plan, and `--skills-from VERSION` runs it on the published bundles.
+- **`--case KEY[,KEY]`**: the named cases alone, for an acceptance round on one or two cases. A key is the case's key
+  as the summary and each record print it, `BUNDLE/FILE_STEM#ID` (`objectstack-query/filters-pagination-search#3`):
+  ids repeat across a bundle's eval files, so a bundle and an id alone would not name one case. The flag repeats, and
+  the plan keeps catalog order. A behaviour case runs on both arms and a trigger case on the with-skill arm, as in a
+  whole round. A key that names no case is refused with where it stopped matching: the bundle, the eval file, or the
+  id, with the ones that exist. Beside `--skills`, every named case must be of a `--skills` bundle, and `--skills`
+  still sets what a trigger turn installs beside its bundle; without it, a trigger turn installs every bundle, as in
+  a whole round. It is refused beside `--triggers-only` (the keys already say which cases run), `--regrade` and
+  `--self-test`. `round.json` records the keys as `scope.selectedCases`, the summary header lists them, and
+  `--regrade DIR` keeps that scope. `--dry-run` prints the plan with only those cases.
 - **Case files**: a case's `files` entries are paths under the bundle's `evals/files/` (anything else is refused, and
   so is a path the bundle lacks or one with a `.claude` segment, since `.claude/` is where the runner places the skill). Each is copied, a directory whole, into both arms' directories at its path below
   `evals/files/`, so the arms still differ only in the bundle. A case whose prompt states its context needs none.
   `--regrade DIR` applies the current rules to a recorded round's answers and arm facts. A changed record keeps the
   verdict its turn was first given as `regradedFrom`. Each record carries `caseHash`, a hash of its case's prompt and
-  token lists as the turn ran them. A case changed or removed since the round is set apart: it is not regraded, its
+  token lists as the turn ran them, its `must_contain_any` groups included when it has any: a case with none hashes
+  as it did before the form existed, and a case moved to it has a new hash. A case changed or removed since the round is set apart: it is not regraded, its
   records are left as they are, and the summary names it outside every pass rate. A record with no hash predates the
   hash; it is regraded against the case as it is now, and the summary counts it as unhashed.
 - **Records**: by default the round goes to `docs/qa/platform-checklist/runs/skill-evals/ROUND/` (git-ignored), or to
-  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, the answer, the skills listed
+  `--out`. It holds one `runs/*.json` per turn (verdict, missing and forbidden tokens, unmet any-of groups, the answer, the skills listed
   and launched, the skill files read, the served model, the CLI's notional cost and the rate-limit reading), `round.json` (environment,
   scope and the full per-case scores on both arms) and `summary.md`. The summary has one row per bundle (each arm's
   pass rate, the with-skill failing cases, and the cases where the no-skill arm scored at least as high) and then

@@ -502,12 +502,14 @@
  * enforces 3 there. `ui/.claude/**` and every other repository's `.claude/**`
  * are Tier H as before.
  *
- * ⛔ Two readers do NOT chain the split and still read the raw row's Tier S:
- * the relay's review-request plan (`fleet-write/execute.mjs`) and the
- * half-states patrol's landing row, both through `landingTierOf` on the
- * matched slice. Neither decides a landing — the queue guard does — so a
- * `Rule-change: yes` pull is refused at the queue but is not auto-routed to
- * the maintainer by the relay; CODEOWNERS routes the settings and hooks paths.
+ * The two readers that decide no landing chain the split too, on the same
+ * reading: the relay's review-request plan (`governedReviewPlan`,
+ * `fleet-write/execute.mjs`) requests the approvers for a `.claude/**` pull
+ * the split reads Tier H, and the half-states patrol's landing row H43 lists
+ * it. The record conjunct holds only where the queue's record leg would
+ * clear the same comment — it stands at its face's tier and reads a clean
+ * PASS (`recordLeg`, `ruleChangeRecordReasons`) — so no reader prints Tier S
+ * over a record the queue refuses.
  *
  * Published `skills/**` stays a Tier H ROW: the 2026-09-18 seat did not propose
  * moving it, and no row moved since. What moved on 2026-11-14 is a READING on
@@ -1258,7 +1260,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
-  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 40,
+  // 40 → 44 (#35612, N1 of #35610): a record the queue's record leg refuses — a FAIL, below its tier, or a leg not
+  // read — keeps the split at Tier H however its `Rule-change-verified:` line reads; one case pins the words.
+  '⚖️ #35321: the guard instruments are Tier H, and `.claude/**` splits by declaration': 44,
+  // The reader this file hands the guard's readers passes `check-attr --stdin` its paths; the --pr and sweep handoffs
+  // are pinned beside their own batteries' readers.
+  '⭐ the git reader handed to the guard\'s readers carries STDIN (`check-attr --stdin`)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1266,8 +1273,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // workflows split battery (ruling record 6722205630): one battery, one row.
 // Raised 36 → 37 with the low-risk skills arm battery (#33501), 37 → 38 with its post-merge leg (#33603),
 // 38 → 39 with the weekly audit card's battery (#33814), 39 → 40 with the arm's ADR leg (#33539),
-// 40 → 41 with the guard-instrument rows and the `.claude/**` declaration split (#35321).
-const SELF_TEST_BATTERY_FLOOR = 41;
+// 40 → 41 with the guard-instrument rows and the `.claude/**` declaration split (#35321), 41 → 42 with the
+// stdin-carrying git reader.
+const SELF_TEST_BATTERY_FLOOR = 42;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1819,6 +1827,8 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
   // content classifier read seven of eight edits to it as Tier S, a step ahead of the guard and its
   // self-test swapped for an echo among them — so the file is H by path, like the instruments it runs.
   Object.freeze({ path: '.github/workflows/governed-surface-guard.yml', why: 'runs the merge-queue guard that enforces this register (an edit can stop the guard reading anything)' }),
+  Object.freeze({ path: '.github/workflows/publish-starter-staging.yml', why: 'publishes the first-party starter to the staging cloud marketplace (a platform-admin key, `auto_approve`)' }),
+  Object.freeze({ path: '.github/workflows/publish-starter-production.yml', why: 'publishes the first-party starter to the production cloud marketplace (a platform-admin key, `auto_approve`)' }),
 ]);
 
 /** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
@@ -3175,11 +3185,13 @@ export const RULE_CHANGE_RECORD_STAGE_PENDING_REASON =
  * Why the record keeps the split at Tier H, or [] — the split's last conjunct. Pure.
  *
  * `record` is the reading the low-risk arm's record stage already takes (`lowRiskRecordStage`, the queue guard),
- * with two keys of this split's own: `ruleChangeVerified` (`readRuleChangeVerified` of the located comment) and
+ * with three keys of this split's own: `ruleChangeVerified` (`readRuleChangeVerified` of the located comment),
  * `ruleChangeCarried` (`null`, or `{ from, ok, reason }` for a record carried from an older head — it stands only
- * when the hops moved nothing under the split row). The conjunct holds only for a record FOUND on this head whose
- * line was READ and reads the value the body `declared`: missing, unreadable, `yes`, or the other seat value are
- * each a reason, as is a record that is absent, unsigned or unread.
+ * when the hops moved nothing under the split row) and `recordLeg` (`{ state, reason }`: the queue's own record leg
+ * on the same comment, `recordVerdict` then `recordPassVerdict` — `stands` only at its face's tier and on a clean
+ * PASS). The conjunct holds only for a record FOUND on this head that the record leg clears and whose line was READ
+ * and reads the value the body `declared`: missing, unreadable, `yes`, or the other seat value are each a reason,
+ * as is a record that is absent, unsigned, unread, below its tier, not a clean PASS, or whose leg was not read.
  */
 export function ruleChangeRecordReasons(record, declared) {
   const want = `${RULE_CHANGE_VERIFIED_KEY}: ${declared}`;
@@ -3195,6 +3207,15 @@ export function ruleChangeRecordReasons(record, declared) {
   const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
   const carried = record.ruleChangeCarried;
   if (carried && carried.ok !== true) reasons.push(`${which} ${carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
+  // The queue's record leg on the same comment: ⛔ a caller that hands no leg reading gets no Tier S (N1 of #35610).
+  const leg = record.recordLeg;
+  if (leg?.state !== 'stands') {
+    const said = leg?.reason ? `: ${leg.reason}` : '';
+    if (!leg) reasons.push(`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`);
+    else if (leg.state === 'not-pass') reasons.push(`${which} does not read a clean PASS${said}`);
+    else if (leg.state === 'below-tier') reasons.push(`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`);
+    else reasons.push(`${which} does not stand on the queue's record leg (${leg.state})${said}`);
+  }
   const line = record.ruleChangeVerified;
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${RULE_CHANGE_VERIFIED_KEY}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${RULE_CHANGE_VERIFIED_KEY}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
@@ -4289,8 +4310,28 @@ export async function recomputeProvenanceFor(root, hitsByEntry, { allPaths = [],
 
 // ── local git (enumeration + diff paths; zero API) ──────────────────────────
 
-function git(root, args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+function git(root, args, input) {
+  return execFileSync('git', args, gitSpawnOptions(root, input));
+}
+
+/**
+ * `git()`'s spawn options. `input`, when given, is git's STDIN — `check-attr --stdin` reads its paths there, and with
+ * stdin dropped git answers nothing, so the guard's `unexplainedPathsBetween` reads every moved path as a regeneration
+ * and `regenCarry` can read a false carry. With no `input`, stdin stays `'ignore'`: a plain read never waits on a
+ * terminal. Exported only as the self-test's seam.
+ */
+export function gitSpawnOptions(root, input) {
+  const base = { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 };
+  return input === undefined ? { ...base, stdio: ['ignore', 'pipe', 'pipe'] } : { ...base, input, stdio: ['pipe', 'pipe', 'pipe'] };
+}
+
+/**
+ * The git reader this file hands the queue guard's readers (`--pr`'s `pullRecordStage`, the sweep's `readArmLanding`):
+ * `(argv, input) => stdout`, the guard's own `runGit` shape, so the `input` a reader passes reaches git's stdin.
+ * ⛔ Never `(argv) => git(root, argv)` there — that drops the second argument, and `check-attr --stdin` answers nothing.
+ */
+export function checkoutGitReader(root) {
+  return (argv, input) => git(root, argv, input);
 }
 
 /**
@@ -5377,9 +5418,9 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   // N5: every git read the arm takes is recorded when it throws. The guard folds such a read into Tier H with a
   // reason (fail closed in the queue), but here an H read on a failed read cannot say whether the queue read S.
   const gitFailures = [];
-  const armGit = (argv) => {
+  const armGit = (argv, input) => {
     try {
-      return runGit(argv);
+      return runGit(argv, input);
     } catch (error) {
       gitFailures.push({ argv, why: why(error) });
       throw error;
@@ -5677,11 +5718,11 @@ function armSettledWithoutUnread({ guard, entry, paths, repo, head, events, runG
     const [work] = guard.decomposeGovernedWork([{ pr: entry.pr, sha: entry.sha, subject: entry.subject, paths }], repo).governed;
     if (!work) return null;
     const failures = [];
-    const git = (argv) => {
+    const git = (argv, input) => {
       const key = JSON.stringify(argv);
       if (answers.has(key)) return answers.get(key);
       try {
-        return runGit(argv);
+        return runGit(argv, input);
       } catch (error) {
         failures.push({ argv, why: String(error?.message ?? error).split('\n')[0] });
         throw error;
@@ -6792,7 +6833,7 @@ async function runPullMode(args) {
       const api = { ...apiContext(process.env), slug: target.slug, token };
       return { fetchComments: guard.makeCommentReader(api), fetchLabels: guard.makeLabelReader(api), fetchTimeline: guard.makeTimelineReader(api) };
     },
-    runGit: sameCheckout ? (argv) => git(root, argv) : null,
+    runGit: sameCheckout ? checkoutGitReader(root) : null,
   });
   return await emitVerdict(derived.paths, args, derived.derivation, derived.size, { fork: derived.fork, checks: derived.checks }, repo, workflowDiff, staged);
 }
@@ -7253,7 +7294,7 @@ async function main() {
       ? { fetchPull: counted(armReaders.guard.makePullReader(api)), fetchReviews: counted(armReaders.guard.makeReviewReader(api)), fetchTimeline: counted(armReaders.guard.makeTimelineReader(api)), fetchComments: counted(armReaders.guard.makeCommentReader(api)), fetchLabels: counted(armReaders.guard.makeLabelReader(api)) }
       : null;
     const root = repoById.get(entry.repoId)?.path;
-    entry.arm = await readArmLanding(entry, { paths: pathsBySha.get(entry.sha) ?? [], repo: entry.repoId, readers: armReaders, fetchers, runGit: (argv) => git(root, argv), attribution: entry.attribution ?? null });
+    entry.arm = await readArmLanding(entry, { paths: pathsBySha.get(entry.sha) ?? [], repo: entry.repoId, readers: armReaders, fetchers, runGit: checkoutGitReader(root), attribution: entry.attribution ?? null });
     if (entry.arm?.state === 'not-measured') armUnmeasured += 1;
   }
 
@@ -7420,7 +7461,7 @@ async function selfTest() {
   const REPO = SELF_REPO_ID;
   // The reading the `.claude/**` declaration split (2026-11-19) lands Tier S on: the body's one bare line, and a
   // record FOUND on this head whose own line verifies it. `ruleReading` moves one half at a time for the controls.
-  const ruleRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 7, carried: null, ruleChangeCarried: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, ...over });
+  const ruleRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 7, carried: null, ruleChangeCarried: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, recordLeg: { state: 'stands', reason: null }, ...over });
   const ruleReading = (body = 'Rule-change: none', record = ruleRecord()) => ({ measured: true, reason: null, body, ...(record === null ? {} : { record }) });
   const RULE_NONE = ruleReading();
   // Report fixtures take a REAL window from the real resolver, never a
@@ -7557,9 +7598,9 @@ async function selfTest() {
     assert('the-split-repositories-are-a-subset-of-the-rows-own', row.split.repos.every((r) => surfaceRepos(row).includes(r)));
     assert('the-reader-parses-the-fixture-and-the-baseline-is-S-against-itself', workflowFacts(BASE_WF).ok === true && isS(tierOf(BASE_WF)) && isS(tierOf(`${BASE_WF}\n`)), show(tierOf(BASE_WF)));
 
-    // Tier H by PATH: the six release, publish and deploy files and the workflow that runs the queue guard, each on disk under its own name.
+    // Tier H by PATH: the six release, publish and deploy files, the workflow that runs the queue guard and the two starter marketplace publishes, each on disk under its own name.
     const PINNED = WORKFLOW_TIER_H_FILES.map((f) => f.path);
-    assert('seven-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-the-write-relay-and-the-guards-own-workflow', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write', 'governed-surface-guard'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
+    assert('nine-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-the-write-relay-the-guards-own-workflow-and-both-starter-publishes', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write', 'governed-surface-guard', 'publish-starter-staging', 'publish-starter-production'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
     assert('every-pinned-path-is-a-real-workflow-file-of-this-repository', PINNED.every((p) => existsSync(resolve(scriptDir, '..', '..', p))), PINNED.filter((p) => !existsSync(resolve(scriptDir, '..', '..', p))).join());
     assert('⛔ the-guards-own-workflow-is-H-by-path-on-an-edit-the-content-classifier-reads-S-anywhere-else', isH(tierOf(`# a comment\n${BASE_WF}`, { path: `${WORKFLOWS_PREFIX}governed-surface-guard.yml` }), /Tier H by path/) && isS(tierOf(`# a comment\n${BASE_WF}`)), show(tierOf(`# a comment\n${BASE_WF}`, { path: `${WORKFLOWS_PREFIX}governed-surface-guard.yml` })));
     assert('a-pinned-file-is-H-even-on-a-comment-only-edit', PINNED.every((p) => isH(classifyWorkflowChange({ path: p, base: BASE_WF, head: `# a comment\n${BASE_WF}`, inventory: INVENTORY }), /Tier H by path/)));
@@ -7960,6 +8001,25 @@ async function selfTest() {
         assert('--pr-reads-no-record-stage-and-loads-no-reader-unless-the-stage-is-pending',
           (await stagePr({ reading: labelled })) === labelled && (await stagePr({ reading: null })) === null && (await stagePr({ reading: walked.lowRisk })) === walked.lowRisk && calls.length === 0 && loads === 0 &&
           (await stagePr()) !== withCs(walked.lowRisk) && loads === 1, `${calls.join()} loads=${loads}`);
+        // ⭐ The reader `--pr` hands the record stage in this checkout is the stdin-carrying one: what the guard's
+        // reader receives answers `check-attr --stdin`, so a hand edit inside a regeneration chain reads unexplained.
+        assert('⭐ --pr-HANDS-THE-RECORD-STAGE-A-GIT-READER-THAT-CARRIES-STDIN-so-a-moved-non-regen-path-reads-unexplained', await (async () => {
+          const { unexplainedPathsBetween } = await import('./record-recognisers.mjs');
+          const fx = buildStdinAttrFixture();
+          try {
+            let handed = null;
+            const spy = { ...armReaders, guard: { ...armReaders.guard, readLowRiskRecordStage: async (o) => { handed = o.runGit; return armReaders.guard.readLowRiskRecordStage(o); } } };
+            await pullRecordStage({
+              lowRisk: withCs(walked.lowRisk), paths: walked.paths, repo: REPO, pullHead: { number: 2, body: 'Fixes #69\n\nClause-②: no\nMetadata-protocol: none', head: { ref: 'claude/project-thread-x' } },
+              derivation: { pull: 2, headSha: PRHEAD, baseSha: null }, readers: () => spy, runGit: checkoutGitReader(fx.root),
+              fetchers: { fetchComments: async () => [], fetchLabels: async () => [], fetchTimeline: async () => [] },
+            });
+            const hand = typeof handed === 'function' ? unexplainedPathsBetween(handed, { from: fx.from, to: fx.to, base: 'main' }) : null;
+            return Array.isArray(hand) && hand.join() === STDIN_FX_HAND ? true : JSON.stringify(hand);
+          } finally {
+            fx.cleanup();
+          }
+        })() === true);
       }
       const removed = await walk([SK, CS], [{ event: 'labeled', label: { name: 'security' } }, { event: 'unlabeled', label: { name: 'security' } }]);
       assert('⛔ S1-a-security-label-REMOVED-in-the-timeline-the-pull-object-no-longer-shows-is-H', tier(removed.paths, withCs(removed.lowRisk)) === GOVERNED_TIER_H && /`security` label removed/.test(lowRiskArmVerdict(governedPathsIn(removed.paths, REPO), REPO, withCs(removed.lowRisk)).reasons.join()));
@@ -8243,10 +8303,20 @@ async function selfTest() {
       'an unsigned record': ruleRecord('none', { located: 'unsigned' }),
       'a record that was not read': { measured: false, reason: 'the PR thread answered 502' },
       'a record carried over a hop that moved the tree': ruleRecord('none', { ruleChangeCarried: { from: 'a'.repeat(40), ok: false, reason: 'was carried over hops that moved .claude/x.md' } }),
+      // N1 of #35610: the record leg the queue reads on the same comment — the verified line alone is not enough.
+      'a record that reads FAIL': ruleRecord('none', { recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }),
+      'a record below its tier': ruleRecord('none', { recordLeg: { state: 'below-tier', reason: null } }),
+      'a record whose leg was not read': ruleRecord('none', { recordLeg: undefined }),
     };
     for (const [name, record] of Object.entries(unverified)) {
       assert(`⛔ unverified-is-Tier-H: ${name}`, tier([WORDING], ruleReading('Rule-change: none', record)) === GOVERNED_TIER_H && split([WORDING], ruleReading('Rule-change: none', record)).reasons.length === 1, why([WORDING], ruleReading('Rule-change: none', record)));
     }
+    assert('⛔ N1: the-record-legs-words-name-why-and-the-same-record-with-a-standing-leg-verifies',
+      /does not read a clean PASS: it reads FAIL/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record that reads FAIL']))) &&
+        /does not stand at its face's tier/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record below its tier']))) &&
+        /was not read by the queue's record leg/.test(why([WORDING], ruleReading('Rule-change: none', unverified['a record whose leg was not read']))) &&
+        tier([WORDING], ruleReading('Rule-change: none', ruleRecord('none'))) === GOVERNED_TIER_S,
+      why([WORDING], ruleReading('Rule-change: none', unverified['a record that reads FAIL'])));
     assert('control-a-carried-record-whose-hops-moved-nothing-under-the-row-still-verifies',
       tier([WORDING], ruleReading('Rule-change: none', ruleRecord('none', { ruleChangeCarried: { from: 'a'.repeat(40), ok: true, reason: null } }))) === GOVERNED_TIER_S);
     assert('⛔ the-record-not-handed-in-is-PENDING-Tier-H-never-none',
@@ -11230,6 +11300,30 @@ async function selfTest() {
     assert('⛔ readers-that-did-not-load-are-NOT-MEASURED', await unmeasured({ rd: { available: false, reason: 'no guard' } }, /no guard/) === true);
     assert('no-catalog-row-or-no-PR-number-is-no-arm-reading', (await run({ paths: ['AGENTS.md'] })) === null &&
       (await readArmLanding({ ...entryOf(), pr: null }, { paths: [SK], repo: 'objectstack', readers, fetchers: {}, runGit })) === null);
+    // ⭐ Every git reader the landing hands the guard — the arm's (`readLowRiskTier`) and the record pair's
+    // (`recordVerdict`, where a `Regen-provenance:` chain is re-tested) — passes the caller's STDIN through.
+    {
+      const handed = { arm: [], pair: [] };
+      const spy = { ...readers, guard: { ...readers.guard,
+        readLowRiskTier: (...a) => { handed.arm.push(a[3]?.runGit); return readers.guard.readLowRiskTier(...a); },
+        recordVerdict: (o) => { handed.pair.push(o?.pair?.runGit); return readers.guard.recordVerdict(o); } } };
+      const echo = (args, input) => (args[0] === 'check-attr' ? `stdin:${input}` : runGit(args));
+      const echoed = await run({ rd: spy, git: echo });
+      const all = [...handed.arm, ...handed.pair];
+      assert('⭐ the-landing-hands-every-guard-reader-a-git-that-passes-STDIN-through-the-arm-and-the-record-pair',
+        echoed?.state === 'pass' && handed.arm.length > 0 && handed.pair.length > 0 && all.every((g) => typeof g === 'function' && g(['check-attr', '--stdin'], 'a\0b') === 'stdin:a\0b'), JSON.stringify({ state: echoed?.state, arm: handed.arm.length, pair: handed.pair.length }));
+      const { unexplainedPathsBetween } = await import('./record-recognisers.mjs');
+      const fx = buildStdinAttrFixture();
+      try {
+        handed.arm.length = 0;
+        await run({ rd: spy, git: checkoutGitReader(fx.root) });
+        const hand = typeof handed.arm[0] === 'function' ? unexplainedPathsBetween(handed.arm[0], { from: fx.from, to: fx.to, base: 'main' }) : null;
+        assert('⭐ the-sweeps-checkout-reader-reaches-real-git-through-the-landings-wrapper-and-a-moved-non-regen-path-reads-unexplained',
+          Array.isArray(hand) && hand.join() === STDIN_FX_HAND, JSON.stringify(hand));
+      } finally {
+        fx.cleanup();
+      }
+    }
 
     // The arm's RECORD STAGE, as the queue read it at the landing: a record that stands and reads PASS must also carry
     // the arm's line, and the card must have been free of `security` THEN. A stage at Tier H is a BREACH flagged
@@ -11651,6 +11745,40 @@ async function selfTest() {
     assert('the-swept-line-names-the-next-weekly-deadline-and-refuses-an-unreadable-cron', auditSweptExpectation('31 23 * * 0', new Date('2026-11-15T23:40:00Z')).includes('next by 2026-11-22T23:31Z') && auditSweptExpectation('*/5 * * * *', new Date()).includes('UNSTATED'));
   }
 
+  // ── The git reader the guard's readers are handed carries STDIN ──────────
+  //
+  // `unexplainedPathsBetween` hands the moved paths to `git check-attr --stdin` as `runGit`'s SECOND argument. A
+  // reader that drops it answers nothing, and an empty answer reads every moved path as a regeneration — so `--pr`
+  // and the post-merge audit read a hand edit inside a `Regen-provenance:` chain as carried. Real git, offline, over
+  // a throwaway repository: the reader this file hands out, never a stub of it.
+  battery('⭐ the git reader handed to the guard\'s readers carries STDIN (`check-attr --stdin`)');
+  {
+    const { unexplainedPathsBetween } = await import('./record-recognisers.mjs');
+    const fx = buildStdinAttrFixture();
+    try {
+      const read = checkoutGitReader(fx.root);
+      const attrs = String(read(['check-attr', '--source', fx.to, '-z', 'merge', '--stdin'], [STDIN_FX_HAND, STDIN_FX_REGEN].join('\0'))).split('\0');
+      assert('⭐ the reader hands git its STDIN: `check-attr --stdin` answers each path it is handed (`unspecified` for the hand-written one, `os-regen` for the generated one)',
+        attrs[0] === STDIN_FX_HAND && attrs[2] === 'unspecified' && attrs[3] === STDIN_FX_REGEN && attrs[5] === 'os-regen', JSON.stringify(attrs));
+      const hand = unexplainedPathsBetween(read, { from: fx.from, to: fx.to, base: 'main' });
+      assert('⛔ through the guard\'s own reader, a moved path whose attribute is NOT `os-regen` reads UNEXPLAINED (a reader that drops stdin reads it explained)',
+        hand.join() === STDIN_FX_HAND, JSON.stringify(hand));
+      const regenOnly = unexplainedPathsBetween(read, { from: fx.to, to: fx.regenOnly, base: 'main' });
+      assert('control: a hop that moved ONLY the `merge=os-regen` path reads explained, so the reading above is the attribute\'s and not a blanket refusal',
+        regenOnly.length === 0, JSON.stringify(regenOnly));
+      assert('⛔ a read that passes NO input still answers, on an ignored stdin: `check-attr --stdin` returns empty rather than waiting on a terminal',
+        String(read(['check-attr', '-z', 'merge', '--stdin'])) === '');
+    } finally {
+      fx.cleanup();
+    }
+    const plain = gitSpawnOptions('/r');
+    const fed = gitSpawnOptions('/r', 'a\0b');
+    assert('⛔ a caller that passes no input keeps stdin `ignore` and hands git no `input`',
+      plain.stdio[0] === 'ignore' && !('input' in plain) && plain.cwd === '/r', JSON.stringify(plain));
+    assert('a caller that passes input gets it on a PIPED stdin, byte for byte',
+      fed.stdio[0] === 'pipe' && fed.input === 'a\0b' && fed.cwd === '/r', JSON.stringify(fed));
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -11664,9 +11792,49 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and the patrol's name does not silence this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths. — and the weekly audit card's readings (#33814), each pinned with its control: a PR-less governed landing reads NOT MEASURED, a carried row names the state this run read it in, the body is fitted under the issue-body limit with its counts taken on the card, a close rules only when its event's actor is an authorized approver and it names no commit (an app object or an absent app key rules nothing) and every such card within the horizon counts, the section reader ignores fences (closed only by their own marker, an unclosed one reported), counts stray rows and stops at the last footer, and every BREACH row that does not fit is named.\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register — and the #17003 derivation set: the Link walk that ends on rel=next rather than on a short page, a rename reaching the predicate as BOTH of its paths, a walk the PR's own count contradicts refusing rather than answering on a subset, a channel chosen once and never spliced mid-walk, every --branch leg on an injected git incl. the uncomputable merge base that REFUSES instead of falling back to two-dot, and the card's own reproduction run end to end on a real repo — a branch behind a main that has since touched a governed path answers GOVERNED two-dot and NOT governed three-dot, a rename out of a governed path is a hit only because the diff is taken --no-renames, the merge-base refusal prints no verdict at all, and the verdict is byte-identical through --branch and through --test on the same list. — and the #18055 banner set: the INCOMPLETE banner is BUILT on the attribution-failure path instead of throwing while it is built, it still returns EXIT_INCOMPLETE, the proxy hint renders from the plan the sweep now binds and stays empty both when the plan says no hint and when the incompleteness is not about attribution, and a real sweep whose every attribution channel fails prints the banner on STDERR and exits 2 — and the #19133 landing tiers: every register row carries H or S, Tier S is exactly the .claude/** row, a list is S only when every governed path is S (empty or ungoverned answers H), the verdict line and --json carry the tier while both tiers share exit 3, and the tier is recomputed on the lifted slice. — and the 2026-09-18 SIZE predicate: the ruled line, 3,000 since the maintainer's 2026-10-09 word, declared once and pinned on both sides and on the PR that prompted it; the number read off --pr's own GET (its absence a refusal), off --branch's --numstat on the range it lists (binary files at zero, a failed read a refusal), or off --additions/--deletions handed to --test (half a pair refused, the pair refused where the mode reads it itself); NOT MEASURED said on stdout when nothing read it; a certified regeneration lifting the path and not the size; and the verdict still ONE emitter — the governed code for either limb, byte-identical across --branch and --test on the same list and numbers. — and the #18989 guard set: the re-exec guard is the CALLER's name — the default is still this file's own, a caller that names its own guard is suppressed by that one alone, and the patrol's name does not silence this file any more — a suppressed run SPEAKS, naming the variable to unset, the 401 the silence would be read as and the proxy the request was supposed to take, while the Actions-runner leg stays inert and an already-flagged run is still answered by the FLAG; and the plan is declared a MIRROR pinned to its OWNER's source: the patrol's spelling, the patrol's own caller-guard parameter, and the module-scope await that is the measured REASON this is a copy rather than an import. — and the #19036 audit half: the sweep classifies on the SAME predicate the queue and the pre-check answer with (\`landsByHumanMerge\` on \`testVerdict\`), the size read LOCALLY off the landed diff by one \`git diff-tree --numstat\` per mainline commit that also lists its paths (byte-identical to the old \`--name-only\` list, a merge commit read against its first parent, a binary row at zero), so an oversized landing with NO governed path is an entry on the size limb alone — counted apart in the head, listed with the ⛔ SIZE row and the same attribution column, GitHub's pair printed beside the landed number only when it differs, exactly the threshold NOT listed, a governed AND oversized row carrying both limbs, a row classified with no size rendering as it did — and a REAL sweep over a fixture repo listing the over-by-one landing and not the at-threshold one, on stdout and in --json. — and the 2026-09-21 FORK predicate: a fork head (or a deleted fork repo) lands by human merge through the Tier H terminal with its own reason sentence, a same-repo head changes nothing on either tier, --test / --branch say NOT MEASURED for a head they cannot see, ZERO check runs read NOT MEASURED and never green, and both readings ride --pr's own GET. — and the closed argv: each mode reads a closed flag set and refuses every other on exit 1 (an unknown flag, another mode's flag, an equals spelling, a --repo, which prescribes the qualified --pr spelling), a bare --pr beside a PM_SWEEP_REPO naming another repository is refused with both qualified spellings, and the card's own invocation table replayed against a recording fake API: every refusal READS NOTHING, the qualified spelling answers from the repository it names, byte-identical with PM_SWEEP_REPO set. — and the #30718 rename-aware size: --branch and the sweep count a moved file by its \`-M\` numstat, as GitHub does (a 400-line move with one edit reads +1 / -1 over one file, a \`diff.renames=false\` config notwithstanding), while both PATH lists keep \`--no-renames\` and so still carry both paths. — and the weekly audit card's readings (#33814), each pinned with its control: a PR-less governed landing reads NOT MEASURED, a carried row names the state this run read it in, the body is fitted under the issue-body limit with its counts taken on the card, a close rules only when its event's actor is an authorized approver and it names no commit (an app object or an absent app key rules nothing) and every such card within the horizon counts, the section reader ignores fences (closed only by their own marker, an unclosed one reported), counts stray rows and stops at the last footer, and every BREACH row that does not fit is named. — and the git reader this file hands the guard's readers carries STDIN: on real git, \`check-attr --stdin\` answers each path it is handed, a moved path not routed \`merge=os-regen\` reads unexplained through \`--pr\`'s and the sweep's handoffs, and a read with no input keeps stdin ignored.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
+}
+
+// The two paths the stdin battery's fixture moves: one hand-written, one routed `merge=os-regen`.
+const STDIN_FX_HAND = 'scripts/pm/x.mjs';
+const STDIN_FX_REGEN = 'gen/out.json';
+
+/**
+ * A throwaway repository for the stdin battery: `main` seeds `.gitattributes` (routing `STDIN_FX_REGEN` to
+ * `merge=os-regen`) and both paths; a branch then commits `from` (an unrelated edit), `to` (both paths moved) and
+ * `regenOnly` (the generated path alone). Offline, on real git; `cleanup()` removes it.
+ */
+function buildStdinAttrFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'governed-merges-stdin-'));
+  const root = join(dir, 'repo');
+  const g = (...rest) => execFileSync('git', ['-c', 'user.email=t@t.invalid', '-c', 'user.name=t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...rest],
+    { cwd: existsSync(root) ? root : dir, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+  const put = (rel, text) => {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), text, 'utf8');
+  };
+  const commit = (msg) => {
+    g('add', '-A');
+    g('commit', '-qm', msg);
+    return g('rev-parse', 'HEAD').trim();
+  };
+  g('init', '-q', root);
+  put('.gitattributes', `${STDIN_FX_REGEN} merge=os-regen\n`);
+  put(STDIN_FX_HAND, 'export const x = 1;\n');
+  put(STDIN_FX_REGEN, '{"v":1}\n');
+  put('README.md', 'seed\n');
+  commit('chore: seed');
+  g('checkout', '-qb', 'feature');
+  put('README.md', 'seed\nfrom\n');
+  const from = commit('docs: from');
+  put(STDIN_FX_HAND, 'export const x = 2;\n');
+  put(STDIN_FX_REGEN, '{"v":2}\n');
+  const to = commit('feat: hand edit beside a regeneration');
+  put(STDIN_FX_REGEN, '{"v":3}\n');
+  const regenOnly = commit('chore: regenerate');
+  return { root, from, to, regenOnly, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** The exit code `--test` would return for a path list in `repo` — pinned without spawning. */

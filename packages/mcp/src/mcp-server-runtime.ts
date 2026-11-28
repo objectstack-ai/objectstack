@@ -25,7 +25,7 @@ import {
 } from './tool-call-interceptor.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { wireBridgeTools, datasetToolsServed, packageDocToolsServed, grantsAuthoringTools, thrownRefusalEnvelope, dataDoorAnswerOf, dataDoorRefusalEnvelope } from './mcp-http-tools.js';
-import { isServerFault, logServerFault } from '@objectstack/types';
+import { FLOW_RUNTIME_STATE_KEY, isServerFault, logServerFault } from '@objectstack/types';
 import type {
   McpDataBridge,
   McpActionBridge,
@@ -48,15 +48,17 @@ import {
   registerSkillPrompts,
   skillPromptFaces,
   skillPromptListEntry,
+  skillPromptRecordArgument,
   skillPromptRefusalError,
   skillPromptResult,
   skillPromptWithdrawn,
+  SKILL_PROMPT_RECORD_ARGUMENT,
   type McpSkillBridge,
   type SkillPrompt,
 } from './skill-prompts.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describePackageScopedHolder } from '@objectstack/core';
-import { deriveAiFaceName } from '@objectstack/spec/ai';
+import { deriveAiFaceName, GET_RECORD_CONTEXT_TOOL_NAME } from '@objectstack/spec/ai';
 import { z } from 'zod';
 // [#28715] The engine's own reading of "this field declares options" (its
 // `label()` map is built from it), never a second spelling here.
@@ -168,12 +170,35 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
       // is read there; the served definition, without that expression, is
       // what the answer is built from.
       readonly: writeNeverSetsField(declared.fields?.[key]),
+      ...describedHandLock(f),
       system: f?.system === true,
       ...(declaresOptions(f) ? { options: describedOptions(f.options as unknown[]) } : {}),
       ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
     })),
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
+  };
+}
+
+/**
+ * The HAND lock as `describe_object` serves it (ruling record 7180466652, the
+ * two-tier field-lock model): `uiReadonly: true` and the `uiReadonlyWhen`
+ * predicate text, each its own key and only where the field authors it, so a
+ * definition that authors neither keeps the shape it always had. ⛔ Never
+ * folded into `readonly`: that key tells an agent to leave the field out of a
+ * write, and a hand-locked field is exactly the one an agent's write (an API,
+ * import or action write) still sets, judged by the object's validations — a
+ * person at the console cannot edit it. Read off the served field.
+ *
+ * The twin is `describedHandLock` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function describedHandLock(f: unknown): { uiReadonly?: true; uiReadonlyWhen?: string } {
+  const field = (f ?? {}) as { uiReadonly?: unknown; uiReadonlyWhen?: unknown };
+  const when = field.uiReadonlyWhen as string | { source?: unknown } | undefined;
+  const source = typeof when === 'string' ? when : typeof when?.source === 'string' ? when.source : undefined;
+  return {
+    ...(field.uiReadonly === true ? { uiReadonly: true as const } : {}),
+    ...(source !== undefined && source.trim() !== '' ? { uiReadonlyWhen: source } : {}),
   };
 }
 
@@ -1181,11 +1206,13 @@ function routeBareSkillPromptNames(
   const sdkGet = map.get('prompts/get');
   if (!sdkGet) return;
   map.set('prompts/get', async (request, extra) => {
-    const wanted = (request as { params?: { name?: unknown } } | null | undefined)?.params?.name;
+    const params = (request as { params?: { name?: unknown; arguments?: Record<string, unknown> } } | null | undefined)?.params;
+    const wanted = params?.name;
     if (typeof wanted === 'string' && !registered.has(wanted)) {
       const lookup = lookupSkillPrompt(await listSkills(), wanted);
       if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
-      if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
+      // [ADR-0160 D8] The record argument, as on the face's own get.
+      if (lookup.status === 'found') return skillPromptResult(lookup.prompt, params?.arguments);
     }
     return sdkGet(request, extra);
   });
@@ -1794,9 +1821,17 @@ function hostInstructions(
  * every grant (a `metadata:write`-only or `actions:execute`-only token lists
  * no data tool) and with or without a build door mounted, so it never
  * promises building to a deployment that has none.
+ * [#35778] It also says where the usage guide is: the teaching prose lives in
+ * the served SKILL.md, not in the tool descriptions, so a client that never
+ * fetches it is told where it went. The runtime dispatcher mounts the public
+ * `GET <prefix>/mcp/skill` beside `<prefix>/mcp`, from the same domain list,
+ * behind the same enable switch and for every grant (it is anonymous), so the
+ * sentence names it relative to this endpoint and gives the default prefix.
+ * The stdio default names no URL: a stdio server has no HTTP endpoint.
  */
 const DEFAULT_HTTP_INSTRUCTIONS =
-  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted. '
+  + 'Usage guide (SKILL.md): GET this endpoint\'s path plus /skill (by default /api/v1/mcp/skill).';
 
 /**
  * [#34774] The authoring contract line (#34659 ruling D4 = A): the
@@ -1843,11 +1878,13 @@ const AUTHORING_CONTRACT_LINE: string | undefined = (() => {
  */
 const DATASET_SELECTION_RULE =
   'For a question about a business number, look for a governed metric first: call list_datasets with the '
-  + 'question\'s business words. A word matches only when it equals a measure\'s or dimension\'s name, label or '
+  + 'question\'s business words, each phrase whole as the user wrote it. A word matches only when it equals a measure\'s or dimension\'s name, label or '
   + 'synonym, never a similar word. Each word that matches exactly one measure: answer with query_dataset; two '
   + 'such words are two metrics, so compute both. One word matching several measures: ask the user which one '
   + 'they mean; do not pick. A word with no match and a measure among its candidates in the answer: ask the same '
   + 'way, listing each candidate\'s label, dataset label and description; do not pick one or treat it as a match. '
+  + 'Only the user\'s own word is asked about: one you cut out of a longer phrase of the question, or reworded, '
+  + 'is sent to list_datasets once more as the user wrote it instead, never the whole question. '
   + 'A word whose candidates are all dimensions is at most a possible grouping: never ask about it, and it never '
   + 'stops a matched measure. No match '
   + 'and no candidates: fall back to query_records / aggregate_records and say the answer is not from a governed '
@@ -1917,9 +1954,15 @@ function skillsInstallLine(version: string | undefined): string | undefined {
  * the reader its connection lists ({@link definitionReaderOf}) as a plain name.
  */
 export function packageDocAnswerRule(definitionReader?: string): string {
+  // [#36856] A switched-off flow keeps its definition, `status` included, so
+  // the definition alone says it runs. The readers carry the switch beside the
+  // item as `runtimeState` (`FLOW_RUNTIME_STATE_KEY`, `@objectstack/types`),
+  // and this sentence is what tells the agent to read it.
   const processStep = definitionReader
     ? `also read its real definition with ${definitionReader}; where the manual and the definition differ, the `
-      + 'definition is what runs: answer from it and name the difference.'
+      + 'definition is what runs: answer from it and name the difference. When that answer carries '
+      + `${FLOW_RUNTIME_STATE_KEY}.enabled: false, the process is switched off and does not run, whatever its `
+      + 'status reads: say that it is switched off.'
     : 'this connection lists no tool that reads its definition, so answer from the manual and say that the '
       + 'configured process was not checked.';
   return 'For a question about the apps installed here, read their manuals before you answer: call '
@@ -2000,6 +2043,20 @@ export interface McpHttpCaller {
   executionContext?: McpCallerExecutionContext;
   /** The environment the host dispatched this request for. */
   environmentId?: string;
+}
+
+/**
+ * [#37666] The tool options with this runtime's logger as the fault-line logger
+ * ({@link RegisterObjectToolsOptions.logger}), unless the caller handed its own.
+ * The plugin builds the runtime with the kernel's logger (`ctx.logger`), so the
+ * `/mcp` and stdio doors' 5xx lines go through the host's sink.
+ */
+function withFaultLogger(
+  toolOptions: (RegisterObjectToolsOptions & RegisterActionToolsOptions) | undefined,
+  logger: Logger | undefined,
+): RegisterObjectToolsOptions & RegisterActionToolsOptions {
+  if (!logger || toolOptions?.logger) return toolOptions ?? {};
+  return { ...toolOptions, logger };
 }
 
 /**
@@ -2220,6 +2277,16 @@ export class MCPServerRuntime {
    * tool and its source; never a boot failure and never a second
    * registration under the name (the SDK refuses one by throwing).
    */
+  /**
+   * [ADR-0160 D8] Whether this long-lived server registers a tool of this
+   * name now: a native data tool ({@link bridgeDataTools}) or one bridged from
+   * the AI registry ({@link bridgeTools}). Read by {@link bridgePrompts}, so a
+   * host bridges its tools before its prompts (`plugin.ts` does).
+   */
+  private servesTool(name: string): boolean {
+    return this.nativeToolNames.has(name) || this.bridgedTools.has(name);
+  }
+
   private yieldBridgedTool(name: string): void {
     const bridged = this.bridgedTools.get(name);
     if (!bridged) return;
@@ -2270,7 +2337,7 @@ export class MCPServerRuntime {
     }) as typeof server.registerTool;
     let registered: string[];
     try {
-      registered = wireBridgeTools(server, bridge, toolOptions);
+      registered = wireBridgeTools(server, bridge, withFaultLogger(toolOptions, this.config.logger));
     } finally {
       server.registerTool = registerTool;
     }
@@ -2424,7 +2491,7 @@ export class MCPServerRuntime {
                   error: err,
                   ...(door.code !== undefined ? { code: door.code } : {}),
                   request: { method: 'resources/read', path: uri },
-                });
+                }, logger);
               }
               // [#31373] …and the door's `declaredCode` / `userMessage`, after
               // `status`, when it serves them, as the record data tools do.
@@ -2522,6 +2589,13 @@ export class MCPServerRuntime {
      * from (`NS-NAME`). Omitted, every face is the item's bare name.
      */
     packageNamespace?: (packageId: string) => string | undefined,
+    /**
+     * [ADR-0150 D3 step 2, ADR-0160 D8] A package's resolution closure, which a
+     * package-held skill's `context` resolves through
+     * (`McpSkillBridge.packageResolutionClosure`). Omitted, such a skill
+     * resolves only its own package's pack.
+     */
+    packageResolutionClosure?: (packageId: string) => ReadonlySet<string>,
   ): Promise<void> {
     const logger = this.config.logger;
 
@@ -2617,6 +2691,20 @@ export class MCPServerRuntime {
     let skillListVerdict: { degraded: boolean; errors: string[] } = { degraded: false, errors: [] };
     const skillBridge: McpSkillBridge = {
       ...(packageNamespace ? { packageNamespace } : {}),
+      ...(packageResolutionClosure ? { packageResolutionClosure } : {}),
+      // [ADR-0160 D8] The packs a skill's `context` resolves against: the
+      // merged listing, the one the stdio bridge's `get_record_context` reads
+      // its packs from, so the face a prompt hands on is one the tool selects.
+      // Only where THIS server registers `get_record_context` (natively or
+      // bridged from the AI registry), read now: without the listing no skill
+      // resolves a pack, so none lists the record argument and none carries
+      // the line telling the model to call a tool this server does not serve.
+      // This door has no general binding filter (that is #37609); this is the
+      // one tool the platform's own line names. The HTTP bridge gates the same
+      // member on its record-context seam (`packages/runtime/src/domains/mcp.ts`).
+      ...(this.servesTool(GET_RECORD_CONTEXT_TOOL_NAME)
+        ? { listContextPacks: async () => (await mergedDiagnosedList(metadataService, mergedRead, 'ai_context')).items }
+        : {}),
       listSkills: async () => {
         // The verdict of the READ, recorded as the read happens. `listSkills`
         // is also the per-call re-read behind each registered prompt's body, so
@@ -2678,40 +2766,54 @@ export class MCPServerRuntime {
       }
       if (entry.prompts.length > 1) logger?.warn(`[MCP] ${duplicateSkillFaceMessage(entry)}`);
       const listed = skillPromptListEntry(entry);
-      this.mcpServer.registerPrompt(
-        entry.face,
-        {
-          ...(listed.title ? { title: listed.title } : {}),
-          ...(listed.description ? { description: listed.description } : {}),
-        },
-        async () => {
-          // Re-read at call time so an edited skill serves fresh instructions.
-          // One read: the projection and the withdrawal check below see the same rows.
-          const rows = (await skillBridge.listSkills()) ?? [];
-          const lookup = lookupSkillPrompt(
-            await listSkillPrompts({ ...skillBridge, listSkills: async () => rows }),
-            entry.face,
-          );
-          if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
-          if (lookup.status === 'found') return skillPromptResult(lookup.prompt);
-          if (entry.prompts.length === 1) {
-            // [#34167] Withdrawn since the snapshot (`mcpPrompt: false`):
-            // answered as the SDK answers a name it never registered. This
-            // server's list is a boot snapshot and keeps the name until
-            // restart; the get stops serving it at once.
-            if (skillPromptWithdrawn(rows, entry.prompts[0])) {
-              throw new McpError(ErrorCode.InvalidParams, `Prompt ${entry.face} not found`);
-            }
-            // Gone since the snapshot: the snapshot's one skill, as before.
-            return skillPromptResult(entry.prompts[0]);
+      // [ADR-0160 D8] A skill whose `context` resolved to a pack at this
+      // snapshot lists the record argument; the SDK hands a get its value.
+      const recordArgument = listed.arguments ? skillPromptRecordArgument() : undefined;
+      const serve = async (args?: Record<string, unknown>) => {
+        // Re-read at call time so an edited skill serves fresh instructions.
+        // One read: the projection and the withdrawal check below see the same rows.
+        const rows = (await skillBridge.listSkills()) ?? [];
+        const lookup = lookupSkillPrompt(
+          await listSkillPrompts({ ...skillBridge, listSkills: async () => rows }),
+          entry.face,
+        );
+        if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
+        if (lookup.status === 'found') return skillPromptResult(lookup.prompt, args);
+        if (entry.prompts.length === 1) {
+          // [#34167] Withdrawn since the snapshot (`mcpPrompt: false`):
+          // answered as the SDK answers a name it never registered. This
+          // server's list is a boot snapshot and keeps the name until
+          // restart; the get stops serving it at once.
+          if (skillPromptWithdrawn(rows, entry.prompts[0])) {
+            throw new McpError(ErrorCode.InvalidParams, `Prompt ${entry.face} not found`);
           }
-          throw skillPromptRefusalError({
-            status: 'refused',
-            message: duplicateSkillFaceMessage(entry),
-            candidates: entry.prompts.map((p) => p.face),
-          });
-        },
-      );
+          // Gone since the snapshot: the snapshot's one skill, as before.
+          return skillPromptResult(entry.prompts[0], args);
+        }
+        throw skillPromptRefusalError({
+          status: 'refused',
+          message: duplicateSkillFaceMessage(entry),
+          candidates: entry.prompts.map((p) => p.face),
+        });
+      };
+      const config = {
+        ...(listed.title ? { title: listed.title } : {}),
+        ...(listed.description ? { description: listed.description } : {}),
+      };
+      if (recordArgument) {
+        this.mcpServer.registerPrompt(
+          entry.face,
+          {
+            ...config,
+            argsSchema: {
+              [SKILL_PROMPT_RECORD_ARGUMENT]: z.string().optional().describe(recordArgument.description),
+            },
+          },
+          async (args) => serve(args),
+        );
+      } else {
+        this.mcpServer.registerPrompt(entry.face, config, async () => serve());
+      }
       registeredNames.add(entry.face);
       bridged++;
     }
@@ -2964,14 +3066,14 @@ export class MCPServerRuntime {
     });
 
     if (skillBridge) {
-      registerSkillPrompts(server, skillBridge);
+      registerSkillPrompts(server, skillBridge, this.config.logger ? { logger: this.config.logger } : {});
     }
 
     if (opts.bridge) {
       // [#8034] The SAME composition the long-lived server uses in
       // {@link bridgeDataTools} — including the by-capability action wiring
       // that used to be open-coded here. Two transports, one call site.
-      wireBridgeTools(server, opts.bridge, opts.toolOptions);
+      wireBridgeTools(server, opts.bridge, withFaultLogger(opts.toolOptions, this.config.logger));
     }
 
     if (opts.authoring) {

@@ -82,8 +82,7 @@ import { registerShareLinkRoutes } from './share-link-routes.js';
 import { SHAREABLE_OBJECTS_ROUTE, registerShareableObjectsRoutes } from './shareable-objects-routes.js';
 import { SharingRulesNotRunningError } from './shareable-objects.js';
 import {
-  bindRuleHooks,
-  unbindAllRuleHooks,
+  rebindRuleHooks,
   bindRuleCriteriaGuard,
   bindRuleObjectEnforcementGuard,
   RULE_REBIND_TRIGGER_PACKAGE,
@@ -96,7 +95,9 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import type { ShareLinkLabelProtocol } from '@objectstack/types';
 import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
+import { registeredObjectNames, reportInertShareGrantHolders, shareGrantRegistrationRefusal } from './share-arm-boot.js';
 
 /**
  * One page of the boot's organization enumeration. A PAGE size, not a cap: the
@@ -453,6 +454,23 @@ export class SharingServicePlugin implements Plugin {
   private ruleRebindChain: Promise<void> = Promise.resolve();
 
   /**
+   * The plugin's ONE binding site for the per-record sharing-rule hooks, at
+   * boot and on every `sys_sharing_rule` rebind ({@link bindRuleRebindTriggers})
+   * — so the two can never derive different object sets. It unbinds the
+   * rule-hook package and binds it again on `listRuleHookObjects()`
+   * (`rebindRuleHooks`, rule-hooks.ts): per OBJECT, from the declarations and
+   * rows, never from the organizations a declared rule is served in at this
+   * moment. An organization created after boot (the organization-created
+   * middleware, `addDeclaredRuleScope`) is therefore served by the hooks
+   * already bound; the organization is resolved when a record is evaluated.
+   */
+  private async bindRuleHooks(engine: any, ctx: PluginContext): Promise<void> {
+    const ruleService = this.ruleService;
+    if (!ruleService) return;
+    await rebindRuleHooks(engine, ruleService, ctx.logger as any);
+  }
+
+  /**
    * [#2592] Rebind rule hooks whenever `sys_sharing_rule` DATA changes.
    *
    * `bindRuleHooks` above runs once at `kernel:ready` and registers
@@ -464,8 +482,9 @@ export class SharingServicePlugin implements Plugin {
    * rebind pattern (#2576) never fires here — the trigger must be a
    * data-change hook on the rule table itself.
    *
-   * The rebind mirrors boot exactly: unbind the whole rule-hook package,
-   * re-bind from a fresh `listRules()`. Runs AFTER the write inside the
+   * The rebind mirrors boot exactly: both go through {@link bindRuleHooks},
+   * which unbinds the whole rule-hook package and re-binds it from a fresh
+   * `listRuleHookObjects()`. Runs AFTER the write inside the
    * same lifecycle pipeline (awaited, so the rule is enforceable the moment
    * the authoring call returns), but never fails the write — a rebind
    * failure logs and leaves the previous bindings in place.
@@ -499,13 +518,7 @@ export class SharingServicePlugin implements Plugin {
    */
   private bindRuleRebindTriggers(engine: any, ctx: PluginContext): void {
     const scheduleRebind = (): Promise<void> => {
-      const run = this.ruleRebindChain.then(async () => {
-        const ruleService = this.ruleService;
-        if (!ruleService) return;
-        const rules = await ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
-        unbindAllRuleHooks(engine);
-        bindRuleHooks(engine, ruleService, rules, ctx.logger as any);
-      });
+      const run = this.ruleRebindChain.then(() => this.bindRuleHooks(engine, ctx));
       // The chain must never hold a rejection (it would poison later
       // rebinds); callers observe failures through `run`.
       this.ruleRebindChain = run.catch(() => undefined);
@@ -992,9 +1005,9 @@ export class SharingServicePlugin implements Plugin {
           }
 
           if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
-            const rules = await this.ruleService.listRules({ activeOnly: true }, { isSystem: true } as any);
-            unbindAllRuleHooks(engine);
-            bindRuleHooks(engine, this.ruleService, rules, ctx.logger as any);
+            // Bound per OBJECT, never per organization: an organization the
+            // middleware above serves later needs no rebind (`bindRuleHooks`).
+            await this.bindRuleHooks(engine, ctx);
             this.bindRuleRebindTriggers(engine, ctx);
 
             // [#7729] A rule whose recipient resolves through the BUSINESS-UNIT
@@ -1227,6 +1240,24 @@ export class SharingServicePlugin implements Plugin {
             registerShareLinkRoutes(http, this.linkService, engine as SharingEngine, {
               basePath: this.options.shareLinkBasePath,
               contextFromRequest: verifiedContextFromRequest,
+              // The resolve answer's object label, in the request's locale. Read
+              // per request: the i18n plugin may register after this one.
+              i18n: () => {
+                try {
+                  return ctx.getService<II18nService>('i18n');
+                } catch {
+                  return undefined;
+                }
+              },
+              // The metadata protocol, for the object's packaged base (a renamed
+              // object keeps its rename, as on the meta door).
+              protocol: () => {
+                try {
+                  return ctx.getService<ShareLinkLabelProtocol>('protocol');
+                } catch {
+                  return undefined;
+                }
+              },
             });
             ctx.logger.info(
               'SharingServicePlugin: share-link routes mounted at ' +
@@ -1248,6 +1279,22 @@ export class SharingServicePlugin implements Plugin {
       // present; with no rule service running it answers 501 rather than an
       // unmounted path (see `shareable-objects-routes.ts`).
       this.mountShareableObjectsRoute(ctx);
+    });
+
+    // [ADR-0155 ② ruled R1 at boot] Registered BEFORE the passes below, so a
+    // host in D4's second class (a middleware or a find hook registered for
+    // `sys_record_share` by name) is refused before any of them runs and
+    // before any request is served (`kernel:listening` has not opened the
+    // socket). Judged here, not at `kernel:ready`: other plugins register
+    // their read middlewares and find hooks in their own `kernel:ready`
+    // handlers, so only now is every registration final. Only where a
+    // producer writes the leaf: the sharing service is registered, whatever
+    // `enforce` says, because plugin-security's read paths ask that service
+    // for its read filter too. See `share-arm-boot.ts`.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      const refusal = shareGrantRegistrationRefusal(this.engine as any, ctx.logger as any);
+      if (refusal) throw refusal;
     });
 
     // [#2926 ③] Materialize sharing grants for rows already present at boot.
@@ -1355,6 +1402,20 @@ export class SharingServicePlugin implements Plugin {
       // Withdrawal is now complete for this boot; runtime rule writes own it
       // from here (see bindRuleRebindTriggers).
       this.ruleGrantsBootReconciled = true;
+    });
+
+    // [ADR-0155 ② ruled R2, ADR-0111 D10] The visible trail of the storage
+    // rows' tightening: the objects whose share grants stopped counting at the
+    // switch and that hold share rows, named once per boot at `warn`. After
+    // the passes above, in a handler of its own, so it runs in every posture
+    // (`enforce: false` and no rule service included) and never fails the boot.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      try {
+        await reportInertShareGrantHolders(this.service, registeredObjectNames(this.engine), ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: the report of share grants that no longer count (kernel:bootstrapped) failed', { error: err?.message });
+      }
     });
   }
 }
@@ -1481,8 +1542,10 @@ export function buildSharingMiddleware(
           // platform-authored as any sharing filter.
           markFilterSubtreeProvenance(selfScope, 'policy');
           vouchCallerWhereBeforeRewrite(ast, ctx.options);
+          // [ADR-0155 plan step 6] `where` only, as in the general read merge
+          // below: the AST's `filter` key is not walked by the executor seam
+          // and no driver reads it, so the scope is no longer mirrored there.
           ast.where = composeAnd(ast.where, selfScope);
-          ast.filter = composeAnd(ast.filter, selfScope);
           ctx.ast = ast;
         }
         return next();
@@ -1524,8 +1587,11 @@ export function buildSharingMiddleware(
         // card: vouch the caller's own predicate BEFORE the rewrite below
         // makes it unrecognisable to every later boundary.
         vouchCallerWhereBeforeRewrite(ast, ctx.options);
+        // [ADR-0155 plan step 6] `where` only. The scope used to be mirrored
+        // under the AST's `filter` key too, which the engine's executor seam
+        // does not walk and no driver reads; it now carries the share-grant
+        // leaf, which must never sit where the seam does not judge it.
         ast.where = composeAnd(ast.where, filter);
-        ast.filter = composeAnd(ast.filter, filter);
         ctx.ast = ast;
       }
       return next();
@@ -1688,8 +1754,10 @@ export function buildSharingMiddleware(
       }
       if (writeFilter) {
         const ast: any = ctx.ast ?? {};
+        // [ADR-0155 plan step 6] `where` only, as on the read path above: the
+        // write form of the share-grant leaf is judged by the seam in a
+        // predicate update's `where`, and never mirrored under `filter`.
         ast.where = composeAnd(ast.where, writeFilter);
-        ast.filter = composeAnd(ast.filter, writeFilter);
         ctx.ast = ast;
       }
       return next();

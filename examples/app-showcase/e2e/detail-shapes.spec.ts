@@ -21,9 +21,9 @@ import { test, expect } from '@playwright/test';
  *                      one-column stack tier (objectstack#27524): a
  *                      `relatedList: 'primary'` list is a body table in the
  *                      details (objectstack#27055, Target 8) and takes no tab;
- *                      the rest are tabs of the tab row (objectstack#35595),
- *                      and one with records is a card of the 概览 tab's rail
- *                      below the details (objectstack#35596)
+ *                      the rest are tabs of the tab row (objectstack#35595);
+ *                      the 概览 tab's rail that summarized them is retired
+ *                      (objectstack#35890), so the case opens the Contacts tab
  *
  * Runs against the console the backend serves at /_console (baseURL from
  * playwright.config.ts; storageState carries the admin session). The
@@ -170,38 +170,36 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // The synthesized record page lays itself out by the width of the view it
   // occupies, by one rule (objectstack#26678, objectstack#27524): details |
   // the right column from `RECORD_PAGE_TWO_COLUMN_MIN_WIDTH` (760 px,
-  // `@object-ui/plugin-detail`), and ONE column below it — the details, then
-  // the 概览 tab's rail. The tab row (objectstack#35595) is drawn in every
+  // `@object-ui/plugin-detail`), and ONE column below it — the details on
+  // the tab row's first tab. The tab row (objectstack#35595) is drawn in every
   // tier. The case stays in that stack tier on purpose: the column tiers are
   // what every other page of this smoke draws at the Desktop Chrome viewport,
   // and the stack is also what the split pane (720 px) and a phone draw.
   //
   // The window and the sidebar are derived, not picked. A collapsed console
   // sidebar draws no icon rail from 768 px up — ruling 6973617688 on
-  // objectstack#35062: "Both collapsed states hide the sidebar completely:
-  // the manual collapse (`UnifiedSidebar` `collapsible="icon"`) and the
-  // automatic fold between 768 px and the record-drawer threshold (#27593,
-  // `consoleSidebarRail.ts`, below 1416 px). No icon column remains." So in a
-  // fresh browser context no desktop window stacks: measured on this harness,
-  // from a 768 px window (`MOBILE_BREAKPOINT`, the desktop shell) to 1415 px
-  // the sidebar folds hidden and the record view is the whole window (two
-  // columns at 768), and from 1416 px it is expanded and the view is at least
-  // 1160. The case therefore docks the sidebar the way a reader does — the
-  // app bar's trigger floats the menu and its "Keep sidebar open" keeps the
-  // 256 px sidebar beside the page — and the view is the window minus it:
-  // one column at 1015 px (759 of view), two at 1016 px (760), the same after
-  // a reload. So the docked stack tier is a window of 768 to 1015 px. 900
-  // sits inside it with headroom on both sides: 644 px of view against the
-  // 760 floor, 132 px above the mobile breakpoint. ⛔ Not 780 px with the
-  // sidebar left as it comes up: that window now draws two columns (780 px of
-  // view). ⛔ Not below 768 px: that is the mobile shell, where the off-canvas
-  // sidebar gives the view the whole window (stack below 760), but where the
-  // details draw no Invoices body table (measured at 720 and 740 px).
+  // objectstack#35062: "Both collapsed states hide the sidebar completely" —
+  // and a browser with no choice kept starts it collapsed below 1280 px and
+  // expanded from 1280 px (ruling 7069868269 on objectstack#36112,
+  // `consoleSidebarRail.ts` CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH). So in a fresh
+  // browser context no window below 1280 px stacks: the sidebar is hidden and
+  // the record view is the whole window (two columns at 768). The case
+  // therefore docks the sidebar the way a reader does — the page header's
+  // expand button puts the 256 px sidebar beside the page, and this browser
+  // keeps that choice — and the view is the window minus it: one column at
+  // 1015 px (759 of view), two at 1016 px (760). So the docked stack tier is
+  // a window of 768 to 1015 px. 900 sits inside it with headroom on both
+  // sides: 644 px of view against the 760 floor, 132 px above the mobile
+  // breakpoint. ⛔ Not 780 px with the sidebar left as it comes up: that
+  // window draws two columns (780 px of view). ⛔ Not below 768 px: that is
+  // the mobile shell, where the off-canvas sidebar gives the view the whole
+  // window (stack below 760), but where the details draw no Invoices body
+  // table (measured at 720 and 740 px).
   await page.setViewportSize({ width: 900, height: 800 });
   const errors = await openRecord(page, recordUrl('showcase_account', contosoId));
-  await page.locator('[data-sidebar="trigger"]').click();
-  await page.getByTestId('sidebar-keep-open').click();
-  await expect(page.getByTestId('sidebar-keep-open')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('shell-sidebar-expand').click();
+  await expect(page.getByTestId('sidebar-collapse')).toBeVisible();
+  await expect(page.getByTestId('shell-sidebar-expand')).toHaveCount(0);
 
   // objectstack#35891: no stage bar, no key-field strip; the heuristic stage
   // (account.status is a select named "status") is the header's tag.
@@ -209,7 +207,9 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   await expect(page.locator(HIGHLIGHT_STRIP)).toHaveCount(0);
   await expect(page.locator(stageTag('status')).first()).toBeVisible();
 
-  // One column: the details, then the rail. The tab row opens on 概览.
+  // One column, on the tab row, which opens on its first tab (详情 / Details,
+  // `overview`). The right summary rail is retired in every tier
+  // (objectstack#35890): the other related lists are the row's tabs.
   await expect(page.locator('[data-record-page-tier]')).toHaveAttribute('data-record-page-tier', 'stack');
   await expect(page.locator('[data-record-columns]')).toHaveAttribute('data-record-columns-shown', 'details');
   await expect(page.locator('[data-record-tab="overview"]')).toHaveAttribute('aria-selected', 'true');
@@ -218,8 +218,7 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   // them (objectstack#27055, Target 8): Invoices and Projects are
   // `relatedList: 'primary'` (CORE relationships), so each is a body table in
   // the details, with its rows read at open, and takes no tab of its own; the
-  // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs, and
-  // one with records is a card of the rail (objectstack#35596).
+  // rest of Contoso's lists (Contacts and the Field Zoo lookups) are tabs.
   // CONTROL for the absence below: an ordinary list's tab is drawn under the
   // same `OBJECT.FIELD` id, so a renamed id scheme reds here, not silently.
   await expect(page.locator('[data-record-tab="showcase_contact.account"]')).toHaveCount(1);
@@ -233,8 +232,6 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
     .filter({ has: page.getByRole('columnheader', { name: 'Project Name' }) });
   await expect(invoicesTable.getByRole('cell', { name: 'INV-1002', exact: true })).toBeVisible();
   await expect(projectsTable.getByRole('cell', { name: 'Data Platform', exact: true })).toBeVisible();
-  const rightColumn = page.locator('[data-record-column="right"]');
-  await expect(rightColumn.getByRole('region', { name: /^(Invoices|Projects)$/ })).toHaveCount(0);
 
   // Contoso's own groups render in the details (ADR-0085 §5), its highlighted
   // fields among their members.
@@ -246,15 +243,23 @@ test('related-heavy: body tables, the tab row and the rail on Contoso', async ({
   await expect(details.getByText('$25,000,000', { exact: false }).first()).toBeVisible();
   const footer = page.locator('[data-testid="record-meta-footer"]');
   await expect(footer).toBeVisible();
+  // On the field list the footer is a "System information" section that
+  // starts collapsed (objectstack#36147): open it, then read its rows
+  // (objectstack#36321).
+  const systemInfo = footer.getByRole('button', { name: 'System information' });
+  await systemInfo.click();
+  await expect(systemInfo).toHaveAttribute('aria-expanded', 'true');
   const footerText = (await footer.innerText()).replace(/\s+/g, ' ');
   expect(footerText, 'footer dangles "Created by" without an actor').not.toMatch(/Created by/);
   expect(footerText).toMatch(/Created/);
 
-  // The rail's Contacts card summarizes the Contacts tab: its first rows,
-  // Contoso's seeded contacts among them.
-  const contactsCard = rightColumn.getByRole('region', { name: 'Contacts', exact: true });
-  await contactsCard.scrollIntoViewIfNeeded();
-  await expect(contactsCard.locator('[data-record-summary-row]').filter({ hasText: 'Carl Fox' })).toBeVisible();
+  // Contoso's contacts are the Contacts tab, where the retired rail's card
+  // summarized them (objectstack#35890, objectstack#36321): the tab lists
+  // Contoso's seeded contacts.
+  const contactsTab = page.locator('[data-record-tab="showcase_contact.account"]');
+  await contactsTab.click();
+  await expect(contactsTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel').getByText('Carl Fox', { exact: true }).first()).toBeVisible();
 
   expect(errors, 'uncaught page errors on related-heavy detail').toEqual([]);
 });

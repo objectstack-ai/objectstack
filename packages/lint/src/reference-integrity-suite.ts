@@ -101,12 +101,14 @@
  * so the gap stays visible instead of being rediscovered.
  */
 
+import { validateFormObjectBindings } from './validate-form-items.js';
 import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateObjectFieldRefs } from './validate-object-field-refs.js';
 import { validateRelatedListRefs } from './validate-related-list-refs.js';
+import { validateExtensionPlacement } from './validate-extension-placement.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validateActionDispatchContract } from './validate-action-dispatch-contract.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
@@ -247,11 +249,33 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // prescription the flow and view doors print (declare the dependency,
   // ADR-0141 D1). Absent — the CLI, or a write that names no package — the
   // rule prints the hint it always did. The verdict and severity do not move.
+  //
+  // [#35143] `action` joins: the member now resolves the object a standalone
+  // action (`objectName`) is bound to, and the action write is the door that
+  // binding arrives through (Studio, REST `/meta`, an MCP/AI author). Safe for
+  // the reason above: the binding resolves against `stack.objects`, which every
+  // per-write snapshot carries, and the member's other rungs find no such
+  // collection on an action snapshot. A flow node's `config.objectName` rides
+  // the `flow` door the member already gates. `seed` does not join: the save
+  // door already refuses a seed over an object nothing resolves (#34864), with
+  // a draft of the object in the same package accepted and the publish
+  // promotion and restore doors left to the load, which a snapshot of served
+  // objects cannot reproduce. A seed dataset's `object` is judged on the CLI.
   {
     name: 'validateObjectReferences',
-    runtimeTypes: ['flow', 'dataset'],
+    runtimeTypes: ['flow', 'dataset', 'action'],
+    // [#35143] `wholeCollection` as the list-view member states it (#24668):
+    // a gated write that names no package is judged against everything the
+    // host serves, so the flow-node site refuses there; the CLI advises.
     run: (stack, ctx) =>
-      validateObjectReferences(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : {}),
+      validateObjectReferences(
+        stack,
+        ctx?.packageScope
+          ? { packageScope: ctx.packageScope }
+          : ctx?.runtimeWriteType !== undefined
+            ? { wholeCollection: true }
+            : {},
+      ),
   },
   // [#9313] `runtimeTypes` gains `view` on this member and its sort sibling:
   // both judge a LIST VIEW's field references, and a standalone list view is
@@ -420,6 +444,21 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
             : undefined,
       ),
   },
+  // [ADR-0159 D2] A `form`'s `object`, judged where a list view's is: under
+  // the stated closure, or against the whole collection of a runtime write.
+  {
+    name: 'validateFormObjectBindings',
+    runtimeTypes: ['flow', 'form'],
+    run: (stack, ctx) =>
+      validateFormObjectBindings(
+        stack,
+        ctx?.packageScope
+          ? { packageScope: ctx.packageScope }
+          : ctx?.runtimeWriteType !== undefined
+            ? { wholeCollection: true }
+            : undefined,
+      ),
+  },
   // [#15254] The same question, one surface IN: the field-name lists the
   // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
   // which the three list-view members above do not walk because they are not
@@ -492,6 +531,13 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
         ctx?.runtimeWriteType !== undefined && !ctx?.packageScope ? { wholeCollection: true } : undefined,
       ),
   },
+  // [#35901] The same object's tabs and groups, one question on: where an
+  // object extension's `place` will not land as written (the object declares
+  // no tab list or groups, or an anchor it does not have). Warnings only: the
+  // registry merge still places the item, and the boot log names it too.
+  // Default `runtimeTypes`: it reads `objectExtensions`, which a per-write
+  // object snapshot does not carry.
+  { name: 'validateExtensionPlacement', run: validateExtensionPlacement },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   // [#17319] The same action name, one question on: `validateActionNameRefs`
   // asks whether the name a list view's selection bar writes resolves to an

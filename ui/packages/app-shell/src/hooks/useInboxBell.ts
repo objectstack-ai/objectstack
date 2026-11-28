@@ -40,6 +40,30 @@ import {
 } from './sharedUserFeeds.js';
 import { useInboxArrivalNotifier } from './useInboxArrivalNotifier.js';
 import type { InboxNotification } from '../layout/inboxGrouping.js';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
+
+/**
+ * Write read receipts through the framework's dedicated REST surface
+ * (`POST /api/v1/notifications/read[/all]`), keyed by the notification EVENT
+ * ids — see the mark-read note in {@link useInboxBell}. Exported for the
+ * full-page inbox (objectstack#36741), which marks rows older than the shared
+ * window, rows this hook's overlay never lists.
+ */
+export async function postInboxReadReceipts(subPath: 'read' | 'read/all', notificationIds?: string[]): Promise<void> {
+  const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
+  await authFetch(`${serverUrl}/api/v1/notifications/${subPath}`, {
+    method: 'POST',
+    credentials: 'include',
+    // Bearer too — see utils/authToken (#2548 split-origin fix).
+    headers: { 'Content-Type': 'application/json', ...bearerAuthHeaders() },
+    body: JSON.stringify(notificationIds ? { ids: notificationIds } : {}),
+  });
+}
 
 /**
  * Same stable-reference rule the header used: a fresh empty Set per render
@@ -124,16 +148,7 @@ export function useInboxBell(): InboxBell {
   // server-side keyed by the notification EVENT id. Rows without a
   // `notification_id` (legacy/synthetic) can't be keyed, so they update
   // optimistically but don't persist.
-  const postMarkRead = useCallback(async (subPath: 'read' | 'read/all', ids?: string[]) => {
-    const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
-    await fetch(`${serverUrl}/api/v1/notifications/${subPath}`, {
-      method: 'POST',
-      credentials: 'include',
-      // Bearer too — see utils/authToken (#2548 split-origin fix).
-      headers: { 'Content-Type': 'application/json', ...bearerAuthHeaders() },
-      body: JSON.stringify(ids ? { ids } : {}),
-    });
-  }, []);
+  const postMarkRead = postInboxReadReceipts;
 
   /** Flip rows read in the local overlay — never in the shared feed's rows. */
   const markLocallyRead = useCallback((ids: readonly string[]) => {

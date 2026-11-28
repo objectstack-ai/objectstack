@@ -14,7 +14,10 @@ import type { AggregationResult } from './useGroupedData';
 export interface GroupRowProps {
   /** Unique key identifying this group */
   groupKey: string;
-  /** Display label for the group (field value or "(empty)") */
+  /**
+   * Display label for the group: the field value, or for an empty key the
+   * grid's empty-value string `grid.empty` ("Empty" in English).
+   */
   label: string;
   /**
    * The group's size. On a server-grouped grid this is the header query's
@@ -38,7 +41,8 @@ export interface GroupRowProps {
    * or the header and the cell under it disagree on one option's colour
    * (objectui#5183): prefer `getBadgeHexAppearance(color)` from
    * `@object-ui/fields` and use its `className`, falling back to
-   * `getBadgeColorClasses(color, value)` when it returns `undefined`. When
+   * `getBadgeColorClasses(color)` (the declared family, else the neutral
+   * badge) when it returns `undefined`. When
    * omitted, the label renders as plain text with a subtle muted background.
    */
   labelColorClass?: string;
@@ -116,7 +120,7 @@ export const GroupRow: React.FC<GroupRowProps> = ({
           ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         {fieldLabel && (
-          <span className="text-[11px] font-medium text-muted-foreground tracking-wide group-label-caption">
+          <span className="text-xs font-medium text-muted-foreground tracking-wide group-label-caption">
             {fieldLabel}
           </span>
         )}

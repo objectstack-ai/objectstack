@@ -34,7 +34,7 @@ export const InCellTextInput = React.forwardRef<
   const text = value == null ? '' : String(value);
   return (
     <div data-in-cell-face="input" className="flex flex-col">
-      <div className="flex h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] items-center gap-1 px-2.5 text-[13px]">
+      <div className="flex h-[calc(var(--radix-popper-anchor-height,2rem)-4px)] items-center gap-1 px-2.5 text-sm">
         {leading != null && <span className="shrink-0 text-muted-foreground tabular-nums">{leading}</span>}
         <span className="relative min-w-0 flex-1 overflow-hidden">
           {/* Sizes the box: the text (or the placeholder) plus room for the caret. */}
@@ -48,7 +48,7 @@ export const InCellTextInput = React.forwardRef<
             value={text}
             placeholder={placeholder}
             className={cn(
-              'absolute inset-0 h-full w-full min-w-0 border-0 bg-transparent p-0 text-[13px] text-foreground shadow-none outline-none',
+              'absolute inset-0 h-full w-full min-w-0 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none',
               'placeholder:text-muted-foreground',
               // A number box shows no spinner: the value is typed, as in the cell.
               '[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none',

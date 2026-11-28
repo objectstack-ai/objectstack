@@ -39,7 +39,7 @@
  */
 
 import { AUDIT_PROVENANCE_FIELDS, type AuditProvenanceField } from './field-group-layout';
-import { resolveInjectedSystemColumns } from './injected-system-columns';
+import { resolveInjectedSystemColumns, SYNC_PROVENANCE_COLUMNS, type SyncProvenanceColumn } from './injected-system-columns';
 import { SystemFieldName } from '../system/constants/system-names';
 
 /**
@@ -189,6 +189,75 @@ export const QUEUE_FIELD_DEF: Readonly<Record<string, unknown>> = {
 };
 
 /**
+ * [ADR-0153 D4] The five sync-in provenance columns of a `managedBy: 'synced'`
+ * object, keyed by {@link SYNC_PROVENANCE_COLUMNS} (the `satisfies` clause is
+ * the sync, as on {@link AUDIT_FIELD_DEFS}).
+ *
+ * `readonly: true` and `system: true`: the pull, which writes as the system,
+ * is their only writer, and the engine refuses any other write that names one
+ * whatever its context. `hidden: true`: they are the kernel's operational
+ * record of a copy, readable and filterable wherever the row is, never a
+ * field a default layout needs. Text, not lookups: a run record is swept on
+ * its own retention window and must never cascade into data.
+ */
+export const SYNC_PROVENANCE_FIELD_DEFS = {
+  _sync_source: {
+    type: 'text',
+    label: 'Sync Source',
+    required: false,
+    hidden: true,
+    readonly: true,
+    system: true,
+    description: 'The mapping whose pull wrote this row (ADR-0153 D4). Written by the pull only.',
+  },
+  _sync_external_id: {
+    type: 'text',
+    label: 'Sync External ID',
+    required: false,
+    hidden: true,
+    readonly: true,
+    system: true,
+    description:
+      "The row's key in the source, as text: the value the mapping writes to its upsertKey field (the source value "
+      + 'for a plain copy), or for a key of several fields a JSON array of those values in upsertKey order '
+      + '(ADR-0153 D4). Written by the pull only.',
+  },
+  _sync_pulled_at: {
+    type: 'datetime',
+    label: 'Sync Pulled At',
+    required: false,
+    hidden: true,
+    readonly: true,
+    system: true,
+    description: 'When a pull last wrote this row (ADR-0153 D4). Written by the pull only.',
+  },
+  _sync_run_id: {
+    type: 'text',
+    label: 'Sync Run',
+    required: false,
+    hidden: true,
+    readonly: true,
+    system: true,
+    description:
+      'The sys_sync_run row of the pull that last wrote this row, as text, never a lookup (ADR-0153 D4, D7). '
+      + 'Not written by a pull that keeps no run record (no run ledger is composed): empty on a row such a pull '
+      + 'created, and left as it was on a row it updated. Written by the pull only.',
+  },
+  _sync_deleted_at: {
+    type: 'datetime',
+    label: 'Sync Deleted At',
+    required: false,
+    hidden: true,
+    readonly: true,
+    system: true,
+    description:
+      'When a pull found this row deleted at the source (ADR-0153 D3): gone from a complete full read, or carrying '
+      + "the source's deletedField value. Cleared when a later pull reads the row again; empty under deletePolicy "
+      + "'ignore'. Written by the pull only.",
+  },
+} satisfies Record<SyncProvenanceColumn, Record<string, unknown>>;
+
+/**
  * The injected columns THIS object carries, as `name -> definition`.
  *
  * Gated entirely by {@link resolveInjectedSystemColumns} — every opt-out row
@@ -210,6 +279,7 @@ export function injectedSystemColumnDefs(def: unknown): Record<string, Readonly<
   if (plan.owner) defs[SystemFieldName.OWNER_ID] = OWNER_FIELD_DEF;
   if (plan.owningBusinessUnit) defs[SystemFieldName.OWNING_BUSINESS_UNIT_ID] = OWNING_BUSINESS_UNIT_FIELD_DEF;
   if (plan.queue) defs[SystemFieldName.QUEUE] = QUEUE_FIELD_DEF;
+  if (plan.sync) for (const name of SYNC_PROVENANCE_COLUMNS) defs[name] = SYNC_PROVENANCE_FIELD_DEFS[name];
   return defs;
 }
 

@@ -16,7 +16,7 @@ AI in ObjectStack is a **cross-protocol capability layer**: agents, tools, and k
 **The open framework does AI bring-your-own-AI** — your keys, your models, zero platform AI cost. Everything on this page is part of the open-source framework unless a section is explicitly marked **ObjectOS**:
 
 - **Data & actions → `@objectstack/mcp`** (BYO-AI). Point your own AI — Claude, Cursor, any MCP client, or a local model — at the app's objects, queries, and business **actions**, governed by the same RLS. With a local model, data *and* inference stay inside your boundary.
-- **Knowledge & RAG → the Knowledge Protocol + adapter plugins** (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) — permission-aware retrieval over your own objects.
+- **Knowledge & RAG → the Knowledge Protocol + adapter plugins** (`knowledge-memory`, `knowledge-pgvector`, `knowledge-turso`, `embedder-openai`) — permission-aware retrieval over your own objects.
 - **Skills → typed metadata** (`defineSkill`) plus the Model Registry. A skill is the third-party extension primitive; agents are platform-owned, and a `defineTool` record is an *optional refinement layer* you will rarely need — see [Tool Records](/docs/ai/tools) for which of the three paths your case wants. Author skills as source (`*.skill.ts`) with your own AI coding agent (Claude Code, Cursor), aided by the ObjectStack [skills](/docs/ai/skills-reference) and MCP introspection.
 
 **ObjectOS** adds an in-product chat *runtime* on top of these same primitives — the `ask` data-query assistant, the `build` Studio authoring assistant, and the `/api/v1/ai/*` chat endpoints. The open-source framework has no built-in in-product chat — that runtime is documented in the [ObjectOS AI & Agents docs](https://docs.objectos.app/docs/ai).
@@ -48,7 +48,7 @@ ObjectStack provides a comprehensive AI platform:
 ```mermaid
 flowchart TD
     A["<b>AI Agents</b> — persona + skills/tools"] --> T["<b>Skills &amp; Tools</b><br/>Actions / Flows exposed to the LLM"]
-    T --> K["<b>Knowledge Protocol</b> — search_knowledge via adapters<br/>memory / ragflow / custom · permission-aware retrieval"]
+    T --> K["<b>Knowledge Protocol</b> — search_knowledge via adapters<br/>memory / pgvector / turso / custom · permission-aware retrieval"]
     K --> R["<b>Model Registry</b> — LLM management<br/>openai · azure_openai · anthropic · local · token accounting / cost"]
 ```
 
@@ -74,7 +74,7 @@ flowchart TD
 ### 2. Knowledge & Data Access
 
 ✅ **DO:**
-- Declare knowledge sources via the Knowledge Protocol and pick the adapter (`memory`, `ragflow`, custom) that fits your data
+- Declare knowledge sources via the Knowledge Protocol and pick the adapter (`memory`, `pgvector`, `turso`, custom) that fits your data
 - Rely on the built-in data tools (`query_records` / `get_record` / `aggregate_records`) for live record access
 - Let permission-aware retrieval and RLS scope what each user's agent can see
 - Keep indexed objects in sync via the protocol's event sync

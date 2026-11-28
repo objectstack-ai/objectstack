@@ -271,8 +271,13 @@ export type FieldWidgetComponentProps<T = any> = {
    * Receive the FULL selected record rather than just its id, so a host can
    * auto-fill sibling fields from it (a line-item grid copying a product's
    * price). When provided, the host owns the resulting value change.
+   *
+   * `picked.sourceFields` is the referenced object's field map, as the widget
+   * read it for its labels (`null` before it loads or when it cannot be read):
+   * a host copying an amount judges its currency by its field
+   * (objectstack#36249).
    */
-  onSelectRecord?: (record: Record<string, any>) => void;
+  onSelectRecord?: (record: Record<string, any>, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => void;
   /**
    * Write sibling fields of the record being edited: the targets a pick in a
    * lookup fills under its declared `lookupAutofill` pairs, as one patch of
@@ -281,7 +286,11 @@ export type FieldWidgetComponentProps<T = any> = {
    * **Producer**: the form renderer, which owns the record's values.
    * **Consumer**: `LookupField`, on a single-value pick whose host owns no
    * `onSelectRecord` (a host that owns the pick, the line-item grid, applies
-   * the pairs itself). A lookup reached without it fills nothing.
+   * the pairs itself). A lookup reached without it fills nothing. A lookup
+   * reached with it fills only when the record form stamped the field
+   * (`withLookupAutofillTargets`, applied to every field the record form
+   * draws): a host that hands `onAutofill` without that stamp, such as a
+   * standalone `form` node, fills nothing either.
    *
    * `options.opening` marks the fill a create form's opening value made (see
    * {@link openingValue}): the filled values join what the form opened with,

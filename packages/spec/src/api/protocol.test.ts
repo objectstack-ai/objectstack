@@ -390,6 +390,16 @@ describe('ObjectStack Protocol', () => {
         `costMultiplier ${String(bad)} is refused`,
       ).toBe(false);
     }
+    // objectstack#35578 — the optional tier display name the closed picker shows in place of `label`
+    const withTier = AiModelsResponseSchema.safeParse({ models: [{ ...entry, tierLabel: '快速' }] });
+    expect(withTier.success).toBe(true);
+    expect(withTier.data?.models[0]).toEqual({ ...entry, tierLabel: '快速' });
+    for (const bad of ['', 3, null]) {
+      expect(
+        AiModelsResponseSchema.safeParse({ models: [{ ...entry, tierLabel: bad }] }).success,
+        `tierLabel ${JSON.stringify(bad)} is refused`,
+      ).toBe(false);
+    }
 
     // conversations
     expect(CreateAiConversationRequestSchema.safeParse({ title: 'Q3 pipeline', metadata: { source: 'sdk' } }).success).toBe(true);
@@ -467,6 +477,12 @@ describe('ObjectStack Protocol', () => {
         { code: 'es-ES', label: 'Spanish (Spain)' },
       ],
     }).success).toBe(true);
+    // [#36504] The source locale is declared, so the parse keeps it (an
+    // undeclared key would be stripped), and it is optional.
+    expect(GetLocalesResponseSchema.parse({
+      locales: [{ code: 'zh-CN', label: 'zh-CN', isDefault: true }],
+      sourceLocale: 'en',
+    }).sourceLocale).toBe('en');
     expect(GetTranslationsRequestSchema.safeParse({ locale: 'en-US' }).success).toBe(true);
     // The request is locale-only. `namespace`/`keys` were declared here but read
     // by no serving surface, so they were trimmed (#3676). Asserting on the
@@ -2273,6 +2289,24 @@ describe('PublishMetaItemRequestSchema mirrors the implementation parameter type
       expect(PublishMetaItemRequestSchema.safeParse({ ...base, [key]: 42 }).success).toBe(false);
       expect(PublishMetaItemRequestSchema.safeParse({ ...base, [key]: { v: 'x' } }).success).toBe(false);
     }
+  });
+
+  it('draftVersion is an optional string, PRESERVED through parse, absent stays absent — the draft pin', () => {
+    // Ruling 7168616260 (A1): the publish door's own pin on the DRAFT it
+    // promotes, beside `parentVersion` (the active row's). Absent is unpinned,
+    // so the parse must keep absent apart from any value.
+    const pinned = PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: 'hmac-sha256:abc', parentVersion: 'hmac-sha256:def' });
+    expect(pinned.success).toBe(true);
+    if (pinned.success) {
+      expect(pinned.data).toEqual({ ...base, draftVersion: 'hmac-sha256:abc', parentVersion: 'hmac-sha256:def' });
+    }
+    const absent = PublishMetaItemRequestSchema.safeParse(base);
+    expect(absent.success).toBe(true);
+    if (absent.success) {
+      expect('draftVersion' in (absent.data as object)).toBe(false);
+    }
+    expect(PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: null }).success).toBe(false);
+    expect(PublishMetaItemRequestSchema.safeParse({ ...base, draftVersion: 42 }).success).toBe(false);
   });
 
   it('does not declare environmentId — transport-level by ruling, stripped and shape-absent', () => {

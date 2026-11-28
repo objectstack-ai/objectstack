@@ -38,12 +38,18 @@ import React from 'react';
 import { render, cleanup, waitFor, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// AppContent reaches the console's dynamic `@objectstack/lint` imports; their
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { RECORD_SURFACE_PAGE_THRESHOLD } from '@object-ui/plugin-view';
 
 /** The part of the modal's schema this file reads. */
 interface ModalSchemaProbe {
   objectName?: string;
-  onSuccess: (saved: { id: string }) => Promise<void> | void;
+  open?: boolean;
+  createMore?: boolean;
+  onSuccess: (saved: { id: string }, outcome?: { createMore?: boolean }) => Promise<void> | void;
 }
 const { modalSchemas } = vi.hoisted(() => ({ modalSchemas: [] as ModalSchemaProbe[] }));
 
@@ -203,5 +209,35 @@ describe('AppContent — a create that lands on the record page names the way ba
 
   it('control: an object that declares no plural is named by its label', async () => {
     expect(await originAfterCreate('en', 'showcase_note')).toBe('Note');
+  });
+});
+
+// objectstack-ai/objectstack#35980 — with 「Create more」 on, the dialog stays
+// for the next record: the console neither closes the form nor leaves for
+// the record it just made.
+describe('AppContent — a 「Create more」 save stays on the list (objectstack-ai/objectstack#35980)', () => {
+  it('offers the switch, and a save told to stay does not land on the record page', async () => {
+    session.lang = 'en';
+    const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
+    render(
+      <I18nProvider instance={i18n}>
+        <MemoryRouter initialEntries={['/apps/crm/showcase_project?form=new']}>
+          <Routes>
+            <Route path="/apps/:appName/*" element={<AppContent />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(modalSchemas.length).toBeGreaterThan(0));
+    const schema = modalSchemas[modalSchemas.length - 1];
+    expect(schema.createMore).toBe(true);
+
+    await schema.onSuccess({ id: 'r9' }, { createMore: true });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByTestId('origin-label')).toBeNull();
+    // The form is still the open dialog on the list's route.
+    const latest = modalSchemas[modalSchemas.length - 1];
+    expect(latest.open).toBe(true);
+    expect(latest.objectName).toBe('showcase_project');
   });
 });

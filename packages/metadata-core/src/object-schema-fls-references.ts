@@ -549,6 +549,8 @@ export const INLINE_COLUMN_POSITIONS: Readonly<Record<string, Scrub>> = {
     name: keep, label: keep, type: keep, options: keep, prefix: keep, step: keep,
     reference: keep, displayField: keep, idField: keep, multiple: keep, accept: keep,
     defaultHidden: keep, computed: keep, scale: keep, autofill: keep, width: keep, required: keep,
+    // A `rating` cell's star count (#36043): a number, never a field name.
+    max: keep,
     // Judged by `inlineColumn` before the table runs: a denied one drops the column.
     expr: keep,
     readonlyWhen: expression,
@@ -622,7 +624,7 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     storage: keep, searchable: keep, multiple: keep, unique: keep, maxLength: keep,
     minLength: keep, valueDomain: keep, rows: keep, precision: keep, scale: keep, min: keep,
     max: keep, useGrouping: keep, percentDisplay: keep, accept: keep, maxSize: keep, picklist: keep, reference: keep,
-    deleteBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
+    deleteBehavior: keep, transferBehavior: keep, inlineEdit: keep, inlineTitle: keep, relatedList: keep,
     relatedListTitle: keep, lookupPageSize: keep, allowCreate: keep, returnType: keep,
     language: keep, step: keep, currencyConfig: keep, dimensions: keep, trackHistory: keep,
     // The unit of this quantity, or this field's unit-code marker (ADR-0158
@@ -630,6 +632,11 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // the way `unitConfig.unitField` does.
     unitConfig: keep,
     group: keep, widget: keep, hidden: keep, internal: keep, readonly: keep,
+    // A boolean facet: whether a create surface asks for this field (#36425);
+    // it names no field.
+    showOnCreate: keep,
+    // A boolean facet: the console's hand lock (#36806); it names no field.
+    uiReadonly: keep,
     requiredPermissions: keep, maskingRule: keep, ackPlaintextMasking: keep, system: keep,
     sortable: keep, inlineHelpText: keep, placeholder: keep, externalId: keep,
     // A boolean facet of this date field: it declares the field a deadline
@@ -642,6 +649,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // A boolean facet of this lookup: it declares the target's name readable
     // by every reader of this record (#29171) and names no field.
     referenceNameVisible: keep,
+    // A boolean facet: whether this field's old → new values show on the
+    // record activity timeline (#36290). It names no field.
+    fieldHistory: keep,
     // The earlier keys of THIS field (cloud#3652 ruling D3): names of columns
     // the field had in earlier package versions. The parse refuses any entry
     // that is a key another field of the object still declares, so no entry
@@ -673,6 +683,11 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     expression,
     visibleWhen: expression,
     readonlyWhen: expression,
+    // The hand lock's predicate (#36806), CEL over this object's record as
+    // `readonlyWhen` is. Deleted when it mentions a denied field, and the
+    // field is then served `uiReadonly: true` (`readableField` below): no
+    // server judges the hand lock, so a deleted predicate must not open it.
+    uiReadonlyWhen: expression,
     requiredWhen: expression,
     // The deadline's settle predicate (#22227), a `visibleWhen`-family CEL over
     // this object's record. Deleted when it mentions a denied field: the caller
@@ -692,7 +707,27 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     ...PROTECTION_ENVELOPE,
 };
 
-const readableField = block(FIELD_REFERENCE_POSITIONS);
+/**
+ * [#36806] A served field whose hand lock's predicate (`uiReadonlyWhen`) the
+ * caller may not evaluate — it mentions a field denied to them, so the table
+ * deletes it — is served LOCKED by hand instead (`uiReadonly: true`). Every
+ * other predicate the table deletes is still judged where it matters: the
+ * server evaluates `readonlyWhen` / `requiredWhen` on the write. Nothing
+ * judges the hand lock but the console, and the console fails it CLOSED, so
+ * deleting the predicate outright would silently OPEN the field for exactly the
+ * caller who cannot see why it is locked. A field already `readonly: true` is
+ * locked harder and gains nothing (the spec refuses the pair).
+ */
+const readableFieldTable = block(FIELD_REFERENCE_POSITIONS);
+const readableField: Scrub = (value, denied, scope) => {
+    const out = readableFieldTable(value, denied, scope);
+    if (out === value || !out || typeof out !== 'object' || Array.isArray(out)) return out;
+    const before = value as Record<string, unknown>;
+    const after = out as Record<string, unknown>;
+    const lockDeleted = before.uiReadonlyWhen != null && !('uiReadonlyWhen' in after);
+    if (!lockDeleted || after.readonly === true || after.uiReadonly === true) return out;
+    return { ...after, uiReadonly: true };
+};
 
 // ── Object level ──────────────────────────────────────────────────────────────
 
@@ -766,7 +801,7 @@ const LIST_VIEW_NAME_LISTS: Readonly<Record<string, Scrub>> = {
  */
 export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // Identity and posture — no field names.
-    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, isSystem: keep,
+    name: keep, label: keep, pluralLabel: keep, description: keep, icon: keep, color: keep, actionLayout: keep, isSystem: keep,
     managedBy: keep, ownership: keep, systemFields: keep, datasource: keep, access: keep,
     requiredPermissions: keep, fileAccessDelegate: keep, schemaReadDelegate: keep, editMode: keep, enable: keep,
     sharingModel: keep, externalSharingModel: keep, protection: keep,
@@ -789,7 +824,10 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // `object.field` for one of that child's FKs to this object, never a field
     // of this object, so nothing here is this object's to deny. Read as
     // unclassified it would over-mask an entry whose child shares a denied
-    // field's name.
+    // field's name. [#35899] An object entry's `columns` name fields of that
+    // CHILD, so they are kept like `lookupColumns`: the child's own projection
+    // governs them, and the list's rows are read through it. Its `label` is
+    // author text, and the built-in tab names (`sys_attachment`, …) name objects.
     relatedLists: keep,
     // Expressions.
     titleFormat: expression,

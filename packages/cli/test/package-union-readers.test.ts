@@ -84,7 +84,7 @@ const PER_PACKAGE = /^package '[^']+' — /;
 const PIECES = `
 import { defineStack, composeStacks } from '@objectstack/spec';
 const I18N = { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' };
-const engines = { protocol: '^18' };
+const engines = { protocol: '^19' };
 const svcManifest = { id: '${SVC_ID}', name: 'Union Service', namespace: 'unr', version: '1.0.0', type: 'module', engines };
 const appManifest = { id: '${APP_ID}', name: 'Union App', namespace: 'unr', version: '1.0.0', type: 'app', engines };
 const ticket = { name: 'unr_ticket', label: 'Ticket', pluralLabel: 'Tickets', sharingModel: 'private',
@@ -93,8 +93,10 @@ const note = { name: 'unr_note', label: 'Note', pluralLabel: 'Notes', sharingMod
   fields: { name: { name: 'name', type: 'text', label: 'Name', required: true } } };
 const app = { name: 'unr_app', label: 'Union', navigation: [{ id: 'nav_tickets', type: 'object', objectName: 'unr_ticket', label: 'Tickets' }] };
 const ticketZh = { 'zh-CN': { objects: { unr_ticket: { label: '工单', pluralLabel: '工单', fields: { title: { label: '标题' } } } },
-  apps: { unr_app: { label: '联合', navigation: { nav_tickets: { label: '工单' } } } } } };
-const noteZh = { 'zh-CN': { objects: { unr_note: { label: '笔记', fields: { name: { label: '名称' } } } } } };
+  apps: { unr_app: { label: '联合', navigation: { nav_tickets: { label: '工单' } } } },
+  packages: { '${APP_ID}': { name: '联合应用' } } } };
+const noteZh = { 'zh-CN': { objects: { unr_note: { label: '笔记', fields: { name: { label: '名称' } } } },
+  packages: { '${SVC_ID}': { name: '联合服务' } } } };
 const api = { name: 'unr_notes_api', path: '/unr/notes', method: 'GET', type: 'object_operation',
   objectParams: { object: 'unr_note', operation: 'find', zzzUnionProbeKey: 1 } };
 `;
@@ -237,7 +239,9 @@ describe('#22238 — translation coverage and extraction read the package union'
     const one = payloadOf(r.checkOne);
     expect(r.checkTwo.code).toBe(r.checkOne.code);
     expect(two.totals.expectedKeys).toBeGreaterThan(0);
-    expect(two.totals).toEqual(one.totals);
+    // Every key but one is the same in both shapes: two packages carry two
+    // names (`packages.MANIFEST_ID.name`, #35513) where one package carries one.
+    expect(two.totals).toEqual({ ...one.totals, expectedKeys: one.totals.expectedKeys + 1 });
     const gaps = (report: Record<string, any>) =>
       (report.issues as Array<{ locale: string; key: string }>).map(({ locale, key }) => `${locale} ${key}`);
     expect(gaps(two)).toEqual(['zh-CN objects.unr_note.pluralLabel']);

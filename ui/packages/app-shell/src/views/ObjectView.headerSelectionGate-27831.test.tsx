@@ -10,8 +10,8 @@
  * objectstack#27831 — a single-record action in a list's header is drawn the
  * way a launch of it would end.
  *
- * The showcase's Tasks → "Reassign…" (`type: 'flow'`, placed at `list_item` and
- * `list_toolbar`) was drawn enabled with nothing selected, and said "select a
+ * The showcase's Tasks → "Reassign…" (`type: 'flow'`, placed at `record_row` and
+ * `list`) was drawn enabled with nothing selected, and said "select a
  * row first" only after a click; on a list whose rows draw no checkbox it could
  * never work at all.
  *
@@ -98,17 +98,17 @@ const REASSIGN = {
   objectName: 'showcase_task',
   type: 'flow',
   target: 'showcase_reassign_wizard',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   refreshAfter: true,
 };
 
-/** CONTROL: an object-level header action — declared at `list_toolbar` alone. */
+/** CONTROL: an object-level header action — declared at `list` alone. */
 const EXPORT_TASKS = {
   name: 'showcase_export_tasks',
   label: 'Export Tasks',
   objectName: 'showcase_task',
   type: 'script',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 const REASSIGN_URL = '/api/v1/actions/showcase_task/showcase_bulk_reassign';

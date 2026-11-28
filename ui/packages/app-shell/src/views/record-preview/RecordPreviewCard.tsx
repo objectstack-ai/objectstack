@@ -107,7 +107,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, EmptyValue, cn } from '@object-ui/components';
 import { buildExpandFields, getRecordDisplayName, withoutDeniedFields } from '@object-ui/core';
-import { deriveHighlightFields, HeaderHighlight } from '@object-ui/plugin-detail';
+import { deriveHighlightFields } from '@object-ui/plugin-detail/core';
 import { usePermissions } from '@object-ui/permissions';
 import {
   InlineEditProvider,
@@ -120,6 +120,8 @@ import {
 import type { QueryParams } from '@object-ui/types';
 import { Link2Off, Loader2 } from 'lucide-react';
 import { servedObjectLabel } from '../../hooks/servedObjectLabel.js';
+import { useReportRecordRead } from '../approval-decision/recordReadReport.js';
+import { LazyHeaderHighlight, preloadDetailEntry } from '../lazyDetailSurfaces.js';
 
 /**
  * The one read the card makes. Structural, so the console's adapter satisfies
@@ -192,6 +194,9 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
     if (targetObject === null || targetRecord === null || targetKey === null) return;
     if (!defReady || !dataSource?.findOne) return;
     let cancelled = false;
+    // The key fields draw through the detail chunk: fetch it beside the read.
+    // A failed load surfaces where the strip draws, not here.
+    preloadDetailEntry().catch(() => undefined);
     const expand: string[] = JSON.parse(expandKey);
     // The executor runs synchronously, so a data source that THROWS rather than
     // rejecting lands in the same branch as a rejection.
@@ -226,6 +231,9 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
   const { objectLabel } = useObjectLabel();
   // The host's record-URL builder (see "The link" in the module header).
   const recordLinks = useRelatedRecordActions();
+  // What this read learned, for a page that links the same record elsewhere
+  // only where it reads (objectstack#35415, `recordReadReport.ts`).
+  useReportRecordRead(targetObject, targetRecord, answer && answer.key === targetKey ? answer.status : 'loading');
 
   if (targetObject === null) {
     return <EmptyValue className={className} data-record-preview="absent" />;
@@ -294,7 +302,7 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
         </CardHeader>
         <CardContent className="px-3 pb-3 pt-0 empty:hidden">
           <InlineEditProvider canEdit={false}>
-            <HeaderHighlight
+            <LazyHeaderHighlight
               // The definition's own label is the fallback the field-label
               // resolver takes when no translation names the field.
               fields={highlightNames.map((name) => ({ name, label: def.fields?.[name]?.label }))}

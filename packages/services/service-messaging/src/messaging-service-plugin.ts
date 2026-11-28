@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
-import { resolveLocalizationContext } from '@objectstack/core';
+import { resolveLocalizationContext, wakeAfterOpenUnitsCommit } from '@objectstack/core';
 import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
@@ -20,7 +20,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel } from './push-channel.js';
-import { createSlackChannel } from './slack-channel.js';
+import { mountSlackChannel } from './slack-channel.js';
 import {
     SlackLinkStore,
     bindSlackLinkRemovalTriggers,
@@ -44,6 +44,12 @@ import {
 import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
 import { installInboxReaderLocale, type InboxReaderLocaleEngine } from './inbox-reader-locale.js';
 import { convertWildcardPreferenceUsers } from './preference-user-conversion.js';
+import { convertLegacyNoneDigestsOnce } from './preference-digest-conversion.js';
+import {
+    bindPreferenceDigestUnset,
+    unbindPreferenceDigestUnset,
+    type PreferenceDigestHookEngine,
+} from './preference-digest-unset.js';
 import {
     InboxMessage,
     NotificationReceipt,
@@ -255,6 +261,8 @@ export class MessagingServicePlugin implements Plugin {
     private httpDispatcher?: HttpDispatcher;
     /** The engine the template placement hooks are bound to — unbound on teardown. */
     private placementEngine?: PlacementHookEngine;
+    /** The engine the unset-digest hook is bound on (#35123; temporary until #36245). */
+    private digestUnsetEngine?: PreferenceDigestHookEngine;
     /** The engine the Slack link removal triggers are bound to — unbound on teardown. */
     private slackTriggerEngine?: SlackTriggerEngine;
 
@@ -471,6 +479,23 @@ export class MessagingServicePlugin implements Plugin {
                 + 'for where its body places a hole',
             );
         }
+        // [ruling 7073270426 on #35123] An insert that leaves
+        // `sys_notification_preference.digest` unset stores it EMPTY ("not
+        // set") even where the column still carries the old physical DEFAULT
+        // 'none', which would read as the person's explicit "no digest".
+        // ⚠️ TEMPORARY, carried by #36245 (the SQL driver keeps a column
+        // default the metadata no longer declares): removed when that lands.
+        // See preference-digest-unset.ts.
+        if (bindPreferenceDigestUnset(engine)) {
+            this.digestUnsetEngine = engine;
+        } else {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a hook registry: on a database created by an earlier release, a '
+                + "notification preference created without a digest stores 'none', which reads as the person's own "
+                + "choice of no digest instead of following the organization's default",
+            );
+        }
+
         // [ruling 7024100939, rider 3] A person's Slack links go when they
         // leave the organization or are banned (their deletion cascades by
         // the object's own declaration). See slack-links.ts.
@@ -537,6 +562,17 @@ export class MessagingServicePlugin implements Plugin {
         if (typeof ctx.hook === 'function') {
             ctx.hook('kernel:ready', async () => {
                 await convertWildcardPreferenceUsers(getData(), ctx.logger);
+            });
+        }
+
+        // [ruling 7073270426 on #35123] `digest` lost its `defaultValue:
+        // 'none'`: a stored `none` is now a person's explicit choice, and the
+        // legacy `none` nobody chose becomes empty — ONCE per deployment,
+        // recorded in `sys_migration`, never on every boot (that would erase
+        // the choices made since). See preference-digest-conversion.ts.
+        if (typeof ctx.hook === 'function') {
+            ctx.hook('kernel:ready', async () => {
+                await convertLegacyNoneDigestsOnce(getData(), ctx.logger);
             });
         }
 
@@ -645,11 +681,25 @@ export class MessagingServicePlugin implements Plugin {
             // (sys_channel_account). [#34730 step 3] Setup's Slack entry
             // (`slack-setup-ui.ts`) is registered on the same condition, so a
             // composition without connector-slack lists no Slack page.
+            // [#36301] The DM's link is a Console page, so it goes under the
+            // Console's mount, read from the auth service's composer
+            // (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`) at send
+            // time, the one source the approval e-mail reads; without an auth
+            // service the link carries no mount.
+            const getConsoleUrl = (path: string): string | undefined => {
+                let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+                try {
+                    auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+                } catch {
+                    return undefined;
+                }
+                return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+            };
             ctx.hook('kernel:ready', async () => {
                 if (!getSlack()) return;
                 service.registerChannelProvider('slack', lazyChannelMount({
                     resolveTransport: getSlack,
-                    create: () => createSlackChannel({ store: slackLinks }),
+                    create: () => mountSlackChannel({ store: slackLinks, getConsoleUrl }),
                     announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
                     logger: ctx.logger,
                 }));
@@ -686,7 +736,8 @@ export class MessagingServicePlugin implements Plugin {
                 const outbox = new SqlNotificationOutbox(engine, { partitionCount: this.options.partitionCount });
                 // [#17610] Resolved at call time: the dispatcher is constructed
                 // below, and after destroy() the hook is a no-op.
-                service.setOutbox(outbox, { onEnqueued: () => this.dispatcher?.wake() });
+                // [#37705] At the commit of the unit the enqueue wrote in, so the tick can see the row.
+                service.setOutbox(outbox, { onEnqueued: () => wakeAfterOpenUnitsCommit(engine, () => this.dispatcher?.wake()) });
 
                 let cluster: DispatchCluster | undefined;
                 try {
@@ -719,7 +770,7 @@ export class MessagingServicePlugin implements Plugin {
                 const httpOutbox = new SqlHttpOutbox(engine, { partitionCount: this.options.partitionCount });
                 // [#17623] The same seam as `setOutbox` above, resolved at call
                 // time for the same reasons.
-                service.setHttpOutbox(httpOutbox, { onEnqueued: () => this.httpDispatcher?.wake() });
+                service.setHttpOutbox(httpOutbox, { onEnqueued: () => wakeAfterOpenUnitsCommit(engine, () => this.httpDispatcher?.wake()) });
                 this.httpDispatcher = new HttpDispatcher({
                     nodeId: `http-${process.pid}-${randomUUID().slice(0, 8)}`,
                     outbox: httpOutbox,
@@ -949,6 +1000,8 @@ export class MessagingServicePlugin implements Plugin {
     async destroy(): Promise<void> {
         unbindTemplateHolePlacement(this.placementEngine);
         this.placementEngine = undefined;
+        unbindPreferenceDigestUnset(this.digestUnsetEngine);
+        this.digestUnsetEngine = undefined;
         unbindSlackLinkRemovalTriggers(this.slackTriggerEngine);
         this.slackTriggerEngine = undefined;
         await this.dispatcher?.stop();

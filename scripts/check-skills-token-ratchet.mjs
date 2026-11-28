@@ -150,9 +150,15 @@
  *
  *   - New text is paid for by DELETING text in the SAME FILE. Genuine deletion:
  *     a re-wrap moves no tokens and pays nothing.
- *   - A ceiling may be LOWERED by any PR that shrinks its file. Lowering is
- *     always legitimate and encouraged; the report line below prints every
- *     file's headroom on every run so a shrink is visible the moment it lands.
+ *   - A ceiling is LOWERED by the PR that shrinks its file, to the new
+ *     measurement, in that same PR. Lowering is always legitimate and every
+ *     author's to make. A row left ABOVE its measurement is RED, naming the
+ *     row, the measurement and the ceiling (#37630): green, it banked the freed
+ *     tokens as budget, and a later raise spent them with no deletion shown —
+ *     a raise outlived by a later shrink, caught only by a reviewer's
+ *     arithmetic. So every row sits AT its measurement, and a reservation of
+ *     the `pending10402` kind below (headroom held for an approved PR) is no
+ *     longer something the gate can carry.
  *   - Going the other way has ONE gate-recognised path — the standing ruling
  *     (maintainer, 2026-10-27, on the skills-lane decision card 「skills 修复卡
  *     的教学和 eval 都撞 token 天花板,怎么付?」, verbatim and untranslated:
@@ -404,6 +410,22 @@ export const BODY_PIN_REPIN = Object.freeze({
 // 900 while the bundle grows by 927. The raising PR's body carries the same
 // arithmetic, per-file and summed.
 
+// ── The 2026-11-27 re-lock: every row AT its measurement (#37630) ──────────
+//
+// When the gate began to red a row above its measurement, 37 of the 61
+// authored rows sat above theirs on `origin/main` ce4d8c7d7, 4813 tokens in
+// all: files shrunk by later PRs that left their rows standing. None was a
+// reservation (the header's one, `pending10402`, is spent). Each was lowered to
+// the measurement on that tree; its `-N to the measurement (was C)` note is
+// the whole change, and no file's text moved. One more row followed on the
+// merge of `origin/main` 077831538: `state-machines-and-approvals.md` had
+// shrunk 9 tokens there with its row left standing — the red this re-lock
+// exists to raise, raised by the merge queue on its first run. The next
+// merge (`origin/main` 247382446) did the same to `context-packs.md`, -1.
+// `objectstack-ai/SKILL.md` went the other way: lowered here 6801 -> 6799,
+// then #37765 (9862d636) grew the file to 6801 on main's own row, so the row
+// is main's 6801 again — the measurement, not a raise by this re-lock.
+
 /**
  * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
  * the header for what the other direction costs.
@@ -417,7 +439,68 @@ export const CEILINGS = new Map([
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
   // Every SKILL.md row was later lowered by exactly 5 when its release-stamp
   // line left the count (A2′, see STAMP_LINE_REPIN) — its headroom did not move.
-  ['skills/objectstack-ai/SKILL.md', 6801], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6801 -> 6800: pitfall 2 no longer says Modify All grants a field edit (19: View All and
+  // Modify All cast no field vote). 27230 -> 27225 bytes; the row follows the measurement down.
+  // 6800 -> 6799 (card #37304): the `supportKb` example's two renamed keys add
+  // two bytes and its comment gives back six; the row follows the measurement down.
+  // 6799 -> 6795 (#37797): LOWERED to the measurement on that PR's head merged
+  // with `main`. Two retired-key rows name their replacements; one sample
+  // instruction line left the skill example and over-paid by 4 tokens.
+  // 6795 -> 6791 (#37782): the `agent.tools` row no longer teaches an aged-out migration; LOWERED to the measurement.
+  // 6791 -> 6609: the section that taught an authored AI button on a record
+  // page is replaced by one sentence (ADR-0160 D6, "Entry point": the shell's
+  // entry is the only one); the row follows the measurement down.
+  // 6609 -> 6639 (2026-11-27, the ADR-0161 K6 item 6 skills follow-up): § Knowledge
+  // Sources teaches the `knowledge_source` item (`name`, an explicit `content`
+  // list with `'*'` refused, the optional `adapter`), egress and cost with the
+  // save-time permission and admission, the retired keys with their fixes, and
+  // `split.strategy` as required. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST: the wiring paragraph's package list, the old key
+  // table's `source.kind` Hygiene column (folded into the `content` and `where`
+  // rows), the example's four comments restating those rows and its
+  // `refresh: { onRecordChange: true }` line restating the default, and the
+  // split passage's adapter-list aside. Arithmetic in priced bytes (stamp line
+  // excluded), against `main`'s 26435 (headroom 0): the file is 26462 -> 26581
+  // bytes, so the LANDED priced text is 26554 -> ceil(26554 / 4) = 6639; the row
+  // moves +30, the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26554 / 4)
+  // 6639 -> 6695 (2026-11-27, the same follow-up's review round): the section
+  // says which items mount the service (a SHIPPED `knowledgeSources` item does;
+  // an app that ships none and authors sources at run time needs
+  // `requires: ['knowledge']`), that a source is identified by its package and
+  // `name` (`search_knowledge` lists a package's source as `NAMESPACE-NAME`; a
+  // code registration and an environment item of one name are one slot), that
+  // the display field is kept as each title, and that no shipped store has a
+  // rerank or hybrid-weight setting. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST: the intro's "which records of one object are indexed, and which of
+  // their fields" (the `source.object` and `source.content` rows say it), its
+  // separate `search_knowledge` sentence (folded into the identity sentence),
+  // the "one name is one source" clause it replaces, and a shorter closing
+  // note. Arithmetic in priced bytes (stamp line excluded), against the row's
+  // 26554: the file is 26581 -> 26806 bytes, so the LANDED priced text is
+  // 26779 -> ceil(26779 / 4) = 6695; the row moves +56, the measured remainder
+  // only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26779 / 4)
+  // 6695 -> 6893 (2026-11-28, the same follow-up's second half, after the
+  // `os validate` rules for `knowledge_source` landed): the section names the
+  // five rules `os validate` and publish report for a source
+  // (`knowledge-source-object-unknown`, `-field-unknown`,
+  // `-object-not-searchable`, `-system-object-not-ai-readable`, and the
+  // `-field-never-indexed` warning), each with its fix. Raise path the
+  // standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B). PAID DOWN FIRST: the `content` row's "credential-class and
+  // `internal` fields are never indexed" (the `-field-never-indexed` line
+  // says it), its "embedding is egress" (the egress paragraph says it), the
+  // `name` row's "with the package, its identity" (the intro says it), and
+  // the example's "no adapter: the deployment's store" comment (the `adapter`
+  // row says it). Arithmetic in priced bytes (stamp line excluded), against
+  // the row's 26779: the file is 26806 -> 27596 bytes, so the LANDED priced
+  // text is 27569 -> ceil(27569 / 4) = 6893; the row moves +198, the
+  // measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27569 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6893], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
@@ -425,7 +508,7 @@ export const CEILINGS = new Map([
   // longer has. Lowered to the measurement, per the shrink-only discipline.
   // 6319 -> 6314: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-api/SKILL.md', 6314],
+  ['skills/objectstack-api/SKILL.md', 5333], // -981 to the measurement (was 6314)
   // 12511 -> 12643 (#11348): the flow value-expression section documented the
   // expression surface but not the function vocabulary (round/floor/ceil/abs/
   // min/max); an unknown function fails at RUNTIME, not at flow-save, so the
@@ -717,7 +800,7 @@ export const CEILINGS = new Map([
   // clause and `name` example, which the JSON now shows. 26678 -> 26859 bytes (26658
   // -> 26839 priced); the row moves +45, the measured remainder, pinned AT it.
   //   ceil(($(wc -c < skills/objectstack-data/SKILL.md) - 20) / 4) == ceil(26839 / 4)
-  ['skills/objectstack-data/SKILL.md', 6710],
+  ['skills/objectstack-data/SKILL.md', 6709], // -1 to the measurement (was 6710)
   // 5997 -> 6008 (the formula skills follow-ups of PRs #34443 and #34447): the
   // `label(record.f)` row teaches a multi-select (`multiple: true`) reading each
   // selected label in stored order, joined with `, `, and the built-ins line
@@ -734,7 +817,23 @@ export const CEILINGS = new Map([
   // bytes -> ceil(24030 / 4) = 6008; the ceiling moves +11, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24030 / 4)
-  ['skills/objectstack-formula/SKILL.md', 6008], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997)
+  // #35356 (ADR-0157 D4), by the standing ruling 「A:先削重复,余额按实测提高」
+  // (record 6513306068): the working-day functions paragraph, with the
+  // contract review's asks on PR #36796 (start excluded and end included, the
+  // refused sites, the blank-until-next-write consequence, and the PRIOR() and
+  // date `+ duration` sentences it found were not restatement). Paid first by
+  // deleting restatement IN THIS FILE: the "No date arithmetic" note folded
+  // into the table header it repeated, the Salesforce-flavor examples the
+  // translation table lists, and the ISBLANK() translation. Priced bytes
+  // against `main`'s 24016 (headroom 4): the changed lines remove 789 bytes and
+  // add 1130, so the LANDED priced text is 24357 bytes -> ceil(24357 / 4) =
+  // 6090; the ceiling moves +82, the measured remainder only. Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-formula/SKILL.md) - 20) / 4) == ceil(24357 / 4)
+  // 6090 -> 6088: the action `visible` / `disabled` paragraph says "a list row" where it wrote
+  // the retired action location word `list_item` (-7 bytes); the row follows the measurement
+  // down, 24384 bytes (24357 priced) -> 24377 (24350 priced) -> 6088 tokens.
+  ['skills/objectstack-formula/SKILL.md', 6088], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997), then +82 (was 6008), then -2 (was 6090)
   ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
@@ -844,14 +943,62 @@ export const CEILINGS = new Map([
   // no longer lists the retired modes `insert` and `replace`. 24649 -> 24591
   // priced bytes; the row follows the measurement down, zero headroom.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24591 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6148],
+  // 6148 -> 6149 (card #37189): the enumeration row for the new `record-context`
+  // capability token — the token joins the `@objectstack/service-` + token cell
+  // of the `requires:` table, which `check:skill-identifier-liveness` holds
+  // exhaustive over `PLATFORM_CAPABILITY_TOKENS`. The standing enumeration-row
+  // case: ruling A on #32584 (record 6819475461), made standing by #32673
+  // letter A (record 6840575378). Raised by the row's own measured delta and
+  // by no more; nothing else in the file is cut and nothing rides along.
+  // Arithmetic in priced bytes (stamp line excluded): on the base the text was
+  // 24577 bytes (6145 tokens, headroom 3); the row adds 17 bytes, so the
+  // LANDED priced text is 24594 bytes -> 6149 tokens: the 3 tokens of headroom
+  // are absorbed and the ceiling moves 6148 -> 6149 (+1). Pinned AT the
+  // measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24594 / 4)
+  // 6149 -> 6151 (card #37102): the enumeration row for the new `knowledge`
+  // capability token, in the same cell of the same `requires:` table and under
+  // the same standing enumeration-row case (ruling A on #32584, record
+  // 6819475461; #32673 letter A, record 6840575378). Raised by the row's own
+  // measured delta and by no more; nothing else in the file is cut and nothing
+  // rides along. Arithmetic in priced bytes (stamp line excluded): on the base
+  // (after #37568 took 2 bytes out of the file and left this row at 6149) the
+  // text is 24591 bytes (6148 tokens, headroom 1); the row adds 12 bytes, so
+  // the LANDED priced text is 24603 bytes -> 6151 tokens: the 1 token of
+  // headroom is absorbed and the ceiling moves 6149 -> 6151 (+2). Pinned AT
+  // the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24603 / 4)
+  // 6151 -> 6153 (card #37086): the enumeration row for the new `forms` stack
+  // key (ADR-0159 card ②) — `forms` joins the top-level key list, which
+  // `check:skill-top-level-keys` holds exhaustive over
+  // `ObjectStackDefinitionSchema`. The standing enumeration-row case: ruling A
+  // on #32584 (record 6819475461), made standing by #32673 letter A (record
+  // 6840575378). Raised by the row's own measured delta and by no more;
+  // nothing else in the file is cut and nothing rides along (its prose,
+  // examples and evals are #37105's). Arithmetic in priced bytes (stamp line
+  // excluded): on the base (after #37102's `knowledge` row above) the text is
+  // 24603 bytes (6151 tokens, headroom 0); the row adds 9 bytes, so the LANDED
+  // priced text is 24612 bytes -> 6153 tokens: the ceiling moves 6151 -> 6153
+  // (+2). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24612 / 4)
+  // 6153 -> 6158 (card #37304): the enumeration row for the new top-level
+  // collection `knowledgeSources` — the key joins the same list, under the
+  // same standing enumeration-row case (ruling A on #32584, record 6819475461;
+  // #32673 letter A, record 6840575378). Raised by the row's own measured
+  // delta and by no more; nothing else in the file is cut and nothing rides
+  // along. Arithmetic in priced bytes (stamp line excluded): after #37086's
+  // `forms` row above the text is 24612 bytes (6153 tokens, headroom 0); the
+  // row adds 20 bytes, so the LANDED priced text is 24632 bytes -> 6158
+  // tokens: the ceiling moves 6153 -> 6158 (+5). Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 27) / 4) == ceil(24632 / 4)
+  ['skills/objectstack-platform/SKILL.md', 6158],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
   // 「发布版 skills/objectstack-pm-dispatch 删」). A row for a file the walk cannot
   // read is red, not a skip (#4690), so the rows go with the files; the bundle
   // total drops by the two ceilings, which is the ratchet's ordinary direction.
-  ['skills/objectstack-query/SKILL.md', 5547], //       -17 (was 5569), then -5 A2′ (was 5552)
+  ['skills/objectstack-query/SKILL.md', 4607], //       -17 (was 5569), then -5 A2′ (was 5552), then -940 to the measurement (was 5547)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
   // priced `src/views/**`, `src/apps/**`, dashboards and reports but never the
@@ -996,14 +1143,26 @@ export const CEILINGS = new Map([
   // (-41 bytes). Net shrink, so no raise: the ceiling follows the file down to the
   // measurement, 9133 bytes (9113 priced) -> 9107 (9087 priced) -> 2272 tokens.
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
-  ['skills/objectstack-ui/SKILL.md', 2272],
+  // 2264 -> 2256: the Actions JSON fence drops its `locations` key (32 bytes), so it parses
+  // under both action location vocabularies; the row follows the measurement down.
+  // 2256 -> 2262: the Actions JSON fence declares its placement again, in the protocol-19 word
+  // (`"locations": ["record"],`, +25 bytes; it had dropped the key so that it parsed under
+  // both vocabularies, the 2264 -> 2256 note above). No cut pays for it: the one passage
+  // weighed as restatement, " over an image, avatar or file field" beside `gallery` in the
+  // List Views kind list, was ruled teaching by the seat's review of the PR and stays, and
+  // nothing else in the file restates another passage. So the ruling's second half carries the
+  // delta: 9050 bytes (9023 priced) -> 9075 (9048 priced) -> 2262 tokens, headroom 0 before,
+  // ceiling +6, the measured remainder only, pinned AT the measurement (2 under the 2264 the
+  // row held before the fence dropped its key). Standing ruling (2026-10-27, tap A):
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  ['skills/objectstack-ui/SKILL.md', 2262], // +6 to the measurement (was 2256)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
   // `references/examples-upgrade.md` (row below), one pointer line each.
   // 6193 -> 6188: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-upgrade/SKILL.md', 6188],
+  ['skills/objectstack-upgrade/SKILL.md', 6170], // -18 to the measurement (was 6188)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
   // Every row below is an INITIAL measurement, taken on
@@ -1046,7 +1205,7 @@ export const CEILINGS = new Map([
   // ceil(40486 / 4) = 10122; the ceiling moves +111, the measured remainder
   // only. Pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-data/references/data-hooks.md) / 4) == ceil(40486 / 4)
-  ['skills/objectstack-data/references/data-hooks.md', 10122],
+  ['skills/objectstack-data/references/data-hooks.md', 10120], // -2 to the measurement (was 10122)
   ['skills/objectstack-data/rules/datasources.md', 911],
   // -552 (was 3584): re-locked at the landed count (#16374) after PR #16187
   // (the two `tree` rows) and PR #16369 (the ASCII decision tree deleted)
@@ -1115,8 +1274,8 @@ export const CEILINGS = new Map([
   // block and the time-zone / country sentence landed, paid by four same-file
   // restatement cuts that over-paid by 12 tokens; the row is lowered to the
   // measurement so the headroom is banked, not spent later. Shrink-only.
-  ['skills/objectstack-data/rules/field-types.md', 3541],
-  ['skills/objectstack-data/rules/indexing.md', 3241],
+  ['skills/objectstack-data/rules/field-types.md', 3540], // -1 to the measurement (was 3541)
+  ['skills/objectstack-data/rules/indexing.md', 2495], // -746 to the measurement (was 3241)
   // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
   // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
   // `class: 'record'` + retention example (home: the Lifecycle Classes `record` row,
@@ -1132,7 +1291,7 @@ export const CEILINGS = new Map([
   // left to cut. 7636 + 85 = 7721 bytes -> 1931 tokens, zero headroom, pinned AT the
   // measurement.
   ['skills/objectstack-data/rules/lifecycle.md', 1931],
-  ['skills/objectstack-data/rules/naming.md', 773],
+  ['skills/objectstack-data/rules/naming.md', 321], // -452 to the measurement (was 773)
   // 3778 -> 3676: RE-LOCK at the landed count (#19715, card item 4). A 5-line
   // table of contents (+154 tokens) landed inside the row's 256 tokens of
   // headroom, so no raise; pinned AT the measurement — zero headroom.
@@ -1206,7 +1365,10 @@ export const CEILINGS = new Map([
   // the summary field and the permission set as JSON; the commented-out alternatives
   // became a sentence and a second field entry. 16884 -> 16811 bytes.
   //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16811 / 4)
-  ['skills/objectstack-data/rules/relationships.md', 4203],
+  // 4201 -> 4181: the roll-up visibility paragraph no longer asks to remove Modify All before
+  // masking a summary (19: it overrides no mask). 16801 -> 16723 bytes.
+  //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16723 / 4)
+  ['skills/objectstack-data/rules/relationships.md', 4181], // -2 to the measurement (was 4203)
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.
@@ -1324,8 +1486,37 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 16164 bytes (4041 tokens, headroom 0); the
   // LANDED file is 16272 bytes -> 4068 tokens, ceiling +27, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(16272 / 4)
-  ['skills/objectstack-data/rules/security.md', 4068],
+  // 4068 -> 4292 (card #36053, the Skills-docs follow-up of the field-axis
+  // split, ruling of record 6912661484): the three permission axes in the
+  // ruled model's words (object permission, record scope, fields);
+  // `viewAllFields` as "reads every field" (a read vote on every field, never
+  // an edit vote; the set's own `readable: false` row beats it; no object
+  // access and no record; on `'*'` it also votes on a private-posture object's
+  // fields; authored in metadata); the three sensitivity tiers; "from v19"
+  // View All / Modify All open no field; and `maskingRule` beside a field's
+  // `requiredPermissions` — none of which the file taught, so an author
+  // granted View All to open fields. Same standing ruling, tap A, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID DOWN
+  // FIRST, 274 bytes: the `when` section's "Locks, never grants" bullet (140;
+  // the choice rule above it already says the other sets keep their grant,
+  // and the new section states the union rule) and the recipe URL (134; the
+  // docs anchor the same bullet keeps links it). On `origin/main` the file was
+  // 16272 bytes (4068 tokens, headroom 0); the LANDED file is 17168 bytes ->
+  // 4292 tokens, ceiling +224, pinned AT the measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17168 / 4)
+  // 4292 -> 4340 (objectstack#37762, from cloud#5080 item F): the Three axes list gains
+  // that `allowDelete` removes only rows the caller created (`owner_only_deletes`) and what
+  // widens it on a `private` object, which no line taught (two door builds lost the check).
+  // Same standing ruling, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」
+  // (record 6513306068). PAID DOWN FIRST, 59 bytes: the "Prefer `member_default`" bullet's
+  // `owner_only_deletes` (now taught above), "the built-in" and "for the common cases".
+  // The bullet adds 248 bytes, the cut removes 59: 17168 -> 17357 bytes -> 4340 tokens,
+  // headroom 0 before, ceiling +48, the measured remainder only, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17357 / 4)
+  // 4340 -> 4334: the `requiredPermissions` sentence no longer lists View All and Modify All
+  // beside the field votes it beats (19: they cast none). 17357 -> 17335 bytes.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17335 / 4)
+  ['skills/objectstack-data/rules/security.md', 4334],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
@@ -1345,15 +1536,15 @@ export const CEILINGS = new Map([
   // measurement. Same authority as the three rows above: cloud#3659 letter A
   // (ruling comment 6682024726); raise path 「A:先削重复,余额按实测提高」
   // (ruling record 6513306068).
-  ['skills/objectstack-data/rules/validation.md', 2761],
+  ['skills/objectstack-data/rules/validation.md', 2758], // -3 to the measurement (was 2761)
 
   // objectstack-platform
-  ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
-  ['skills/objectstack-platform/rules/plugin-lifecycle.md', 2408],
-  ['skills/objectstack-platform/rules/service-registry.md', 2331],
+  ['skills/objectstack-platform/references/plugin-hooks.md', 2413], // -215 to the measurement (was 2628)
+  ['skills/objectstack-platform/rules/plugin-lifecycle.md', 1788], // -620 to the measurement (was 2408)
+  ['skills/objectstack-platform/rules/service-registry.md', 1808], // -523 to the measurement (was 2331)
 
   // objectstack-query
-  ['skills/objectstack-query/rules/aggregation.md', 2357],
+  ['skills/objectstack-query/rules/aggregation.md', 2346], // -11 to the measurement (was 2357)
   // 2149 -> 2482: the now-anchored comparand `{ $now: true, addDays }` — the
   // shape, the one example (overdue by each record's own grace days, the
   // offset column holding negative days), where it is accepted (the six scalar
@@ -1385,7 +1576,7 @@ export const CEILINGS = new Map([
   // headroom absorbed, ceiling +123, pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-query/rules/filters.md) / 4) == ceil(10382 / 4)
   ['skills/objectstack-query/rules/filters.md', 2596],
-  ['skills/objectstack-query/rules/pagination.md', 1382],
+  ['skills/objectstack-query/rules/pagination.md', 1289], // -93 to the measurement (was 1382)
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts
@@ -1510,7 +1701,49 @@ export const CEILINGS = new Map([
   // before, ceiling +378, the measured remainder only, pinned AT the measurement. Same ruling
   // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
   //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(14843 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 3711],
+  // 3711 -> 3880 (#36630): one section after the `locations` table, "Button Order
+  // (`actionLayout`)": the object key's arms and parts, the limit of 3 pinned, which placements
+  // each arm takes and where the `record` arm is drawn, the list page's `$import` / `$export` as
+  // pinned-only built-ins, that `os validate` refuses a name the arm's scope does not place, and
+  // that on an installed object only the paired `.custom` package's extension writes it. PAID
+  // DOWN FIRST by 49 bytes of restatement in this file: " (`'Choose the new owner of
+  // {{ record.name }}.'`)" beside `description` on the copy-holes bullet (the `helpText` bullet
+  // right below it and the Reassign Lead block's `successMessage` show the `{{ record.name }}`
+  // spelling). Nothing else in the file restates another passage (see the 2777 -> 2808 note
+  // above), so the same ruling's second half carries the rest. Arithmetic: the text adds 726
+  // bytes, the cut removes 49, so the file is 14842 -> 15519 bytes -> 3880 tokens, zero headroom
+  // before, ceiling +169, the measured remainder only, pinned AT the measurement. Same ruling
+  // (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15519 / 4)
+  // 3880 -> 3890 (objectstack#37762, from cloud#5080 item D): the `confirmText` bullet says it
+  // gates no AI call and an `ai.exposed` action also sets `ai.requiresConfirmation: true` (three
+  // door builds set `confirmText` alone and lost the confirm-gated check). PAID DOWN FIRST by 43
+  // bytes of restatement: the intro's "A parameterized bulk mutation is `script`." (the bulk
+  // bullet and the `crm_create_campaign` example show it). The text adds 84 bytes, the cut
+  // removes 43: 15518 -> 15559 bytes -> 3890 tokens, headroom 0 before, ceiling +10, the
+  // measured remainder only. Same ruling (2026-10-27, tap A): 「A:先削重复,余额按实测提高」
+  // (ruling record 6513306068, letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15559 / 4)
+  // 3890 -> 3844: five checked examples drop their `locations` line (186 bytes), so each
+  // compiles under both action location vocabularies; the row follows the measurement down.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15373 / 4)
+  // 3844 -> 3918: the file teaches the protocol-19 action location vocabulary, which says what
+  // an action acts on (`list`, `record`, and the narrow words `record_page`, `record_row`,
+  // `record_related`, `record_section`). The location table's four page-part rows become four
+  // rows in those words, one line under the table names what replaced each old word, the
+  // `actionLayout` paragraph and the `defaultFromRow` sentence name the new words, and the five
+  // checked examples declare a placement again (130 bytes; the 3890 -> 3844 note above is the
+  // 186 they dropped). PAID DOWN FIRST by 62 bytes of restatement in this file: the opening
+  // "Actions are user-triggered operations on an object or a view." (the paragraph under it
+  // says how `objectName` binds an action to an object and how a view names one). Nothing else
+  // in the file restates another passage, so the same ruling's second half carries the rest.
+  // Arithmetic: the text adds 359 bytes, the cut removes 62, so the file is 15373 -> 15670
+  // bytes -> 3918 tokens, headroom 0 before, ceiling +74, the measured remainder only, pinned
+  // AT the measurement (28 above the 3890 the row held before the examples dropped their key).
+  // Same ruling (2026-10-27, tap A): 「A:先削重复,余额按实测提高」 (ruling record 6513306068,
+  // letter B).
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(15670 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 3918],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling
@@ -1545,7 +1778,7 @@ export const CEILINGS = new Map([
   // before, ceiling +42, pinned AT the measurement. Authority as the `rules/actions.md`
   // row above.
   //   ceil($(wc -c < skills/objectstack-ui/rules/dashboards.md) / 4) == ceil(25094 / 4)
-  ['skills/objectstack-ui/rules/dashboards.md', 6274],
+  ['skills/objectstack-ui/rules/dashboards.md', 6273], // -1 to the measurement (was 6274)
   // 3011 -> 3141 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +132 tokens,
   // of which the row's 2 tokens of headroom absorb 2; the CEILING moves 130.
@@ -1587,7 +1820,16 @@ export const CEILINGS = new Map([
   // (+4014) -> 4448 tokens, the row's 7 tokens of headroom absorbed, ceiling +997, pinned
   // AT the measurement. Authority as the `rules/actions.md` row above.
   //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(17790 / 4)
-  ['skills/objectstack-ui/rules/list-views.md', 4448],
+  // 4448 -> 4510 (#37406): one sentence under Column Features — a `select` badge is coloured
+  // only when its option declares `color` (the nine palette families the renderer's
+  // `BADGE_COLOR_MAP` keys, or a `#` hex), any other option renders neutral. Colour on a
+  // select option was untaught in this skill (0 hits), so no text here restates it and
+  // nothing was cut to fund it. Authority: the ruling of record on #36882 (record
+  // 7178358629, maintainer verbatim 「A 全部去掉，没配就灰」), whose term (5) orders this
+  // line into `skills/objectstack-ui`; it authorises its own measured delta and no more.
+  // 17790 -> 18039 bytes (+249) -> 4510 tokens, ceiling +62, pinned AT the measurement.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/list-views.md) / 4) == ceil(18039 / 4)
+  ['skills/objectstack-ui/rules/list-views.md', 4510],
   // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
   // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
   // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
@@ -1607,7 +1849,7 @@ export const CEILINGS = new Map([
   // absorbed, ceiling +380, pinned AT the measurement. Authority as the `rules/actions.md`
   // row above.
   //   ceil($(wc -c < skills/objectstack-ui/rules/navigation.md) / 4) == ceil(10255 / 4)
-  ['skills/objectstack-ui/rules/navigation.md', 2564],
+  ['skills/objectstack-ui/rules/navigation.md', 2559], // -5 to the measurement (was 2564)
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
   // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
@@ -1640,7 +1882,7 @@ export const CEILINGS = new Map([
   // labels it (Activity) in place of the Chinese word, and step 5's "(one page at two
   // widths)" aside — step 1 already says layout follows the surface's width — is gone; the
   // ceiling follows the file down to the measurement (3961 bytes).
-  ['skills/objectstack-ui/rules/record-page.md', 991],
+  ['skills/objectstack-ui/rules/record-page.md', 990], // -1 to the measurement (was 991)
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
@@ -1805,7 +2047,7 @@ export const CEILINGS = new Map([
   // marker went with the TypeScript block. 23652 -> 23744 bytes; the row moves +20,
   // the measured remainder (main carried 3 of headroom), pinned AT the measurement.
   //   ceil($(wc -c < skills/objectstack-automation/references/state-machines-and-approvals.md) / 4) == ceil(23744 / 4)
-  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5936],
+  ['skills/objectstack-automation/references/state-machines-and-approvals.md', 5927], // -9 to the measurement (was 5936)
   // 1779 -> 1769 (#26297): RE-LOCK at the landed count after a net cut — two
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
@@ -1818,7 +2060,7 @@ export const CEILINGS = new Map([
   // rename that dropped its intro line (-14) and left headroom, then the
   // review's module pointer paid by the custom-Page aside (the ui skill's
   // rule); the row follows the measurement down, zero headroom.
-  ['skills/objectstack-data/references/examples-objects.md', 1728],
+  ['skills/objectstack-data/references/examples-objects.md', 1723], // -5 to the measurement (was 1728)
   // 970 -> 934: one row for `relationship/inline-edit-needs-bulk`, and the closing "target a
   // lint-clean model" paragraph cut — it restated the table's rows one by one. 3829 -> 3735
   // bytes -> ceil(3735 / 4) = 934; the row follows the measurement down, zero headroom.
@@ -1877,10 +2119,10 @@ export const CEILINGS = new Map([
   // the same paydown as the step above (one PR, the cuts are its deletion):
   // 7245 -> 7590 bytes (+345) -> ceil(7590 / 4) = 1898; headroom was 0, so the
   // ceiling moves +86, the measured remainder only. Pinned AT the measurement.
-  ['skills/objectstack-data/references/seeds.md', 1898],
+  ['skills/objectstack-data/references/seeds.md', 1895], // -3 to the measurement (was 1898)
   // 1351 -> 1343: the body-pin values left the count (#31115, ruling B; see
   // BODY_PIN_REPIN); the file's count fell by the same 8, headroom unchanged.
-  ['skills/objectstack-platform/references/bootstrap.md', 1343],
+  ['skills/objectstack-platform/references/bootstrap.md', 1340], // -3 to the measurement (was 1343)
   // 3108 -> 3287: `os deploy`, the managed-package dev loop — when to deploy
   // rather than publish a release, its entry points, how it picks the
   // environment, its flags, and how to read its exit 1 (refusal before any
@@ -1937,9 +2179,19 @@ export const CEILINGS = new Map([
   // pinned at the measurement. Same maintainer ruling, verbatim and
   // untranslated: 「A:先削重复,余额按实测提高」 (ruling record 6513306068 on
   // #27847).
-  ['skills/objectstack-platform/references/operations.md', 3394],
-  ['skills/objectstack-platform/references/plugin-development.md', 3137],
-  ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
+  ['skills/objectstack-platform/references/operations.md', 3389], // -5 to the measurement (was 3394)
+  ['skills/objectstack-platform/references/plugin-development.md', 3127], // -10 to the measurement (was 3137)
+  ['skills/objectstack-upgrade/references/examples-upgrade.md', 1193], // -4 to the measurement (was 1197)
+  // NEW FILE, pinned AT the measurement: the context pack (`ai_context`, ADR-0160)
+  // is a metadata kind no published skill taught beyond its key name. Card #37177
+  // (the `Skills-docs: follow-up` of the PR that admitted the kind) asks for the
+  // teaching "in references where the ceiling binds", and both SKILL.md rows were
+  // at 14 and 0 tokens of headroom, so the keys, bounds, body outline, pack names
+  // and `os validate` rules live here and each SKILL.md carries a pointer paid by
+  // deleting restatement in the same file (neither SKILL.md row moves). The row is
+  // the seat's claim amendment 7179788843 on that card: one new row for this file.
+  // 5813 bytes -> ceil(5813 / 4) = 1454; zero headroom.
+  ['skills/objectstack-ai/references/context-packs.md', 1453], // -1 to the measurement (was 1454)
 
   // ── 2026-10-26 the objectui bundle joins the catalog — decision C, #25832 ──
   // The maintainer ruled (decision C, 2026-10-25, recorded as item 17d of the
@@ -1954,21 +2206,21 @@ export const CEILINGS = new Map([
   // No existing row moves. Adding the rows is the pricing act the header
   // reserves to the maintainer; the PR that adds them is Tier H and lands only
   // on the maintainer's approval, which is that word.
-  ['skills/objectui/README.md', 735],
+  ['skills/objectui/README.md', 733], // -2 to the measurement (was 735)
   ['skills/objectui/SKILL.md', 1852],
-  ['skills/objectui/guides/app-composition.md', 1079],
+  ['skills/objectui/guides/app-composition.md', 1078], // -1 to the measurement (was 1079)
   ['skills/objectui/guides/architecture.md', 1045],
-  ['skills/objectui/guides/auth-permissions.md', 3866],
-  ['skills/objectui/guides/data-integration.md', 4451],
-  ['skills/objectui/guides/i18n.md', 1413],
+  ['skills/objectui/guides/auth-permissions.md', 3864], // -2 to the measurement (was 3866)
+  ['skills/objectui/guides/data-integration.md', 4328], // -123 to the measurement (was 4451)
+  ['skills/objectui/guides/i18n.md', 1411], // -2 to the measurement (was 1413)
   ['skills/objectui/guides/mobile.md', 1349],
-  ['skills/objectui/guides/page-builder.md', 3411],
-  ['skills/objectui/guides/plugin-development.md', 4184],
-  ['skills/objectui/guides/project-setup.md', 2727],
-  ['skills/objectui/guides/schema-expressions.md', 6571],
+  ['skills/objectui/guides/page-builder.md', 3409], // -2 to the measurement (was 3411)
+  ['skills/objectui/guides/plugin-development.md', 4178], // -6 to the measurement (was 4184)
+  ['skills/objectui/guides/project-setup.md', 2726], // -1 to the measurement (was 2727)
+  ['skills/objectui/guides/schema-expressions.md', 6569], // -2 to the measurement (was 6571)
   ['skills/objectui/guides/testing.md', 3101],
   ['skills/objectui/rules/composition.md', 1624],
-  ['skills/objectui/rules/protocol.md', 4368],
+  ['skills/objectui/rules/protocol.md', 4353], // -15 to the measurement (was 4368)
   ['skills/objectui/rules/styling.md', 2699],
 
   // ── the objectstack-ask skill joins the catalog — epic ruling 6940528935 (D5 A) ──
@@ -2075,7 +2327,13 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 20) / 4) == ceil(7507 / 4)
   // = 1877 (+4), the measured remainder only. Pinned AT the measurement, zero
   // headroom; no other row moves.
-  ['skills/objectstack-ask/SKILL.md', 1877],
+  // 1875 -> 1873 (#34996): the step-1 rewrite (terms copied whole as the user
+  // wrote them, one worked example, the re-send sentence before a question)
+  // paid for itself inside the file and freed 9 bytes; lowered to the new
+  // measurement, shrink-only, no ruling needed. 7516 bytes less the 27-byte
+  // stamp line:
+  //   ceil(($(wc -c < skills/objectstack-ask/SKILL.md) - 27) / 4) == ceil(7489 / 4)
+  ['skills/objectstack-ask/SKILL.md', 1873], // -2 to the measurement (was 1875)
 
   // ── the objectstack-mcp-build skill joins the catalog — ruling #34691 S3 = A ──
   // (decision record: comment 6943107981 on #34691, "one copy of the shape
@@ -2381,6 +2639,21 @@ export function verdict(rel, tokens, ceiling, generated = null) {
         + `red. ${RATCHET_AUTHORITY_MARKER}`,
     };
   }
+  if (tokens < ceiling) {
+    // The other half of "pinned AT the measurement": a row a later shrink left
+    // standing above its file. Green here, the freed tokens sat in the row as
+    // budget nobody had paid for, and the next author spent them with no
+    // deletion shown. Lowering is the author's own act, so no authority token.
+    return {
+      ok: false,
+      msg:
+        `${rel} is ${tokens} tokens; its ratchet ceiling is ${ceiling}, above the measurement by ${ceiling - tokens}. `
+        + 'A ceiling is pinned AT its file\'s measurement — every path that moves a row pins it there (ruling records '
+        + '6513306068, 6819475461, 6840575378) — so tokens a shrink frees are banked, never left as budget the next '
+        + 'author spends with no deletion shown. '
+        + `Lower the row to ${tokens} in this PR: lowering is shrink-only and is every author's to make, no ruling needed.`,
+    };
+  }
   return { ok: true, msg: `${rel} is ${tokens} tokens (ceiling ${ceiling}; headroom ${ceiling - tokens}).` };
 }
 
@@ -2548,7 +2821,7 @@ const SELF_TEST_VERDICT = 'check-skills-token-ratchet self-test reached its verd
 // registrations must not red. 1 is the honest floor for a table row: the loop
 // reaches it exactly once per run.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'under the ceiling -> green': 1,
+  'under the ceiling -> red (a ceiling above its measurement)': 1,
   'at the ceiling -> green': 1,
   'over the ceiling -> red': 1,
   'empty read -> red, not a skip (#4690)': 1,
@@ -2557,7 +2830,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the red names the ceiling': 1,
   'the red names the rule: deletion in the same file': 1,
   'the red rejects a re-wrap as payment': 1,
-  'shrink direction — a shrunk file is green and its headroom is reported': 1,
+  'shrink direction — a shrunk file is red until its row is lowered to the measurement': 1,
+  'the above-measurement red names the row': 1,
+  'the above-measurement red names the measured count': 1,
+  'the above-measurement red names the ceiling': 1,
+  'the above-measurement red names the gap': 1,
+  'the above-measurement red tells the author to lower the row to the measurement': 1,
+  'the above-measurement red is not the over-ceiling red': 1,
+  'one token above the measurement is red (the reading that was missed)': 1,
   'the gate declares its registry shrink-only in author-facing text': 1,
   'the over-ceiling remedy carries the authority token': 1,
   'the unpriced-file remedy carries the authority token': 1,
@@ -2660,11 +2940,16 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 104;
+const SELF_TEST_BATTERY_FLOOR = 111;
 
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
   const over = verdict(rel, 26000, 25154).msg;
+  // Each above-measurement case reads the verdict AND its text, so none of
+  // them can hold on a green message that happens to carry the same numbers.
+  const underVerdict = verdict(rel, 20000, 25154);
+  const under = underVerdict.msg;
+  const underSays = (text) => [underVerdict.ok, under.includes(text)];
   const unpriced = verdict('skills/objectstack-new/SKILL.md', 4000, undefined).msg;
   const discovered = discoverBundleFiles();
   const authored = discovered.filter((p) => !generatorOwning(p) && !isEvalFixture(p));
@@ -2786,7 +3071,7 @@ function selfTest() {
 
   const cases = [
     // ── ratchet semantics ────────────────────────────────────────────────
-    ['under the ceiling -> green', verdict(rel, 25000, 25154).ok, true],
+    ['under the ceiling -> red (a ceiling above its measurement)', verdict(rel, 25000, 25154).ok, false],
     ['at the ceiling -> green', verdict(rel, 25154, 25154).ok, true],
     ['over the ceiling -> red', verdict(rel, 25155, 25154).ok, false],
     ['empty read -> red, not a skip (#4690)', verdict(rel, 0, 25154).ok, false],
@@ -2796,11 +3081,22 @@ function selfTest() {
     ['the red names the rule: deletion in the same file', over.includes('IN THE SAME FILE'), true],
     ['the red rejects a re-wrap as payment', over.includes('never a re-wrap'), true],
     // Shrink-only, pinned in the DIRECTION it runs: a file measured below its
-    // ceiling is green and the green message reports the headroom, which is
-    // what makes an opportunistic lowering visible. Nothing here rewrites a
-    // ceiling — the map is edited by a person, in a PR, in one direction.
-    ['shrink direction — a shrunk file is green and its headroom is reported',
-      verdict(rel, 20000, 25154).ok && verdict(rel, 20000, 25154).msg.includes('headroom 5154'), true],
+    // ceiling is red until the PR that shrank it lowers its row, and the red
+    // carries all three numbers. Green, the freed tokens were budget a later
+    // raise spent with no deletion shown. Nothing here rewrites a ceiling —
+    // the map is edited by a person, in a PR, in one direction.
+    ['shrink direction — a shrunk file is red until its row is lowered to the measurement',
+      [verdict(rel, 20000, 25154).ok, verdict(rel, 20000, 20000).ok], [false, true]],
+    ['the above-measurement red names the row', underSays(rel), [false, true]],
+    ['the above-measurement red names the measured count', underSays('20000 tokens'), [false, true]],
+    ['the above-measurement red names the ceiling', underSays('ceiling is 25154'), [false, true]],
+    ['the above-measurement red names the gap', underSays('above the measurement by 5154'), [false, true]],
+    ['the above-measurement red tells the author to lower the row to the measurement',
+      underSays('Lower the row to 20000'), [false, true]],
+    ['the above-measurement red is not the over-ceiling red',
+      [underVerdict.ok, under.includes('over by'), under === over, under.includes(RATCHET_AUTHORITY_MARKER)],
+      [false, false, false, false]],
+    ['one token above the measurement is red (the reading that was missed)', verdict(rel, 6273, 6274).ok, false],
     ['the gate declares its registry shrink-only in author-facing text', over.includes('shrink-only'), true],
 
     // ── remedy authority (#8435) ─────────────────────────────────────────
@@ -2809,7 +3105,7 @@ function selfTest() {
     // The convention's actual content: the author is never handed the steps for
     // loosening the ratchet. Pinned as an ABSENCE, because that is the shape
     // the failure takes — a helpful sentence appended a year from now.
-    ['no remedy tells the author to raise a ceiling', /raise (?:the |a |its )?ceiling to|bump the ceiling|update the ceiling to/i.test(`${over} ${unpriced}`), false],
+    ['no remedy tells the author to raise a ceiling', /raise (?:the |a |its )?ceiling to|bump the ceiling|update the ceiling to/i.test(`${over} ${unpriced} ${under}`), false],
     ['the raise is bound to a quoted maintainer ruling', over.includes('quotes the standing maintainer ruling'), true],
     // The standing path (ruling record 6513306068, letter B): both conditions
     // and the pin are in the author-facing text, because the script cannot

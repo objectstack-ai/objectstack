@@ -262,6 +262,8 @@ const ROSTER: Record<string, Member> = {
   'comment-parent-pair': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'comment-reactions': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
   'files-to-references': { argv: ['--apply'], confirm: '--yes', writes: BOOT },
+  // `--apply` deletes only with its pre-delete export named; the gate sits before the boot.
+  'list-preferences': { argv: ['--apply', '--export', join(SCRATCH, 'list-preferences-export.json')], confirm: '--yes', writes: BOOT },
   // `--yes` belongs to the stored-row pass; without `--stored` the command converts source files.
   meta: { argv: ['--stored', '--apply'], confirm: '--yes', writes: BOOT },
   'multi-value-columns': { argv: ['--apply'], confirm: '--yes', writes: BOOT },

@@ -9,7 +9,7 @@
  *    in the page beside it neither closes it nor is swallowed by it;
  *  - "Needs your action" heads the Notifications tab, one item per pending
  *    request, and each item's levers are the request's OWN declared actions
- *    (`DeclaredActionsBar` over `sys_approval_request` at `list_item`, with
+ *    (`DeclaredActionsBar` over `sys_approval_request` at `record_row`, with
  *    the served row as the dispatch record), not a third approvals client;
  *  - a decision taken there drops the row and the badge at once and asks the
  *    feed to re-read;
@@ -64,7 +64,12 @@ const approvals = [request('req-1', 'PO-001'), request('req-2', 'PO-002')];
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+  return (
+    <>
+      <output data-testid="location">{`${location.pathname}${location.search}`}</output>
+      <output data-testid="location-state">{JSON.stringify(location.state ?? null)}</output>
+    </>
+  );
 }
 
 function PageButtons() {
@@ -178,12 +183,12 @@ describe('InboxPopover — pending approvals pinned on top, decided in place (ob
     expect(within(section).getByText('Purchase approval · PO-001')).toBeTruthy();
   });
 
-  it("runs each request's own declared actions at list_item, with the served row as the dispatch record", () => {
+  it("runs each request's own declared actions at record_row, with the served row as the dispatch record", () => {
     render(bell());
     openInbox();
     expect(barProps).toHaveLength(2);
     expect(barProps.map((p) => p.objectName)).toEqual(['sys_approval_request', 'sys_approval_request']);
-    expect(barProps.map((p) => p.location)).toEqual(['list_item', 'list_item']);
+    expect(barProps.map((p) => p.location)).toEqual(['record_row', 'record_row']);
     // the row carrying the server-computed `viewer` block the actions gate on
     expect(barProps[0].record).toBe(approvals[0].row);
     expect(barProps[1].record).toBe(approvals[1].row);
@@ -269,5 +274,30 @@ describe('InboxPopover at 375 px (objectstack#34589)', () => {
     fireEvent.click(within(panel).getByText('Task assigned'));
     expect(screen.getByTestId('location').textContent).toMatch(/\/task\/t1$/);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('InboxPopover — "View details" hands the request page the pending queue (objectstack#35505)', () => {
+  it('opens the request with the queue the panel lists and the approvals inbox as the way back', () => {
+    render(bell());
+    const panel = openInbox();
+    const [, second] = within(panel).getAllByTestId('inbox-approval-item');
+    fireEvent.click(within(second).getByRole('button', { name: 'View details' }));
+
+    const where = screen.getByTestId('location').textContent ?? '';
+    expect(where).toMatch(/\/system\/approvals\?request=req-2$/);
+    const inbox = where.slice(0, where.indexOf('?'));
+    expect(JSON.parse(screen.getByTestId('location-state').textContent ?? 'null')).toMatchObject({
+      approvalQueue: true,
+      from: { pathname: inbox, siblings: ['req-1', 'req-2'] },
+    });
+  });
+
+  it('CONTROL: "View all" opens the inbox itself and hands no queue', () => {
+    render(bell({ notifications: [], unreadCount: 0 }));
+    const panel = openInbox();
+    fireEvent.click(within(panel).getByRole('button', { name: /View approvals|Open Approvals Inbox/ }));
+    expect(screen.getByTestId('location').textContent).toMatch(/\/system\/approvals$/);
+    expect(screen.getByTestId('location-state').textContent).toBe('null');
   });
 });

@@ -31,7 +31,7 @@ const ARCHIVE = {
   name: 'showcase_task_archive',
   label: 'Archive',
   objectName: 'showcase_task',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };
@@ -54,6 +54,7 @@ const objectDef = {
 };
 
 const mockClient: Record<string, unknown> & { save: ReturnType<typeof vi.fn> } = {
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn(async () => ({})),
   // The action inspector's field pickers read the object through the preview-draft door.
   get: vi.fn(async () => objectDef),
@@ -103,7 +104,11 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { __setCelFormulaLoader } from '../metadata-admin/celAuthoring';
@@ -137,17 +142,17 @@ afterEach(() => {
   mockClient.save.mockClear();
 });
 
-/** Past the autosave's 1.5 s debounce. */
-const outlastDebounce = () => new Promise((r) => setTimeout(r, 2300));
+/** The top bar's Save pressed (objectstack#36511): a held edit sends nothing. */
+const outlastDebounce = pressStudioSave;
 
 const rawEditorIn = (root: HTMLElement) =>
   within(root).getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
 
 function mount() {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
-    </MemoryRouter>,
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 
@@ -166,7 +171,7 @@ async function openActionVisible(): Promise<HTMLTextAreaElement> {
   return rawEditorIn(root);
 }
 
-const leaveToForm = () => fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+const leaveToForm = () => fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
 
 describe('DataPillar — a rule guard that does not parse holds with the draft (objectstack#27629)', () => {
   it('leaving the Validations tab keeps the hold, and the held line names the rule', async () => {
@@ -198,6 +203,7 @@ describe('DataPillar — a rule guard that does not parse holds with the draft (
     });
     expect(box.value).toBe('record.status ==');
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });
@@ -212,6 +218,7 @@ describe('DataPillar — a rule guard that does not parse holds with the draft (
     fireEvent.click(screen.getByTestId('data-tab-flat-rules'));
     const detail = (await screen.findAllByRole('button', { name: 'Delete' })).at(-1)!;
     fireEvent.click(detail);
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     const body = (mockClient.save.mock.calls.at(-1) as unknown[] | undefined)?.[2] as { validations?: unknown[] };
     expect(body.validations ?? []).toEqual([]);
@@ -248,6 +255,7 @@ describe('DataPillar — an action predicate that does not parse holds with the 
     });
     expect(box.value).toBe('record.status ==');
     fireEvent.change(box, { target: { value: "record.status == 'open'" } });
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 4000 });
     expect(screen.queryByTestId('studio-held')).toBeNull();
   });

@@ -32,7 +32,7 @@
  *
  * `locations` stays orthogonal — it places an action's SINGLE-record entry
  * (toolbar / row kebab / record header). One action can be both: declared
- * `locations: ['list_item']` AND named in `bulkActions`, it runs on one row
+ * `locations: ['record_row']` AND named in `bulkActions`, it runs on one row
  * from the kebab and on N rows from the selection bar.
  *
  * ## Two vocabularies reach the selection bar
@@ -153,7 +153,7 @@ export function unresolvedFieldOf(param: BulkActionParam): string | undefined {
  * promoted param always delivered them (the hand-mapper spread the raw param).
  *
  * The picker settings a reference-bearing field declares — `lookupFilters`,
- * `lookupColumns`, `lookupPageSize` and `descriptionField` — are carried under
+ * `lookupColumns`, `lookupPageSize`, `descriptionField` and `allowCreate` — are carried under
  * their own names, the spellings `LookupField` reads and the ones app-shell's
  * `paramToField` hands the single-record dialog's picker
  * (objectstack-ai/objectstack#26951). No rename is needed: `BulkActionParam`'s
@@ -188,6 +188,7 @@ function toBulkParam(resolved: ActionParamDef): BulkActionParam | null {
     ...(resolved.lookupColumns !== undefined && { lookupColumns: resolved.lookupColumns }),
     ...(resolved.lookupFilters !== undefined && { lookupFilters: resolved.lookupFilters }),
     ...(resolved.lookupPageSize !== undefined && { lookupPageSize: resolved.lookupPageSize }),
+    ...(resolved.allowCreate !== undefined && { allowCreate: resolved.allowCreate }),
     ...(resolved.accept !== undefined && { accept: resolved.accept }),
     ...(resolved.maxSize !== undefined && { maxSize: resolved.maxSize }),
     ...(resolved.unresolvedField !== undefined && { [UNRESOLVED_FIELD_KEY]: resolved.unresolvedField }),

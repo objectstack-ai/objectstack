@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 19 |
-| Object name statically decidable | 13 |
-| Object name chosen at run time | 6 |
+| Write call sites | 22 |
+| Object name statically decidable | 15 |
+| Object name chosen at run time | 7 |
 | Object name spelled inline | 11 |
-| Object name spelled through a `const` | 2 |
+| Object name spelled through a `const` | 4 |
 | Object name is an `object: string` parameter | 0 |
-| Object name is some other run-time expression | 6 |
-| Against a tenancy-enabled object | 13 |
+| Object name is some other run-time expression | 7 |
+| Against a tenancy-enabled object | 15 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 14 |
+| Threading a tenant context | 17 |
 | Provably carrying none (options read, no context key) | 0 |
 | …and decidably tenancy-enabled | 0 |
 | Options argument unreadable | 5 |
 | …and decidably tenancy-enabled | 4 |
-| Threading a decidably elevated (`isSystem`) context | 14 |
+| Threading a decidably elevated (`isSystem`) context | 17 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 5 |
-| Receiver carried a readable engine type | 19 |
+| Receiver carried a readable engine type | 22 |
 | Receiver erased, placed by the object NAME | 0 |
 | Receiver erased, placed by an `object: string` PARAMETER | 0 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 0 |
@@ -51,12 +51,15 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/app-activity-door.ts` | `insert` | `sys_activity` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/expiry.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/audit-signing-key-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/comment-resolution.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/comment-routes.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/data-export-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/dataset-query-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |

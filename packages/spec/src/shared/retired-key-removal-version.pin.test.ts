@@ -78,8 +78,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { ALL_CONVERSIONS } from '../conversions/registry';
+import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
+import { AIModelConfigSchema } from '../ai/agent.zod';
 import { TimeUpdateInterval } from '../data/analytics.zod';
-import { CurrencyConfigSchema } from '../data/field.zod';
+import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
 import { ManifestPermissionsSchema, PluginPackagingSchema } from '../kernel/manifest.zod';
 import {
@@ -99,7 +101,9 @@ import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationBundleSchema, TranslationItemSchema } from '../system/translation.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
+import { ActionLocationSchema } from '../ui/action.zod';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
+import { KnowledgeRefreshPolicySchema, KnowledgeSourceSchema, ObjectKnowledgeSourceSchema } from '../ai/knowledge-source.zod';
 import {
   ActionButtonPropsSchema,
   ActionGroupPropsSchema,
@@ -236,6 +240,23 @@ const todo = (where: string, id: string, stack: Record<string, unknown>): Render
   return reasons.map((text) => ({ where, text }));
 };
 
+/**
+ * The D3 entry `os migrate meta` prints for a DEFAULT FLIP, read by its `id`:
+ * the old shape still parses and now means something else, so there is no
+ * refusal or tombstone to read, and the semantic entry that judges the
+ * conversion's edits (its `conversionIds`) is the prescription an author and
+ * an operator meet. Its `reason` and `acceptanceCriteria` are the two texts.
+ */
+const semantic = (where: string, id: string, conversionId: string): Renderer => () => {
+  const found = Object.values(MIGRATIONS_BY_MAJOR).flatMap((step) => step.semantic).find((e) => e.id === id);
+  if (!found) throw new Error(`${where}: no semantic entry \`${id}\``);
+  expect(found.conversionIds ?? [], `${where} judges \`${conversionId}\``).toContain(conversionId);
+  return [
+    { where: `${where} (reason)`, text: found.reason },
+    { where: `${where} (acceptanceCriteria)`, text: found.acceptanceCriteria },
+  ];
+};
+
 const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
   [ElementNumberPropsSchema, 'element:number', ['object', 'filter']],
   [ElementRecordPickerPropsSchema, 'element:record_picker', ['object', 'filter', 'sort', 'limit']],
@@ -261,6 +282,7 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   ),
   'object-external-sharing-model-removed': [tombstone(ObjectSchema, 'object', 'externalSharingModel')],
   'object-grid-default-filters-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultFilters')],
+  'object-grid-single-click-edit-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'singleClickEdit')],
   'email-template-category-is-system-removed': [
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),
@@ -315,6 +337,26 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #27123: `packaging: 'manifest-deps'`, refused by the enum's own error map.
   'manifest-packaging-manifest-deps-removed': [
     refusal("manifest.packaging 'manifest-deps'", () => PluginPackagingSchema.safeParse('manifest-deps')),
+  ],
+  // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
+  // #37712: an agent's `model.provider`, tombstoned on the model block.
+  'agent-model-provider-removed': [tombstone(AIModelConfigSchema, 'agent.model', 'provider')],
+  // objectstack#36495: a retired page-part location word is an enum VALUE, so
+  // what an author meets is the enum's refusal of it, which names the release.
+  'action-locations-acted-on': (['list_toolbar', 'list_item', 'record_header', 'record_more'] as const).map((word) =>
+    refusal(`action.locations ${word}`, () => ActionLocationSchema.safeParse(word)),
+  ),
+  'field-inline-edit-boolean-removed': [
+    refusal(
+      'field.inlineEdit: true',
+      () => FieldSchema.safeParse({ type: 'master_detail', reference: 'order', inlineEdit: true }),
+      'inlineEdit',
+    ),
+    refusal(
+      'field.inlineEdit: false',
+      () => FieldSchema.safeParse({ type: 'lookup', reference: 'order', inlineEdit: false }),
+      'inlineEdit',
+    ),
   ],
   'declared-index-unique-scope': [
     refusal('indexes[].unique: true', () => IndexSchema.safeParse({ fields: ['code'], unique: true })),
@@ -440,6 +482,24 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #26677: value-level retirements — each retired member is refused by the
   // enum's own error map with its prescription, so the refusal is the parse.
   'list-view-options-bag-folded': [tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'options')],
+  // #36403: one family on both wire doors — the two flattened overlays carry the
+  // tombstone in their own shape; the record is a discriminated union, so its
+  // refusal is read off a parse.
+  'view-column-state-removed': [
+    tombstone(VIEW_METADATA_MEMBERS.listOverlay, 'view (list overlay)', 'columnState'),
+    tombstone(VIEW_METADATA_MEMBERS.formOverlay, 'view (form overlay)', 'columnState'),
+    refusal(
+      'a view item record carrying columnState',
+      () => VIEW_METADATA_MEMBERS.viewItem.safeParse({
+        name: 'crm_case.mine',
+        object: 'crm_case',
+        viewKind: 'list',
+        columnState: { order: ['subject'] },
+        config: { type: 'grid', columns: ['subject'] },
+      }),
+      'columnState',
+    ),
+  ],
   'navigation-mode-overlay-values-removed': [
     ...(['modal', 'split', 'popover'] as const).map((mode) =>
       refusal(`navigation.mode '${mode}'`, () => NavigationModeSchema.safeParse(mode)),
@@ -616,6 +676,27 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'object-kanban-quick-add-removed': [tombstone(ObjectKanbanPropsSchema, 'object-kanban', 'quickAdd')],
   'cube-sub-day-granularities-removed': [
     refusal('a sub-day TimeUpdateInterval member', () => TimeUpdateInterval.safeParse('minute')),
+  ],
+  // #37304 (ADR-0161 K6): the knowledge source's keys, settled as the type is admitted.
+  'knowledge-source-id-to-name': [tombstone(KnowledgeSourceSchema, 'knowledge_source', 'id')],
+  'knowledge-source-content-fields-to-content': [
+    tombstone(ObjectKnowledgeSourceSchema, 'knowledge_source.source', 'contentFields'),
+  ],
+  'knowledge-source-inert-keys-removed': [
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'embedding'),
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'vectorStore'),
+    tombstone(KnowledgeSourceSchema, 'knowledge_source', 'adapterConfig'),
+    tombstone(KnowledgeRefreshPolicySchema, 'knowledge_source.refresh', 'cron'),
+  ],
+  // Protocol 19's View All / Modify All field-axis split, a default flip: View
+  // All without `viewAllFields` still parses and now casts no field vote, so the
+  // D3 entry is what an author and an operator meet.
+  'permission-view-all-fields-beside-record-bypass': [
+    semantic(
+      'D3 permission-view-all-modify-all-cast-no-field-vote',
+      'permission-view-all-modify-all-cast-no-field-vote',
+      'permission-view-all-fields-beside-record-bypass',
+    ),
   ],
 };
 

@@ -1,46 +1,61 @@
 # Actions
 
-Actions are user-triggered operations attached to an object or a view.
 Register them under `defineStack({ actions: [...] })`; the six types:
-[Action Types](../SKILL.md#action-types). A parameterized bulk mutation is
-`script`.
+[Action Types](../SKILL.md#action-types).
 
 **A record button needs a placement and a body that writes.** `objectName`
 folds the action into that object's surfaces: `locations` without it
 is refused at validate and publish (`action-no-object-binding`; set it, or
 `locations: []` if headless). With neither `locations` nor a view naming it in
-`rowActions` / `bulkActions` it renders nowhere (`action-no-placement`). A body
+`rowActions` / `bulkActions` / `bulkActionDefs` it renders nowhere (`action-no-placement`). A body
 that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
-`capabilities: ['api.write']`: without it the sandbox throws on a write.
+`capabilities: ['api.write']`; without that grant, a write is refused too
+(`action-body-write-capability-undeclared`).
 
 ## Where Actions Appear (`locations`)
 
-| Value            | Surface |
+| Value            | Acts on, and where |
 |:-----------------|:--------|
-| `record_header`  | Detail page header |
-| `record_more`    | Detail page overflow menu (⋯) |
-| `record_related` | Related-list section inside a record |
+| `list`           | No record: the list page toolbar; one ticked row is its `recordId`, several are refused (no `_selectedIds`) |
+| `record`         | One record, the default: the record page and each list row |
+| `record_page`    | The record page only; `component: 'action:menu'` puts it in the ⋯ menu |
+| `record_row`     | Each list row only |
+| `record_related` | Related-list section in a record |
 | `record_section` | Body section/tab of a record |
-| `list_item`      | Per-row action in list views |
-| `list_toolbar`   | Bulk action on selected rows (`input.selectedIds`) |
+
+Until protocol 19: `list_toolbar` (now `list`), `list_item` (`record_row`), `record_header` / `record_more` (`record_page`).
+
+## Button Order (`actionLayout`)
+
+The object's `actionLayout` arranges one scope per arm:
+`{ record: { pinned: ['crm_convert_lead'], more: ['crm_print_a3'] } }`. `pinned`
+(required; `[]` pins none) names at most 3 buttons, in order; every other action
+goes to the ⋯ menu, those `more` names first. `record` takes `record` /
+`record_page` actions wherever that header draws (record page, side preview,
+phone bar, a row's ⋮ menu order); `list` takes `list` actions and may
+pin `$import` / `$export` (pinned only). `os validate` refuses a name the arm's
+scope does not place, on the object or an extension of one the same stack
+defines. On an installed object only its paired `.custom` package's extension
+writes it (as `fieldGroups`, objectstack-data), each arm whole, not judged
+there: a wrong name draws nothing.
 
 ## Visibility, Disable & Feedback
 
-- `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false the action is **hidden**.
-- `disabled` — `boolean` **or** a CEL predicate; when true the action **shows but greys out**. A bare field ref in either (`done` for `record.done`) fails `os validate`.
+- `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false it is **hidden**.
+- `disabled` — `boolean` **or** a CEL predicate; when true it **shows but greys out**. A bare field ref in either (`done` for `record.done`) fails `os validate`.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate or a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
-- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
-- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
+- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused, and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
+- `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. It gates no AI call: an `ai.exposed` one also sets `ai.requiresConfirmation: true`. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
 - `resultDialog` — a one-shot dialog that shows the server answer in place of the success toast (so no `successMessage`; `outcomeMessages` is refused beside it): `{ title?, description?, acknowledge?, format?, fields? }`. `fields: [{ path, label?, format? }]`, `path` a dot path into `result.data` (omitted: the whole answer as JSON); `format` is one of `qrcode`, `code-list`, `secret`, `text`, `json`, or `table` with `columns: [{ path, label?, format? }]` (one row per element of the array at `path`, one cell per column; required with `table` and refused beside any other format). The dialog-level `format` (default `json`) and a cell's (default `text`) take every format but `table`. A `text` or `code-list` cell draws the value with no copy control; a `secret` or `qrcode` cell keeps its own.
-- `successMessage` / `errorMessage` — toast copy; without `successMessage` the UI shows a generic "Action completed".
-- Copy holes are `{{ }}`: `confirmText`, `description` (`'Choose the new owner of {{ record.name }}.'`) and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` (the handler's answer) and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
+- `successMessage` / `errorMessage` — toast copy; without `successMessage` the UI shows "Action completed".
+- Copy holes are `{{ }}`: `confirmText`, `description` and a param's `helpText` read `record`; `successMessage` and each `outcomeMessages` entry (`resent: 'Invitation resent to {{ result.email }}'`) read `result` and `record`; `errorMessage` takes none. A `bulkActionDefs` entry's `confirmText` reads `{{ count }}` and its params by bare name (`{{ tier }}`). In all of them `${record.name}`, `{name}`, logic in a hole and a blank sentence fail `os validate`.
 - A param's `helpText`, like `description`, is a sentence or an inline locale map (`{ en: 'Why {{ record.name }} is paused', 'zh-CN': '暂停原因' }`); the map is how a page button's inline `action` (no bundle reaches it) writes its hint per locale.
 - `undoable: true` — an **Undo** in the success toast (and `Ctrl+Z`). Snapshot: runtime on `operation: 'update'`, console on `type: 'api'`; else refused.
-- An `execution: 'aggregate'` bulk handler runs once for the selection, its ids in `params._selectedIds` (a script body's `input._selectedIds`). One that wrote some rows and refused others catches per row and RESOLVES with `{ succeeded: string[], failed: [{ id, message }] }` (`BulkActionResult`, `@objectstack/spec/ui`) as its whole return value; a throw means no outcome, reported once for the selection. An id outside `_selectedIds` is dropped, a duplicate counts once, an id in both lists counts as failed, and a selected id in neither is reported as not confirmed. A value with neither member keeps the whole-selection report; one carrying either that does not parse (counts, one list) is reported as unreadable, never as full success.
+- A list view's `bulkActions: ['<name>']` runs it once per ticked row. A body that writes each selected row takes that form: declare `execution: 'perRecord'` and write the row it is handed (`ctx.record`, `ctx.recordId`; `crm_create_campaign` below); a row whose run throws is listed with its message. A `bulkActionDefs` entry `{ name, operation: 'custom', execution: 'aggregate' }` runs it once for the selection. A script body or a flow receives the ids under the built-in key `params._selectedIds` (`input._selectedIds`), at most 5000 and only ids the caller can read: one the caller cannot read refuses the whole call (`404 RECORD_NOT_FOUND`) before it starts. A throw is one outcome for the selection; a return value's top-level `succeeded` or `failed` is read as a `BulkActionResult` (`@objectstack/spec/ui`), and in any other form (counts, one list) reported as unreadable.
 
 <!-- os:check -->
 ```typescript
@@ -51,16 +66,16 @@ export const ReassignLeadAction = defineAction({
   name: 'crm_reassign_lead',
   label: 'Reassign Lead',
   objectName: 'lead',
+  locations: ['record'],
   type: 'api',
   target: 'lead',
-  locations: ['record_header', 'list_item'],
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'owner_id', required: true }],
   submitText: 'Reassign',
   undoable: true,
   successMessage: 'Lead {{ record.name }} reassigned.',
-  errorMessage: "Couldn't reassign this lead — try again.",
+  errorMessage: "Couldn't reassign this lead.",
 });
 ```
 
@@ -77,13 +92,13 @@ export const ConvertLeadAction = defineAction({
   name: 'crm_convert_lead',
   label: 'Convert Lead',
   objectName: 'lead',
+  locations: ['record'],
   icon: 'arrow-right-circle',
   type: 'flow',
   target: 'crm_lead_conversion',
-  locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
-  confirmText: 'Are you sure you want to convert this lead?',
-  successMessage: 'Lead converted successfully!',
+  confirmText: 'Convert this lead?',
+  successMessage: 'Lead converted.',
   onSuccess: { navigate: '/apps/crm_enterprise/opportunity/record/${result.output.opportunity_id}' },
   refreshAfter: true,
 });
@@ -97,35 +112,25 @@ export const AddToCampaignAction = defineAction({
   name: 'crm_create_campaign',
   label: 'Add to Campaign',
   objectName: 'lead',
-  icon: 'send',
   type: 'script',
-  locations: ['list_toolbar'],
-  params: [
-    { field: 'campaign_id', objectOverride: 'campaign', required: true },
-  ],
+  execution: 'perRecord',
+  params: [{ field: 'campaign_id', objectOverride: 'campaign', required: true }],
   body: {
     language: 'js',
     source: `
-      const campaignId = input.campaign_id;
-      const ids = Array.isArray(input.selectedIds) ? input.selectedIds : [];
-      for (const leadId of ids) {
-        await ctx.api.object('campaign_member').insert({
-          campaign_id: campaignId, lead_id: leadId, status: 'sent',
-        });
-      }
-      return { count: ids.length };
+      await ctx.api.object('campaign_member').insert({
+        campaign_id: input.campaign_id, lead_id: ctx.recordId, status: 'sent',
+      });
     `,
     capabilities: ['api.write'],
     timeoutMs: 10000,
   },
-  successMessage: 'Leads added to campaign!',
-  refreshAfter: true,
 });
 ```
 
 ### Action body context (`ctx`)
 
-A server-side `body` (or a registered `handler`) receives `ctx` with `input` (the dialog params), `record` (the target row, when a
+A server-side `body` or registered `handler` receives `ctx` with `input` (the dialog params), `record` (the target row when a
 `recordId` is in scope), `api` (scoped cross-object CRUD) and the caller. Read
 the active organization as `ctx.user?.organizationId ?? ctx.session?.organizationId`
 (as in hooks, objectstack-data).
@@ -137,11 +142,13 @@ Bodies execute **trusted** (`ctx.api` /
 
 `throw new Error('…')` answers every caller in the author's language. A `type: 'script'` action
 with a `js` body (an inline `target` function is lowered to one; any other action is refused the
-key) declares `refusals` and throws the code, as `crm_add_invoice_line` below does: the catalogue,
+key) declares `refusals` and throws the code, as `crm_add_invoice_line` below: the catalogue,
 throws and checks are a hook's (objectstack-data → Lifecycle Hooks → Declared refusals). The
 sentence is answered as `userMessage`, translated at
 `objects.<object>._actions.<action>.refusals.<CODE>.message` (objectstack-i18n); the console's
-failure toast shows it unless the action authors `errorMessage`.
+failure toast shows it unless the action sets `errorMessage`. For several reasons throw
+`reasons: [{ reason, params? }, …]`, not `reason`: `userMessage` is one line per reason, closed
+by the code's `message` (rules there).
 
 ### Writing in the organization's language (`texts`)
 
@@ -159,7 +166,7 @@ rejects. An undeclared key is refused at save when named literally, else at run.
 
 A **static** `target` URL on a `type: 'url'` action: `openIn: 'self'` forces
 in-place navigation; omitted, absolute URLs open in a new tab and relative ones
-navigate in place.
+in place.
 
 <!-- os:check -->
 ```typescript
@@ -167,12 +174,12 @@ import { defineAction } from '@objectstack/spec/ui';
 
 export const PrintA3Action = defineAction({
   name: 'crm_print_a3',
-  label: 'Print Summary Sheet (A3)',
+  label: 'Print A3',
   objectName: 'lead',
+  locations: ['record_page'],
   type: 'url',
-  target: '/print/a3?id=${record.id}',   // interpolated at click
+  target: '/print/a3?id=${ctx.recordId}',   // interpolated at click
   openIn: 'new-tab',
-  locations: ['list_toolbar'],
 });
 ```
 
@@ -182,7 +189,7 @@ A redirect URL **computed after a fetch**: `opensInNewTab:
 true` pre-opens the tab synchronously on click (no popup blocker), then navigates
 it to the handler's `redirectUrl`. `newTabUrl` skips the round-trip — a backend
 path starting with `/` (an external URL is refused, use
-`openIn`), valid only with `opensInNewTab: true`; the endpoint enforces its own
+`openIn`), only with `opensInNewTab: true`; the endpoint enforces its own
 auth (the tab carries no in-app session).
 
 <!-- os:check -->
@@ -193,11 +200,11 @@ export const OpenInvoicePdfAction = defineAction({
   name: 'crm_open_invoice_pdf',
   label: 'Open PDF',
   objectName: 'invoice',
+  locations: ['record'],
   type: 'script',
   target: 'crm_open_invoice_pdf',
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
-  locations: ['record_header'],
 });
 ```
 
@@ -214,7 +221,7 @@ placeholder and widget come from the object metadata
 (`widget` only while the param keeps or restates the field's `type`; a param
 that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
-pre-fills from the selected row in `list_item`.
+pre-fills from the list row it runs on (`record` / `record_row`).
 
 **An action that adds a child line sets its price.** `lookupAutofill` fills only
 the form and the grid, and a stored `expression` reads only its own row, so a
@@ -230,8 +237,8 @@ export const AddInvoiceLineAction = defineAction({
   name: 'crm_add_invoice_line',
   label: 'Add Line',
   objectName: 'invoice',
+  locations: ['record'],
   type: 'script',
-  locations: ['record_header'],
   params: [
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },
@@ -255,7 +262,7 @@ export const AddInvoiceLineAction = defineAction({
 
 Lines also written past the action (API, an agent, an import — one with
 automations off skips hooks) get the price from a `beforeInsert` hook on the
-line instead (objectstack-data → Lifecycle Hooks), `runAs: 'system'` when the
+line (objectstack-data → Lifecycle Hooks), `runAs: 'system'` when the
 writer cannot read it.
 
-> Set `refreshAfter: true` whenever the action mutates the current record.
+> Set `refreshAfter: true` when the action mutates the current record.

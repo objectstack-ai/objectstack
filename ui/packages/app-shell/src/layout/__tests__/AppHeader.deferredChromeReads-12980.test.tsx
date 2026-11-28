@@ -193,6 +193,18 @@ import {
   __markFirstPainted,
 } from '../../hooks/sharedUserFeeds';
 
+// From 768 px up the bell opens the full-page inbox instead of a panel
+// (objectstack#36741); the panel these pins read is the phone's, so the
+// header is drawn at phone width.
+let widthBeforePhone = 0;
+beforeEach(() => {
+  widthBeforePhone = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 375 });
+});
+afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: widthBeforePhone });
+});
+
 const READER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',

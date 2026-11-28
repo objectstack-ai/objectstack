@@ -12,6 +12,7 @@ import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
+import { MANIFEST_ID_PATTERN } from '../kernel/address-grammar';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
 /**
@@ -554,6 +555,38 @@ const submitBehaviorTranslationSchema = (surface: string) => strictObject({
   message: z.string().optional().describe('Translated thank-you panel message (overlays `submitBehavior.message`)'),
 });
 
+/**
+ * The copy of one named form section: its `label`, `description` and, under
+ * `fields`, the `label` / `placeholder` / `helpText` each entry authors, keyed
+ * by the entry's own `field`. Two faces carry it: the object-level default at
+ * `objects.<object>._sections.<section>` (shared with field groups and record
+ * pages on purpose) and a form's own `forms.<form>.sections.<section>`
+ * (ADR-0159 D8), which the translator reads first. Built by a factory for
+ * {@link actionTranslationSchema}'s reason: the two cannot drift, and
+ * `surface` says which of the two a rejected key was written on.
+ */
+const sectionTranslationSchema = (surface: string, entrySurface: string) => strictObject({
+  surface,
+  history: TRANSLATION_HISTORY,
+  aliases: { name: 'label', title: 'label', heading: 'label', entries: 'fields' },
+}, {
+  label: z.string().optional().describe('Translated section label'),
+  description: z.string().optional().describe('Translated section description'),
+  fields: z.record(z.string(), strictObject({
+    surface: entrySurface,
+    history: TRANSLATION_HISTORY,
+    // `helpText` is the spelling a form section entry declares
+    // (`FormFieldSchema.helpText`); `help` is the FIELD translation's, one
+    // level up at `objects.<object>.fields.<field>`. Neighbouring-surface
+    // borrowing, which edit distance reads as a legitimate word.
+    aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', title: 'label' },
+  }, {
+    label: z.string().optional().describe('Translated entry label (overlays the section entry\'s `label` override)'),
+    placeholder: z.string().optional().describe('Translated entry placeholder (overlays the section entry\'s `placeholder` override)'),
+    helpText: z.string().optional().describe('Translated entry help text (overlays the section entry\'s `helpText` override)'),
+  })).optional().describe('Form section entry translations keyed by the entry\'s `field`'),
+});
+
 export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this object translation',
   history: TRANSLATION_HISTORY,
@@ -561,7 +594,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     // The group prefixes are the whole point of the `_`-prefixed convention,
     // and the un-prefixed spelling is the one an author reaches for first.
     views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
-    validationRules: '_validations', rules: '_validations',
+    validationRules: '_validations', rules: '_validations', relatedLists: '_relatedLists',
+    milestones: '_milestones', activityMilestones: '_milestones',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -814,27 +848,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * none of the three keeps the object field's own copy, translated at
    * `objects.<object>.fields.<field>`.
    */
-  _sections: z.record(z.string(), strictObject({
-    surface: 'this section translation',
-    history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', heading: 'label', entries: 'fields' },
-  }, {
-    label: z.string().optional().describe('Translated section label'),
-    description: z.string().optional().describe('Translated section description'),
-    fields: z.record(z.string(), strictObject({
-      surface: 'this form section entry translation',
-      history: TRANSLATION_HISTORY,
-      // `helpText` is the spelling a form section entry declares
-      // (`FormFieldSchema.helpText`); `help` is the FIELD translation's, one
-      // level up at `objects.<object>.fields.<field>`. Neighbouring-surface
-      // borrowing, which edit distance reads as a legitimate word.
-      aliases: { help: 'helpText', hint: 'helpText', tooltip: 'helpText', name: 'label', title: 'label' },
-    }, {
-      label: z.string().optional().describe('Translated entry label (overlays the section entry\'s `label` override)'),
-      placeholder: z.string().optional().describe('Translated entry placeholder (overlays the section entry\'s `placeholder` override)'),
-      helpText: z.string().optional().describe('Translated entry help text (overlays the section entry\'s `helpText` override)'),
-    })).optional().describe('Form section entry translations keyed by the entry\'s `field`'),
-  })).optional().describe('Section translations keyed by section name'),
+  _sections: z.record(z.string(), sectionTranslationSchema('this section translation', 'this form section entry translation'))
+    .optional().describe('Section translations keyed by section name'),
 
   /**
    * Filter-preset tab translations keyed by tab name (`ViewTabSchema.name`).
@@ -864,6 +879,40 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated tab label'),
   })).optional().describe('Filter-preset tab translations keyed by tab name'),
+
+  /**
+   * Record-page related-list titles keyed by the `list` of an object-form
+   * `relatedLists` entry (`RelatedListEntryObjectSchema`) on THIS object, the
+   * parent whose record page draws the list. Convention (overlaid by
+   * `translateObject` onto the served object's `relatedLists`):
+   *   objects.<object>._relatedLists.<list>.label
+   *
+   * `<list>` is the entry's literal `list` value, indexed directly and never
+   * split: `event.related_to` (a child with several relationships to this
+   * object, written `object.field`) is ONE key, as `resultDialog.fields` keys
+   * its dotted paths.
+   *
+   * **The hole this closes.** An entry's `label` is the tab's title and its
+   * table's heading, and it wins over the child FK's `relatedListTitle`, which
+   * the bundle already translated at
+   * `objects.<child>.fields.<field>.relatedListTitle`. The winning title had no
+   * key, so a declared tab title showed its authored text in every locale.
+   *
+   * **It translates the entry's own `label` and nothing else.** An entry with
+   * no `label` keeps the precedence it has without one (the FK's
+   * `relatedListTitle`, then the child object's plural label, each translated
+   * where it is declared): a bundle translates an attribute and never swaps
+   * another in, the rule `inlineTitle` and `relatedListTitle` above follow. A
+   * bare-string entry and a built-in tab (`sys_attachment`, …) carry no label,
+   * so they have no key here.
+   */
+  _relatedLists: z.record(z.string(), strictObject({
+    surface: 'this related list title translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', title: 'label', heading: 'label', text: 'label' },
+  }, {
+    label: z.string().optional().describe("Translated related list title (overlays the relatedLists entry's own `label`)"),
+  })).optional().describe('Record-page related list titles keyed by the relatedLists entry list name'),
 
   /**
    * Custom validation-rule messages keyed by rule name
@@ -931,6 +980,28 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
     message: z.string().optional()
       .describe("Translated rejection message — overlays the rule's authored `message` on every rejected write"),
   })).optional().describe('Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`)'),
+
+  /**
+   * Activity-milestone summaries (ADR-0052 §5b.2), keyed by the milestone's
+   * watched `field`, then by the `value` it fires on:
+   *
+   *   objects.<object>._milestones.<field>.<value>.summary
+   *
+   * A milestone declares no name, and `field` + `value` is what fires it (the
+   * first declared milestone for the pair wins), so the pair is its address.
+   * The translated template carries the same `{field}` tokens as the authored
+   * `summary`; the record timeline composes it in the reader's language, and a
+   * token naming a select value is rendered with that option's label in the
+   * same language. A milestone with no entry keeps its authored `summary`.
+   */
+  _milestones: z.record(z.string(), z.record(z.string(), strictObject({
+    surface: 'this activity milestone translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { message: 'summary', template: 'summary', text: 'summary', title: 'summary' },
+  }, {
+    summary: z.string().optional()
+      .describe("Translated milestone summary template — the same `{field}` tokens as the milestone's authored `summary`"),
+  }))).optional().describe('Activity-milestone summary translations keyed by the watched field, then by the value the milestone fires on'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
@@ -1066,9 +1137,9 @@ const PER_APP_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than filling the gap from an application. For an '
-  + 'application\'s own copy use the seventeen groups this bundle does declare, in the order it '
+  + 'application\'s own copy use the eighteen groups this bundle does declare, in the order it '
   + "declares them — 'objects', 'picklists', 'apps', 'messages', 'globalActions', 'dashboards', "
-  + "'datasets', 'reports', 'pages', 'flows', 'hooks', 'positions', 'permissions', 'books', "
+  + "'datasets', 'reports', 'pages', 'forms', 'flows', 'hooks', 'positions', 'permissions', 'books', "
   + "'mappings', 'metadataForms', 'settingsCommon'. "
   + "Note the last one: 'settingsCommon' IS "
   + 'on this face, so the Settings UI shell strings an application may translate (the source '
@@ -1111,7 +1182,7 @@ const ITEM_SETTINGS_PLATFORM_ONLY =
   + '(`@objectstack/service-settings`\'s `settingsBuiltinTranslations`, typed '
   + '`PlatformTranslationData`); a key it does not translate falls back to the manifest\'s own '
   + 'literal, so correct it there rather than overriding it from an application. For an '
-  + 'application\'s own copy use the groups this item does declare — the same seventeen a per-app '
+  + 'application\'s own copy use the groups this item does declare — the same eighteen a per-app '
   + "bundle declares, 'settingsCommon' among them: the Settings UI shell strings an application "
   + 'may translate (the source badges, under `settingsCommon.sourceLabels`) are NOT what is being '
   + "refused here — only the per-namespace manifest copy under 'settings' is. "
@@ -1150,12 +1221,12 @@ const ITEM_TRANSLATION_KEY_GUIDANCE: Record<string, string> = {
  */
 /**
  * The translation groups an APPLICATION may author, as a shape rather than a
- * schema. Seventeen groups — the eighteenth, `settings`, is platform-only and lives in
+ * schema. Eighteen groups — the nineteenth, `settings`, is platform-only and lives in
  * {@link platformSettingsShape}.
  *
  * Three schemas need exactly these keys: {@link TranslationDataSchema} (one
- * entry of a per-app file-authored bundle — these seventeen and no more),
- * {@link PlatformTranslationDataSchema} (these seventeen plus `settings`) and
+ * entry of a per-app file-authored bundle — these eighteen and no more),
+ * {@link PlatformTranslationDataSchema} (these eighteen plus `settings`) and
  * {@link TranslationItemSchema} (the registered `translation` metadata type —
  * the per-app face plus `locale`, its identity keys and the ADR-0010
  * envelope; it carried the platform face's `settings` too until #19620). The item used to
@@ -1774,6 +1845,46 @@ const appTranslationDataShape = () => ({
   })).optional().describe('Page translations keyed by page name'),
 
   /**
+   * [ADR-0159 D8] `form` item translations keyed by the form's name
+   * (`Form.name`, `OBJECT.KEY`).
+   *
+   * Convention:
+   *   forms.<form_name>.label
+   *   forms.<form_name>.description
+   *   forms.<form_name>.title
+   *   forms.<form_name>.submitBehavior.title     (a `thank-you` panel)
+   *   forms.<form_name>.submitBehavior.message
+   *   forms.<form_name>.sections.<section_name>.label
+   *   forms.<form_name>.sections.<section_name>.description
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.label
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.placeholder
+   *   forms.<form_name>.sections.<section_name>.fields.<field>.helpText
+   *
+   * The translator reads `forms.NAME` first; the form tails a form defined in
+   * a view had under `objects.OBJECT._views.KEY` (`title`, `submitBehavior`)
+   * are the declared fallback, so a bundle written for the old shape keeps
+   * translating the same form. `label` and `description` under `_views.KEY`
+   * are a view's, not form tails: they are neither moved nor read as a
+   * fallback. A section with no key under `forms.NAME.sections` reads
+   * `objects.OBJECT._sections.SECTION`, its object-level default: field
+   * groups and forms of one object share section names on purpose, so that
+   * is not a legacy fallback, and an entry key the form's section lacks falls
+   * back the same way, one key at a time.
+   */
+  forms: z.record(z.string(), strictObject({
+    surface: 'this form translation',
+    history: TRANSLATION_HISTORY,
+    aliases: { name: 'label', heading: 'title' },
+  }, {
+    label: z.string().optional().describe('Translated form label'),
+    description: z.string().optional().describe('Translated form description'),
+    title: z.string().optional().describe('Translated form heading (overlays the form\'s `title`)'),
+    submitBehavior: submitBehaviorTranslationSchema('this form submit behavior translation').optional().describe("Translated thank-you panel copy — overlays the form's `submitBehavior` `title` / `message` when its `kind` is `'thank-you'`"),
+    sections: z.record(z.string(), sectionTranslationSchema('this form section translation', 'this form section entry translation'))
+      .optional().describe("The form's own section copy keyed by section name; a key absent here reads `objects.OBJECT._sections.SECTION`"),
+  })).optional().describe('Form translations keyed by form name (ADR-0159 D8)'),
+
+  /**
    * Screen-flow translations keyed by flow name (`Flow.name`).
    *
    * Convention:
@@ -1788,6 +1899,7 @@ const appTranslationDataShape = () => ({
    *   flows.<flow_name>.screens.<node_id>.fields.<field_name>.options.<value>   (#22507)
    *   flows.<flow_name>.refusals.<node_id>.message   (a refused `end` node, #22450)
    *   flows.<flow_name>.approvals.<node_id>.label    (an `approval` node's step label)
+   *   flows.<flow_name>.nodes.<node_id>.label        (any other node's display label, a titled screen's included, ruling 7076440876)
    *   flows.<flow_name>.records.<node_id>.fields.<field_name>   (text a record write keeps)
    *
    * Every user-read string slot of the flow schemas is either one of these
@@ -1913,6 +2025,41 @@ const appTranslationDataShape = () => ({
    * spec half of a contract-first split: the reader that renders the step
    * label in the reader's locale is `plugin-approvals`'s, a downstream change.
    *
+   * ## `nodes` — any other node's display label (ruling 7076440876)
+   *
+   *   flows.<flow_name>.nodes.<node_id>.label
+   *
+   * A drawing of the flow names each step by its node's `label`
+   * (`FlowNode.label`): the docs viewer's `type: flow` embed
+   * (`element:metadata_viewer`, ADR-0051) lists them for a manual's reader, and
+   * the Studio designer draws them on its canvas. Until this key a decision, a
+   * notify, a start or an end step had nowhere to put a translation, so a
+   * manual read in a translated locale named its steps in the authored
+   * language (the maintainer ruled them translatable on objectstack#35979,
+   * option A: 「补上翻译位，可以翻译」).
+   *
+   * - **Grouped by what it overlays, not by node type.** Every other group
+   *   addresses one node type; this one addresses the node label of every
+   *   node whose label has no key of its own, at any depth (an ADR-0031 region
+   *   included). That excludes an `approval` (`approvals.<node_id>.label`)
+   *   and an untitled `screen`, whose `screens.<node_id>.title` covers
+   *   `config.title ?? node.label`, so one string keeps one key.
+   *   `objectstack validate` points a `nodes` key over either at its own key.
+   * - **A titled screen's label is keyed here.** A screen that authors its
+   *   own non-empty `config.title` is titled apart from its label, so its
+   *   label has no other key: the Studio canvas draws it, and the docs embed
+   *   draws it where the heading holds a `{{ }}` hole a drawing cannot fill
+   *   (elsewhere the embed names the screen by its heading). Its heading
+   *   stays `screens.<node_id>.title`.
+   * - **Start and end nodes included.** Their labels are the author's words
+   *   like any other step's, and often name an outcome or a trigger
+   *   ("Approved", "On Task Created"), so a viewer does not substitute words of
+   *   its own for them.
+   * - **Plain text, not a template.** `FlowNode.label` is drawn as authored and
+   *   never rendered over a run's variables, so the leaf is a plain string.
+   * - **Display only.** A reader overlays the label it draws; the flow
+   *   document, the run and the `{{ }}` copy the engine renders are untouched.
+   *
    * ## `notices` — a `save_notice` node's message (#28251)
    *
    *   flows.<flow_name>.notices.<node_id>.message
@@ -2035,7 +2182,9 @@ const appTranslationDataShape = () => ({
     surface: 'this flow translation',
     history: TRANSLATION_HISTORY,
     aliases: {
-      name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
+      name: 'label', title: 'label', screen: 'screens', pages: 'screens',
+      // A step's name is a node label: `steps.<node_id>.label` means `nodes`.
+      node: 'nodes', steps: 'nodes', step: 'nodes',
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
       notice: 'notices', saveNotices: 'notices',
@@ -2149,6 +2298,37 @@ const appTranslationDataShape = () => ({
         + 'request shows its submitter and approvers',
       ),
     })).optional().describe("Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node"),
+    // [ruling 7076440876] Any other node's display label, the step name a
+    // drawing of the flow shows (the docs viewer's `type: flow` embed and the
+    // Studio designer). Grouped by what it overlays, `FlowNode.label`, not by
+    // node type: an untitled screen's heading and an approval step's label
+    // already have their own keys, so `objectstack validate` points a key over
+    // either at it; a screen that authors its own `config.title` has its label
+    // keyed here.
+    nodes: z.record(z.string(), strictObject({
+      surface: 'this flow node translation',
+      history: TRANSLATION_HISTORY,
+      // The leaf is the node's own `label`; the spellings a neighbouring group
+      // uses for the same string are renames onto it.
+      aliases: { title: 'label', name: 'label', heading: 'label', stepLabel: 'label', text: 'label' },
+      guidance: {
+        message:
+          'A node label is a name, not a message. A refused `end` node\'s message is '
+          + '`refusals.<node_id>.message`; a `save_notice` node\'s is `notices.<node_id>.message`.',
+        description:
+          'A drawing of the flow shows a node by its label alone. Translate `label`; a screen\'s body text is '
+          + '`screens.<node_id>.description`.',
+      },
+    }, {
+      label: z.string().optional().describe(
+        "Translated node label — overlays the node's own `label` (`FlowNode.label`), the step name a drawing of the "
+        + 'flow shows; for any node but an untitled `screen` (keyed `screens.<node_id>.title`) and an `approval` '
+        + '(keyed `approvals.<node_id>.label`). A screen that authors its own `config.title` has its label keyed here',
+      ),
+    })).optional().describe(
+      'Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an '
+      + '`approval`',
+    ),
     // [#28251] A `save_notice` node's message, picked by the ENGINE in the
     // triggering writer's locale before its holes are filled — the `refusals`
     // posture, one group over, addressed the same way (by `FlowNode.id`).
@@ -2369,6 +2549,49 @@ const appTranslationDataShape = () => ({
   })).optional().describe('Import-mapping translations keyed by mapping name'),
 
   /**
+   * Package translations keyed by the package's `manifest.id`
+   * (`kernel/manifest.zod.ts`, reverse-domain, e.g. `com.acme.crm`).
+   *
+   *   packages.<manifest id>.name         → the manifest's own `name`
+   *   packages.<manifest id>.description  → the manifest's own `description`
+   *
+   * A package is listed by its display name wherever the console lists
+   * packages — Setup's package list and Studio's package switcher — and that
+   * name is end-user copy: a zh-CN admin otherwise reads every package by its
+   * English `manifest.name` beside a launcher that already calls the same apps
+   * by their translated labels. The group follows `apps.<app>.label`: each
+   * package ships the row for its own id in the bundle it already carries,
+   * and the served document merges every package's rows into one tree.
+   *
+   * Keyed by `manifest.id`, not `namespace`: the id is the package's identity
+   * on every list row, while a `.custom` pair shares its base's namespace.
+   * The key is checked against the manifest id grammar, so a row keyed by a
+   * namespace or a display name is refused at parse instead of never
+   * rendering.
+   *
+   * A package's DISPLAY name only: `manifest.name` stays the authored value on
+   * every wire and in every editor, and a client overlays this row where it
+   * draws a package for a reader, falling back to `manifest.name`. Because
+   * the key carries dots, a client reads the row by direct property access,
+   * never through a dot-separated i18next key path.
+   */
+  packages: z.record(
+    z.string().regex(MANIFEST_ID_PATTERN, {
+      error: (iss) => `'${String(iss.input)}' is not a package id. \`packages\` translations are keyed by `
+        + "the package's `manifest.id`, in reverse-domain notation like 'com.acme.crm' — a namespace or a "
+        + 'display name never names a package, so a row keyed by one would never render.',
+    }),
+    strictObject({
+      surface: 'this package translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { label: 'name', title: 'name', displayName: 'name' },
+    }, {
+      name: z.string().optional().describe("Translated package display name — overlays the manifest's own `name`"),
+      description: z.string().optional().describe("Translated package description — overlays the manifest's own `description`"),
+    }),
+  ).optional().describe('Package translations keyed by manifest id'),
+
+  /**
    * Translations for **metadata-type configuration forms** — the forms
    * used by admins to author objects, fields, agents, flows, etc. in the
    * Studio metadata editor.
@@ -2384,6 +2607,14 @@ const appTranslationDataShape = () => ({
    *   metadataForms.<type>.fields.<field_path>.label
    *   metadataForms.<type>.fields.<field_path>.helpText
    *   metadataForms.<type>.fields.<field_path>.placeholder
+   *   metadataForms.<type>.fields.<field_path>.options.<value>
+   *
+   * `options.<value>` overlays the `label` of the form field's `options[]`
+   * entry whose `value` matches — the name a select on the form shows for
+   * that choice. It is keyed by value, as
+   * `objects.<object>.fields.<field>.options` is, so a choice is named the
+   * same wherever the row is rendered; a value the row does not offer is
+   * never shown.
    *
    * `field_path` uses dot-notation for nested composite/repeater fields,
    * e.g. `"name"`, `"capabilities.trackHistory"`, and a repeater ROW property
@@ -2432,11 +2663,12 @@ const appTranslationDataShape = () => ({
     fields: z.record(z.string(), strictObject({
       surface: 'this metadata-form field translation',
       history: TRANSLATION_HISTORY,
-      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText' },
+      aliases: { name: 'label', title: 'label', help: 'helpText', hint: 'helpText', description: 'helpText', choices: 'options', values: 'options' },
     }, {
       label: z.string().optional().describe('Translated field label'),
       helpText: z.string().optional().describe('Translated field help/hint text'),
       placeholder: z.string().optional().describe('Translated field placeholder text'),
+      options: z.record(z.string(), z.string()).optional().describe('Option value to translated label map — overlays the label of the form field option whose value matches'),
     })).optional().describe('Field translations keyed by field path (dot-notation for nested fields)'),
   })).optional().describe('Translations for metadata-type configuration forms keyed by metadata type'),
 
@@ -2627,10 +2859,10 @@ const platformSettingsShape = () => ({
  * One locale of a PER-APP translation bundle — `stack.translations`, and
  * everything {@link defineTranslationBundle} builds.
  *
- * Seventeen groups: every group the platform bundle declares EXCEPT `settings`,
+ * Eighteen groups: every group the platform bundle declares EXCEPT `settings`,
  * which is platform-only and is refused here by name with
  * {@link PER_APP_SETTINGS_PLATFORM_ONLY} as the remedy. See
- * {@link PlatformTranslationDataSchema} for the eighteen-group face and for why
+ * {@link PlatformTranslationDataSchema} for the nineteen-group face and for why
  * the two are separate namespaces.
  */
 export const TranslationDataSchema = lazySchema(() => strictObject({
@@ -2641,7 +2873,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   // `settings`, and an alias prescribing a key the shape rejects is a
   // suggestion the author cannot take (the `alias-integrity` audit judges
   // exactly that). Both spellings are answered by `guidance` above instead.
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', form: 'forms', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', package: 'packages', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -2651,7 +2883,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
 export type TranslationData = z.input<typeof TranslationDataSchema>;
 
 /**
- * One locale of a PLATFORM translation bundle — the eighteen groups, `settings`
+ * One locale of a PLATFORM translation bundle — the nineteen groups, `settings`
  * included.
  *
  * The platform's own bundles are code, not authored metadata
@@ -2686,7 +2918,7 @@ export const PlatformTranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the platform translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', form: 'forms', dashboard: 'dashboards', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', package: 'packages', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   extraKeys: ['locale'],
 }, {
   ...appTranslationDataShape(),
@@ -2895,7 +3127,7 @@ export type TranslationConfig = z.input<typeof TranslationConfigSchema>;
  * to whoever — or whatever — authored it.
  *
  * `settings` is NOT on this door (#19620, ruling batch #210 item 2 letter B):
- * the item takes the PER-APP face, the same seventeen groups as
+ * the item takes the PER-APP face, the same eighteen groups as
  * {@link TranslationDataSchema}, and refuses `settings` (and the singular
  * `setting`) by name with {@link ITEM_SETTINGS_PLATFORM_ONLY} as the remedy.
  * The file door and the item door are two authoring surfaces for one app
@@ -2934,7 +3166,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // this door no longer declares `settings`, and an alias prescribing a key
   // the shape rejects is a suggestion the author cannot take. Both spellings
   // are answered by `guidance` above instead.
-  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', form: 'forms', dataset: 'datasets', report: 'reports', picklist: 'picklists', flow: 'flows', hook: 'hooks', position: 'positions', permission: 'permissions', permissionSets: 'permissions', book: 'books', mapping: 'mappings', package: 'packages', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...appTranslationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 简体中文 (zh-CN) — Setup App Translations
  */
 export const zhCN: TranslationData = {
   objects: zhCNObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('zh-CN'),
   apps: {
     account: {
       label: '账户',
@@ -40,7 +43,7 @@ export const zhCN: TranslationData = {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
         nav_marketplace_browse: { label: '浏览应用市场' },
-        nav_marketplace_installed: { label: '已安装应用' },
+        nav_packages: { label: '软件包' },
         nav_cloud_connection: { label: '云连接' },
         group_people_org: { label: '人员与组织' },
         group_access_control: { label: '访问控制' },
@@ -76,6 +79,7 @@ export const zhCN: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 凭据' },
         nav_api_keys: { label: 'API 密钥' },
+        nav_access_directory: { label: '岗位与权限' },
 
         // 审批中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables.
@@ -90,6 +94,7 @@ export const zhCN: TranslationData = {
         nav_settings_localization: { label: '本地化' },
         nav_exchange_rates: { label: '汇率' },
         nav_units_of_measure: { label: '计量单位' },
+        nav_standard_unit_settings: { label: '标准单位设置' },
         nav_work_calendars: { label: '工作日历' },
         nav_work_calendar_exceptions: { label: '日历例外' },
         nav_settings_company: { label: '公司' },
@@ -103,6 +108,7 @@ export const zhCN: TranslationData = {
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '对外表单' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 
@@ -126,7 +132,7 @@ export const zhCN: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: '应用搭建',
       description: '面向开发者、分析师与实施者的元数据工作台',
       navigation: {
         group_overview: { label: '总览' },

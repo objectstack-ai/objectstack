@@ -239,6 +239,32 @@ function isDenyAll(filter: unknown): boolean {
 }
 
 /**
+ * [ADR-0155 ② ruled R2] The sharing service's verdict on whether share grants
+ * count on `object`, read through the deps bag: a reason, or `undefined` when
+ * they count, when the bag carries no reader, or when the reader throws (no
+ * answer is never a reason).
+ */
+function shareGrantsInertReasonOf(deps: Pick<ExplainEngineDeps, 'shareGrantsInertReason'>, object: string): string | undefined {
+  if (typeof deps.shareGrantsInertReason !== 'function') return undefined;
+  try {
+    const reason = deps.shareGrantsInertReason(object);
+    return typeof reason === 'string' && reason !== '' ? reason : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [ADR-0155 ② ruled R2] The explainer's sentence: the sharing layer's detail,
+ * followed by why the shares attached to the record admit nothing, when share
+ * grants do not count on its object.
+ */
+function withSharesInertSentence(reason: string | undefined, detail: string): string {
+  if (reason === undefined) return detail;
+  return `${detail} Share grants do not count on this object, so no share attached to the record is consulted: ${reason}.`;
+}
+
+/**
  * A dependency call that REJECTED, kept apart from every value it could have
  * resolved to.
  *
@@ -504,6 +530,16 @@ export interface ExplainEngineDeps {
     recordId: string,
     context: any,
   ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
+  /**
+   * [ADR-0155 ② ruled R2] Why share grants do not count on the object, or
+   * `null` when they do: the sharing service's own verdict
+   * (`SharingService.shareGrantsInertReason`), the one its read scope, its
+   * write gate and its grant doors read. Where it names a reason, every share
+   * attached to the record is reported `neutral` and the sharing layer's
+   * detail says why. Optional: a deps bag wired without it reports shares as
+   * before; a throw counts as no answer.
+   */
+  shareGrantsInertReason?: (object: string) => string | null | undefined;
   /**
    * [#26180] The pending approval requests that grant the principal READ of
    * the record while their step is pending (`SharingService.listApprovalReadGrants`,
@@ -2080,8 +2116,13 @@ async function applyRecordAttribution(
   const shares = deps.listRecordShares && recordExists
     ? await deps.listRecordShares(object, recordId, context).catch(() => [])
     : [];
+  // [ADR-0155 ② ruled R2] On an object whose storage does not evaluate the
+  // share arm, no share row is consulted: each is evaluated and `neutral`, and
+  // the layer's detail carries the sentence below.
+  const sharesInertReason = (shares ?? []).length > 0 ? shareGrantsInertReasonOf(deps, object) : undefined;
   const shareRules: ExplainMatchedRule[] = (shares ?? []).map((s) => {
-    const recipMatchesUser = s.recipient_type === 'user' && s.recipient_id != null && String(s.recipient_id) === String(context?.userId);
+    const recipMatchesUser = sharesInertReason === undefined
+      && s.recipient_type === 'user' && s.recipient_id != null && String(s.recipient_id) === String(context?.userId);
     const kind: ExplainMatchedRule['kind'] =
       s.source === 'rule' ? 'sharing_rule' : s.source === 'team' ? 'team' : 'record_share';
     return {
@@ -2354,7 +2395,7 @@ async function applyRecordAttribution(
       rules: shareRules,
       // A fault is only ever recorded against an existing record, and the
       // master leg [ADR-0055] is only ever asked of one.
-      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
+      detail: withSharesInertSentence(sharesInertReason, sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -2396,7 +2437,7 @@ async function applyRecordAttribution(
                 : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
                   (vamaEffective
                     ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
-                    : '')),
+                    : ''))),
     };
   }
 
@@ -3321,36 +3362,22 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // judged per ROW by the write gate (the incoming row of an insert, the
   // stored row before an update); this report holds no row, so each such entry
   // is reported AS a row-conditioned lock — which is also how every row-blind
-  // reader applies it — rather than folded silently into the mask above.
-  //
-  // [#29610 / ruling of record 6573563853, letter A] …unless the principal's
-  // Modify All vote supersedes it: `getFieldPermissions` applies that vote after
-  // the per-entry votes under every `when` verdict, so such an entry's lock
-  // binds on no row. The evaluator names the superseding sets from the SAME
-  // vote (`ConditionedFieldEntry.supersededBy`); this layer only words it, in
-  // the "Superseded by …" form the sharing attribution already uses. Each
-  // principal's entries are judged against its own sets: under D10 the masks
-  // intersect, so a delegator's lock still binds when only the agent holds the
-  // vote.
+  // reader applies it — rather than folded silently into the mask above. No
+  // object-wide bit supersedes such a lock: Modify All casts no field vote and
+  // `viewAllFields` votes no edit (the field-axis split, ruling of record
+  // 6912661484). Each principal's entries are listed from its own sets: under
+  // D10 the masks intersect, so a delegator's lock binds the agent too.
   const conditioned = [
     ...deps.evaluator.conditionedFieldEntries(object, sets),
     ...(delegatorSets ? deps.evaluator.conditionedFieldEntries(object, delegatorSets) : []),
   ];
   const describeConditioned = (e: (typeof conditioned)[number]): string =>
     `${e.field} (${e.editable ? 'editable' : 'locked'} when ${e.when}, set "${e.set}")`;
-  const binding = conditioned.filter((e) => e.supersededBy.length === 0);
-  const superseded = conditioned.filter((e) => e.supersededBy.length > 0);
-  const supersedingSets = [...new Set(superseded.flatMap((e) => e.supersededBy))];
   const conditionedSentence =
-    (binding.length > 0
-      ? ` ${binding.length} field permission(s) carry a row condition — judged per row by the write gate, ` +
-        `applied as the lock everywhere else: ${listFields(binding.map(describeConditioned), (f) => f)}.`
-      : '') +
-    (superseded.length > 0
-      ? ` ${superseded.length} row-conditioned field permission(s) are superseded by the Modify All Data field vote ` +
-        `[${supersedingSets.join(', ')}], which votes every field editable on every row, so the lock binds on no row: ` +
-        `${listFields(superseded.map(describeConditioned), (f) => f)}.`
-      : '');
+    conditioned.length > 0
+      ? ` ${conditioned.length} field permission(s) carry a row condition — judged per row by the write gate, ` +
+        `applied as the lock everywhere else: ${listFields(conditioned.map(describeConditioned), (f) => f)}.`
+      : '';
   layers.push({
     layer: 'fls',
     verdict: maskNarrows ? 'narrows' : 'not_applicable',

@@ -79,6 +79,41 @@ export interface ResolveSurfaceAgentInput {
 }
 
 /**
+ * objectstack#36969 — does the live catalog serve the build agent (alias-aware:
+ * `build` or its legacy id)? The console's AI-build entries — 「Add app」's
+ * build-with-AI door, Home's "Build an app" chip, the Studio copilot dock —
+ * gate on THIS, never on "any agent at all" and never on a hosted/self-hosted
+ * guess: a deployment that closes in-app building keeps `ask` in the catalog
+ * and persists `build` inactive, so the catalog stops listing it and the chat
+ * route refuses it. Where it is listed, every entry behaves as before.
+ */
+export function catalogServesBuild(agents: readonly AgentDescriptor[]): boolean {
+  return resolveAgentParam('build', agents.map((a) => a.name)) !== undefined;
+}
+
+/**
+ * objectstack#37142 — does the live catalog serve an agent that declares it
+ * honours a conversation focus (`capabilities.focus`, objectstack#36999)? The
+ * second half of the gate ADR-0160 D7 puts on the `ask_ai` action (the first
+ * is the AI surface itself). An undeclared capability is off.
+ */
+export function catalogServesFocus(agents: readonly AgentDescriptor[]): boolean {
+  return focusAgentName(agents) !== undefined;
+}
+
+/**
+ * objectstack#37142 — the agent an `ask_ai` click opens the drawer on: one
+ * that declares `capabilities.focus`, so the drawer's pin control (drawn only
+ * when the ACTIVE agent honours the focus) is drawn on the record the click
+ * pinned. An `ask` agent is preferred among them; `undefined` when none
+ * declares it, which leaves the action absent.
+ */
+export function focusAgentName(agents: readonly AgentDescriptor[]): string | undefined {
+  const honouring = agents.filter((agent) => agent.capabilities?.focus === true);
+  return (honouring.find((agent) => isAskAgent(agent.name)) ?? honouring[0])?.name;
+}
+
+/**
  * cloud#1674 — is this session on the CONVERGED maker surface? True when the
  * principal may author, the deployment offers authoring, and the catalog
  * actually serves a build agent. This is the ONE predicate the console's chat
@@ -90,11 +125,7 @@ export function makerConvergedOnBuild(
   canAuthorMetadata: boolean,
   aiStudioEnabled = true,
 ): boolean {
-  return (
-    canAuthorMetadata &&
-    aiStudioEnabled &&
-    resolveAgentParam('build', agents.map((a) => a.name)) !== undefined
-  );
+  return canAuthorMetadata && aiStudioEnabled && catalogServesBuild(agents);
 }
 
 /**

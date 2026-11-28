@@ -62,6 +62,8 @@ import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFin
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { SharingService, type SharingSecurityProbe } from './sharing-service.js';
 import { buildSharingMiddleware } from './sharing-plugin.js';
+import { SharedRecordIds } from '@objectstack/spec/data';
+import { WRITE_ACCESS_LEVELS } from './access-level.js';
 
 // ── metadata ───────────────────────────────────────────────────────────────
 
@@ -649,8 +651,11 @@ describe('[#5493 / #6736] the BULK path is untouched — a verdict is a by-id an
     let nextCalled = false;
     await stack.mw(opCtx, async () => { nextCalled = true; });
     expect(nextCalled, 'the bulk branch scopes rather than refuses').toBe(true);
-    expect(opCtx.ast.where, 'still scoped by OWNERSHIP, unwidened by any authored policy')
-      .toEqual({ $and: [{ stage: 'prospecting' }, { owner_id: U_WIDENED }] });
+    expect(opCtx.ast.where, 'still scoped by OWNERSHIP and edit-shares, unwidened by any authored policy')
+      .toEqual({ $and: [{ stage: 'prospecting' }, { $or: [
+        { owner_id: U_WIDENED },
+        { id: { $in: SharedRecordIds.write('crm_campaign', U_WIDENED, WRITE_ACCESS_LEVELS) } },
+      ] }] });
     expect(stack.security!.calls, 'the bulk path asks no verdict').toEqual([]);
   });
 });

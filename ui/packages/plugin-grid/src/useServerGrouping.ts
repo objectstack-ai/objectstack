@@ -78,6 +78,21 @@
  * group. A refresh (`reloadKey`) re-asks the SAME question, so it keeps the
  * answer in hand on screen while it reloads; any other change starts with
  * none.
+ *
+ * ## A cut answer is partial, and says so (objectstack#37278)
+ *
+ * The header query names no `limit`, so on a deployment with a default page
+ * size the platform cuts the group rows to that page and answers `hasMore`,
+ * which `DataSource.queryGroupHeaders` hands on as the answer's `hasMore`
+ * (`ListViewGroupHeaderAnswer`). A grouped read cannot be paged past the cut
+ * (the door slices the groups and reads no `offset`), and the header query
+ * carries no `limit` to ask for more, so the grid cannot re-read the rest:
+ * {@link ServerGroupHeaders.partial} says the group set is not every group
+ * the view has. The groups that ARE listed keep their exact counts; what the
+ * grid may not do is read the set as whole: it draws a note saying more
+ * groups were not loaded, and folds no record total over the top-level
+ * counts. Read off the answer the adapter returned, never off a copy of it:
+ * `[...rows]` or `.slice()` drops the flag.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -92,6 +107,7 @@ import {
 import { isExpandableFieldType, referencedRecordTitle } from '@object-ui/core';
 import { readLookupTargetDef } from './lookupGroupTargets';
 import { groupOrderByOf, serverSummaryOf, type GroupAggregationConfig, type UsableGroupingField } from './useGroupedData';
+import { honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
 
 /**
  * `aggregations` as the summary columns the header query compiles from. An
@@ -145,9 +161,18 @@ export interface ServerGroupHeadersInput {
    */
   search?: string;
   searchFields?: readonly string[];
-  /** `object-grid.aggregations` — the per-group numbers besides the count. */
+  /**
+   * `object-grid.aggregations` — the per-group numbers besides the count.
+   * Each depth's header query carries only those its own `groupBy` admits
+   * (`honestGroupAggregationsByDepth`, objectstack#36276).
+   */
   aggregations?: GroupAggregationConfig[];
-  /** The object's field catalogue, for reference-typed grouping keys. */
+  /**
+   * The object's field catalogue: for reference-typed grouping keys, and for
+   * the unit or currency field of a `record`-mode measure (ADR-0144 D6,
+   * ADR-0158 U7 R1), which decides at which depths an aggregate over it is
+   * asked.
+   */
   objectFields?: Record<string, { type?: unknown; reference?: unknown; displayField?: unknown } | undefined>;
   /** Any change re-asks the server (refresh, data invalidation). */
   reloadKey: string;
@@ -165,14 +190,20 @@ export interface ServerGroupHeaders {
    * keeps the id as its label.
    */
   keyLabels: Record<string, Record<string, string>>;
+  /**
+   * `true` when any depth's answer said `hasMore`: the platform cut the group
+   * rows to its default page size, so `headers` lists only SOME of the
+   * view's groups (objectstack#37278). `false` with no answer in hand.
+   */
+  partial: boolean;
   loading: boolean;
   error: Error | null;
 }
 
-const IDLE: ServerGroupHeaders = { headers: undefined, keyLabels: {}, loading: false, error: null };
+const IDLE: ServerGroupHeaders = { headers: undefined, keyLabels: {}, partial: false, loading: false, error: null };
 
 /** Asked, with no answer to THIS question in hand yet. */
-const PENDING: ServerGroupHeaders = { headers: undefined, keyLabels: IDLE.keyLabels, loading: true, error: null };
+const PENDING: ServerGroupHeaders = { headers: undefined, keyLabels: IDLE.keyLabels, partial: false, loading: true, error: null };
 
 /** The header state, recorded against the question it answers. */
 interface HeldHeaders extends ServerGroupHeaders {
@@ -220,7 +251,16 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
       ? { search, ...(searchFields && searchFields.length > 0 ? { searchFields: [...searchFields] } : {}) }
       : null,
   );
-  const aggregationsKey = JSON.stringify(summaryColumnsOf(aggregations));
+  // [ADR-0144 D6, ADR-0158 U7 R1, objectstack#36276] The summary columns PER
+  // DEPTH, each judged on the levels that depth's header query groups by: a
+  // measure aggregate over a `record`-mode amount or quantity is asked only of
+  // a query whose `groupBy` holds its unit or currency field. The engine
+  // refuses any other (`INVALID_FIELD`, 400), and a refused depth failed every
+  // header of the view. The levels judged are the ones sent below, so the
+  // judgment and the compiled `groupBy` cannot disagree.
+  const aggregationsKey = JSON.stringify(
+    honestGroupAggregationsByDepth(aggregations, objectFields, fields.map((f) => f.field)).map(summaryColumnsOf),
+  );
   const referenceKey = JSON.stringify(
     fields.map((f) => {
       const def = objectFields?.[f.field];
@@ -253,7 +293,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
     const fieldNames = levels.map((level) => level.field);
     const references: Array<[string, string | null] | null> = JSON.parse(referenceKey);
     const grouping = groupingOf(levels);
-    const columns = JSON.parse(aggregationsKey) as NonNullable<ListViewGroupQuerySource['columns']>;
+    const columnsByDepth = JSON.parse(aggregationsKey) as Array<NonNullable<ListViewGroupQuerySource['columns']>>;
     const composedWhere = JSON.parse(whereKey) as FilterCondition | null;
     const searched = JSON.parse(searchKey) as { search: string; searchFields?: string[] } | null;
 
@@ -262,7 +302,7 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
         const headers = await Promise.all(
           fieldNames.map((_, depthIndex) => {
             const query = compileListViewGroupQuery(
-              { grouping, columns },
+              { grouping, columns: columnsByDepth[depthIndex] ?? [] },
               { ...(composedWhere ? { where: composedWhere } : {}), depth: depthIndex + 1 },
             );
             // Every depth counts the same searched rows (objectui#11021).
@@ -307,10 +347,13 @@ export function useServerGroupHeaders(input: ServerGroupHeadersInput): ServerGro
           }),
         );
 
-        if (!cancelled) setState({ question, headers, keyLabels, loading: false, error: null });
+        // Read off each depth's answer as the adapter returned it: a copy
+        // would have dropped the flag (objectstack#37278).
+        const partial = headers.some((answer) => answer?.hasMore === true);
+        if (!cancelled) setState({ question, headers, keyLabels, partial, loading: false, error: null });
       } catch (err) {
         if (!cancelled) {
-          setState({ question, headers: undefined, keyLabels: {}, loading: false, error: err instanceof Error ? err : new Error(String(err)) });
+          setState({ question, headers: undefined, keyLabels: {}, partial: false, loading: false, error: err instanceof Error ? err : new Error(String(err)) });
         }
       }
     })();

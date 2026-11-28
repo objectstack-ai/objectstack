@@ -41,7 +41,7 @@ const action = (name: string, label: string, requiredPermissions?: string[]) => 
   name,
   label,
   type: 'api',
-  locations: ['record_header'],
+  locations: ['record_page'],
   ...(requiredPermissions ? { requiredPermissions } : {}),
 });
 

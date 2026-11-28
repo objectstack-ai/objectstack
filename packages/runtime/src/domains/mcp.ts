@@ -8,12 +8,15 @@
  * Fetch-Request normalization ride along as family helpers.
  */
 
-import { isMcpServerEnabled } from '@objectstack/types';
-import { MCP_OAUTH_SCOPES, deriveAiFaceName } from '@objectstack/spec/ai';
+import { isMcpServerEnabled, resolveQueryReadPageCap } from '@objectstack/types';
+import { MCP_OAUTH_SCOPES, MCP_OAUTH_SCOPE_DATA_READ, deriveAiFaceName } from '@objectstack/spec/ai';
 import type { ErrorCode, MetadataProtocol } from '@objectstack/spec/api';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 // [#32442] The ONE reading of `enable.aiReadable` (ruling A, #32865).
 import { isAiReadExposed } from '@objectstack/spec/data';
+// [ADR-0160 D4] The read path's own decorations, removed from the context-pack
+// listing before the record-context executor parses it (`listContextPacks`).
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import {
     BUILTIN_MEMBERSHIP_ROLES,
     MEMBERSHIP_REACH,
@@ -33,7 +36,7 @@ import {
 } from '@objectstack/rest';
 // [ADR-0131 D3 · D12 items 7–8 · D11] The walled refusal every door that writes
 // the environment's metadata asks, read through this transport's one posture read.
-import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import { packageResolutionClosure, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 import { shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, userTextLocalesOf } from '@objectstack/core';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { buildApiError } from '../error-envelope.js';
@@ -69,6 +72,7 @@ import { automationAddressRegistryOf, bareNameRefusal } from './automation-addre
 import { maskObjectSchema, resolveObjectMasker } from './meta.js';
 // [ADR-0106 D1] The run doors' visibility question, asked where an action is listed or run.
 import { actionRunFieldVisibilityRefusal, actionRunMasker, projectActionForCaller } from '../action-run-visibility.js';
+import { catalogNotImplemented } from './own-door-bridge.js';
 
 /** Typed as the registered vocabulary, so a misspelling fails to compile. */
 const FIELD_VISIBILITY_UNRESOLVED: ErrorCode = 'FIELD_VISIBILITY_UNRESOLVED';
@@ -203,7 +207,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
-        return { handled: true, response: deps.error('MCP server is not available', 501) };
+        return catalogNotImplemented(deps, context, 'mcp_server_unavailable');
     }
 
     // [#24151] The body is read once the anonymous decision above has admitted
@@ -251,9 +255,31 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     // service serves its dataset executor.
     const datasetTools = await resolveMcpDatasetToolsService(deps, context);
     // [#35442] The docs seam: the bridge carries `search_package_docs` /
-    // `read_package_doc` exactly where the protocol serves the `/meta` list read.
-    const packageDocs = await resolveMcpPackageDocsProtocol(deps, context);
-    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs });
+    // `read_package_doc` exactly where the protocol serves the `/meta` list read
+    // and [ADR-0090 D10] the grant reaches the docs tools. The MCP runtime's
+    // `packageDocToolsServed` (`data:read`, or no grant at all) stays the
+    // authority on listing them; it is read here too so a token that cannot
+    // reach them never has the delegating person's holdings read for them.
+    const packageDocs = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpPackageDocsProtocol(deps, context)
+        : undefined;
+    // [ADR-0149 D2] The knowledge seam: the bridge carries `search_knowledge`
+    // exactly where the kernel holds a `knowledge` service serving its
+    // executor and the grant reaches the read family (`data:read`, or no
+    // grant at all). The MCP runtime's `knowledgeToolDefinition` stays the
+    // authority on listing it; the gate is read here too so a token that
+    // cannot reach it never has the service resolved for it.
+    const knowledgeTools = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpKnowledgeToolsService(deps, context)
+        : undefined;
+    // [ADR-0160 D4] The record-context seam: the bridge carries
+    // `get_record_context` exactly where the kernel holds a `record-context`
+    // service and the grant reaches the read family. The MCP runtime's
+    // `recordContextToolDefinition` stays the authority on listing it.
+    const recordContextTools = !grantedScopes || grantedScopes.includes(MCP_OAUTH_SCOPE_DATA_READ)
+        ? await resolveMcpRecordContextToolsService(deps, context)
+        : undefined;
+    const bridge = buildMcpBridge(deps, context, { recordFiles, datasetTools, packageDocs, knowledgeTools, recordContextTools });
     // [#34766] The open draft door (design `docs/design/mcp-local-first-door.md`,
     // Design A): resolved per request, so the user's own `manage_metadata` is
     // read for every call. `undefined` for a grant without `metadata:write`
@@ -336,7 +362,7 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.renderSkill !== 'function') {
-        return { handled: true, response: deps.error('MCP server is not available', 501) };
+        return catalogNotImplemented(deps, context, 'mcp_server_unavailable');
     }
 
     // Resolve this environment's MCP URL for the skill's Connect section:
@@ -732,12 +758,34 @@ function describeServedObject(def: any, declared: any): Record<string, unknown> 
             // field. Only the boolean is read there; the served definition,
             // without that expression, is what the answer is built from.
             readonly: writeNeverSetsField(declared?.fields?.[k]),
+            ...describedHandLock(f),
             system: f?.system === true,
             ...(declaresOptions(f) ? { options: describedOptions(f.options) } : {}),
             ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
         })),
         validations: describedRules(def.validations),
         enableFeatures: def.enable ?? {},
+    };
+}
+
+/**
+ * The HAND lock as `describe_object` serves it (ruling record 7180466652, the
+ * two-tier field-lock model): `uiReadonly: true` and the `uiReadonlyWhen`
+ * predicate text, each its own key and only where the field authors it, so a
+ * definition that authors neither keeps the shape it always had. ⛔ Never
+ * folded into `readonly`: that key tells an agent to leave the field out of a
+ * write, and a hand-locked field is exactly the one an agent's write (an API,
+ * import or action write) still sets, judged by the object's validations — a
+ * person at the console cannot edit it. Read off the served field.
+ *
+ * The twin is `describedHandLock` in `packages/mcp/src/mcp-server-runtime.ts`.
+ */
+function describedHandLock(f: any): { uiReadonly?: true; uiReadonlyWhen?: string } {
+    const when = f?.uiReadonlyWhen;
+    const source = typeof when === 'string' ? when : typeof when?.source === 'string' ? when.source : undefined;
+    return {
+        ...(f?.uiReadonly === true ? { uiReadonly: true as const } : {}),
+        ...(source !== undefined && source.trim() !== '' ? { uiReadonlyWhen: source } : {}),
     };
 }
 
@@ -941,6 +989,27 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 }
 
 /**
+ * [#33712] The door the MCP action tools hand the bridge when the client can be
+ * elicited (`McpActionCallDoor`, `@objectstack/mcp`, which this package does
+ * not depend on). [#34325] And, without one, the door's facts
+ * (`McpActionCallDoorFacts`), the fourth argument: the door would have asked a
+ * client that supports confirmation.
+ */
+type McpActionCallDoor = { elicitConfirmation?: actionExec.ActionConfirmationElicitor };
+type McpActionCallDoorFacts = { elicitsCapableClients?: boolean };
+
+/** The door and its facts as `invokeBusinessAction` / `resumeActionRun` wiring: each only when the tool set it. */
+function actionCallDoorWiring(
+    door: McpActionCallDoor | undefined,
+    facts: McpActionCallDoorFacts | undefined,
+): { elicitConfirmation?: actionExec.ActionConfirmationElicitor; elicitsCapableClients?: boolean } {
+    return {
+        ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+        ...(facts?.elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
+    };
+}
+
+/**
  * Build a principal-bound {@link McpDataBridge}: every method runs AS the
  * request's ExecutionContext through {@link callData} (RLS/permissions) and
  * the per-env metadata reads (the protocol's merged listing, or the metadata
@@ -953,7 +1022,13 @@ function actionDeclarationReads(deps: DomainHandlerDeps, context: HttpProtocolCo
 export function buildMcpBridge(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
-    seams: { recordFiles?: McpRecordFileService; datasetTools?: McpDatasetToolsService; packageDocs?: PackageDocsProtocol } = {},
+    seams: {
+        recordFiles?: McpRecordFileService;
+        datasetTools?: McpDatasetToolsService;
+        packageDocs?: PackageDocsProtocol;
+        knowledgeTools?: McpKnowledgeToolsService;
+        recordContextTools?: McpRecordContextToolsService;
+    } = {},
 ): any {
     const ec = context.executionContext;
     const envId = context.environmentId;
@@ -1117,7 +1192,7 @@ export function buildMcpBridge(
         return describeServedObject(localized, declared);
     };
 
-    return {
+    const bridge = {
         listObjects: listObjectSummaries,
         /**
          * [#6504] The HTTP transport's half of the `list_objects` completeness
@@ -1369,6 +1444,12 @@ export function buildMcpBridge(
         },
         // [ADR-0150 D6] A package-held skill's prompt name is `NS-NAME`.
         packageNamespace: (packageId: string) => packageNamespaceOf(skillEngine, packageId),
+        // [ADR-0150 D3 step 2, ADR-0160 D8] A package-held skill's `context`
+        // resolves through its package's closure, walked by the one walk over
+        // the same engine's registry. No engine: the empty closure, and the
+        // skill resolves only its own package's pack.
+        packageResolutionClosure: (packageId: string): ReadonlySet<string> =>
+            skillEngine?.registry ? packageResolutionClosure(skillEngine.registry, packageId) : new Set<string>(),
 
         create: async (object: string, data: any) =>
             await callData('create', { object, data }, driver, envId, ec),
@@ -1542,10 +1623,14 @@ export function buildMcpBridge(
             input: { objectName?: string; namespace?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
             // [#33712] The door's channel to the person's client, set by the
             // tool only when the client can be elicited (`McpActionCallDoor`).
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            door?: McpActionCallDoor,
+            // [#34325] Set by the tool only without `door`: the door would
+            // have asked a client that supports confirmation
+            // (`McpActionCallDoorFacts`).
+            facts?: McpActionCallDoorFacts,
         ) => actionExec.invokeBusinessAction(deps, context, name, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door, facts),
         }),
         // [#15705] `resume_run`: continue the caller's own paused screen run.
         // Admitted by the same gates as `run_action`; see
@@ -1553,10 +1638,11 @@ export function buildMcpBridge(
         resumeRun: async (
             runId: string,
             input: { values?: Record<string, unknown> } & AIActionConfirmation,
-            door?: { elicitConfirmation?: actionExec.ActionConfirmationElicitor },
+            door?: McpActionCallDoor,
+            facts?: McpActionCallDoorFacts,
         ) => resumeActionRun(deps, context, runId, input ?? {}, {
             driver, envId, ec, getMeta, readObjects: readServedObjects, readActions: readServedActions, callData,
-            ...(typeof door?.elicitConfirmation === 'function' ? { elicitConfirmation: door.elicitConfirmation } : {}),
+            ...actionCallDoorWiring(door, facts),
         }),
         // ── Federation surface (McpFederationBridge, #27745) ───────
         // The `external-datasource` service Studio's datasource page reaches
@@ -1605,7 +1691,9 @@ export function buildMcpBridge(
         // [#35442] The docs seam (`search_package_docs` / `read_package_doc`),
         // carried only where the protocol serves the `/meta` list read. Every
         // page is read through the `/meta/doc` docs-audience gate AS this
-        // request's caller (`mcp-package-docs.ts`), in this request's locale.
+        // request's caller (`mcp-package-docs.ts`), in this request's locale;
+        // [ADR-0090 D10] on a delegated agent envelope with the delegating
+        // person's own holdings, read through this request's data engine.
         ...(seams.packageDocs
             ? createPackageDocMembers(async () => ({
                 protocol: seams.packageDocs!,
@@ -1613,10 +1701,170 @@ export function buildMcpBridge(
                     seams.packageDocs!,
                     ec as Record<string, unknown> | undefined,
                     (name) => deps.resolveService(context, name),
+                    async () => (await deps.getObjectQL(context, envId))
+                        ?? (await deps.resolveService(context, 'objectql', envId)),
                 ),
                 locale: metaRequestLocale(mcpRequestHttp(context)),
+                // [#36854] A cited manual's name in the page's locale, by the
+                // `/meta/book` door's translation, ⛔ never a second routine.
+                translateBooks: async (books, locale) => {
+                    const translated = await translateMetaList(
+                        { ...metaTranslationSources(deps, context, getProtocol), requestLocale: () => locale },
+                        'book',
+                        [...books],
+                    );
+                    return Array.isArray(translated) ? translated : books;
+                },
             }))
             : {}),
+        // [ADR-0149 D2] The knowledge seam (`search_knowledge`), carried only
+        // where the kernel's `knowledge` service serves its executor. Every
+        // call runs AS this request's caller ([ADR-0090 D10] on a delegated
+        // agent envelope, the delegating person's own reach): the service
+        // searches only `aiExposed` sources and re-checks every object-source
+        // hit against this execution context's row-level security.
+        ...(seams.knowledgeTools
+            ? {
+                searchKnowledge: async (input: Record<string, unknown>) =>
+                    seams.knowledgeTools!.knowledgeTools().searchKnowledge(input, ec),
+                knowledgeToolDefinitions: () => seams.knowledgeTools!.knowledgeTools().definitions,
+            }
+            : {}),
+    };
+    // [ADR-0160 D4] The record-context seam (`get_record_context`), carried
+    // only where the kernel's `record-context` service serves its executor.
+    // Its door is THIS bridge's own read members, bound to this request's
+    // caller: nothing it reads is read any other way.
+    if (seams.recordContextTools) {
+        let contextPackEngine: any;
+        // The authored packs, not the serving envelope: the merged listing
+        // is the one `/meta/ai_context` serves, so every item carries the
+        // read path's `_diagnostics`, which the executor's closed
+        // `AiContextSchema` refuses as an unrecognized key — every pack
+        // would be dropped. `stripReadDecorations` removes exactly the
+        // read decorations (`METADATA_READ_DECORATIONS`) and keeps the
+        // ADR-0010 protection envelope the schema declares.
+        const listContextPacks = async () => {
+            // [ADR-0150 addendum 2026-11-25] The engine whose registry
+            // places each pack's package ({@link packageNamespaceOf}),
+            // resolved beside the read it serves, as `listSkills` does.
+            contextPackEngine = await deps.getObjectQL(context, envId).catch(() => undefined);
+            const merged = await actionExec.readMergedItems(await getProtocol(), 'ai_context');
+            if (merged !== undefined) return merged.map(stripReadDecorations);
+            const meta: any = await getMeta();
+            const listed = typeof meta?.list === 'function' ? await meta.list('ai_context') : [];
+            return Array.isArray(listed) ? listed.map(stripReadDecorations) : [];
+        };
+        // [ADR-0160 D8] The skill prompt surface resolves a skill's `context`
+        // against the same listing the tool selects from, so the pack face a
+        // prompt hands on is one `get_record_context` reads back.
+        Object.assign(bridge, { listContextPacks });
+        Object.assign(bridge, recordContextMembers(seams.recordContextTools, bridge, {
+            assertApiExposed: (object, action) =>
+                actionExec.refuseUnexposedDataAction(deps, context, action, object, envId, ec, 'refuse'),
+            servedObjectDefinitionOf: async (name) => {
+                const def: any = await readObjectForCaller(name);
+                if (!def) return null;
+                const [localized] = await inCallerLocale([def]);
+                return (localized ?? def) as Record<string, unknown>;
+            },
+            publishedObjectDefinitionOf: async (name) => ((await readServedObject(name)) ?? null) as Record<string, unknown> | null,
+            listContextPacks,
+            // [ADR-0150 D6, addendum 2026-11-25] A package's pack is spelt by
+            // its face `NS-NAME`, as a package-held skill's prompt name is.
+            packageNamespace: (packageId: string) => packageNamespaceOf(contextPackEngine, packageId),
+            // [ADR-0160 D3, second amendment] The fields this caller may query
+            // on: THIS request's security service's own answer
+            // (`getQueryableFields`), judged on the map its engine guard
+            // refuses a filter or sort with, so a related list's `where` or
+            // `orderBy` the guard would refuse is dropped and stated before
+            // the read. No security service, or one predating the method:
+            // `undefined`, and the executor takes the contract's fallback.
+            queryableFieldsOf: async (object: string) => {
+                const security = await deps.resolveService(context, 'security', envId) as
+                    Partial<ISecurityService> | undefined;
+                if (typeof security?.getQueryableFields !== 'function') return undefined;
+                return await security.getQueryableFields(object, ec);
+            },
+            // [ADR-0160 D3] The data door's page cap: `findData` refuses a
+            // read asking for more rows than the deployment's maximum page
+            // size or its row budget (`@objectstack/types`'
+            // `query-read-limits.ts`), so the executor asks for no more.
+            pageCap: () => resolveQueryReadPageCap(),
+        }));
+    }
+    return bridge;
+}
+
+/**
+ * [ADR-0160 D4] The face of the `record-context` service `get_record_context`
+ * calls: `recordContextTools()` hands the one executor
+ * (`@objectstack/service-record-context`, `createRecordContextTools`). Named
+ * here structurally, as {@link McpKnowledgeToolsService} is, so this package
+ * takes no dependency on the service package (it loads opt-in). The executor
+ * refuses by throwing an ADR-0112 coded error.
+ */
+export interface McpRecordContextToolsService {
+    recordContextTools(): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string; parameters?: unknown }>;
+        getRecordContext(input: unknown, door: unknown): Promise<unknown>;
+    };
+}
+
+/**
+ * [ADR-0160 D4] The `record-context` service when it serves the executor,
+ * else `undefined` (no service — it loads opt-in — or one without
+ * `recordContextTools`). A lookup that throws is "not served".
+ */
+export async function resolveMcpRecordContextToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpRecordContextToolsService | undefined> {
+    let service: Partial<McpRecordContextToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'record-context', context.environmentId)) as unknown as
+            Partial<McpRecordContextToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.recordContextTools === 'function' ? (service as McpRecordContextToolsService) : undefined;
+}
+
+/**
+ * [ADR-0160 D3/D4] The bridge's two record-context members. The door handed
+ * to the executor is built per call from the bridge's own members — `get`,
+ * `query` ({@link callData}, as the caller), `fieldVisibilityOf`,
+ * `diagnoseDelegation`, `userTextLocales` — plus the tool layer's read guard
+ * (the system-object refusal and its AI-read attestation) and the data door's
+ * own API-exposure gate. It adds no gate of its own and skips none.
+ */
+function recordContextMembers(
+    service: McpRecordContextToolsService,
+    bridge: any,
+    reads: {
+        assertApiExposed(object: string, action: 'get' | 'query'): Promise<void>;
+        servedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
+        publishedObjectDefinitionOf(name: string): Promise<Record<string, unknown> | null>;
+        listContextPacks(): Promise<readonly unknown[]>;
+        packageNamespace(packageId: string): string | undefined;
+        queryableFieldsOf(object: string): Promise<readonly string[] | undefined>;
+        pageCap(): number | undefined;
+    },
+) {
+    return {
+        getRecordContext: async (
+            input: Record<string, unknown>,
+            opts: { readGuard: (objectName: string) => Promise<string | undefined> },
+        ) => service.recordContextTools().getRecordContext(input, {
+            readGuard: opts.readGuard,
+            ...reads,
+            get: (object: string, id: string) => bridge.get(object, id),
+            query: (object: string, o: unknown) => bridge.query(object, o),
+            fieldVisibilityOf: (object: string) => bridge.fieldVisibilityOf(object),
+            diagnoseDelegation: (object: string) => bridge.diagnoseDelegation(object),
+            userTextLocales: () => bridge.userTextLocales(),
+        }),
+        recordContextToolDefinitions: () => service.recordContextTools().definitions,
     };
 }
 
@@ -1659,6 +1907,40 @@ export async function resolveMcpDatasetToolsService(
         return undefined;
     }
     return service && typeof service.datasetTools === 'function' ? (service as McpDatasetToolsService) : undefined;
+}
+
+/**
+ * [ADR-0149 D2] The face of the `knowledge` service `search_knowledge` calls:
+ * `knowledgeTools()` binds the service-knowledge executor to the service
+ * itself. Named structurally, as {@link McpDatasetToolsService} is, so this
+ * package takes no dependency on the knowledge package (it loads opt-in). The
+ * executor refuses by throwing an ADR-0112 coded error.
+ */
+export interface McpKnowledgeToolsService {
+    knowledgeTools(): {
+        readonly definitions: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }>;
+        searchKnowledge(input: unknown, context?: unknown): Promise<unknown>;
+    };
+}
+
+/**
+ * [ADR-0149 D2] The `knowledge` service when it serves the knowledge tool's
+ * executor, else `undefined` (no knowledge service — it loads opt-in — or one
+ * without `knowledgeTools`). A lookup that throws is "not served": the tool
+ * is then not listed, as for {@link resolveMcpDatasetToolsService}.
+ */
+export async function resolveMcpKnowledgeToolsService(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+): Promise<McpKnowledgeToolsService | undefined> {
+    let service: Partial<McpKnowledgeToolsService> | undefined;
+    try {
+        service = (await deps.resolveService(context, 'knowledge', context.environmentId)) as unknown as
+            Partial<McpKnowledgeToolsService> | undefined;
+    } catch {
+        return undefined;
+    }
+    return service && typeof service.knowledgeTools === 'function' ? (service as McpKnowledgeToolsService) : undefined;
 }
 
 /**
@@ -2211,6 +2493,8 @@ export async function resumeActionRun(
         callData: (action: string, params: any, dataDriver?: any, scopeId?: string, ec?: any) => Promise<any>;
         /** [#33712] As `invokeBusinessAction`'s: the person asked in their client, in place of a hand-off. */
         elicitConfirmation?: actionExec.ActionConfirmationElicitor;
+        /** [#34325] As `invokeBusinessAction`'s: a no-service refusal names the client route too. */
+        elicitsCapableClients?: boolean;
         /**
          * [#34386] Present exactly when the call comes through the host's
          * resume door ({@link resumeActionRunRequest}), never at the MCP
@@ -2377,7 +2661,7 @@ export async function resumeActionRun(
             params: {},
             door: 'mcp',
             run: { runId, values: values ?? {}, ...(screenNodeId !== undefined ? { screenNodeId } : {}) },
-        }, ec);
+        }, ec, { elicitsCapableClients: wiring.elicitsCapableClients === true });
         if ('refused' in answer) {
             throw resumeDoorError(deps, answer.refused.message, answer.refused.status, {
                 code: answer.refused.code,

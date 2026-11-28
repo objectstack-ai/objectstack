@@ -35,14 +35,6 @@ export interface ConversationsSidebarProps {
    * new ids match. Omit for an unscoped, all-agents list.
    */
   activeAgent?: string;
-  /**
-   * cloud#1674 maker convergence — also list the built-in `ask` agent's
-   * conversations alongside the active agent's. On the converged maker surface
-   * the ask picker entry is gone, so this sidebar is the ONLY road back to a
-   * maker's pre-convergence ask history; each row already navigates to its own
-   * agent's surface (`/ai/ask/:id`), which still renders. Alias-aware.
-   */
-  includeAskConversations?: boolean;
   className?: string;
   refreshKey?: number | string;
   titleHints?: Record<string, string>;
@@ -153,7 +145,6 @@ export function ConversationsSidebar({
   userId,
   apiBase,
   activeAgent,
-  includeAskConversations,
   className,
   refreshKey,
   titleHints,
@@ -179,20 +170,10 @@ export function ConversationsSidebar({
   // Friendly route segment for New/delete navigation (stays on this surface).
   const agentRoute = activeAgent ? agentRouteName(activeAgent) : undefined;
   // Names equivalent to the active agent, for scoping the list (alias-aware).
-  // With `includeAskConversations` (cloud#1674) BOTH built-in groups join the
-  // scope — the converged maker sees ONE merged history whether the open
-  // thread is a build one or a legacy ask one (merging only ask would make the
-  // build history vanish the moment an ask thread is opened; measured on the
-  // first in-browser pass).
-  const agentGroup = useMemo(() => {
-    if (!activeAgent) return undefined;
-    const names = new Set(agentAliasGroup(activeAgent));
-    if (includeAskConversations) {
-      for (const n of agentAliasGroup('ask')) names.add(n);
-      for (const n of agentAliasGroup('build')) names.add(n);
-    }
-    return names;
-  }, [activeAgent, includeAskConversations]);
+  const agentGroup = useMemo(
+    () => (activeAgent ? new Set(agentAliasGroup(activeAgent)) : undefined),
+    [activeAgent],
+  );
 
   const decoratedConversations = useMemo(() => {
     return conversations.map((conversation) => {
@@ -316,7 +297,7 @@ export function ConversationsSidebar({
           <div className="flex flex-col py-1">
             {groupConversationsByDate(visible).map((group) => (
               <section key={group.key} data-testid={`ai-conversation-group-${group.key}`}>
-                <h3 className="px-3 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t(`console.ai.group.${group.key}`, { defaultValue: CONVERSATION_GROUP_LABELS[group.key] })}
                 </h3>
                 <ul className="flex flex-col">
@@ -492,7 +473,7 @@ function ConversationRow({
             </span>
           ) : null}
           <span
-            className="mt-0.5 block text-[10px] text-muted-foreground"
+            className="mt-0.5 block text-xs text-muted-foreground"
             title={absoluteTimestamp(conversation.updatedAt ?? conversation.createdAt, displayLocale)}
           >
             {formatTimestamp(conversation.updatedAt ?? conversation.createdAt, t, displayLocale)}

@@ -31,9 +31,9 @@ import {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
@@ -1718,142 +1718,35 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
 });
 
 /**
- * ── Rule: security-superuser-field-mask-inert (ADR-0066 D2 ⑧ as amended) ────
+ * ── Retired: security-superuser-field-mask-inert (v19, #36055) ─────────────
  *
- * Ruling of record 6573563853, letter A: a set holding Modify All on an
- * object votes on every field of it, so the same set's `readable: false` or
- * edit lock binds none of its holders. ADR-0066 D2 ⑧ note of 2026-11-15: a
- * set's own `readable: false` binds beside its own View All, so that pair is
- * not reported. The pair is legal, so the finding is a warning. Each case
- * below is a set PARSED by `PermissionSetSchema`, the normalized set the
- * runtime reads, unless it says otherwise.
+ * The rule warned that a set's own Modify All made its field rows inert. From
+ * v19 View All and Modify All cast no field vote, so those rows bind and the
+ * rule has nothing left to report. The stacks it used to report get no
+ * finding under that id, and the id is no longer explained.
  */
-describe('validateSecurityPosture · a field mask its own set\'s Modify All makes inert', () => {
-  const inert = (stack: Record<string, unknown>) =>
-    validateSecurityPosture(stack)
-      .filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
-      .map((f) => [f.severity, f.where, f.path]);
+describe('validateSecurityPosture · security-superuser-field-mask-inert is retired', () => {
+  const RETIRED = 'security-superuser-field-mask-inert';
   const parsed = (...sets: Array<Record<string, unknown>>) => ({
     permissions: sets.map((s) => PermissionSetSchema.parse(s)),
   });
 
-  it('the resume-decider fixture before its repair: Modify All beside an edit lock', () => {
-    // `deal_manager` in service-automation's `resume-decider-identity.integration.test.ts`
-    // reached every deal through Modify All until the ruling made its
-    // `restricted_note` lock inert; it now reaches them through org depth.
-    expect(inert(parsed({
-      name: 'deal_manager', label: 'Deal manager',
-      objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: { 'deal.restricted_note': { readable: true, editable: false } },
-    }))).toEqual([['warning', 'permission set "deal_manager"', 'permissions[0].fields["deal.restricted_note"]']]);
-  });
-
-  it('View All beside the set\'s own read mask is not reported: the mask binds', () => {
-    // `qa_pp_directory_masked` as plugin-security's `explain-principal-person.test.ts`
-    // first wrote it: every user through View All, the email withheld.
-    expect(inert(parsed({
-      name: 'qa_pp_directory_masked',
-      objects: { sys_user: { allowRead: true, viewAllRecords: true }, qa_pp_board: { allowRead: true } },
-      fields: { 'sys_user.email': { readable: false, editable: false } },
-      systemPermissions: ['manage_users'],
-    }))).toEqual([]);
-  });
-
-  it('the composed sets of admin-ledger-decision-metadata.dogfood.test.ts: View All unbinds none of their rows', () => {
-    // Spelled as that file composes them, from shared consts, which is why a
-    // structural grep for the pair finds nothing there. View All on the user
-    // object leaves the `editable: false` grants binding, and the
-    // `readable: false` on `email` binds in both sets that carry it.
-    const read = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
-    const grants = { sys_user: { ...read, viewAllRecords: true }, sys_audit_log: read };
-    const withheldField = { 'sys_user.email': { readable: false, editable: false } };
-    const classFieldsReadable = {
-      'sys_user.role': { readable: true, editable: false },
-      'sys_user.must_change_password': { readable: true, editable: false },
-    };
-    expect(inert(parsed(
-      { name: 'ald_unmask_set', label: 'ALD unmask', objects: grants, fields: classFieldsReadable },
-      { name: 'ald_withhold_set', label: 'ALD withhold', objects: grants, fields: { ...classFieldsReadable, ...withheldField } },
-      { name: 'ald_withhold_only_set', label: 'ALD withhold only', objects: { sys_user: { allowRead: true, viewAllRecords: true } }, fields: withheldField },
-    ))).toEqual([]);
-  });
-
-  it('Modify All unbinds a read mask too; View All never unbinds an edit lock', () => {
-    expect(inert(parsed({
-      name: 'ps', objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: { 'deal.amount': { readable: false } },
-    }))).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
-    expect(inert(parsed({
-      name: 'ps', objects: { deal: { allowRead: true, viewAllRecords: true } },
-      fields: { 'deal.amount': { readable: true, editable: false } },
-    }))).toEqual([]);
-  });
-
-  it('reads the set as the runtime does: its own entry for the object, else its wildcard', () => {
-    // `holdsSuperuserBypass`: `objects[name] || objects['*']`, a lookup and
-    // never a merge, so an explicit entry without the bits answers alone.
-    expect(inert({
-      permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.amount': { readable: true, editable: false } } }],
-    })).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
-    expect(inert({
-      permissions: [{
-        name: 'ps',
-        objects: { '*': { modifyAllRecords: true }, deal: { allowRead: true } },
+  it('Modify All beside the set\'s own edit lock or read mask: the rows bind, no finding', () => {
+    for (const stack of [
+      parsed({
+        name: 'deal_manager', label: 'Deal manager',
+        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+        fields: { 'deal.restricted_note': { readable: true, editable: false } },
+      }),
+      parsed({
+        name: 'ps', objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
         fields: { 'deal.amount': { readable: false } },
-      }],
-    })).toEqual([]);
-  });
-
-  it('an unparsed entry votes what it spells: an omitted edit bit is a lock under Modify All', () => {
-    // Parsing writes `editable: false` into the omitted key, so the raw and
-    // the parsed set answer the same.
-    const raw = { name: 'ps', objects: { deal: { modifyAllRecords: true } }, fields: { 'deal.amount': { readable: true } } };
-    expect(inert({ permissions: [raw] })).toEqual([['warning', 'permission set "ps"', 'permissions[0].fields["deal.amount"]']]);
-    expect(inert(parsed(raw))).toEqual(inert({ permissions: [raw] }));
-  });
-
-  it('controls: a row policy or org depth beside a mask, and another set\'s bypass, get nothing', () => {
-    expect(inert(parsed({
-      // `qa_pp_directory_masked` as repaired: every row through a row policy.
-      name: 'qa_pp_directory_masked',
-      objects: { sys_user: { allowRead: true }, qa_pp_board: { allowRead: true } },
-      fields: { 'sys_user.email': { readable: false, editable: false } },
-      rowLevelSecurity: [{ name: 'qa_pp_directory_rows', object: 'sys_user', operation: 'select', using: "id != ''" }],
-      systemPermissions: ['manage_users'],
-    }))).toEqual([]);
-    expect(inert(parsed({
-      // `deal_manager` as repaired: every deal through org read and write depth.
-      name: 'deal_manager', label: 'Deal manager',
-      objects: { deal: { allowRead: true, allowEdit: true, readScope: 'org', writeScope: 'org' } },
-      fields: { 'deal.restricted_note': { readable: true, editable: false } },
-    }))).toEqual([]);
-    // The rule judges one set: a holder of both sets is unmasked by the
-    // runtime, but neither set's author wrote an inert entry.
-    expect(inert(parsed(
-      { name: 'admin', objects: { deal: { allowRead: true, modifyAllRecords: true } } },
-      { name: 'clerk', objects: { deal: { allowRead: true } }, fields: { 'deal.amount': { readable: false } } },
-    ))).toEqual([]);
-  });
-
-  it('says which mask Modify All unbinds, in one line, and the id is explained', () => {
-    const [read] = validateSecurityPosture(parsed({
-      name: 'ps', objects: { sys_user: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-      fields: { 'sys_user.email': { readable: false, editable: true } },
-    })).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
-    const [write] = validateSecurityPosture({
-      permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.note': { readable: false, editable: false } } }],
-    }).filter((f) => f.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT);
-    expect(read.message).toContain('modifyAllRecords on objects.sys_user');
-    expect(read.message).toContain('readable: false');
-    expect(write.message).toContain("objects['*']");
-    expect(write.message).toContain('modifyAllRecords');
-    for (const f of [read, write]) {
-      expect(f.message, f.message).not.toContain('\n');
-      expect(f.message.length, f.message).toBeLessThanOrEqual(200);
-      expect(f.hint, f.hint).not.toContain('\n');
-      expect(f.hint.length, f.hint).toBeGreaterThan(0);
+      }),
+      { permissions: [{ name: 'ps', objects: { '*': { modifyAllRecords: true } }, fields: { 'deal.note': { readable: false, editable: false } } }] },
+    ]) {
+      expect(validateSecurityPosture(stack).map((f) => f.rule)).not.toContain(RETIRED);
     }
-    expect(explainRule(SECURITY_SUPERUSER_FIELD_MASK_INERT)).toBeDefined();
+    expect(explainRule(RETIRED)).toBeUndefined();
   });
 });
 
@@ -2057,13 +1950,12 @@ describe('validateSecurityPosture · a hidden master reference still decides a c
     }))).toEqual([]);
   });
 
-  it('control: the set\'s own Modify All on the detail makes the mask inert, so the inert rule speaks instead', () => {
+  it('[v19 #36055] the set\'s own Modify All on the detail no longer unmasks the reference: the rule speaks', () => {
     const stack = withSets([MASTER, DETAIL], {
       name: 'operator', objects: { line_item: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
       fields: { 'line_item.invoice': { readable: false, editable: false } },
     });
-    expect(hidden(stack)).toEqual([]);
-    expect(validateSecurityPosture(stack).map((f) => f.rule)).toContain(SECURITY_SUPERUSER_FIELD_MASK_INERT);
+    expect(hidden(stack)).toHaveLength(1);
   });
 
   it('states the rule and its consequence in one line, and the id is explained', () => {
@@ -2286,7 +2178,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   // counts as a controlled_by_parent master (`master_detail` + `required: true`)
   // is read by the spec's exported `isControlledByParentMasterField`, which
   // `cbpMasterCandidates` calls, so this rule no longer reads it off `f`.
-  { receiver: 'f', expected: ['label', 'name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
+  // [Field-axis split, ruling 6912661484, step 2] `requiredPermissions`: the
+  // cross-set reopen rule skips a field gated on the field itself (ADR-0066 D3).
+  { receiver: 'f', expected: ['label', 'name', 'requiredPermissions', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
   {
     receiver: 'p',
     expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],
@@ -2295,31 +2189,27 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'wildcard',
-    expected: ['modifyAllRecords', 'viewAllRecords'],
+    // `viewAllFields`: the field half of the superuser wildcard (L2 record 7063858938).
+    expected: ['modifyAllRecords', 'viewAllFields', 'viewAllRecords'],
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
   },
   // [#29544] The super-user bypass mirror (`holdsSuperuserBypass`, verbatim
   // from `@objectstack/core`): the set it is asked about, and the one
-  // object-permission entry its lookup lands on.
+  // object-permission entry its lookup lands on. [Ruling 6912661484, step 2]
+  // Also the cross-set reopen rule's second set: its name, and its own field
+  // row on the field (`objectWideFieldVote`, the `viewAllFields` mirror too).
   {
     receiver: 'set',
-    expected: ['objects'],
+    expected: ['fields', 'name', 'objects'],
     declaredBy: 'PermissionSetSchema',
     keys: () => Object.keys(PermissionSetSchema.shape),
   },
   {
     receiver: 'op',
-    expected: ['modifyAllRecords', 'viewAllRecords'],
+    expected: ['modifyAllRecords', 'viewAllFields', 'viewAllRecords'],
     declaredBy: 'ObjectPermissionSchema',
     keys: () => shapeKeysOf(ObjectPermissionSchema),
-  },
-  // [#29544] One field-permission entry, read by the inert-mask arm.
-  {
-    receiver: 'mask',
-    expected: ['editable', 'readable'],
-    declaredBy: 'PermissionSetSchema.fields{}',
-    keys: () => shapeKeysOf(PermissionSetSchema.shape.fields),
   },
   // [#25575] One object-permission entry, read by the Modify All delete arm.
   {
@@ -2393,7 +2283,11 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fieldPatches', 'fields', 'label', 'priority', 'validations'],
+    // `fieldGroups` [ADR-0146 D10]: carried by the shared extension fold for
+    // the translation rule's `_sections` anchors; `place` and `relatedLists`
+    // likewise, for its `_relatedLists` anchors (the tab entries an extension
+    // brings). This rule reads none of them.
+    expected: ['extend', 'fieldGroups', 'fieldPatches', 'fields', 'label', 'place', 'priority', 'relatedLists', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
   },
@@ -2483,6 +2377,11 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #33494: the fold's `stored` parameter, the host's list of other packages' published extensions
       // (`StoredObjectExtension[]`) — `.forEach`, a JS Array method; each entry is read by `collect` as `ext`.
       'stored',
+      // Ruling 6912661484, step 2 (`pushCrossSetFieldReopen`): the capability-gated field index and one
+      // object's set of it (JS Map / Set methods), a field's `requiredPermissions` array (`.length`),
+      // `objectWideFieldVote`'s answer (`.bit` / `.via` / `.editable`, fields of that helper's own return
+      // value), and the wildcard arm's list of the bits it names (`.join`).
+      'capabilityGated', 'gated', 'required', 'vote', 'bits',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -2598,9 +2497,9 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
-  SECURITY_SUPERUSER_FIELD_MASK_INERT,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -2629,13 +2528,13 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     stack: { permissions: [{ name: 'ps', label: 'PS', objects: { item: { allowEdit: true, allowDelete: false, modifyAllRecords: true } } }] },
   },
   {
-    label: 'superuser-field-mask-inert',
+    label: 'cross-set-field-reopen',
     stack: {
-      permissions: [{
-        name: 'ps', label: 'PS',
-        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
-        fields: { 'deal.amount': { readable: false, editable: false } },
-      }],
+      objects: [{ name: 'deal', label: 'Deal', sharingModel: 'private', fields: { amount: { type: 'number', label: 'Amount' } } }],
+      permissions: [
+        { name: 'ps', label: 'PS', objects: { deal: { allowRead: true } }, fields: { 'deal.amount': { readable: false, editable: false } } },
+        { name: 'auditor', label: 'Auditor', objects: { deal: { allowRead: true, viewAllFields: true } } },
+      ],
     },
   },
   {
@@ -2796,9 +2695,11 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 17 since #25575: allowDelete: false beside modifyAllRecords: true.
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
-    // 20 since #29544: a field mask its own set's Modify All makes inert.
+    // 20 since #29544: a field mask its own set's Modify All makes inert (retired in v19, #36055).
     // 21: a caller-keyed update policy that declares no check (ADR-0058 D4, info).
     // 22: a set's readable: false on a controlled_by_parent detail's master reference.
+    // 23: a field one set hides, re-opened by another set's viewAllFields (ruling 6912661484, steps 2 and 3).
+    // 22 since #36055: the inert-mask site retired.
     expect(pushedRuleIds()).toHaveLength(22);
   });
 

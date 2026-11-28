@@ -218,6 +218,26 @@ export interface ApiEndpointMatch {
     params: Record<string, string>;
 }
 
+/**
+ * [#37039] One item of {@link IMetadataService.listPackageBindings}: the body
+ * {@link IMetadataService.list} answers, the store's key for it, and the
+ * package it is bound to.
+ */
+export interface MetadataPackageBinding {
+    /** The store's key for the item (`register()`'s `name`). */
+    name: string;
+    /** The body, exactly as {@link IMetadataService.list} answers it. */
+    data: unknown;
+    /** The package the item is bound to; `null` for none. */
+    packageId: string | null;
+    /**
+     * Where `packageId` was read: `'row'` — the package column of the stored
+     * row that holds the item; `'registration'` — no stored row holds it, and
+     * the binding is the one its registration carries.
+     */
+    source: 'row' | 'registration';
+}
+
 export interface IMetadataService {
     // ==========================================
     // Core CRUD Operations
@@ -415,6 +435,44 @@ export interface IMetadataService {
     listDiagnosed?(
         type: string,
     ): Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
+
+    /**
+     * Every item {@link list} answers for `type`, in its order, each with the
+     * package it is bound to and where that binding was read from.
+     *
+     * [#37039, cloud ADR-0118 D2] The protocol records a stored item's
+     * package binding on the STORED ROW — its package column, written by the
+     * store's own write path — never on the body's package stamp. Neither {@link list} nor
+     * {@link query} reads it: `list` returns bodies, and a reader that takes
+     * the binding off a body's package stamp trusts whatever the row's author
+     * wrote there. This read answers the column:
+     *
+     *  - an item a stored row holds answers `source: 'row'` and that row's
+     *    column — `null` for a row written before the column, ⛔ never the
+     *    package its body names, so a body stamped with a package whose row
+     *    records none is bound to none;
+     *  - an item no stored row holds (registered by code, or held by a loader
+     *    of no rows) answers `source: 'registration'` and the package its
+     *    registration files it under, as today — `null` for none.
+     *
+     * `degraded` / `errors` as on {@link listDiagnosed}: a loader that could
+     * not be read leaves the set partial. A row loader whose rows could not be
+     * read leaves an item it holds answering `'registration'` unless the item
+     * is a copy the registry primed from that loader's rows, which still
+     * answers `'row'` and its row's column as the registry last knew it: the
+     * column the boot priming pass wrote when that pass bound the row, else
+     * the column it was read with. Either way a consumer
+     * that gates on the binding treats a degraded answer as unknown.
+     *
+     * Optional, like {@link listDiagnosed}: a service without it cannot tell a
+     * row's binding from a body's, and a consumer that needs the difference
+     * must not substitute {@link list}.
+     *
+     * @param type - Metadata type
+     */
+    listPackageBindings?(
+        type: string,
+    ): Promise<{ items: MetadataPackageBinding[]; degraded: boolean; errors: string[] }>;
 
     /**
      * Unregister/remove a metadata item by type and name.

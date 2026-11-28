@@ -23,16 +23,28 @@ import { DraftPreviewBar } from '../preview/DraftPreviewBar.js';
 import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
-import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhoneAppNavBar, isPhoneTabRoute, phoneTabOf } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { PhonePageBarProvider } from './PhonePageBar.js';
+import { SidebarDocsNavSlotProvider } from './sidebarDocsNavSlot.js';
 import { useLastApp } from '../context/LastAppProvider.js';
+import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
+import { ShellAssistantFallback, ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
+import { ChromeBannerHost } from './chromeBannerHost.js';
+import { ConnectionBanner } from './ConnectionBanner.js';
+import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
+import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
+import { DesignModeProvider, useDesignModeController } from './designMode.js';
+import { DesignModeBar } from './DesignModeBar.js';
+import { useDesignModeArrival } from './useDesignModeArrival.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
+import { isAppAskPagePath, isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
+import { SIDEBAR_TOGGLE_CHORD, primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -73,16 +85,18 @@ interface ConsoleLayoutProps {
 }
 
 /**
- * `⌘B` / `Ctrl+B` toggles the sidebar. The listener is `SidebarProvider`'s own
- * (`@object-ui/components`' synced Shadcn primitive, mounted by `AppShell`):
- * it matches `b` with ⌘ or Ctrl, and a bare `B` does nothing. That code is not
- * ours to edit, so the shortcut is advertised from inside the provider it
- * belongs to, by {@link ConsoleLayoutInner} (objectui#11674).
+ * `⌘B` / `Ctrl+B` toggles the sidebar: it matches `b` with ⌘ or Ctrl, and a
+ * bare `B` does nothing. From 768 px up the console sidebar answers it as a
+ * press on its expand / collapse button (`useConsoleSidebarRailPanel`, ruling
+ * 7074574380 on objectstack#36112); on a phone the listener is
+ * `SidebarProvider`'s own (`@object-ui/components`' synced Shadcn primitive,
+ * mounted by `AppShell`). The shortcut is advertised from inside that
+ * provider, by {@link ConsoleLayoutInner} (objectui#11674).
  */
 const TOGGLE_SIDEBAR_SHORTCUT: AdvertisedShortcut = {
   id: 'toggle-sidebar',
   group: 'navigation',
-  chord: { key: 'b', mod: true },
+  chord: SIDEBAR_TOGGLE_CHORD,
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleSidebar'),
 };
 
@@ -126,23 +140,8 @@ function SkipToContentLink({ targetRef }: { targetRef: React.RefObject<HTMLDivEl
   );
 }
 
-/**
- * Is `pathname` a record page, the console route `RecordDetailView` draws:
- * `/apps/APP/OBJECT/record/ID`, or the same record on a named record page
- * (`.../page/PAGE`)? The record's edit form (`.../edit`) is not one.
- */
-export function isRecordPagePath(pathname: string): boolean {
-  return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
-}
-
-/**
- * Is `pathname` one of an app's documentation pages, `/apps/APP/docs` and
- * everything under it (objectstack#35424)? A reader there has one navigation,
- * the docs' own, so the app's menu is not drawn beside it.
- */
-export function isAppDocsPath(pathname: string): boolean {
-  return /^\/apps\/[^/]+\/docs(?:\/|$)/.test(pathname);
-}
+// objectstack#35981 — shared with the boot frame, which draws the same shape.
+export { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
 
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
@@ -180,6 +179,9 @@ export function ConsoleLayout({
   const mainContentRef = useRef<HTMLDivElement>(null);
 
   const location = useLocation();
+  // ⌘⇧H home from any app page, at every width (objectui#12605).
+  const homePath = useHomePath();
+  useGoHomeShortcut(true, homePath);
   // objectstack#28483 (ruling letter A) — on a phone a record page has one
   // bar, its own top bar (「‹ <object plural>」 and the stepper), so the app
   // bar is not mounted there. The app menu, search, notifications and account
@@ -194,17 +196,49 @@ export function ConsoleLayout({
   // the top left goes back. The route slot leaves the bar's height free at its
   // end.
   const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
-  // objectstack#35424 — a docs page draws its own left column (the app's
-  // books and a way back to the app), so the app menu is not mounted there.
+  // objectstack#36792 — the inset's end padding only scrolls when it follows
+  // in-flow content: a page taller than an `h-full` route slot overflows the
+  // slot, and the scroll ends at the page's bottom, under the bar. So on the
+  // bar's home and approvals pages the slot grows with its page (at least the
+  // inset's height, so a short page or an empty state still fills it) and the
+  // padding ends the scroll above the bar. The inbox list keeps the fixed slot:
+  // it is an object list page, which bounds itself and scrolls its rows in its
+  // own box (objectui#12463), and a growing slot would unbound a long one.
+  const phoneSlotGrows = phoneNavBar && phoneTabOf(location.pathname) !== 'notifications';
+  // objectstack#35424 — a docs page has one navigation, the docs' own (the
+  // app's books and a way back to the app), so the app's menu is not drawn
+  // there. objectstack#37150 (ruling 7142354097 on objectstack#36107) — from
+  // 768 px up the page still draws in the app shell like every other app page:
+  // the sidebar is mounted, its head and foot as everywhere, and its body
+  // carries the docs' navigation in the menu's place. A phone keeps what it
+  // had: no sidebar, the app bar, and the column in the page.
   const docsPage = isAppDocsPath(location.pathname);
+  const phoneDocsPage = phone && docsPage;
   // objectstack#35881 — the app this person last had open, where a phone
   // lands after sign-in. Recorded at every width: it is the person's last app.
   const { rememberApp } = useLastApp();
   useEffect(() => {
     if (activeAppName) rememberApp(activeAppName);
   }, [activeAppName, rememberApp]);
+  // objectstack#36501 — and the app page in view, where Studio's 「‹ Back to
+  // app」 returns: an app → Studio entry leaves from the page recorded last.
+  useEffect(() => {
+    if (!activeAppName) return;
+    rememberAppReturnPage({
+      path: `${location.pathname}${location.search}${location.hash}`,
+      app: activeAppName,
+      label: appLabel,
+    });
+  }, [activeAppName, appLabel, location.pathname, location.search, location.hash]);
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
+  // objectstack#36362 — the app's design mode, held here so it stays on from
+  // page to page of the app; never on a phone, which has no 「Design layout」.
+  const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
+  // objectstack#36907 — a Studio dashboard list's 「New」 arrives with the
+  // mode asked to enter and the 「Add menu item」 picker on its dashboards;
+  // read once and cleared, so Back or a reload enters nothing.
+  useDesignModeArrival(designMode, !phone);
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -239,6 +273,9 @@ export function ConsoleLayout({
     appPackageId: activeApp?._packageId,
     surfaceContext: dockSurface,
     surfaceArtifactLabel: dockSurfaceLabel,
+    // ui ADR-0057 Amendment A4 — the app's AI inquiry page draws its own ask
+    // conversation, so the drawer stays closed there.
+    askPageActive: isAppAskPagePath(location.pathname),
   });
 
   // Set navigation context to 'app' when this layout mounts
@@ -258,18 +295,37 @@ export function ConsoleLayout({
     {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
         (which draws the menu into it) and the route (which holds it). */}
     <PhoneAppHomeSlotProvider>
+    {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
+    <PhonePageBarProvider>
+    {/* objectstack#37150 — the sidebar's place for an app's docs navigation,
+        shared by the sidebar (which holds it) and the docs page (which draws
+        its column into it). */}
+    <SidebarDocsNavSlotProvider>
+    <DesignModeProvider value={designMode}>
     <AppShell
       sidebar={
-        docsPage ? undefined : (
+        phoneDocsPage ? undefined : (
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
+           docsNav={docsPage}
          />
         )
       }
-      showHeader={!recordPageOwnsTopBar}
+      // objectstack#36112 — from 768 px up an app draws no top bar: the app
+      // menu, search, bell and account are the sidebar's, the page's buttons
+      // its own header's. An app's docs pages are no exception
+      // (objectstack#37150). A phone keeps its bar (and its record page draws
+      // its own instead, objectstack#28483).
+      //
+      // objectstack#36362 — while the design mode is on, its bar takes the
+      // top slot instead, across the whole window, on every route.
+      showHeader={designMode.active || (phone && !recordPageOwnsTopBar)}
       navbar={
+        designMode.active ? (
+          <DesignModeBar mode={designMode} />
+        ) : (
           <AppHeader
             variant="app"
             appName={appLabel}
@@ -278,6 +334,7 @@ export function ConsoleLayout({
             activeAppName={activeAppName}
             onAppChange={onAppChange}
           />
+        )
       }
       // objectui#12463 — from `lg` up the inset is a flex column: the banners
       // box (`shrink-0`, below) keeps its height and the route slot (below)
@@ -313,11 +370,20 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
+        {/* objectstack#36111 — the pages under the shell draw its top-right
+            button group; objectstack#36112 — and the sidebar's expand button
+            at their headers' left edge while it is collapsed. */}
+        <ShellPageActionsScope sidebarExpand={!phoneDocsPage}>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
             the `lg` flex column above only the route page gives up height. */}
         <div data-testid="console-banners" className="shrink-0">
+        {/* objectstack#36112 — from 768 px up the shell's standing banners
+            (impersonation, read rate, storage) and the connection notice sit
+            here, the content's width, since no top bar carries them. */}
+        {!phone && <ChromeBannerHost />}
+        {!phone && <ConnectionBanner state={connectionState} />}
         <DraftPreviewBar />
         {/* ADR-0045: materialized-but-unlisted app — real and interactive,
             invisible to end users until the Publish visibility flip. */}
@@ -344,10 +410,22 @@ export function ConsoleLayout({
           ref={mainContentRef}
           tabIndex={-1}
           data-testid="console-route"
-          className="h-full lg:min-h-0 focus:outline-none"
+          className={cn(
+            'h-full lg:min-h-0 focus:outline-none',
+            // objectstack#36792 — a one-track grid: its row stretches to the
+            // `min-h-full` floor, so a page's `h-full` root still resolves
+            // against it, and grows past it with a taller page. The track's
+            // `minmax(0,1fr)` keeps a wide page from widening the slot.
+            phoneSlotGrows && 'grid h-auto min-h-full grid-cols-[minmax(0,1fr)]',
+          )}
         >
+        <ShellSidebarExpandFallback />
+        {/* objectstack#37858 — a route whose page draws no button group gets
+            the assistant's entry at its top-right corner. */}
+        <ShellAssistantFallback />
         {children}
         </div>
+        </ShellPageActionsScope>
       </ConsoleLayoutInner>
 
       {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}
@@ -356,6 +434,9 @@ export function ConsoleLayout({
       {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
       {chatDock.sheet}
     </AppShell>
+    </DesignModeProvider>
+    </SidebarDocsNavSlotProvider>
+    </PhonePageBarProvider>
     </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
     </ChatDockControlProvider>

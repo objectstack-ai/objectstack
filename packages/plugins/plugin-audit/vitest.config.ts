@@ -40,6 +40,13 @@ export default defineConfig({
     // One rule for all namespaces cannot go stale that way.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The never-listening route table `comment-doors-member.ts` serves the
+      // comment doors on for a kernel with no `http.server`: to source, so the
+      // suite's verdict is about the checkout (`pnpm check:test-source-alias`).
+      {
+        find: /^@objectstack\/plugin-hono-server$/,
+        replacement: path.resolve(__dirname, '../plugin-hono-server/src/index.ts'),
+      },
       // [#16829] The real driver `read-audit-view-instant-preservation.integration.test.ts`
       // boots. That file exists to judge the ledger row AFTER the real
       // `sys_stamp_audit_insert` hook and a real driver have both run, so

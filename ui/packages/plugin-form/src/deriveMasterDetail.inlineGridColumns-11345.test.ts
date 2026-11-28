@@ -14,7 +14,9 @@
  *    expected arrays below were produced by the implementation this card
  *    replaced (the local `curateColumns` budget), and `deriveColumns` is a
  *    public export of `@object-ui/plugin-form`: the swap must not move a single
- *    column, label, type or flag. The corpus covers the budget edge from both
+ *    column, label, type or flag — save the one type objectstack#36043 moved
+ *    on purpose (a derived `boolean` column is the check cell), marked where
+ *    it sits. The corpus covers the budget edge from both
  *    sides, `maxColumns` (explicit, `0`, negative), the relationship field,
  *    `exclude`, the filters, more required columns than the budget, a computed
  *    required column, and FALSY field definitions — the one input where the
@@ -168,7 +170,9 @@ const CORPUS: Array<{ title: string; schema: ChildObjectSchemaLike | undefined; 
       { name: 'delivered_on', label: 'delivered_on', type: 'datetime', required: false, defaultHidden: true },
       { name: 'shipped_at', label: 'shipped_at', type: 'time', required: false, defaultHidden: true },
       { name: 'tax_class', label: 'tax_class', type: 'select', required: false, options: [{ label: 'Standard', value: 'std' }, { label: 'Zero', value: '0' }] },
-      { name: 'gift', label: 'gift', type: 'select', required: false, options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }] },
+      // The one column objectstack#36043 moved on purpose: a derived boolean
+      // column is the check cell now, keeping the yes / no words as its options.
+      { name: 'gift', label: 'gift', type: 'boolean', required: false, options: [{ label: 'Yes', value: 'true' }, { label: 'No', value: 'false' }] },
       { name: 'remark', label: 'remark', type: 'text', required: false, defaultHidden: true },
     ],
   },

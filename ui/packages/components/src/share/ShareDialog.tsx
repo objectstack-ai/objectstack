@@ -16,9 +16,10 @@
  * `apiBase`, `objectName`, and `recordId`.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Copy, Link2, Loader2, ShieldOff, Trash2 } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { SchemaRendererContext } from '@object-ui/react';
 import type {
   ShareLink as SpecShareLink,
   ShareLinkAudience,
@@ -199,6 +200,14 @@ export function ShareDialog({
   const [error, setError] = useState<ShareDialogFailure | null>(null);
   const [draft, setDraft] = useState<CreateLinkDraft>(DEFAULT_DRAFT);
   const [justCopied, setJustCopied] = useState<string | null>(null);
+  // Every request rides the host's AUTHENTICATED fetch (`SchemaRendererProvider`'s
+  // `apiFetch`), the channel the renderers' own reads use: a session held by its
+  // bearer token alone carries no cookie, so `credentials: 'include'` on the bare
+  // global fetch read as anonymous and the dialog listed, created and revoked
+  // nothing, while a `401` never reached the host's session-ended check. Read the
+  // context directly (not `useSchemaContext`, which throws with no provider): a
+  // host that mounts none keeps the global fetch, cookies included.
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
 
   const headers = useCallback(async (): Promise<Record<string, string>> => {
     const base: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -220,7 +229,8 @@ export function ShareDialog({
     setError(null);
     try {
       const h = await headers();
-      const res = await fetch(listUrl, { headers: h, credentials: 'include' });
+      const doFetch = apiFetch ?? fetch;
+      const res = await doFetch(listUrl, { headers: h, credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = (await res.json()) as { links?: ShareLink[]; data?: ShareLink[] };
       setLinks(body.links ?? body.data ?? []);
@@ -229,7 +239,7 @@ export function ShareDialog({
     } finally {
       setLoading(false);
     }
-  }, [listUrl, headers]);
+  }, [listUrl, headers, apiFetch]);
 
   useEffect(() => {
     if (open) {
@@ -247,7 +257,8 @@ export function ShareDialog({
           ? undefined
           : new Date(Date.now() + draft.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
       const h = await headers();
-      const res = await fetch(`${apiBase.replace(/\/+$/, '')}/v1/share-links`, {
+      const doFetch = apiFetch ?? fetch;
+      const res = await doFetch(`${apiBase.replace(/\/+$/, '')}/v1/share-links`, {
         method: 'POST',
         headers: h,
         credentials: 'include',
@@ -281,13 +292,14 @@ export function ShareDialog({
     } finally {
       setCreating(false);
     }
-  }, [apiBase, headers, objectName, recordId, draft, publicBaseUrl]);
+  }, [apiBase, headers, objectName, recordId, draft, publicBaseUrl, apiFetch]);
 
   const handleRevoke = useCallback(
     async (link: ShareLink) => {
       try {
         const h = await headers();
-        const res = await fetch(
+        const doFetch = apiFetch ?? fetch;
+        const res = await doFetch(
           `${apiBase.replace(/\/+$/, '')}/v1/share-links/${encodeURIComponent(link.id)}`,
           { method: 'DELETE', headers: h, credentials: 'include' },
         );
@@ -303,7 +315,7 @@ export function ShareDialog({
         setError({ message: err?.message, step: 'revoke' });
       }
     },
-    [apiBase, headers],
+    [apiBase, headers, apiFetch],
   );
 
   const handleCopy = useCallback(
@@ -377,7 +389,7 @@ export function ShareDialog({
                     <SelectItem key={opt.value} value={opt.value} className="text-xs">
                       <div className="flex flex-col">
                         <span>{opt.label}</span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {opt.help}
                         </span>
                       </div>
@@ -479,7 +491,7 @@ export function ShareDialog({
               />
             ))}
             {revokedLinks.length > 0 && (
-              <li className="pt-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <li className="pt-2 text-xs uppercase tracking-wide text-muted-foreground">
                 {t('shareDialog.revokedHeading', { defaultValue: 'Revoked' })}
               </li>
             )}
@@ -527,18 +539,18 @@ function LinkRow({ link, copied, onCopy, onRevoke, publicBaseUrl, disabled }: Li
       )}
       data-testid="share-link-row"
     >
-      <Badge variant="secondary" className="text-[10px] capitalize">
+      <Badge variant="secondary" className="text-xs capitalize">
         {link.audience.replace('_', ' ')}
       </Badge>
-      <Badge variant="outline" className="text-[10px] capitalize">
+      <Badge variant="outline" className="text-xs capitalize">
         {link.permission}
       </Badge>
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[11px]" title={url}>
+        <div className="truncate font-mono text-xs" title={url}>
           {url}
         </div>
         {link.label && (
-          <div className="truncate text-[10px] text-muted-foreground">{link.label}</div>
+          <div className="truncate text-xs text-muted-foreground">{link.label}</div>
         )}
       </div>
       {!disabled && (
@@ -568,7 +580,7 @@ function LinkRow({ link, copied, onCopy, onRevoke, publicBaseUrl, disabled }: Li
         </>
       )}
       {disabled && (
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <ShieldOff className="h-3 w-3" />
           {t('shareDialog.revokedBadge', { defaultValue: 'revoked' })}
         </span>

@@ -88,6 +88,8 @@ const ru = {
       versions: "Версии",
       noApprovedVersions: "Нет одобренных версий.",
       prerelease: "Пред-релиз",
+      notInstallableHosted: "Нельзя установить в размещённых средах",
+      notInstallableHostedReason: "Плагин с кодом: размещённые среды не запускают плагины с кодом. Установите его в самостоятельно размещённой среде выполнения или Enterprise.",
       moreOptions: "Другие варианты установки",
       uninstallFromRuntime: "Удалить из рантайма",
       addSampleData: 'Добавить демоданные',

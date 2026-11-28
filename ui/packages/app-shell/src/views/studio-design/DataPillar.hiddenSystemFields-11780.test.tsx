@@ -122,6 +122,7 @@ const mockClient = {
     draft: (servedDraft as { item?: unknown } | null)?.item ?? null,
   })),
   getDraft: vi.fn(async () => servedDraft),
+  publish: vi.fn(async () => ({})), reset: vi.fn(async () => ({})),
   save: vi.fn<(type: string, name: string, body: Record<string, unknown>, opts?: unknown) => Promise<unknown>>(
     async () => ({ ok: true }),
   ),
@@ -200,7 +201,11 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
   return { ...actual, DndContext: CapturingDndContext };
 });
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField';
 
@@ -218,11 +223,11 @@ afterEach(() => {
 
 function renderPillar() {
   return render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_account" packageId="com.example.showcase" />
       </SurfaceDeepLinkProvider>
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
 }
 
@@ -260,7 +265,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('Form preview: the injected-and-hidden fields are not form fields; the author fields are', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
     await waitFor(() => expect(screen.getByTestId('form-fields')).toBeInTheDocument(), { timeout: 4000 });
 
@@ -273,7 +278,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('form designer: no card for the injected-and-hidden fields; the author fields have one', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await waitFor(() => expect(screen.getByText('Account Name')).toBeInTheDocument(), { timeout: 4000 });
 
     for (const label of AUTHOR_VISIBLE_LABELS) expect(screen.getByText(label)).toBeInTheDocument();
@@ -284,7 +289,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
   it('write-back: a designer drop saves `fields` that still carry every hidden system field, definition unchanged', async () => {
     renderPillar();
     await waitFor(() => expect(screen.getByTestId('grid-columns')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await waitFor(() => expect(screen.getByText('Account Name')).toBeInTheDocument(), { timeout: 4000 });
     expect(dnd.onDragEnd).not.toBeNull();
 
@@ -292,6 +297,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
     act(() => dnd.onDragEnd!({ active: { id: 'f:industry' }, over: { id: 'f:name' } }));
 
     // The auto-save sends the draft the designer committed.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 5000 });
     const body = mockClient.save.mock.calls.at(-1)![2] as { fields: Record<string, Record<string, unknown>> };
 
@@ -318,6 +324,7 @@ describe.each(CASES)('Data pillar on an object with $title (objectui#11780)', ({
 
     expect(seenColumns[seenColumns.length - 1]).toBe(before);
     // The edit was real: the draft the pillar saves carries the new label.
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalled(), { timeout: 5000 });
     expect(mockClient.save.mock.calls.at(-1)![2].label).toBe('Account (renamed)');
   });

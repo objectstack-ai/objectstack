@@ -58,6 +58,13 @@
  * its icon says a draft is there). Folded, the row's boxes fit the row, so
  * the ⋯ trigger stays inside the column, not under the right panel. Like
  * every rule here, it measures the header's own row, never the viewport.
+ *
+ * objectstack#37455 — the page's Cancel and Save and the AI assistant, which
+ * sat in the Studio top bar, end the actions slot: Cancel and Save after the
+ * pillar's own actions, then, behind a hairline, the assistant (the front
+ * end's page-header group, objectstack#36111). The surface hands them in
+ * (`studioTitleRow.tsx`); outside it, and in a header nested under the page's
+ * own, the slot holds the pillar's actions alone.
  */
 
 import * as React from 'react';
@@ -73,6 +80,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
 import {
   STUDIO_API_CHIP,
@@ -89,6 +97,7 @@ import {
   STUDIO_TAB_IDLE,
   STUDIO_TAB_ROW,
 } from './studio-tokens.js';
+import { StudioTitleRowDivider, useStudioTitleRowControls } from './studioTitleRow.js';
 
 /** The item's status, drawn by the header as one amber chip (objectui#12524). */
 export interface StudioItemStatus {
@@ -590,6 +599,12 @@ function useTitleRowFold(
 export interface StudioItemHeaderProps {
   /** The icon component for the tile; omitted when the pillar has nothing open. */
   icon?: React.ElementType;
+  /**
+   * Set when the item is an object (objectstack#35985): the icon is drawn as
+   * the object's tile, a white glyph on the object's palette colour, as the
+   * console's menu draws it. Absent: the primary-tinted tile.
+   */
+  objectTile?: { color?: string };
   /** The item's label. */
   title: React.ReactNode;
   /** Attributes for the title element (a test id, a tooltip with the machine name). */
@@ -629,6 +644,7 @@ export interface StudioItemHeaderProps {
 
 export function StudioItemHeader({
   icon: Icon,
+  objectTile,
   title,
   titleProps,
   apiName,
@@ -666,15 +682,21 @@ export function StudioItemHeader({
   );
   const ownMenu = typeof foldMenu === 'object' ? foldMenu : null;
   const hasFolded = folded && (!!apiName || !!chips || tools.length > 0);
+  // objectstack#37455 — the surface's Save and assistant, on the page's first title row.
+  const titleRowControls = useStudioTitleRowControls(titleRowRef);
+  const save = titleRowControls?.save ?? null;
+  const assistant = titleRowControls?.assistant ?? null;
   return (
     <div data-testid={testId} className={cn(STUDIO_ITEM_HEADER, !tabs && 'pb-3', className)}>
       <div ref={titleRowRef} className={STUDIO_ITEM_ROW}>
         {leading}
-        {Icon && (
+        {Icon && objectTile ? (
+          <ObjectIconTile glyph={Icon} color={objectTile.color} size="lg" />
+        ) : Icon ? (
           <span className={STUDIO_ICON_TILE}>
             <Icon className="h-4 w-4" />
           </span>
-        )}
+        ) : null}
         <h1 {...titleProps} ref={titleRef} title={titleTooltip} className={cn(STUDIO_ITEM_TITLE, titleProps?.className)}>
           {title}
         </h1>
@@ -688,7 +710,7 @@ export function StudioItemHeader({
             {meta}
           </span>
         )}
-        {(actions || (ownMenu && hasFolded)) && (
+        {(actions || (ownMenu && hasFolded) || save || assistant) && (
           <div
             className="group/item-actions ml-auto flex shrink-0 items-center gap-2"
             data-fold={foldStage === 2 ? 'labels' : undefined}
@@ -714,6 +736,13 @@ export function StudioItemHeader({
                 </DropdownMenu>
               )}
             </StudioItemHeaderFoldContext.Provider>
+            {save}
+            {assistant && (
+              <>
+                {(actions || (ownMenu && hasFolded) || save) && <StudioTitleRowDivider />}
+                {assistant}
+              </>
+            )}
           </div>
         )}
       </div>

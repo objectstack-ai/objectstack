@@ -36,6 +36,11 @@ import {
   // RAW for the same reason: the spec's own `AppSchema.landing` check, chained
   // on `AppComponentSchema` below (objectstack-ai/objectstack#28450).
   checkAppLandingItems,
+  // RAW for the same reason: the spec's two `ai:chat` entry checks — its
+  // `params`, chained on the flat navigation arm below, and at most one such
+  // entry per app, chained on `AppComponentSchema`.
+  checkAiChatNavParams,
+  checkAppSingleAiChatEntry,
 } from '@objectstack/spec/ui';
 import {
   EvaluatedExpressionInputSchema as SpecEvaluatedExpressionInputSchema,
@@ -292,7 +297,7 @@ const NavigationItemObject = z.looseObject({
   url: z.string().optional().describe('Target URL (type: url)'),
   target: z.enum(['_blank', '_self']).optional().describe('Link target (type: url)'),
   componentRef: z.string().optional().describe('Target component reference (type: component) — colon-joined ComponentRegistry key e.g. metadata:resource, routed to /component/<ns>/<name>'),
-  params: z.record(z.string(), z.unknown()).optional().describe('Extra parameters (type: component | page) — serialised as querystring; string values support {current_user_id}/{current_org_id}'),
+  params: z.record(z.string(), z.unknown()).optional().describe('Extra parameters (type: component | page) — serialised as querystring; string values support {current_user_id}/{current_org_id}. Exception: an `ai:chat` component entry\'s params are the AI inquiry page\'s copy (`AiChatNavParamsSchema`), read off the entry and never put in the URL.'),
 
   // Grouping
   children: z.array(z.lazy(() => NavigationItemSchema)).optional().describe('Child items (type: group)'),
@@ -398,6 +403,11 @@ const NavigationItemObject = z.looseObject({
   // `visible` is handed over as authored: the function reads the bare string
   // and the `{ dialect, source }` envelope alike, and a boolean judges nothing.
   navItemVisibleDataNeedsDataSource(item, ctx);
+
+  // The spec's own `ai:chat` params rule, CHAINED: `@objectstack/spec` mounts
+  // it on its whole navigation union; it judges only a `component` entry whose
+  // `componentRef` is `ai:chat`, so calling it for every type is a no-op elsewhere.
+  checkAiChatNavParams(item, ctx);
 });
 
 /**
@@ -813,7 +823,10 @@ export const AppComponentSchema = BaseSchema.extend(SpecAppFields.shape).extend(
   // reads no `data`. `landing` flows in by reference through `SpecAppFields`; this
   // node's `navigation` / `areas` are its own, and carry the same `id` / `type` the
   // check reads. `__tests__/spec-object-refinements-7715.test.ts` re-derives the count.
-  .superRefine(checkAppLandingItems);
+  .superRefine(checkAppLandingItems)
+  // The spec's own at-most-one-`ai:chat`-entry check, over the same `navigation`
+  // and `areas[].navigation` this node carries.
+  .superRefine(checkAppSingleAiChatEntry);
 
 /**
  * objectui#11440 — ONE refusal string for both content channels of

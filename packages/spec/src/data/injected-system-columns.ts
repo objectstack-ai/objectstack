@@ -87,6 +87,41 @@ const QUEUE_COLUMN = 'queue';
 /** THE tenant isolation key. */
 const TENANT_SCOPE_COLUMN = 'organization_id';
 
+/**
+ * [ADR-0153 D4] The five sync-in provenance columns, planned on a
+ * `managedBy: 'synced'` object only. Every name carries the `_sync_` prefix
+ * `ObjectSchema` reserves for them (`AuthorFieldNameKeySchema`), so no author
+ * field can take one and an object holding one is always the plan's.
+ *
+ * - `_sync_source`: the name of the `mapping` that wrote the row;
+ * - `_sync_external_id`: the row's key in the source, as text;
+ * - `_sync_pulled_at`: when a pull last wrote the row;
+ * - `_sync_run_id`: the `sys_sync_run` row of that pull (text, not a lookup);
+ * - `_sync_deleted_at`: D3's mark, stamped when a pull finds the row deleted
+ *   at the source and cleared when a later pull reads it again (ADR-0153 D3).
+ *
+ * The pull is the only writer of all five: any other write that names one is
+ * refused by the engine, whatever its context (ADR-0153 D4).
+ */
+export const SYNC_PROVENANCE_COLUMNS = [
+  '_sync_source',
+  '_sync_external_id',
+  '_sync_pulled_at',
+  '_sync_run_id',
+  '_sync_deleted_at',
+] as const;
+
+/** One of {@link SYNC_PROVENANCE_COLUMNS}. */
+export type SyncProvenanceColumn = (typeof SYNC_PROVENANCE_COLUMNS)[number];
+
+/**
+ * [ADR-0153 D4] The field-name prefix of {@link SYNC_PROVENANCE_COLUMNS}, the
+ * one `ObjectSchema` reserves. A write key starting with it names a
+ * provenance column (or a column no object can carry), which is how the
+ * engine's refusal reads a payload.
+ */
+export const SYNC_PROVENANCE_PREFIX = '_sync_';
+
 /** Does the deployment's declaration name the object `name` platform-global? */
 function deploymentDeclaresPlatformGlobal(
   declared: ReadonlySet<string> | readonly string[] | undefined,
@@ -113,7 +148,8 @@ export type InjectedSystemColumnName =
   | (typeof AUDIT_PROVENANCE_FIELDS)[number]
   | typeof OWNER_COLUMN
   | typeof OWNING_BUSINESS_UNIT_COLUMN
-  | typeof QUEUE_COLUMN;
+  | typeof QUEUE_COLUMN
+  | SyncProvenanceColumn;
 
 /**
  * Which system columns an object carries, as the four independent decisions the
@@ -140,6 +176,11 @@ export interface InjectedSystemColumnPlan {
    * no owning person.
    */
   queue: boolean;
+  /**
+   * The {@link SYNC_PROVENANCE_COLUMNS} — [ADR-0153 D4] on a
+   * `managedBy: 'synced'` object only, the copy a sync-in pull writes.
+   */
+  sync: boolean;
   /**
    * Every column addressable on this object without being authored — the
    * columns the flags above select, plus the driver-provisioned primary key.
@@ -169,6 +210,7 @@ export interface InjectedSystemColumnPlan {
  * | `ownership: 'org' \| 'none'`           | no ownership anchors (either tier)          |
  * | `ownership: 'business_unit'`           | `owning_business_unit_id` but NOT `owner_id` or `queue` |
  * | `ownership: 'user'` / omitted          | both ownership anchors, and `queue`         |
+ * | `managedBy: 'synced'`                  | the five `_sync_` provenance columns (ADR-0153 D4) |
  *
  * The ownership rows are a POSITIVE list, not a deny-list, for the reason
  * ADR-0117 D1 / #5677 record at the injection site: under a deny-list a NEW
@@ -206,7 +248,7 @@ export function resolveInjectedSystemColumns(
   // even on the two "nothing is injected" rows below.
   const names = new Set<InjectedSystemColumnName>([PRIMARY_KEY_COLUMN]);
   const nothing: InjectedSystemColumnPlan = {
-    tenant: false, audit: false, owner: false, owningBusinessUnit: false, queue: false, names,
+    tenant: false, audit: false, owner: false, owningBusinessUnit: false, queue: false, sync: false, names,
   };
 
   // 1. Hard opt-out at object level (e.g. seed/migration tables).
@@ -244,12 +286,17 @@ export function resolveInjectedSystemColumns(
   // [ADR-0142 D3] The queue column rides with the owner anchor, never apart
   // from it: "sits in Q" is `queue == Q AND owner_id IS NULL`.
   const queue = owner;
+  // [ADR-0153 D4] The provenance columns ride with the bucket that names a
+  // pulled copy, and with nothing else: the plan's two hard opt-outs above
+  // still withhold them, and a pull refuses a target that lacks them.
+  const sync = managedBy === 'synced';
 
   if (tenant) names.add(TENANT_SCOPE_COLUMN);
   if (audit) for (const f of AUDIT_PROVENANCE_FIELDS) names.add(f);
   if (owner) names.add(OWNER_COLUMN);
   if (owningBusinessUnit) names.add(OWNING_BUSINESS_UNIT_COLUMN);
   if (queue) names.add(QUEUE_COLUMN);
+  if (sync) for (const column of SYNC_PROVENANCE_COLUMNS) names.add(column);
 
-  return { tenant, audit, owner, owningBusinessUnit, queue, names };
+  return { tenant, audit, owner, owningBusinessUnit, queue, sync, names };
 }

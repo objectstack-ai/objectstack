@@ -31,8 +31,8 @@
  *
  * The template's own `manifest.description` is DROPPED from both
  * objectstack.manifest.json and objectstack.config.ts rather than carried
- * over unrewritten (#9263): it describes the bundled template ("Minimal
- * ObjectStack environment — a clean slate for building."), not the project
+ * over unrewritten (#9263): it describes the bundled template ("Companies
+ * and contacts, with tasks and notes from the platform in the menu."), not the project
  * being scaffolded, and there is nothing but the project name to derive a
  * replacement from — which would only restate `name`/`displayName`. `os
  * validate` already omits the description line entirely when the field is
@@ -194,7 +194,7 @@ function rewriteProjectIdentity(
   // file refuses each, and publish refuses `category` and `visibility` — the
   // list is RETIRED_TEMPLATE_MANIFEST_KEYS in rewrite-identity.ts), and DROP
   // .description (#9263). The template ships a generic line describing
-  // ITSELF ("Minimal ObjectStack environment — a clean slate for building."),
+  // ITSELF ("Companies and contacts, with tasks and notes from the platform in the menu."),
   // not the project being scaffolded, and there is nothing but the project
   // name to derive a replacement from — a name-derived sentence would be a
   // bare restatement of `name`/`displayName` (e.g. "Support Desk — an
@@ -238,9 +238,11 @@ function rewriteProjectIdentity(
     fs.writeFileSync(configPath, cfg);
   }
 
-  // src/**/*.ts — swap the template's `${templateNamespace}_` object-name prefix
-  // for the user's sanitized namespace so rendered objects satisfy the
-  // `${namespace}_${shortName}` rule. No-op if the namespace already matches.
+  // src/**/*.ts — swap the template's `${templateNamespace}_` prefix for the
+  // user's sanitized namespace on every name literal, so rendered objects
+  // satisfy the `${namespace}_${shortName}` rule and every reference to one (a
+  // lookup target, a related list, a view's object, a menu entry) follows it.
+  // No-op if the namespace already matches.
   //
   // Then VERIFY. A prefix rewrite that quietly does nothing looks exactly like
   // one that was not needed, and that ambiguity is what let five broken
@@ -673,6 +675,16 @@ const program = new Command()
       printCreatedSummary(targetDir, { wasEmpty: targetWasEmpty, skillPaths });
 
       printSuccess('Environment created!');
+      console.log('');
+
+      // What the project holds on day one, so the first `dev` run is not a
+      // surprise: the bundled template's companies and contacts (the
+      // platform's Starter app, as source), and the platform's tasks and notes
+      // in its menu. `blank-template-starter-parity.test.ts` holds these lines
+      // to the template's tree.
+      console.log(chalk.bold('  Your project starts with:'));
+      console.log(chalk.dim('    Companies and Contacts   src/objects/, with their lists in src/views/'));
+      console.log(chalk.dim("    Tasks and Notes          the platform's own, in the menu of src/apps/main.app.ts"));
       console.log('');
 
       console.log(chalk.bold('  Next steps:'));

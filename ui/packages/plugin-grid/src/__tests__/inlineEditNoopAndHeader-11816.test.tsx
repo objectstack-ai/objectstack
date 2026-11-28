@@ -12,12 +12,14 @@
  * (showcase Tasks → Edit inline):
  *
  *  - opening a select cell and clicking away without choosing used to show
- *    "1 row modified · Save All (1)" for a row nobody changed;
+ *    "1 row modified · Save All (1)" for a row nobody changed; under the
+ *    per-cell save (objectstack#35827) it must write nothing;
  *  - with inline edit on, the grid drew TWO columns headed "Actions": its own
- *    row-menu column and the data-table's per-row cancel/save column.
+ *    row-menu column and the data-table's per-row cancel/save column. The
+ *    second is retired with the staged model; one "Actions" column is left.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -96,7 +98,6 @@ function renderGrid() {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', type: 'text' },
       { field: 'priority', label: 'Priority', type: 'select' },
@@ -117,10 +118,8 @@ function renderGrid() {
   return { ...utils, ds };
 }
 
-const modified = () => screen.queryByText(/rows? modified/);
-
 describe('ObjectGrid inline edit (objectui#11816)', () => {
-  it('a select cell opened and left without a choice does not mark the row modified', async () => {
+  it('a select cell opened and left without a choice writes nothing', async () => {
     const { container, ds } = renderGrid();
     await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
 
@@ -129,24 +128,25 @@ describe('ObjectGrid inline edit (objectui#11816)', () => {
       (td) => td.textContent?.trim() === 'High',
     ) as HTMLElement;
     expect(priorityTd).toBeTruthy();
+    // Select-first: a click selects, a double-click opens the in-cell list.
     fireEvent.click(priorityTd);
-    // The select editor is open on the cell…
-    await waitFor(() => expect(priorityTd.querySelector('[role="combobox"]')).toBeTruthy());
+    fireEvent.doubleClick(priorityTd);
+    await waitFor(() => expect(screen.getByTestId('in-cell-option-low')).toBeInTheDocument());
 
     // …and the user clicks away without choosing.
     fireEvent.pointerDown(screen.getByTestId('outside'));
-    await waitFor(() => expect(priorityTd.querySelector('[role="combobox"]')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('in-cell-option-low')).toBeNull());
 
-    expect(modified()).toBeNull();
-    expect(screen.queryByText(/Save All/)).toBeNull();
+    await act(async () => {});
     expect(ds.update).not.toHaveBeenCalled();
+    expect(priorityTd.textContent).toContain('High');
   });
 
-  it('draws one "Actions" column; the cancel/save column is headed by its own name', async () => {
+  it('draws one "Actions" column and no cancel/save column', async () => {
     renderGrid();
     await waitFor(() => expect(screen.getByText('Design system')).toBeInTheDocument());
 
     expect(screen.getAllByRole('columnheader', { name: 'Actions' })).toHaveLength(1);
-    expect(screen.getByRole('columnheader', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Edit' })).toBeNull();
   });
 });

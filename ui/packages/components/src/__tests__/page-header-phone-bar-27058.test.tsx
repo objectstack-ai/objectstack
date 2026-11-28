@@ -46,9 +46,9 @@ const HOST_ACTIONS = [
   { name: 'sys_delete', label: 'Delete' },
 ];
 
-const convert = { name: 'convert', locations: ['record_header'], label: 'Convert Lead', type: 'flow' };
-const assign = { name: 'assign', locations: ['record_header'], label: 'Assign', type: 'flow' };
-const ret = { name: 'return_to_pool', locations: ['record_header'], label: 'Return', type: 'flow' };
+const convert = { name: 'convert', locations: ['record_page'], label: 'Convert Lead', type: 'flow' };
+const assign = { name: 'assign', locations: ['record_page'], label: 'Assign', type: 'flow' };
+const ret = { name: 'return_to_pool', locations: ['record_page'], label: 'Return', type: 'flow' };
 
 /** A host that owns a bottom bar and hands it to the header, as the console's record page does. */
 function PhoneHost({
@@ -198,10 +198,10 @@ describe('a record header on a phone draws its actions into the host\'s bottom b
  * of the `⋯`. The bar is now Edit, the primary action, then the `⋯`.
  */
 describe('the phone bar keeps Edit visible on an editable record (objectstack#34595)', () => {
-  const clone = { name: 'clone_opportunity', locations: ['record_header'], label: 'Clone Opportunity', type: 'flow' };
+  const clone = { name: 'clone_opportunity', locations: ['record_page'], label: 'Clone Opportunity', type: 'flow' };
   // Declared second, so the primary is picked by its `variant`, not by position.
-  const quote = { name: 'generate_quote', locations: ['record_header'], label: 'Generate Quote', type: 'flow', variant: 'primary' };
-  const report = { name: 'print_report', locations: ['record_header'], label: 'Print', type: 'flow' };
+  const quote = { name: 'generate_quote', locations: ['record_page'], label: 'Generate Quote', type: 'flow', variant: 'primary' };
+  const report = { name: 'print_report', locations: ['record_page'], label: 'Print', type: 'flow' };
   const OPPORTUNITY = { type: 'page:header', actions: [clone, quote, report] };
 
   it('draws [Edit][primary][⋯]: the primary is the action declaring variant primary, the rest fold', async () => {
@@ -246,5 +246,70 @@ describe('the phone bar keeps Edit visible on an editable record (objectstack#34
       .getAllByRole('button')
       .map((b) => b.getAttribute('aria-label') || b.textContent);
     expect(labels).toEqual(['Generate Quote', 'Clone Opportunity', 'Print', 'Edit', 'More actions']);
+  });
+});
+
+/**
+ * objectstack#36151 — a phone host that hands a top-bar slot for the `⋯`
+ * (`PageHeaderPhoneContext.more`): the bottom bar holds the action buttons
+ * alone, filling the row, and the `⋯` is drawn in the slot; with no button to
+ * draw the bar is left empty. The console's record page hands its Edit as a
+ * menu entry there (`component: 'action:menu'`), so it is one of the `⋯`'s
+ * entries. Control: without the slot (every test above) the `⋯` stays the
+ * bar's last button.
+ */
+describe('the phone bar with the host\'s top-bar ⋯ slot (objectstack#36151)', () => {
+  const MENU_EDIT = [
+    { name: 'sys_edit', label: 'Edit', component: 'action:menu' },
+    { name: 'sys_delete', label: 'Delete' },
+  ];
+
+  function TopBarHost({ schema, mountMore = true }: { schema: unknown; mountMore?: boolean }) {
+    const [barEl, setBarEl] = React.useState<HTMLDivElement | null>(null);
+    const [moreEl, setMoreEl] = React.useState<HTMLSpanElement | null>(null);
+    const face = React.useMemo<PageHeaderPhoneFace>(() => ({ actionBar: barEl, more: moreEl }), [barEl, moreEl]);
+    return (
+      <ActionProvider>
+        {mountMore && <span ref={setMoreEl} data-testid="top-more" />}
+        <RecordContextProvider
+          objectName="lead"
+          recordId="1"
+          data={{ id: '1', name: 'Mira Costa' }}
+          objectSchema={{ name: 'lead', label: 'Lead' }}
+          headerSystemActions={MENU_EDIT}
+        >
+          <PageHeaderPhoneContext.Provider value={face}>
+            <PageHeader schema={schema} />
+          </PageHeaderPhoneContext.Provider>
+        </RecordContextProvider>
+        <div ref={setBarEl} data-testid="bar" />
+      </ActionProvider>
+    );
+  }
+
+  const topMore = () => screen.getByTestId('top-more');
+
+  it('the bar is the page\'s two actions, filling the row; the ⋯ is in the slot and holds the rest and Edit', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [convert, assign, ret] }} />);
+    await waitFor(() => expect(bar().querySelector('[role="toolbar"]')).not.toBeNull());
+    expect(barButtons()).toEqual(['Convert Lead', 'Assign']);
+    for (const b of within(bar()).getAllByRole('button')) expect(b.className.split(/\s+/)).toContain('flex-1');
+    expect(within(bar()).queryByRole('button', { name: 'More actions' })).toBeNull();
+    await waitFor(() => expect(within(topMore()).getByRole('button', { name: 'More actions' })).toBeTruthy());
+    expect(await openMore(topMore())).toEqual(['Return', 'Edit', 'Delete']);
+  });
+
+  it('with no page action the bar draws nothing, and the ⋯ in the slot holds Edit', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [] }} />);
+    await waitFor(() => expect(within(topMore()).getByRole('button', { name: 'More actions' })).toBeTruthy());
+    expect(bar().childElementCount).toBe(0);
+    expect(await openMore(topMore())).toEqual(['Edit', 'Delete']);
+  });
+
+  it('nothing is drawn for the ⋯ until the slot exists; the bar\'s buttons still are', async () => {
+    render(<TopBarHost schema={{ type: 'page:header', actions: [convert] }} mountMore={false} />);
+    await waitFor(() => expect(bar().querySelector('[role="toolbar"]')).not.toBeNull());
+    expect(barButtons()).toEqual(['Convert Lead']);
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
   });
 });

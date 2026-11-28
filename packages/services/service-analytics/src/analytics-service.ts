@@ -27,6 +27,7 @@ import {
   filterTokenContextFrom,
   resolveFilterTokens,
   type FilterTokenResolutionContext,
+  type JsonColumnFieldClass,
 } from '@objectstack/core';
 // [#6615] The Postgres `"x" of relation "y"` phrase, owned once. This is the
 // only reason this package depends on `@objectstack/types` — see the module's
@@ -75,8 +76,10 @@ import {
   assertDefinitionExposed,
   assertNoInternalFieldNamed,
   assertObjectsExposed,
+  assertObjectsOfServedPackages,
   servesLabelTarget,
   type ObjectDeclarationProvider,
+  type ObjectPackageDisabledProbe,
   type RegisteredDefinitionKind,
 } from './api-exposure-door.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
@@ -90,6 +93,7 @@ import { measureResultType } from './measure-result-type.js';
 // compile.
 import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-measure-field-type-door.js';
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
+import { assertRecordUnitAggregatesGrouped } from './cube-record-unit-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, FixedReadLeafClassAnswer, ReadScopeFilterJudge } from './strategies/types.js';
 import { fixedReadLeafRefusalSinkOf } from './read-scope-sql.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
@@ -1188,6 +1192,23 @@ export interface AnalyticsServiceConfig {
    */
   getObjectDeclaration?: ObjectDeclarationProvider;
   /**
+   * [#35525] Whether `objectName` belongs to a DISABLED package — the
+   * registry's `isObjectPackageDisabled`, the predicate the data route asks
+   * before it answers `404 OBJECT_PACKAGE_DISABLED` (`api-exposure-door.ts`,
+   * {@link ObjectPackageDisabledProbe}).
+   *
+   * Asked of every object a query reads (base object, declared joins,
+   * relationship hops) on every door, for every caller: such an object is
+   * refused with the data route's own `404 OBJECT_PACKAGE_DISABLED`. A lookup
+   * dimension's label read of it is withheld (the stored id renders, as the
+   * data route's `$expand` withholds it), and `getMeta` leaves out a cube
+   * whose base object or declared join it is, as the metadata listing leaves
+   * the object out. Absent, or answering `false`, hides nothing — a registry
+   * that cannot answer hides nothing on the data route either. The production
+   * bridge in `plugin.ts` wires it from the data engine's registry.
+   */
+  isObjectPackageDisabled?: ObjectPackageDisabledProbe;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -1260,6 +1281,12 @@ export interface AnalyticsServiceConfig {
     defaultCurrency?: string;
     currencyField?: string;
     homeAmountField?: string;
+    /**
+     * [ADR-0158 U7 R1] A `number` field's `unitConfig.unitField`, relayed
+     * ONLY under `unitMode: 'record'`: the unit field the cube door's
+     * record-unit judgment requires a grouping by (`cube-record-unit-door.ts`).
+     */
+    unitField?: string;
     max?: number;
   } | undefined;
   /**
@@ -1318,6 +1345,19 @@ export interface AnalyticsServiceConfig {
    * every dialect (#21647): it prints a bucket in no expression but the driver's.
    */
   dateBucketSql?: (object: string, field: string, granularity: string, timezone?: string) => string | undefined;
+  /**
+   * [#36190] Which class of JSON column `field` on `object` is on THIS
+   * deployment, as the driver that stores it answers, or `undefined` when it
+   * is not one or the host cannot answer. See
+   * `DatasetScopedStrategyContext.jsonColumnFieldClass` (`strategies/types.ts`).
+   *
+   * Answered by the plugin from the driver that stores the object
+   * (`SqlDriver.jsonColumnFieldClass`): the one JSON column the declaration
+   * cannot name is a single-value media field inside the ADR-0104 window. The
+   * native face and the draft preview refuse a scalar comparison on it in the
+   * data door's words. A host that wires nothing keeps the behaviour it had.
+   */
+  jsonColumnFieldClass?: (object: string, field: string) => JsonColumnFieldClass | undefined;
   /**
    * [#19995, ruling C] The data engine's judge-only `where` admission,
    * `IObjectQLEngine.judgeFilter` (#20157): would the engine admit this
@@ -1603,6 +1643,8 @@ export class AnalyticsService implements IAnalyticsService {
     return typeof target === 'string' ? target : target?.object;
   };
   private readonly sourceFieldMeta?: AnalyticsServiceConfig['sourceFieldMeta'];
+  /** [#36190] The storing driver's JSON-column class, read by the draft preview's comparison refusal. */
+  private readonly jsonColumnFieldClass?: AnalyticsServiceConfig['jsonColumnFieldClass'];
   /** Optional dimension display-label resolver (select options / lookup names). */
   private readonly labelResolver?: DimensionLabelDeps;
   /** ADR-0037 P3: pending-seed row resolver for draft data preview. */
@@ -1620,6 +1662,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
   /** The generic-exit declaration probe (`api-exposure-door.ts`). */
   private readonly objectDeclarationProvider?: ObjectDeclarationProvider;
+  /** [#35525] The registry's disabled-package predicate (`api-exposure-door.ts`). */
+  private readonly isObjectPackageDisabled?: ObjectPackageDisabledProbe;
   /** One-shot flag for the no-declaration-probe stand-down warning. */
   private warnedNoObjectDeclaration = false;
   /** Names {@link reportDatasetCatalogDefect} already reported (once each). */
@@ -1678,6 +1722,7 @@ export class AnalyticsService implements IAnalyticsService {
     this.configuredAllowedRelationships = config.getAllowedRelationships;
     this.relationshipResolver = config.relationshipResolver;
     this.sourceFieldMeta = config.sourceFieldMeta;
+    this.jsonColumnFieldClass = config.jsonColumnFieldClass;
     this.draftRowsResolver = config.draftRowsResolver;
     this.isRegisteredObject = config.isRegisteredObject;
     this.getObjectFieldNames = config.getObjectFieldNames;
@@ -1688,9 +1733,18 @@ export class AnalyticsService implements IAnalyticsService {
     // not serve is never read, and the stored id renders. Wrapped once, here,
     // so every pass that reads labels inherits it. No declaration probe wired:
     // no gate, as on the query face (which reports that once).
+    //
+    // [#35525] …and a target of a disabled package is withheld the same way
+    // (the stored id renders), as the data route's `$expand` withholds it.
     const declarations = this.objectDeclarationProvider;
-    this.labelResolver = config.labelResolver && declarations
-      ? withServedLabelTargets(config.labelResolver, (target) => servesLabelTarget(target, declarations, this.logger))
+    const packageDisabled = config.isObjectPackageDisabled;
+    this.isObjectPackageDisabled = packageDisabled;
+    this.labelResolver = config.labelResolver && (declarations || packageDisabled)
+      ? withServedLabelTargets(
+        config.labelResolver,
+        (target) => packageDisabled?.(target) !== true
+          && (!declarations || servesLabelTarget(target, declarations, this.logger)),
+      )
       : config.labelResolver;
     this.getObjectDatasource = config.getObjectDatasource;
     this.isExternalObject = config.isExternalObject;
@@ -1780,6 +1834,9 @@ export class AnalyticsService implements IAnalyticsService {
       // [#21441] The executing driver's own bucket expression, for the ObjectQL
       // face's echo; passed through untouched, `undefined` included.
       dateBucketSql: config.dateBucketSql,
+      // [#36190] The storing driver's JSON-column class, for the comparison
+      // refusal; passed through untouched, `undefined` included.
+      jsonColumnFieldClass: config.jsonColumnFieldClass,
       // [#19995, ruling C] The engine's own admission verdict on a read scope,
       // asked by `ObjectQLStrategy` at its engine-bound merges. The host's
       // answer is passed through untouched, `undefined` included. A host that
@@ -2254,6 +2311,15 @@ export class AnalyticsService implements IAnalyticsService {
    * exposure declaration before the permission check, and so does this one.
    */
   private assertQueryObjectsExposed(objects: Iterable<string>): void {
+    // [#35525] Ahead of the exposure decision, in the data route's order
+    // (`assertObjectRegistered` refuses a disabled package's object before any
+    // exposure is judged), and whether or not a declaration probe is wired:
+    // every door and both asks above run through here, so an object of a
+    // disabled package — the base object, a declared join, a hop — answers the
+    // data route's `404 OBJECT_PACKAGE_DISABLED` on all of them.
+    const set = [...objects];
+    if (this.isObjectPackageDisabled) assertObjectsOfServedPackages(set, this.isObjectPackageDisabled);
+    objects = set;
     const provider = this.objectDeclarationProvider;
     if (!provider) {
       if (!this.warnedNoObjectDeclaration) {
@@ -3233,6 +3299,8 @@ export class AnalyticsService implements IAnalyticsService {
             // must not serve the sum across currencies that the published
             // dataset refuses.
             this.assertRecordCurrencyGrouped(q, cube);
+            // [ADR-0158 U7 R1] …and its twin over a record-mode quantity.
+            this.assertRecordUnitGrouped(q, cube);
             // [#28257] …and the `where` field gate (#5669), last in
             // `ensureCube`: a filter member whose field the object does not
             // have (a `runtimeFilter` typo) is refused `INVALID_FIELD` / 400
@@ -3274,7 +3342,25 @@ export class AnalyticsService implements IAnalyticsService {
             const previewCube = previewEvaluationCube(q, cube);
             const declaredType = (field: string) => this.sourceFieldMeta?.(dataset.object, field)?.type;
             const whereColumns = previewWhereColumns(q, cube);
-            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns);
+            // [#36168] …with the declared value shape, so a scalar comparison
+            // on a multi-valued or JSON-stored field is refused as the live
+            // faces refuse it (`json-column-comparison-refusal.ts`), and
+            // [#36190] the storing driver's answer, so a single-value media
+            // column it keeps as JSON is refused in the live faces' words too.
+            const declaredShape = (field: string) => {
+              const meta = this.sourceFieldMeta?.(dataset.object, field);
+              return typeof meta?.type === 'string' && meta.type !== ''
+                ? { type: meta.type, multiple: meta.multiple === true }
+                : undefined;
+            };
+            const storedJsonClass = (field: string) => {
+              try {
+                return this.jsonColumnFieldClass?.(dataset.object, field);
+              } catch {
+                return undefined;
+              }
+            };
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns, declaredShape, storedJsonClass);
             // [#28765, #28798] …and a selection asking one column for two
             // values under one name (raw beside its own bucket, or two buckets
             // of it), with the refusal the ObjectQL strategy gives both live
@@ -3943,11 +4029,25 @@ export class AnalyticsService implements IAnalyticsService {
    * from each dataset measure, and no `description`, because the compiler
    * writes none.
    */
+  /** [#35525] Whether `cube`'s own read set ({@link cubeObjects}) holds an object of a disabled package. */
+  private readsObjectOfDisabledPackage(cube: Cube): boolean {
+    const disabled = this.isObjectPackageDisabled;
+    if (!disabled) return false;
+    for (const object of this.cubeObjects(cube)) if (disabled(object) === true) return true;
+    return false;
+  }
+
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
     const cubes = (cubeName
       ? [this.cubeRegistry.get(cubeName)].filter(Boolean) as Cube[]
       : this.cubeRegistry.getAll()
-    ).filter(isCubePublic);
+    ).filter(isCubePublic)
+      // [#35525] A cube whose base object or declared join belongs to a
+      // disabled package is left out, as the metadata listing leaves the
+      // object out: every query of it answers `404 OBJECT_PACKAGE_DISABLED`
+      // until the package is re-enabled, and it is listed again then (nothing
+      // is cached). By name it answers as a hidden cube does: nothing.
+      .filter((cube) => !this.readsObjectOfDisabledPackage(cube));
 
     return cubes.map(cube => ({
       name: cube.name,
@@ -4149,6 +4249,9 @@ export class AnalyticsService implements IAnalyticsService {
       // must group by its code field: this ad-hoc exit is the one
       // `ObjectStackDataSource.aggregate()` reaches (`${field}_${fn}`).
       this.assertRecordCurrencyGrouped(query, cube);
+      // [ADR-0158 U7 R1] …and a quantity aggregate over a record-unit field
+      // must group by its unit field, on the same ad-hoc exit.
+      this.assertRecordUnitGrouped(query, cube);
       // [#5669] …and the `where`'s, third and last of the three request keys that
       // carry a field name. Its members are read from the filter TREE, not from
       // `cube.dimensions` — which on this path was minted from this very query,
@@ -4226,6 +4329,7 @@ export class AnalyticsService implements IAnalyticsService {
       // authored one are one population for the aggregate × field-type table.
       this.assertMeasureFieldTypes(query, augmented);
       this.assertRecordCurrencyGrouped(query, augmented);
+      this.assertRecordUnitGrouped(query, augmented);
       // [#5669] The `where` gate resolves a filter member through dimensions AND
       // measures (that is what the strategies do for a filter member), so it is
       // handed the AUGMENTED cube — a caller filtering on a suffix-inferred
@@ -4243,6 +4347,7 @@ export class AnalyticsService implements IAnalyticsService {
       this.assertDimensionsGroupScalarColumns(query, cube);
       this.assertMeasureFieldTypes(query, cube);
       this.assertRecordCurrencyGrouped(query, cube);
+      this.assertRecordUnitGrouped(query, cube);
       this.assertWhereFields(query, cube, Object.keys(cube.dimensions));
     }
   }
@@ -4310,22 +4415,54 @@ export class AnalyticsService implements IAnalyticsService {
       query,
       cube.name,
       (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
-      (member) => {
-        const entry = declaredMemberEntry(cube, member, 'dimension');
-        const sql = (entry ? (typeof entry.sql === 'string' ? entry.sql : '') : member).trim();
-        if (BARE_IDENTIFIER.test(sql)) return { object, column: sql, path: sql };
-        if (!IDENTIFIER_PATH.test(sql)) return null;
-        return {
-          object: columnObjectOf(cube, object, sql, this.hopReference),
-          column: sql.slice(sql.lastIndexOf('.') + 1),
-          path: sql,
-        };
-      },
+      (member) => this.groupedColumnOf(cube, object, member),
       (o, field) => {
         const meta = fieldMeta(o, field);
         if (meta?.currencyField === undefined) return undefined;
         return { codeField: meta.currencyField, homeField: meta.homeAmountField };
       },
+    );
+  }
+
+  /**
+   * The column a `dimensions` entry groups by, for the record-currency and
+   * record-unit doors: located by the same {@link declaredMemberEntry} lookup
+   * and hop resolver {@link declaredMeasureColumn} reads, or `null` when no
+   * column can be pinned.
+   */
+  private groupedColumnOf(cube: Cube, object: string, member: string): MeasureColumn | null {
+    const entry = declaredMemberEntry(cube, member, 'dimension');
+    const sql = (entry ? (typeof entry.sql === 'string' ? entry.sql : '') : member).trim();
+    if (BARE_IDENTIFIER.test(sql)) return { object, column: sql, path: sql };
+    if (!IDENTIFIER_PATH.test(sql)) return null;
+    return {
+      object: columnObjectOf(cube, object, sql, this.hopReference),
+      column: sql.slice(sql.lastIndexOf('.') + 1),
+      path: sql,
+    };
+  }
+
+  /**
+   * [ADR-0158 U7 R1] Refuse a `sum` / `avg` / `min` / `max` measure over a
+   * `record`-mode quantity whose query does not group by the quantity's unit
+   * field: `INVALID_FIELD` / 400, naming the member the caller wrote, before
+   * either strategy reads anything. The rule and the envelope are
+   * {@link assertRecordUnitAggregatesGrouped}'s (`cube-record-unit-door.ts`);
+   * the resolvers and stand-downs are {@link assertRecordCurrencyGrouped}'s,
+   * after which it runs, and the unit field is
+   * {@link AnalyticsServiceConfig.sourceFieldMeta}'s `unitField`.
+   */
+  private assertRecordUnitGrouped(query: AnalyticsQuery, cube: Cube): void {
+    const fieldMeta = this.sourceFieldMeta;
+    if (!fieldMeta) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    assertRecordUnitAggregatesGrouped(
+      query,
+      cube.name,
+      (member) => declaredMeasureColumn(cube, member, object, this.hopReference),
+      (member) => this.groupedColumnOf(cube, object, member),
+      (o, field) => fieldMeta(o, field)?.unitField,
     );
   }
 

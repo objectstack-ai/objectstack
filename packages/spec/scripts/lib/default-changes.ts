@@ -798,4 +798,34 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + SEED_MODE_CREATE_ONLY_REASON,
     },
   ],
+  19: [
+    {
+      key: 'ai/AIModelConfig:provider',
+      from: '"openai"',
+      to: '(none)',
+      reason:
+        'An agent\'s `model` block may now omit the model name, and an absent name means the host\'s '
+        + 'default model for the environment. A block that names no model also names no provider, so '
+        + 'the parse no longer stamps `provider: \'openai\'` onto it: that would assert a provider for a '
+        + 'model the host picks. No runtime reads an agent\'s `model.provider` (the AI service reads '
+        + 'the name, `temperature` and `maxTokens` only), so no deployed agent changes behaviour; what '
+        + 'changes is the parsed value. A parsed agent\'s `model` block no longer carries `provider`, '
+        + 'and a display that showed `openai` for a block that never wrote it shows nothing. The key '
+        + 'itself leaves the spec in the same major '
+        + '(#37712, `agent-model-provider-removed`): delete `provider`; the deployment\'s AI settings '
+        + 'choose the provider.',
+    },
+    {
+      key: 'ai/KnowledgeSource:refresh',
+      from: '(none)',
+      to: '{}',
+      reason:
+        'No parsed value changes. `refresh` has parsed to `{}` when omitted since it was declared '
+        + '(`.default({}).optional()`), and the knowledge service reads an absent `onRecordChange` '
+        + 'as on. The published input-shape JSON Schema could not state that default while `cron` '
+        + 'beside it carried a transform (#14825); `cron` is removed (ADR-0161 K6), so the schema '
+        + 'now states the default the parser has always applied. There is nothing to write to keep '
+        + 'the old behaviour.',
+    },
+  ],
 };

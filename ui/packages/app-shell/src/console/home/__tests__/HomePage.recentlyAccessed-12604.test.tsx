@@ -22,6 +22,8 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Pays the lint package's first load during collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import React from 'react';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { useDisplayLocale } from '@object-ui/i18n';
@@ -151,6 +153,7 @@ const ACCOUNT = {
   label: 'Account',
   pluralLabel: 'Accounts',
   icon: 'building',
+  color: 'orange',
   listViews: { 'crm_account.all_accounts': { name: 'crm_account.all_accounts', label: 'All Accounts' } },
 };
 
@@ -236,10 +239,10 @@ describe('Home "Recently accessed" (objectui#12604)', () => {
     expect(rows().map((row) => row.getAttribute('data-recent-type'))).toEqual(['record', 'view', 'dashboard', 'object']);
   });
 
-  it('a record row draws its object’s icon; every other row its kind’s', () => {
+  it('a record, view or object row draws its object’s icon; every other row its kind’s (objectstack#36141)', () => {
     renderPage();
     const icons = rows().map((row) => within(row).getByTestId('home-recent-icon').getAttribute('data-icon'));
-    expect(icons).toEqual(['building', 'view', 'dashboard', 'object']);
+    expect(icons).toEqual(['building', 'building', 'dashboard', 'building']);
   });
 
   it('each trail reads context · app · visit time, the time in the display locale', () => {
@@ -274,6 +277,16 @@ describe('Home "Recently accessed" (objectui#12604)', () => {
     renderPage();
     rows()[1].click();
     expect(navigateMock).toHaveBeenCalledWith('/apps/crm/crm_account/view/crm_account.all_accounts');
+  });
+});
+
+describe('a row about an object draws its object\'s tile (objectstack#35985, objectstack#36141)', () => {
+  it('a record, a view and an object row in the object\'s palette colour; a dashboard row on the neutral tile', () => {
+    renderPage();
+    const tiles = rows().map((row) => row.querySelector('[data-object-icon-tile]')?.getAttribute('data-object-icon-tile') ?? null);
+    expect(tiles).toEqual(['orange', 'orange', null, 'orange']);
+    const neutral = rows().map((row) => row.querySelector('[data-neutral-icon-tile]') !== null);
+    expect(neutral).toEqual([false, false, true, false]);
   });
 });
 

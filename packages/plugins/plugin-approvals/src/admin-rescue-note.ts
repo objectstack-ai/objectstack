@@ -170,8 +170,13 @@ function labelledPosition(clause: Clause, positionLabel: PositionLabelOf | undef
 
 /** The position names an admin_rescue note's abandoned slate holds, each once. */
 export function adminRescuePositions(note: Pick<AdminRescueNote, 'abandoned'>): string[] {
+  return slatePositions(note.abandoned);
+}
+
+/** [#36035] The position names a slate's `type:value` slots hold, each once: the no-approver note's too. */
+export function slatePositions(slots: readonly string[]): string[] {
   const names = new Set<string>();
-  for (const slot of note.abandoned) {
+  for (const slot of slots) {
     if (typeof slot === 'string' && slot.startsWith('position:') && slot.length > 'position:'.length) {
       names.add(slot.slice('position:'.length));
     }

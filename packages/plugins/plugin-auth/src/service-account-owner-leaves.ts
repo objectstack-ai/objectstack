@@ -47,6 +47,20 @@
  * keeps its own reason, and nothing is revoked. A suspension that cannot be
  * written never fails the deprovision: the outcome says so and the caller
  * logs it once, and the next inactive write for the person retries it.
+ *
+ * ## An administrator bans the owner
+ *
+ * A platform administrator's ban of a person (`/admin/ban-user`,
+ * `admin-ban-endpoints.ts`) suspends every AI service account that person is
+ * accountable for, in every organization, with
+ * {@link SERVICE_ACCOUNT_OWNER_BANNED_REASON} (`suspendAccountsOfBannedOwner`):
+ * the same writer, its own reason. An account runs only while its owner's
+ * account is active, whichever door disabled the owner. An unban lifts the
+ * person's ban only, so the accounts stay suspended, and a timed ban that
+ * expires leaves them suspended too: an administrator names a new owner, or
+ * keeps the owner once their account is active again, and resumes it (resume
+ * refuses while the owner is disabled, `service-account-lifecycle.ts`). An
+ * account already suspended keeps its own reason, and nothing is revoked.
  */
 
 import { authSystemWriteContext } from './auth-actor-attribution.js';
@@ -61,6 +75,9 @@ export const SERVICE_ACCOUNT_OWNER_LEFT_REASON = 'Accountable owner left the org
 
 /** The ban reason a directory (SCIM) deactivation or delete of the owner records. */
 export const SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON = 'Accountable owner deactivated by the directory';
+
+/** The ban reason a platform administrator's ban of the owner records. */
+export const SERVICE_ACCOUNT_OWNER_BANNED_REASON = 'Accountable owner banned by an administrator';
 
 type LoggerLike = {
   info?(msg: string, meta?: unknown): void;
@@ -210,6 +227,19 @@ export function suspendAccountsOfDirectoryDeactivatedOwner(
   ownerId: string,
 ): Promise<OwnedAccountSuspensionOutcome> {
   return suspendOwnedAccounts(engine, ownerId, { reason: SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON });
+}
+
+/**
+ * A platform administrator banned `ownerId`: suspend every AI service account
+ * that person is accountable for, in every organization, with
+ * {@link SERVICE_ACCOUNT_OWNER_BANNED_REASON}. Never throws; the ban door
+ * answers what it did (`admin-ban-endpoints.ts`).
+ */
+export function suspendAccountsOfBannedOwner(
+  engine: ServiceAccountOwnerLeavesEngine,
+  ownerId: string,
+): Promise<OwnedAccountSuspensionOutcome> {
+  return suspendOwnedAccounts(engine, ownerId, { reason: SERVICE_ACCOUNT_OWNER_BANNED_REASON });
 }
 
 /** Did the pass suspend every account it found unsuspended? */

@@ -37,13 +37,18 @@
  * keys), and the change is judged on the row with them filled in. A read that
  * fails asks nothing: the write goes ahead and the server judges it, as before
  * this card.
+ *
+ * The read is made only when the edited column can open the dialog at all
+ * (`requiredWhenPromptAsksOn`): a column that no askable field's `requiredWhen`
+ * reads leaves every verdict where it was, so its commit reads nothing.
  */
 
 import React from 'react';
-import { getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, getRecordDisplayName, resolveFieldAffordance } from '@object-ui/core';
 import {
   collectRequiredWhenPromptFields,
   requiredWhenPromptReads,
+  requiredWhenPromptAsksOn,
   hasFieldEditWidget,
   RequiredFieldsDialog,
   type RequiredFieldsDialogField,
@@ -112,7 +117,7 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
   // A field this reader may write from the list: the field grant the cell
   // editors ask (`listInlineEdit`).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
-    def.readonly !== true
+    !fieldStaticallyReadOnlyByHand(def)
     && (!objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, name));
 
   const label = (f: RequiredWhenPromptField): RequiredFieldsDialogField => {
@@ -158,6 +163,9 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
       const fields = judge(row);
       return fields.length > 0 ? open(row, row, columnKey, value, fields) : otherwise();
     }
+    // A column no askable predicate reads cannot move any verdict, so the read
+    // could change nothing: the change goes on as if nothing were asked.
+    if (!requiredWhenPromptAsksOn(objectFields, [columnKey], { fillable })) return otherwise();
     const read = inputs.read;
     return (async () => {
       let record: any;
@@ -198,7 +206,9 @@ export function useCellRequiredPrompt(inputs: CellRequiredPromptInputs): {
       // A field a refusal names joins the dialog when it could have been asked
       // for: it has an edit widget and this reader may write it.
       if (!hasFieldEditWidget(def.type) || !fillable(name, def)) return null;
-      return label({ name, def: { name, ...def } });
+      // The record the change would leave, the merge the collector judges its
+      // rows on, so the row's options read the change (objectstack#37270).
+      return label({ name, def: { name, ...def }, record: { ...record, [columnKey]: value } });
     };
     return (
       <RequiredFieldsDialog

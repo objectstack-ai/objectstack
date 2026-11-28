@@ -32,8 +32,24 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CAPABILITY_PROVIDERS, providesCapability } from '@objectstack/core';
+import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS, providesCapability } from '@objectstack/core';
 import Serve from '../src/commands/serve.js';
+
+// Pay the first transform of these dist-resolved workspace deps at MODULE LOAD:
+// `serve.ts`, which this file imports for its statics, loads them lazily inside
+// its command body, a clocked window for any case that reaches it
+// (`check:test-source-alias`, the source-reach rule).
+import '@objectstack/metadata-protocol';
+import '@objectstack/metadata';
+import '@objectstack/plugin-hono-server';
+import '@objectstack/rest';
+import '@objectstack/service-settings';
+import '@objectstack/service-datasource';
+import '@objectstack/cloud-connection';
+import '@objectstack/driver-turso';
+import '@objectstack/driver-sql';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/plugin-security';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
@@ -131,6 +147,8 @@ const EXPECTED_PROVIDER_NAME: Record<string, string> = {
   approvals: 'com.objectstack.service.approvals',
   settings: 'com.objectstack.service.settings',
   webhooks: 'com.objectstack.plugin-webhook-outbox',
+  'record-context': 'com.objectstack.service.record-context',
+  knowledge: 'com.objectstack.service.knowledge',
 };
 
 describe('#7652: every registered provider is still recognised (the other direction)', () => {
@@ -205,7 +223,12 @@ describe('#7652: declared identities match what the provider packages register',
   const entries = Object.entries(CAPABILITY_PROVIDERS).flatMap(([cap, spec]) => [
     { cap, pkg: spec.pkg, export: spec.export, identities: spec.identities },
     ...(spec.extras ?? []).map((ex) => ({ cap: `${cap}:${ex.export}`, pkg: ex.pkg, export: ex.export, identities: ex.identities })),
-  ]);
+  ]).concat(
+    // The stores the `knowledge` token chooses between (`resolveCapabilityExtras`).
+    Object.values(KNOWLEDGE_STORE_PROVIDERS).map((store) => ({
+      cap: `knowledge:${store.export}`, pkg: store.pkg, export: store.export, identities: store.identities,
+    })),
+  );
 
   /**
    * The consumer side of the pin. `@objectstack/connector-mcp` is not a
@@ -324,6 +347,12 @@ const IDENTITY_SOURCES: IdentitySource[] = [
       identities: ex.identities,
     })),
   ]),
+  ...Object.entries(KNOWLEDGE_STORE_PROVIDERS).map(([id, store]) => ({
+    label: `KNOWLEDGE_STORE_PROVIDERS.${id}`,
+    pkg: store.pkg,
+    export: store.export,
+    identities: store.identities,
+  })),
   ...Object.entries(IDENTITY_LISTS).map(([name, entry]) => ({
     label: `Serve.${name}`,
     pkg: entry.pkg,

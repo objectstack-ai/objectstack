@@ -25,7 +25,7 @@ import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/s
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions, MetadataStampOnlyRow } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions, MetadataRowBinding, MetadataStampOnlyRow } from './loader-interface.js';
 import { parsedStoredBody, stampOnlyPackageOf } from '../stamp-only-row.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
@@ -45,6 +45,7 @@ import {
   storeRowKey,
   storeRowSlotKey,
   storeRowWriteKey,
+  isPlatformOrigin,
 } from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
@@ -456,6 +457,8 @@ export class DatabaseLoader implements MetadataLoader {
   private readonly statCache?: LRUCache<string, MetadataStats | null>;
   /** [#31699 R7-A] Each body a plural read handed out from a legacy row, with that row's id and package ({@link bindReadRowPackage}). */
   private readonly legacyReadRows = new WeakMap<object, { id: string; packageId: string }>();
+  /** [#37039] Each body a plural read answered or handed out, with its row's package column ({@link rowPackageIdOf}). */
+  private readonly readRowColumns = new WeakMap<object, string | null>();
 
   constructor(options: DatabaseLoaderOptions) {
     if (!options.driver && !options.engine) {
@@ -1253,12 +1256,14 @@ export class DatabaseLoader implements MetadataLoader {
       for (const row of rows) {
         const data = this.rowToData(row);
         if (data === null) continue;
+        this.recordRowColumn(data, storedRowColumnPackageId(row));
         const name = row.name;
         const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
         const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, data, row.bundle_member) : undefined;
         result.push({
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
+          rowPackageId: storedRowColumnPackageId(row),
           ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
             ? {
                 packageId,
@@ -1295,8 +1300,19 @@ export class DatabaseLoader implements MetadataLoader {
    */
   private handOut(entry: StoredTypeRow): Record<string, unknown> {
     const copy = { ...entry.data };
+    this.recordRowColumn(copy, entry.rowPackageId);
     if (entry.legacyRowId !== undefined && entry.packageId !== undefined) this.legacyReadRows.set(copy, { id: entry.legacyRowId, packageId: entry.packageId });
     return copy;
+  }
+
+  /**
+   * [#37039] Record `column` as the package column of the row `item` was read
+   * from ({@link rowPackageIdOf}). A row whose stored body is a JSON primitive
+   * is not an object a column can be recorded against: it is skipped, so its
+   * neighbours' read still answers.
+   */
+  private recordRowColumn(item: unknown, column: string | null): void {
+    if (item !== null && typeof item === 'object') this.readRowColumns.set(item, column);
   }
 
   /**
@@ -1318,6 +1334,14 @@ export class DatabaseLoader implements MetadataLoader {
     if (!read) return;
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const row = rows.find((candidate) => String(candidate.id) === read.id);
+    // [#37130 N7] The handed-out body answers the column as the row holds it now:
+    // another node's boot pass may have bound it since this node read it empty,
+    // and then nothing is written here. ⛔ Never the column as read, which this
+    // node would otherwise answer until it restarted.
+    if (row && storedRowColumnPackageId(row) !== this.readRowColumns.get(item)) {
+      this.recordRowColumn(item, storedRowColumnPackageId(row));
+      this.invalidate(type, name);
+    }
     if (!row || row.package_id === read.packageId || storedRowPackageId(row) !== read.packageId) return;
     // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
     // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
@@ -1346,6 +1370,9 @@ export class DatabaseLoader implements MetadataLoader {
     if (owned) await this.nameUnnamedRows(type, name, unnamedRowsOf(type, ofPackage, (of) => this.rowToData(of)));
     const naming = owned && typeof target === 'string' && row.bundle_member !== target ? { bundle_member: target } : {};
     await this._update(this.tableName, read.id, { package_id: read.packageId, ...naming });
+    // [#37039] The handed-out body answers the column as this update left it, not as the
+    // read found it; `invalidate` drops the cached rows, so a later read agrees.
+    this.recordRowColumn(item, read.packageId);
     this.invalidate(type, name);
   }
 
@@ -1461,6 +1488,34 @@ export class DatabaseLoader implements MetadataLoader {
    * itself is not rebound: no write, its `package_id` stays empty.
    */
   async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
+    return (await this.typeRowSlots<T>(type)).map(({ slot }) => slot);
+  }
+
+  /**
+   * [#37039, cloud ADR-0118 D2] {@link loadManySlots}' entries, in its order,
+   * each with the package its row's `package_id` column records
+   * ({@link MetadataRowBinding.rowPackageId}): `null` for a row written before
+   * the column (or by a writer that left it empty), ⛔ never the package its
+   * stored body names. The entry's own `packageId` stays the slot the store
+   * keys the row under, as {@link loadManySlots} answers it, so a reader
+   * matches each entry to the item it keyed from it.
+   */
+  async loadRowBindings<T = any>(type: string): Promise<MetadataRowBinding<T>[]> {
+    return (await this.typeRowSlots<T>(type)).map(({ slot, row }) => ({ ...slot, rowPackageId: row.rowPackageId }));
+  }
+
+  /**
+   * [#37039] The package column of the row a plural read of this loader
+   * answered `item` — that very object — from (`loadMany`, `loadManyKeyed`,
+   * `loadManySlots`, `loadRowBindings`); `null` for an empty column;
+   * `undefined` for an object this loader did not hand out.
+   */
+  rowPackageIdOf(item: object): string | null | undefined {
+    return this.readRowColumns.get(item);
+  }
+
+  /** {@link loadManySlots}' body: each entry paired with the stored row it was read from. */
+  private async typeRowSlots<T>(type: string): Promise<Array<{ slot: MetadataKeyedItem<T>; row: StoredTypeRow }>> {
     const rows = (await this.readTypeRows(type)).filter((entry): entry is StoredTypeRow & { name: string } => entry.name !== null);
     const keys = PACKAGE_SLOTTED_STORE_TYPES.has(type) && !isBundledStoreType(type) ? pluralEntryKeys(type, rows) : [];
     // Only the row the unscoped read keeps of its key ({@link unscopedTypeRows}:
@@ -1471,15 +1526,15 @@ export class DatabaseLoader implements MetadataLoader {
       if (held === undefined || (entry.version ?? 0) >= (rows[held]!.version ?? 0)) kept.set(keys[at]!, at);
     });
     const customizes = pluralEntryCustomizedHolders(type, rows, keys).map((holder, at) => (kept.get(keys[at]!) === at ? holder : undefined));
-    if (customizes.every((holder) => holder === undefined)) return rows.map((entry) => keyedRow<T>(entry.name, entry));
+    if (customizes.every((holder) => holder === undefined)) return rows.map((entry) => ({ slot: keyedRow<T>(entry.name, entry), row: entry }));
     const slotOf = (entry: StoredTypeRow & { name: string }, at: number) =>
       storeRowSlotKey(type, entry.name, customizes[at] ?? entry.packageId, entry.member);
-    const customizationOf = new Map<string, MetadataKeyedItem<T>>();
+    const customizationOf = new Map<string, { slot: MetadataKeyedItem<T>; row: StoredTypeRow }>();
     rows.forEach((entry, at) => {
       const holder = customizes[at];
-      if (holder !== undefined) customizationOf.set(slotOf(entry, at), { name: entry.name, data: entry.data as T, packageId: holder });
+      if (holder !== undefined) customizationOf.set(slotOf(entry, at), { slot: { name: entry.name, data: entry.data as T, packageId: holder }, row: entry });
     });
-    const slots: MetadataKeyedItem<T>[] = [];
+    const slots: Array<{ slot: MetadataKeyedItem<T>; row: StoredTypeRow }> = [];
     rows.forEach((entry, at) => {
       if (customizes[at] !== undefined) return;
       const customization = customizationOf.get(slotOf(entry, at));
@@ -1487,7 +1542,7 @@ export class DatabaseLoader implements MetadataLoader {
         slots.push(customization);
         customizationOf.delete(slotOf(entry, at));
       }
-      slots.push(keyedRow<T>(entry.name, entry));
+      slots.push({ slot: keyedRow<T>(entry.name, entry), row: entry });
     });
     return slots;
   }
@@ -1870,6 +1925,18 @@ export class DatabaseLoader implements MetadataLoader {
     if (!existing && !restoresBinding) {
       throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
+    // [#37013] The platform's own record is written by the platform's
+    // registration alone: a rollback never restores it (a restored body is
+    // written without the platform's mark, so the row would stop being the
+    // platform's record). Refused before anything is written.
+    // [#37604] …nor writes a version the platform registered into a package's
+    // row: the row this rollback writes is the slot's (or, for any other type,
+    // the name's row), and the version is judged by its history row.
+    refusePlatformRecordRestore(type, name, existing, {
+      historyRow: slot ? slot.recorded : await this.historyVersionRow(type, name, targetVersion),
+      version: targetVersion,
+      intoPackageId: slot ? slot.packageId : (existing ? storedRowColumnPackageId(existing) : null),
+    });
     if (restoresBinding) {
       // [#32540 C8] Refused before any write: an object the column cannot
       // store, or an object-less binding whose place an unnameable row holds.
@@ -1979,7 +2046,7 @@ export class DatabaseLoader implements MetadataLoader {
     targetVersion: number,
     restoredData: unknown,
     packageId: string | null | undefined,
-  ): Promise<{ rows: Array<Record<string, unknown>>; packageId?: string } | undefined> {
+  ): Promise<{ rows: Array<Record<string, unknown>>; packageId?: string; recorded?: Record<string, unknown> } | undefined> {
     const bySlot = await this.rowSlots(type, name);
     if (bySlot.size === 0) return { rows: [] };
     let key: string;
@@ -2012,7 +2079,7 @@ export class DatabaseLoader implements MetadataLoader {
       }
       refuseSlotNotHeld(bySlot, type, name, versionOwner);
     }
-    return { rows: bySlot.get(key) ?? [], packageId: slotPackage };
+    return { rows: bySlot.get(key) ?? [], packageId: slotPackage, recorded };
   }
 
   /**
@@ -2084,7 +2151,15 @@ export class DatabaseLoader implements MetadataLoader {
       const key = slotOf(row);
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
-    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
+    // [#37013] A package's first row never takes over the platform's row.
+    // Read off the stored body as written: the stamp is no conversion's. For a
+    // type whose slot holds a row per member, the row judged is the written
+    // member's — the one the write would take over — not the slot's first.
+    const writtenMember = storedRowMemberOf(type, data);
+    const platformRow = (slot: string) => isPlatformOrigin(storedRowBodyOf(writtenMember === undefined
+      ? bySlot.get(slot)
+      : rows.find((row) => slotOf(row) === slot && (memberOf(row) ?? null) === writtenMember)));
+    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data, platformRow);
     // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
     // a row per member: the write goes to the row of the member the body
     // declares (the canonical one spelled `null`, `storedBundleMemberOf`), and
@@ -2388,9 +2463,14 @@ export class DatabaseLoader implements MetadataLoader {
       const bySlot = await this.rowSlots(type, name);
       const keys = options?.packageId === undefined && options?.packagelessOnly === true
         ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
-        : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+        : options?.packageId === undefined && options?.platformOnly === true
+          ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
+          : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+      // [#37013] The platform's withdrawal takes its own rows only: a
+      // package-less row whose stored body the platform wrote.
+      const taken = (row: Record<string, unknown>) => options?.platformOnly !== true || isPlatformOrigin(storedRowBodyOf(row));
       for (const key of keys) {
-        for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
+        for (const row of bySlot.get(key) ?? []) if (taken(row)) await this._delete(this.tableName, row.id as string);
       }
       if (keys.length > 0) this.invalidate(type, name);
       return;
@@ -2410,12 +2490,28 @@ export class DatabaseLoader implements MetadataLoader {
       // Another package's item (or none this row can name): not this removal's.
       return;
     }
+    // [#37013] The platform's withdrawal takes the row only when the
+    // platform's registration wrote it.
+    if (options?.platformOnly === true && !isPlatformOrigin(storedRowBodyOf(existing))) return;
 
     // Delete from the main metadata table using the record's ID
     await this._delete(this.tableName, existing.id as string);
 
     this.invalidate(type, name);
   }
+}
+
+/**
+ * [#37039, cloud ADR-0118 D2] The package a `sys_metadata` row's `package_id`
+ * column records, and only the column: `null` when it is empty — a row written
+ * before the column, or by a writer that left it unset — or holds the
+ * {@link ENVIRONMENT_HISTORY_MARK} sentinel, which names no package. ⛔ Never
+ * the package the stored body names: the body is what the row's author wrote,
+ * the column is what the store's write path recorded.
+ */
+function storedRowColumnPackageId(row: Record<string, unknown>): string | null {
+  const column = row.package_id;
+  return typeof column === 'string' && column !== '' && column !== ENVIRONMENT_HISTORY_MARK ? column : null;
 }
 
 /**
@@ -2427,8 +2523,8 @@ export class DatabaseLoader implements MetadataLoader {
  * delete therefore never takes.
  */
 function storedRowPackageId(row: Record<string, unknown>): string | undefined {
-  const column = row.package_id;
-  if (typeof column === 'string' && column !== '' && column !== 'sys_metadata') return column;
+  const column = storedRowColumnPackageId(row);
+  if (column !== null) return column;
   const stored = row.metadata;
   if (stored === null || stored === undefined) return undefined;
   let body: unknown;
@@ -2488,6 +2584,8 @@ interface StoredTypeRow {
   member?: string | null;
   /** [#31699 R7-A] For a by-package type's row whose `package_id` is empty and whose body names `packageId`: its id. */
   legacyRowId?: string;
+  /** [#37039] The package the row's `package_id` column records ({@link storedRowColumnPackageId}), for every type. */
+  rowPackageId: string | null;
 }
 
 /** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */
@@ -2596,4 +2694,85 @@ function generateId(): string {
   }
   // Fallback for environments without crypto.randomUUID
   return `meta_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+}
+
+/**
+ * [#37013, #37604 N5] Whether a stored row is the platform's own record: its
+ * `package_id` column names no package (empty, or the environment's history
+ * mark), and its stored body carries the platform's mark and names no package
+ * ({@link isPlatformOrigin}). Read off a `sys_metadata` row, it says whether
+ * the row is the record the platform's registration writes; off a
+ * `sys_metadata_history` row, whether the version is one the platform
+ * registered. A row bound to a package by its column is that package's,
+ * whatever its body keeps. The one reader of the fact: the restore refusal
+ * ({@link refusePlatformRecordRestore}), the metadata protocol's overlay
+ * census and its adoption of orphans ask it, so they cannot disagree.
+ */
+export function isPlatformRecordRow(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row || storedRowColumnPackageId(row) !== null) return false;
+  return isPlatformOrigin(storedRowBodyOf(row));
+}
+
+/**
+ * [#37013, #37130] Refuse a rollback or restore whose target `row` (a
+ * `sys_metadata` row) is the platform's own record ({@link isPlatformRecordRow}):
+ * `409 RESOURCE_CONFLICT`, naming the fix, before anything is written. Only
+ * the platform's registration writes that record; a rollback restores a
+ * package's or the environment's item. The one rule the metadata service's
+ * `rollback` ({@link DatabaseLoader.registerRollback}) and the metadata
+ * protocol's restore doors (`rollbackMetaItem` and the restore limb of
+ * `revertCommit`, through `SysMetadataRepository.restoreVersion`) share: a
+ * row the platform's record does not hold passes.
+ *
+ * [#37604] `restored`, when stated, is the version the restore would write:
+ * its history row, its number, and the package whose row it writes (`null`:
+ * the package-less row). A version the platform registered (its history row
+ * read by {@link isPlatformRecordRow}) is never written into a package's row,
+ * refused with the same envelope: after the platform withdraws its record,
+ * a name's one remaining holder may be a package, whose slot the
+ * environment's versions then belong to, and the platform's body would
+ * become that package's item.
+ */
+export function refusePlatformRecordRestore(
+  type: string,
+  name: string,
+  row: Record<string, unknown> | null | undefined,
+  restored?: { historyRow: Record<string, unknown> | null | undefined; version: number; intoPackageId: string | null | undefined },
+): void {
+  if (isPlatformRecordRow(row)) {
+    throw platformRecordConflict(
+      `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
+      'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package; ' +
+      'to make an earlier version the environment\'s own item of the name, save that version\'s body again, which holds until the platform\'s next registration at boot writes its record back.',
+    );
+  }
+  const into = restored?.intoPackageId;
+  if (restored && typeof into === 'string' && into !== '' && isPlatformRecordRow(restored.historyRow)) {
+    throw platformRecordConflict(
+      `${type}/${name}: version ${restored.version} is a version the platform registered, and this rollback would write it into package '${into}''s row. ` +
+      `It is not restored: a package's rollback restores that package's own versions. To make that body package '${into}''s item, save it again naming the package.`,
+    );
+  }
+}
+
+function platformRecordConflict(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_CONFLICT';
+  err.status = 409;
+  return err;
+}
+
+/**
+ * [#37013] A row's stored body as written (`metadata`, parsed when stored as
+ * text), for reading a stamp off it; `undefined` for a missing row or a body
+ * that does not parse, which is then no platform record.
+ */
+function storedRowBodyOf(row: Record<string, unknown> | undefined): unknown {
+  const stored = row?.metadata;
+  if (typeof stored !== 'string') return stored ?? undefined;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
 }

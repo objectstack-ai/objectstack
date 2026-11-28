@@ -4,6 +4,7 @@ import {
   SkillSchema,
   SkillTriggerConditionSchema,
   defineSkill,
+  skillBindsRecordContextTool,
   type Skill,
 } from './skill.zod';
 
@@ -243,5 +244,69 @@ describe('retired `triggerPhrases` — phrases never routed a skill; triggerCond
     const message = result.error?.issues.map((i) => i.message).join(' | ') ?? '';
     expect(message).toContain('`triggerPhrase`');
     expect(message).not.toContain('triggerPhrases');
+  });
+});
+
+describe('[#37013] a stored skill the platform registered keeps its provenance through a parse', () => {
+  const stored = { name: 'data_explorer', label: 'Data explorer', instructions: 'Answer questions about records.', tools: ['query_records'] };
+
+  it('`_provenance: \'platform\'` is a declared value: the parse succeeds and keeps it', () => {
+    const result = SkillSchema.safeParse({ ...stored, _provenance: 'platform' });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data._provenance).toBe('platform');
+  });
+
+  it('CONTROL — a value outside the enum is still refused at `_provenance`', () => {
+    const result = SkillSchema.safeParse({ ...stored, _provenance: 'system' });
+    expect(result.success).toBe(false);
+    expect(result.success ? [] : result.error.issues.map((issue) => issue.path.join('.'))).toEqual(['_provenance']);
+  });
+});
+
+describe('[ADR-0160 D8] SkillSchema.context — the pack a skill works from', () => {
+  const base = { name: 'policy_inquiry', label: 'Policy inquiry', instructions: 'Answer questions about one policy.' };
+
+  it('a skill that binds get_record_context by name parses with its context', () => {
+    const result = SkillSchema.safeParse({ ...base, tools: ['get_record_context'], context: 'policy_document' });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.context).toBe('policy_document');
+  });
+
+  it('a wildcard that matches get_record_context is a binding too', () => {
+    for (const wildcard of ['get_record*', 'get_*', 'g*']) {
+      expect(SkillSchema.safeParse({ ...base, tools: [wildcard], context: 'policy_document' }).success, wildcard).toBe(true);
+    }
+  });
+
+  it('refuses context at parse when tools does not bind get_record_context, located on tools', () => {
+    for (const tools of [[], ['get_record'], ['query_*'], ['get_record_contexts']]) {
+      const result = SkillSchema.safeParse({ ...base, tools, context: 'policy_document' });
+      expect(result.success, JSON.stringify(tools)).toBe(false);
+      const issues = result.success ? [] : result.error.issues;
+      expect(issues.map((issue) => [issue.code, issue.path.join('.')])).toEqual([['custom', 'tools']]);
+    }
+  });
+
+  it('CONTROL — without context the same bindings parse as before', () => {
+    for (const tools of [[], ['get_record'], ['query_*']]) {
+      const result = SkillSchema.safeParse({ ...base, tools });
+      expect(result.success, JSON.stringify(tools)).toBe(true);
+      expect(result.success && 'context' in result.data).toBe(false);
+    }
+  });
+
+  it('takes a bare pack name only: a face (NS-NAME) or a non-snake name is refused at context', () => {
+    for (const context of ['crm-policy_document', 'Policy', '']) {
+      const result = SkillSchema.safeParse({ ...base, tools: ['get_record_context'], context });
+      expect(result.success, context).toBe(false);
+      expect(result.success ? [] : result.error.issues.map((issue) => issue.path.join('.'))).toContain('context');
+    }
+  });
+
+  it('skillBindsRecordContextTool answers the binding the refusal reads', () => {
+    expect(skillBindsRecordContextTool(['get_record_context'])).toBe(true);
+    expect(skillBindsRecordContextTool(['query_records', 'get_*'])).toBe(true);
+    expect(skillBindsRecordContextTool(['get_record'])).toBe(false);
+    expect(skillBindsRecordContextTool(undefined)).toBe(false);
   });
 });

@@ -67,6 +67,8 @@ import type { ExprValidationCode } from '@objectstack/formula';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
+import { stampRootRun } from './root-run.js';
+import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1048,14 +1050,19 @@ export function celScope(
     variables: Map<string, unknown>,
     context?: AutomationContext,
 ): { extra: Record<string, unknown> } {
-    const vars: Record<string, unknown> = {};
+    // No variable key reaches a prototype (`./scope-key-segments.ts`):
+    // prototype-free containers, and a key with a skipped segment binds
+    // nothing. A dotted tail whose head names a value the run holds is still
+    // written into that value.
+    const vars = scopeContainer();
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.
         const segs = key.split('.');
+        if (isSkippedScopeKey(segs)) continue;
         let cursor = vars;
         for (let i = 0; i < segs.length - 1; i++) {
             if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                cursor[segs[i]] = {};
+                cursor[segs[i]] = scopeContainer();
             }
             cursor = cursor[segs[i]] as Record<string, unknown>;
         }
@@ -1381,6 +1388,9 @@ export async function executeWithoutRetry(
     // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
     stampFlowRunSlot(runContext, flowName, runPackage);
+    // [ADR-0162 item 7] Each attempt is a run of its own, and its own root
+    // when it has no parent, as `execute()` stamps it.
+    stampRootRun(runContext, { runId, flowName, startedAt });
 
     try {
         const startNode = flow.nodes.find(n => n.type === 'start');

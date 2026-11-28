@@ -88,6 +88,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#30237] `registerRecycleBinEndpoints`' body, the recycle bin's doors under
     // `{data}/:object/recycle-bin`. New, not a moved slice.
     'recycle-bin-routes.ts',
+    // [#35402] `registerChangeOwnerEndpoints`' body, the Change Owner action's doors under
+    // `{data}/:object/change-owner` and `{data}/:object/:id/change-owner`. New, not a moved slice.
+    'change-owner-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */

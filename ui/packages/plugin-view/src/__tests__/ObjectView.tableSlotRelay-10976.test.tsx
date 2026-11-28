@@ -21,7 +21,7 @@
  * and registry, and reads the node `ObjectGrid` receives. It pins:
  *
  *  1. completeness, at COMPILE time: every key the slot declares is either read
- *     by name, relayed (`OBJECT_VIEW_TABLE_RELAY_KEYS`), or one of the three
+ *     by name, relayed (`OBJECT_VIEW_TABLE_RELAY_KEYS`), or one of the
  *     retirement tombstones. A key added to the slot and handed to nothing is a
  *     `tsc` error here (`pnpm --filter @object-ui/plugin-view type-check`);
  *  2. arrival, at RUNTIME: one render carries every relayed and by-name key,
@@ -96,9 +96,11 @@ type ByNameKey =
  * `ObjectGridSchema`'s own retirement tombstones, which type no value an author
  * can write. `defaultFilters` joined them with `@objectstack/spec` 18
  * (objectstack#11509), when this component stopped reading it by name
- * (objectui#12030).
+ * (objectui#12030). `singleClickEdit` joined them when objectstack#36270 retired
+ * it (the select-first editing model has no single-click entry); the view
+ * relayed it until then.
  */
-type TombstoneKey = 'body' | 'children' | 'defaultFilters' | 'defaultSort';
+type TombstoneKey = 'body' | 'children' | 'defaultFilters' | 'defaultSort' | 'singleClickEdit';
 
 /**
  * ⭐ The compile-time pins. Each alias resolves to `never` when the claim holds;
@@ -137,7 +139,6 @@ const RELAYED: Required<Pick<TableSlot, RelayKey>> = {
   showColumnTypeIcons: true,
   showPagination: false,
   showSearch: false,
-  singleClickEdit: true,
 };
 
 /**

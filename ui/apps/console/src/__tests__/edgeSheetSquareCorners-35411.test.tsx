@@ -1,12 +1,16 @@
 /**
- * The console's extra-rounded dialog corners skip full-height edge drawers
- * (objectstack#35411).
+ * The console's extra-rounded corners skip full-height edge drawers
+ * (objectstack#35411) and, since objectstack#35980, every modal dialog.
  *
- * `index.css` gives every `role="dialog"` surface a 1.25rem radius. A left or
- * right Sheet is fixed against the top, side and bottom of the viewport, so the
- * radius showed as a notch at each inner corner. The rule now skips the Sheet's
- * edge variants by the `inset-y-0` class their variant carries, while centred
- * dialogs and bottom sheets keep the radius.
+ * `index.css` used to give every `role="dialog"` surface a 1.25rem radius. A
+ * left or right Sheet is fixed against the top, side and bottom of the
+ * viewport, so the radius showed as a notch at each inner corner; #35411 made
+ * the rule skip the Sheet's edge variants. #35980 moved the dialog's look onto
+ * the dialog itself (`dialog-surface`, a 12px card), so the rule no longer
+ * names every `role="dialog"`: it keeps the rounded corners for the floating
+ * popover and the bottom drawer only, by their own containers. A top or
+ * bottom Sheet meets the viewport on three edges like a side one, and is no
+ * longer matched either.
  *
  * The record drawer is the exception: it is a floating card (objectstack#35854)
  * that sets its own radius, so the global rule must not override it either.
@@ -59,20 +63,21 @@ function renderSheet(side: 'left' | 'right' | 'bottom' | 'top'): HTMLElement {
   return screen.getByRole('dialog');
 }
 
-describe('edge sheets are not rounded by the dialog corner rule (#35411)', () => {
-  it('the rule still targets dialogs', () => {
-    expect(roundingSelector()).toContain('[role="dialog"]');
+describe('edge sheets and dialogs are not rounded by the corner rule (#35411, #35980)', () => {
+  it('the rule names popovers and the bottom drawer, never every dialog', () => {
+    const selector = roundingSelector();
+    expect(selector).toContain('[data-radix-popper-content-wrapper] > [role="dialog"]');
+    expect(selector).toContain('[data-vaul-drawer]');
+    for (const part of selector.split(',')) {
+      expect(part.trim().startsWith('[role="dialog"]')).toBe(false);
+    }
   });
 
-  it.each(['left', 'right'] as const)('a %s sheet is not matched', (side) => {
+  it.each(['left', 'right', 'bottom', 'top'] as const)('a %s sheet is not matched', (side) => {
     expect(renderSheet(side).matches(roundingSelector())).toBe(false);
   });
 
-  it.each(['bottom', 'top'] as const)('a %s sheet keeps the rounded corners', (side) => {
-    expect(renderSheet(side).matches(roundingSelector())).toBe(true);
-  });
-
-  it('a centred dialog keeps the rounded corners', () => {
+  it('a centred dialog is not matched: it carries its own corner', () => {
     render(
       <Dialog open>
         <DialogContent>
@@ -80,7 +85,9 @@ describe('edge sheets are not rounded by the dialog corner rule (#35411)', () =>
         </DialogContent>
       </Dialog>,
     );
-    expect(screen.getByRole('dialog').matches(roundingSelector())).toBe(true);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.matches(roundingSelector())).toBe(false);
+    expect(dialog.className.split(/\s+/)).toContain('sm:rounded-[12px]');
   });
 });
 

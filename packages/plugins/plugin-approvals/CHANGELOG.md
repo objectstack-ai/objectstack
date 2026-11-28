@@ -1,5 +1,745 @@
 # @objectstack/plugin-approvals
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 0bfdee9: fix(approvals): the stranded-request inspection keeps finding new strands past 500 decided requests
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The read-only inspection that rides the approvals sweep (every five minutes) names decided requests (`approved`, `rejected`, `returned`) whose flow run can no longer advance. It read up to 500 decided requests with no order and no cursor, so once a deployment held more than 500, the page it read was whatever the database handed back, and a request stranded today could stay unseen on every sweep.
+  
+  Each sweep now reads two ordered windows of at most 500 rows, both filtered and ordered by the database:
+  
+  - the most recently decided requests (by `updated_at`), so a decision whose run could not advance is named on the next sweep;
+  - the next 500 of a walk over every decided request by id, which resumes where the previous sweep stopped and starts again once it reaches the end. Every decided request is read at least once every ceil(decided / 500) sweeps, which also covers more than 500 decisions between two sweeps.
+  
+  A sweep reads at most 1,000 rows instead of 500. The walk's position is kept in memory, so after a restart it starts again from the first id. The inspection still only reports, in the same log line and the same result; nothing is rewritten.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 9b622bb: feat(service-messaging): a keyed notification param can be a list, each item rendered in the recipient's language; the approval "no one can approve" notice names a slate of any size in the reader's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `EmitInput.keyedText.params` accepts a new value shape, `{ list, separator }`. Each `list` item is `{ key, params?, fallback }`: a catalog sentence with its own `{{hole}}` params, rendered per recipient. An item param can be text, `{ key, fallback }` or `{ object, fallback }`, but not another list. A sentence with no entry falls back to the item's `fallback`. The rendered items are joined by the `separator` entry (`{ key, fallback }`), so a list of any length reads in one language. A list holds 1 to `NOTIFICATION_LIST_PARAM_MAX_ITEMS` (100) items, and `emit()` refuses a malformed one before it writes anything. The new exports are the types `NotificationListParam`, `NotificationListItem` and `NotificationScalarParam`, and the constant `NOTIFICATION_LIST_PARAM_MAX_ITEMS`. Every existing param shape renders as before.
+  - The widening reaches the read side too. `NotificationTextParam` is now `NotificationScalarParam | NotificationListParam`, so the exported channel contract `Notification.keyedText` can carry a list param. A channel that reads `keyedText.params` must handle the list shape.
+  - An older reader does not understand a list row. After a rollback to a version before this one, it reads the row's keys as malformed and delivers or shows the whole notice as its stored English literal, title and body alike. Nothing fails. Within one install this cannot otherwise happen, because the two packages always release together.
+  - The approval submitter's notice for a request no one else can approve now names a slate of two or more slots through this list param, one `approvalNoApproverSlot` clause per slot, joined by `approvalNoApproverSlotSeparator`. Before, a slate of more than 8 slots named its slots in English inside a zh-CN, ja-JP or other non-English sentence. Now every slot reads in the recipient's language. The literal English body is unchanged. A slate of more slots than a list param holds (more than 100) is sent with the slots as one English clause list instead, as before, so `emit()` does not refuse the notice and the submitter is still told.
+  - The `approvalNoApproverHoldingSlots2` to `…Slots8` sentences stay in the packs, because notices already delivered carry those keys and are rendered again whenever the inbox is read.
+- c9741f4: fix(approvals): the Approval Actions list and an action's record page name the step and the platform's own notes in the reader's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_approval_action` read through the generic data door (Setup's Approval Actions list, an action's record page, the export) now serves, to a reader with a locale, the same text the approvals door's timeline serves:
+  
+  - `step_label`: the step's label from the app's language pack (`flows.<flow>.approvals.<step>.label`), as the Approval Requests list already did. Before, the stored authoring-language snapshot was served to every reader.
+  - `comment` on the rows the platform writes itself: the administrators' routing note, the submitter exclusion note and the no-approver note, which are stored as data on the request, and the cancellation written when the record a pending request is about is deleted ("Auto-cancelled: the … record '…' this request is about was deleted"), now a catalog sentence (`approvalAutoCancelledRecordDeleted`, in all eleven shipped languages) composed from the request's own columns. The approvals door's timeline serves that cancellation in the reader's language too.
+  
+  A comment a person wrote is served as written. A list that selects `step_label` or `comment` without the columns their text is picked by is served exactly the columns it selected. Storage is unchanged: the stored step label stays the authored text and the stored comment the English, which is what a system read, a reader with no locale and a language the pack does not hold are served. Nothing to migrate.
+- f19ae3a: feat(automation): every run of a tree is handed its root run and the run that carries its record, and each approval request records both in columns of its own
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0162 Execution item 7, "The root run". A `subflow` body or a `map` item knew only its immediate parent (`$parentRunId`), so nothing could tell which runs, and which requests, belong to one whole approval.
+  
+  - **`@objectstack/service-automation`.** The engine stamps every run's context with its root run, `$rootRun`: `{ runId, flowName, object, startedAt }`, the run the tree was started on, its flow's key, the object it was started on (its context's `object`, with or without a record; `null` when it names none, never a `map` item's own object) and when it started. A run with no parent is its own root, also on each retry attempt; a child carries its parent's over, at any depth, and the stamp rides every suspension. Beside it, `$recordRun`: `{ runId, object, recordId }`, the highest run from this one up over which the record does not change, which is the root run or a `map` item run whose item is a record (a `subflow` child, and an item that is not a record, inherit their parent's). New: `AutomationEngine.rootRunOf(context)` and `recordRunOf(context)`, which answer them, and the `RootRun` and `RecordRun` types. A run parked before this release carries neither and gets both when it is resumed, derived in one walk of its links to its parents, before the suspension is consumed: a parent the store cannot read refuses that resume with `STORE_UNAVAILABLE` (nothing consumed, retry verbatim), and a parent that is no longer parked stamps the run `null` on both, said once at `warn`, while the run goes on; a child such a run starts inherits the `null`, and a `null` stamp is not walked again.
+  - **`@objectstack/plugin-approvals`.** The approval node hands both to `openNodeRequest` (new optional `rootRun` and `recordRun` inputs, types `ApprovalRootRun` and `ApprovalRecordRun`), and each request records `root_run_id`, `root_run_started_at` and `record_run_id` as it opens, three new read-only columns on `sys_approval_request` (in its free-text search set beside `flow_run_id`) with indexes on `(root_run_id, object_name, record_id)` and `(record_run_id)`. A run the engine could not place (the derivation above could not read its tree whole), and any run on an automation service without `rootRunOf`, opens its approval step as before, with the three columns empty. `ApprovalRootRun` and `ApprovalRecordRun` are exported from the plugin's index.
+  
+  Nothing to migrate. The columns are added by schema sync; requests opened before this release keep them empty.
+- 94b0314: fix(approvals): a step decided in a `subflow` child no longer tells the submitter "approved" while the parent opens a further step
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The decision that ends an approval tells its submitter the outcome (`approval.approved` / `approval.rejected`); a decision that ends only a step tells no one. To tell the two apart, the platform looked for a pending request on the decided request's own run. A step decided inside a `subflow` child hands the next step to the parent run, which opens it under the parent's run id, so nothing pending was found and the submitter was told "approved" while the next step was still open.
+  
+  The check now looks across the run that carries the request's record (`record_run_id`, recorded on each request since requests record their root run). A `subflow` child shares that run with its parent, so a further step on either side keeps the first decision quiet, and the decision that ends the approval tells the submitter as before.
+  
+  - A `map` item whose item is a record carries a run of its own, so each item's submitter is still told that item's outcome when its last step is decided, while the batch goes on to the next item.
+  - A request opened before requests recorded the run that carries their record is judged on its own run, as before.
+  
+  Nothing to migrate.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- e6fa510: feat(approvals): an escalation deadline can count working time on an organization's working calendar (`escalation.clock: 'working_time'`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-automation/references/state-machines-and-approvals.md
+  
+  An approval node's `escalation` gains two optional keys (ADR-0157 D5):
+  
+  - **`clock`**: `'wall_clock'` (the default) or `'working_time'`. Under `wall_clock` nothing changes: `timeoutHours` counts elapsed hours from `created_at`, nights, weekends and holidays included, and every request already open keeps its deadline (a stored snapshot carries no `clock`). Under `working_time` the hours count only the working periods of a working calendar (`sys_work_calendar`), skipping its holidays and counting its make-up workdays: a request opened at 17:00 on a Friday with `timeoutHours: 4`, on 09:00-12:00 and 13:00-18:00 periods, escalates at 12:00 on the next working day.
+  - **`calendar`**: the code of the working calendar to count on. Left out, the request organization's default calendar counts. There is never a fallback to wall-clock hours.
+  
+  The approvals sweep and the request read share one deadline function. A `working_time` deadline is counted again on every sweep and every read and is never stored, so a holiday entered after a request opened moves its deadline; an escalation that already fired stays fired (single-shot, ADR-0042). When the calendar cannot count the deadline (no calendar has the code, the organization has no default, or the calendar is not maintained as far as the deadline needs), the request does not escalate, the next sweep tries again, and the request read carries a new additive field, `sla_due_refusal` (`code`, `reason` or `date`, `message`), in place of `sla_due_at`. The approvals inbox shows "Calendar can't compute" with the reason where the SLA countdown sits, in every console language.
+  
+  `@objectstack/lint` refuses a `calendar` written beside the wall clock (`approval-escalation-calendar-without-working-time`, error): nothing would read it. Whether the named calendar exists is the organization's runtime data and is never checked at publish. The Studio approval inspector offers the clock and, under working time only, the calendar.
+  
+  Not released alone: this ships in the same release as the working-calendar objects and service and the working-day formula functions (ADR-0157 D4).
+
+### Patch Changes
+
+- 8f49499: fix(approvals): a recall or subflow-parent strand reports the hook refusal that stranded the run
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  When an approval decision strands its flow run because the next step was refused (a record hook's declared refusal, a validation rule, a permission), the thrown `RESUME_FAILED` already carries `innerRefusal` and the refusal's marked `userMessage`. Two doors report a stranded run on a success answer instead, through `resumeFailure`: the recall door, whose own resume stranded, and a subflow parent that stranded after the run this door resumed advanced (through `decide` and through `recall`). Those reports carried `code`, `runId`, `status` and `repairable` only, so the approver saw a stranded run with no reason.
+  
+  - `ResumeFailureReport` (`@objectstack/spec/contracts`) gains two optional members, `innerRefusal` (`{ code, message }`, the engine's `AutomationResult.innerRefusal`) and `userMessage` (the declared sentence in the language of whoever started the run, since a resumed leg keeps the starter's locale; the authored message when no person started the run). The names and shapes are the ones the thrown `RESUME_FAILED` uses. `innerRefusal` is absent when the strand met no refusal (a fault), and `userMessage` is absent unless the failure carried a marked end-user text, so it can ride alone; neither changes how `code` and `repairable` are read. `ResumeFailureDetailsSchema` is unchanged. On the resume door these members already ride the error envelope.
+  - `AutomationEngine.takeSubflowParentStrand` now returns the stranded parent's `innerRefusal` / `userMessage` beside `runId`, `repairable` and `error`, read from the parent's own result.
+  - The approvals recall door and the subflow-parent strand fill both members whenever the strand met a refusal, read the way the thrown `RESUME_FAILED` reads them: an `innerRefusal` whose `code` is outside the registered error codes or whose `message` is not a string, and a blank or non-string `userMessage`, are dropped, so a node that returns a malformed pair answers the same on the success channel as on the thrown one.
+  
+  No migration: the change only adds optional members, and a caller that ignores them reads exactly what it read before.
+- 8e46424: Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  feat(messaging): Slack DM delivery — a `slack` channel, a per-person link store, approval requests by DM
+  
+  An organization can now receive notifications in Slack, as direct messages to each person who connected their own Slack user (ADR-0013 addendum of 2026-11-19, step 2 of #34730).
+  
+  - **The install.** An organization administrator (`setup.write` in their current organization) installs the organization's own Slack app with `PUT /api/v1/messaging/slack/account` `{ token }`. Slack proves the bot token (`auth.test`) before it is saved. The app's bot token needs the scopes `chat:write`, `im:write`, `users:read` and `users:read.email` (the methods called are `auth.test`, `users.lookupByEmail`, `conversations.open` and `chat.postMessage`); `auth.test` does not check scopes, so an app without `users:read.email` installs and every proposal then answers 502. The token is kept in `sys_channel_account.bot_token`, a `secret` field: encrypted at rest by the host's `ICryptoProvider`, masked on every read, never returned by any route, and read only by the server when it calls Slack. `GET` and `DELETE` on the same route read and remove the install.
+  - **A person's link.** `POST /api/v1/messaging/me/slack-link/proposal` proposes a link by the person's email (Slack `users.lookupByEmail`); it delivers nothing until the person confirms it with `POST /api/v1/messaging/me/slack-link/confirm`. A Slack link is proposed only for a verified email and names no one before it is confirmed. `GET` and `DELETE /api/v1/messaging/me/slack-link` read and remove it. An administrator lists links with `GET /api/v1/messaging/slack/links` and removes one with `DELETE /api/v1/messaging/slack/links/:id`; the person is told by inbox and e-mail (topic `messaging.slack_link_removed`) and may link again. A link goes when the person is deleted, banned, or leaves the organization. Links are `sys_channel_user_link` rows; every write names who acted, so the platform's write audit records each one.
+  - **The channel, only where connector-slack is composed.** `slack` is registered beside inbox, email, sms and push only on a composition where connector-slack's `slack` client service resolves at boot: `ConnectorSlackPlugin` now registers that service, which sends with a caller-held token. On such a composition, and only there, the `/automation` save doors accept `slack` on a `notify` node, and `GET /api/v1/messaging/preference-options` and `GET /api/v1/messaging/me/preferences` list `slack` as a channel. A `notify` node naming `slack` delivers only where connector-slack is composed, the organization installed Slack and the recipient confirmed a link. Without connector-slack, those doors answer as before: a `notify` node naming `slack` is refused 400, and neither preference door lists it. It sends `conversations.open` then `chat.postMessage` with the notification's title linked to its deep link, made absolute under `OS_AUTH_URL` / `OS_BASE_URL`. Preferences, digest and quiet hours apply as on every channel. A recipient with no confirmed link is skipped before any delivery row is written, so nothing is dead-lettered for them; a refused token stops delivery on that install until an administrator sets it again; a rate limit is retried.
+  - **Approval requests.** `approval.requested` also asks for `slack`, beside inbox and e-mail, only while the `slack` channel is registered and mounted (connector-slack composed).
+  - `MessagingChannel` gains an optional `reachableRecipients(ctx, { organizationId, recipients })`, consulted once per channel per emit after preferences. A channel without it reaches every recipient, as before.
+  - `PLATFORM_OBJECTS_BY_PACKAGE['service-messaging']` lists `sys_channel_account` and `sys_channel_user_link`, and the organization ownership inventory gives both a row.
+- e100a37: fix(approvals): the approval e-mail's link and the action-link page's inbox link open the Console under its mount
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The approval e-mail's "Open the approval" link was `BASE/system/approvals?request=ID`. `os serve` serves the Console at `/_console/` and nothing at `/system/*`, so the link answered `404 ENDPOINT_NOT_FOUND` and the request never opened. The "Open the Approvals Inbox" link on the action-link result page (`/api/v1/approvals/act`) had the same defect.
+  
+  Both links now carry the Console's mount. The mount is read from the auth service's Console page composer (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`, default `/_console`), the same composer the auth e-mails and the mention e-mail use.
+  
+  - The e-mail link goes from `BASE/system/approvals?request=ID` to `BASE/_console/system/approvals?request=ID` on a default deployment. A deployment that sets `uiBasePath` to `/` keeps `BASE/system/approvals?request=ID`. Its base is still the approval links' own (`publicBaseUrl`, else `OS_AUTH_URL` / `OS_BASE_URL`). A kernel with no auth service has no mount to read, and the e-mail link stays as it was.
+  - The inbox link goes from the origin-relative `/system/approvals` to `BASE/_console/system/approvals`. It is now absolute under the approval links' base when one resolves, and relative (`/_console/system/approvals`) when none does. With no mount to read (no auth service, or `uiBasePath` set to `/`) it is `BASE/system/approvals`.
+  
+  The widening: the exported `ApprovalServiceOptions` gains the optional `getConsoleUrl` that carries the composer; the in-app `actionUrl` is unchanged.
+- bfd6b6b: fix(i18n): an approval rejection reads 驳回 in Chinese, on the runtime surfaces and in the designer's approval panel
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Chinese, the approval runtime now names the reject decision 驳回 (zh-Hant 駁回), the word the flow designer gives the approval branch and the server notifications already use. Before, the designer's branch said 驳回 while its approval-node help and the approver's buttons said 拒绝 for the same decision.
+  
+  - `@object-ui/i18n`: the `approvalsInbox` strings in zh-Hans and zh-Hant: the inbox and record-bar buttons, the bulk and single confirm dialogs, the toasts, the status chip (已拒绝 → 已驳回), the history row, the keyboard hint and the send-back limit notice.
+  - `@objectstack/plugin-approvals`: the zh-CN labels of `sys_approval_request` (the `approval_reject` lever, its confirm question and success toast, the `rejected` status) and of the `reject` row of `sys_approval_action`; the zh-Hant bundle already said 駁回. The email action-link confirm and result pages read 驳回.
+  - `@object-ui/app-shell`: the approval node's zh panel in the flow designer: the multi-approver help, the status-mirror help, the escalation help and its `auto_reject` option label (自动拒绝 → 自动驳回; the stored `auto_reject` value is unchanged), and the revision-limit help. Its branch label and Problems hint already said 驳回; a zh-Hant session draws the same Simplified table.
+  
+  拒绝 stays where it means access denial or declining an invitation, in the AI tool approvals, and in the designer's end-node refused outcome and its API-key, bulk-update and audit-outcome refusals. Display text only: the stored `rejected` status and the `reject` action key are unchanged, and English and the other languages are untouched.
+- 03865ae: Clause-②: no
+  Metadata-protocol: none
+  
+  fix(approvals): a request no one can approve tells its submitter and names the remedy
+  
+  When an approval step resolves to no one who can decide it and no administrator other than the submitter can take it (an organization of one whose step sets `excludeSubmitter` is the common case), the request opened silently: no one was notified and the submitter saw only "Submitted". It now writes a note on its timeline, rendered in the reader's language, and tells the submitter under the `approval.comment` topic: "No one else can approve this request yet. An organization administrator must add a member who can approve it, then reassign the request to them." When the slate kept an unstaffed position, the note names it: "…must add a member who holds position 'legal'; that member can then decide it."
+  
+  The submitter still cannot approve their own request, not even through the administrator override. When no one else is on the slate, the two refusals of that approval now end with the same remedy instead of "Another approver on the step decides it" / "An approver on the step decides it"; with another approver on the slate the text is unchanged. The `excludeSubmitter` note for that route no longer says a privileged override can decide it: it reads "…because this step sets excludeSubmitter, and no one else could take it."
+  
+  A `platform_admin` approver step's slot is now labelled "Platform administrators" (in the reader's language on the approvals door, `pending_approver_names`; in English on the stored `pending_approver_labels`) instead of its raw address `platform_admin:*`. The approvals guide now says that on a deployment where no one holds platform-administrator standing such a step waits with no warning.
+- aff34ba: fix(approvals,audit): an approval's flow and position labels, and a renamed object's label in approvals and activity summaries, read as the metadata translators serve them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese, say), the approvals door still looked up a request's flow label (`flows.<flow>.label`) and a position's label (`positions.<name>.label`) through `II18nService.t()`, which falls back to the `defaultLocale` row when the reader's locale has no entry. So an `en` or `en-US` reader saw the Chinese flow name on the inbox, the request page and the generic data door's request rows, and the Chinese position name in a timeline note, where the authored text was expected. Both labels now resolve through the spec translators of their types (`translateFlow`, `translatePosition` from `@objectstack/spec/system`) over every locale the i18n service holds. They use the resolve options the metadata route builds: the reader's locale, the declared fallback chain, and the authored language (the declared `sourceLocale`, else `defaultLocale`). A reader in the authored language now reads the label as written, and every other reader reads the same row as before.
+  
+  A packaged object renamed by a code extension was named in the reader's language by the bundle's translation of its OLD label. This hit the approvals inbox, request page and object-naming refusals, and the object label inside an activity summary, where `GET /meta/object` serves the rename. Both readers now hand `translateObject` the object's served definition and its packaged base (`packagedBase`, read off the engine's registry through `getPackagedObjectBase`, the base `/meta` reads). So the rename stands in every locale, as on `/meta`, and an unrenamed object reads its translation as before.
+  
+  An approval step's label (`flows.<flow>.approvals.<node_id>.label`) is still read through `t()`: no spec translator reads that key yet.
+- 6d0089c: fix(objectql,approvals,audit): an authored rule message, an approval's object label and an activity summary's labels read as `/meta` serves them in a declared `i18n.sourceLocale`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese, say), three readers still looked metadata text up through `II18nService.t()`, which falls back to the `defaultLocale` row when the reader's locale holds no entry. An `en` reader was shown the Chinese text where `GET /meta` and every other refusal label showed the English one as authored:
+  
+  - objectql: the author-written message of a validation rule (`objects.<object>._validations.<rule>.message`) in a `400 VALIDATION_FAILED` refusal;
+  - plugin-approvals: the object label on the approvals inbox, the request page, the generic data door's request rows and the approval refusals that name an object;
+  - plugin-audit: the object, field and select-option labels inside an activity summary composed in the reader's language.
+  
+  Each now resolves through `translateObject` (`@objectstack/spec/system`) over every locale the i18n service holds, with the resolve options the metadata route builds: the reader's locale, the declared fallback chain and the authored language (the declared `sourceLocale`, else `defaultLocale`). A reader in the authored language reads the text as written; every other reader reads the same row as before. `t()` keeps carrying the catalog sentences.
+  
+  An i18n service that cannot hand its translations over (no `getLocales()` / `getTranslations()`) no longer has these labels and rule messages translated through `t()`: the authored text stands. Every service the platform ships implements both.
+- 99ece3c: fix(i18n): an approval step label and an approval notification's object label read as the metadata translators serve them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese), an English reader was shown the Chinese approval step name, and an English approval-notification recipient read the Chinese object name inside an English sentence. Both labels were read through `II18nService.t()`, which falls back to the `defaultLocale` row; `/meta` serves the authored text. Both now resolve the way the metadata route resolves a label: the reader's negotiated locale, the declared fallback chain, and the authored language (the declared `sourceLocale`, else `defaultLocale`).
+  
+  - **`@objectstack/spec`** adds `resolveFlowApprovalStepLabel(bundle, flowName, nodeId, literal?, opts?)` (`@objectstack/spec/system`), the one reading of `flows.<flow>.approvals.<node_id>.label`: the requested locale, then the declared fallback chain (skipped for the authored locale), then `literal`. It takes the flow's name and the node's id, so a reader holding only an approval request row needs no flow document.
+  - **`@objectstack/service-messaging`** accepts a new `NotificationTextKeys.params` value, `{ object: '<object API name>', fallback }` (`NotificationObjectLabelParam`): the label of that object in the recipient's language, resolved as `GET /meta/object/:name` serves it, by `translateObject` over the object's served definition and its packaged base, so a renamed packaged object is named by its rename. It renders the same way on the inline fan-out, the dispatcher (digests included) and the inbox reader. `fallback` is delivered when nothing resolves. The `{ key, fallback }` value is still accepted and still renders through `t()`, so stored deliveries and inbox rows render as before.
+  - **`@objectstack/plugin-approvals`** names a notification's object with that typed param, and reads the approval step label through `resolveFlowApprovalStepLabel`, so `t()` carries catalog sentences only.
+  
+  Upgrade `@objectstack/plugin-approvals` and `@objectstack/service-messaging` together: an older messaging service refuses the typed param at `emit()`.
+- cda16d4: fix(console): the approval request page is named by the record it asks a decision on, and its reject button no longer outweighs approve
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The page title.** An approval request's page used to be titled by its flow's label ("Purchase approval"), which the strip under it repeated as its Flow chip, while the business record the approver decides on had no title at all. The page header now reads the record's title the approvals get serves (`record_title`), linked to that record once the page itself has read it: a plain click opens it in the app, as the "As submitted" card's "Open record" link does, and a modifier or middle click opens it in a new tab. Where the page's read of the record is refused or finds nothing, or the platform says the record was deleted, the title is plain text with no link, as the record card on the same page draws it. The title makes no read of its own: the reads the page already makes report what they found. Where the get serves no title for the record, or serves only its id, the header keeps the flow's label, so the page never names the record by a raw id. The flow stays named once, by the strip's Flow chip; no subtitle is added, because it would repeat that chip. The request object's declared title (`nameField: 'process_label'`) is unchanged, so lists, search, recent items and the breadcrumb still name a request by its flow.
+  - **`RecordHeaderState.title`** (`@object-ui/components`, new optional member, with its type `RecordHeaderTitle`). A host that knows a better name for the record than the object's declared title hands `{ text, node? }`; `page:header` draws `node` (or `text`) inside its H1, in the host's top bar and in its own row alike. Absent, or with an empty `text`, the header's own title stands exactly as before.
+  - **The decision band.** In the approver's band (the request page, and the business record page's approval band), Approve stays the filled primary button and Reject is drawn as an outline button in the destructive text colour, the face the record header already gives a secondary danger lever. A host that does not ask for the band's fold keeps the declared filled danger face.
+  - **One time format.** The approval timeline's action times use the compact datetime face the page's highlight chips and every `datetime` cell draw (`2026/11/10 下午8:25` under zh-CN), in the host's display time zone, instead of the browser's long form with seconds.
+  - `@objectstack/plugin-approvals`: comments only, saying where the request page now names its record.
+- fe75349: fix(approvals): the approval timeline names an unstaffed position by its label, and the platform's own rows read as the system's
+  
+  Clause-②: yes (widening) — @objectstack/plugin-approvals adds the optional `ApprovalServiceOptions.positionLabelSource`; @object-ui/i18n adds approvalsInbox.systemActor and approvalsInbox.actSystemNote; nothing removed
+  Metadata-protocol: none
+  
+  When a request goes to the organization's administrators because a position on its approver list has no holder, its timeline note named the position by its machine name ("岗位「crm_sales_manager」无人任职"). The note a reader is served now names it by its label: the reader's language pack (`positions.<name>.label`) first, else the position's declared `label`, else the name as before ("岗位「销售经理」无人任职"). The English the row stores for audit keeps the name.
+  
+  On the timeline, a row no person took read its actor as "—", and the routing, submitter-exclusion and no-approver notes read as "Commented". A row with no actor now reads its actor as "System", and a `comment` row with no actor reads as "System note". A person's comment keeps "Commented" and its author.
+  
+  New locale keys: `approvalsInbox.systemActor` and `approvalsInbox.actSystemNote`, in all eleven packs.
+- 1e018d6: feat: edit a record and its line tables together, and lock a record's lines while an approval locks the record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **A locked record's lines are locked too.** While a record is held by an approval that locks it, writes to its master-detail child rows are refused with `RECORD_LOCKED` (409), the same answer a write to the record itself gets: inserting a row under it, updating or deleting one of its rows, and moving a row into it or out of it (both ends of a reparent are checked). A multi-row write that touches any such row is refused as a whole, and a row whose parent cannot be read is refused when the parent object has a locking approval the writer's run does not own. The approval's own exemptions carry over: system writes and the flow run that opened the approval still write. The refusal names the record by its object's label ("This Opportunity is locked while an approval is in progress, …"). Lookup children are not affected. `@objectstack/plugin-approvals` binds the new `bindDetailRowLockHook` beside the record lock it already binds.
+  
+  **`@object-ui/plugin-form` exports the record-page body-table editor.** `RecordBodyTableEditor` draws a master-detail body table as editable lines (the `LineItemsField` grid, with the child columns, field permissions and add / remove rules the master-detail form uses) for a host's edit session (`RecordEditSessionContext`). `buildRecordEditBatch` folds a record's field changes and every table's lines into one batch (the `buildMasterDetailEditBatch` diff, table by table), and `attributeRecordEditRefusal` places a refused batch's reasons on the record's field or on the line whose write carried the refused field.
+  
+  **`@object-ui/i18n`** adds `detail.bodyTableRow`, `detail.bodyTablesReadOnlyBulk` and `detail.discardInlineEditsMessage` to every built-in pack.
+  
+  **`@object-ui/plugin-detail`** exports `RecordBodyTableEditorSlotContext`: while a host provides it, a `record:related_list` whose relationship id (`CHILD_OBJECT.FK_FIELD`) is in the slot's set draws the host's element in its place instead of the read-only list. The record page's edit state draws its body-table editors through it; no new node type is registered.
+  
+  In the console, Edit on a record page that draws master-detail body tables now opens the page's edit state: the fields become inputs, the body tables editable lines, and one Save writes all of it in one batch. Per-field inline edit stays on every record page, those included, and saves the record alone through its save bar. One mode runs at a time: the edit state offers no per-field inline edit, and pressing Edit while inline changes are unsaved first asks whether to discard them.
+- 03bce5c: fix(approvals): rejecting through the `approval_reject` action requires a reason
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one param declaration in this plugin's own object metadata: approval_reject's comment goes from optional to required, so a call to that action without a reason is refused. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of the `approval_reject` action on `sys_approval_request` that sends no `comment`: the call used to reject the request and is now refused before the approvals route runs. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): the declaration belongs to this plugin, and nothing a metadata author writes changes, so `Metadata-protocol` is `none`.
+  
+  `approval_reject` declares its `comment` param `required: true`, so a reject through `approval_reject` always carries its reason. The declared param contract judges the call before the target route runs, and it counts an empty or whitespace-only string as missing: the REST action door (`POST /api/v1/actions/sys_approval_request/approval_reject`) and MCP `run_action` answer `400` with the param contract's refusal naming `comment`, and the console's param dialog holds Confirm until a reason is typed. A reject with a reason runs as before. The action's AI tool description now says the reason is required. The `POST /api/v1/approvals/requests/:id/reject` route itself is unchanged.
+  
+  Fix for a caller: send the reason as `params.comment` when you run `approval_reject`.
+- d9be915: fix(approvals): a reject through the approvals route or `IApprovalService.decide` requires a reason
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is one runtime check in this plugin's decide(): a reject without a non-blank string comment is refused. No stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of `POST /api/v1/approvals/requests/:id/reject`, or of `IApprovalService.decide()` with `decision: 'reject'`, that sends no `comment`, an empty or whitespace-only one, or one that is not a string: the call used to reject the request and is now refused before anything is read or written. It ships `patch` because it is a non-protocol breaking change (AGENTS.md Post-Task Checklist step 3): nothing a metadata author writes changes, so `Metadata-protocol` is `none`.
+  
+  The refusal is the one the `approval_reject` action door gives, judged by the same rules over the same `textarea` param: `400 VALIDATION_ERROR` with `Invalid action params: Action param "comment" is required` for an absent, `null`, empty or whitespace-only value, and `Invalid action params: Action param "comment" (textarea): …` for a value that is not a string (a number, a boolean, an array or an object). The request stays pending. A reject with a reason runs as before, and an approve keeps its comment optional. The platform's own rejects keep working: the SLA escalation's `auto_reject` and the revision-limit auto-reject do not pass through `decide()`, and the email action link records its fixed text. The email action link still records no reason the approver typed; that is a separate follow-up.
+  
+  Fix for a caller: send the reason as `comment` in the reject body (`{ "comment": "Over budget." }`).
+- 65ee4b7: fix(plugin-approvals)!: a reject from the email action link records the reason the approver types on the confirm page, and a reject with no reason is refused on the page
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — nothing under `skills/**` teaches the approval action link or its confirm page (`git grep -i` for "action link", "approvals/act" and `issueActionTokens` over `skills/` finds nothing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped. One exported member moves: `ApprovalService.redeemActionToken` takes an optional reason, and its outcome type gains a `reason_required` arm (both stated below). What moves is the answer the ADR-0043 action page, and that member, give a redemption of a reject link with no reason: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller that POSTs a reject link's token to `/api/v1/approvals/act` (the plugin's self-hosted mount, or the HTTP dispatcher's `/approvals/act` domain through `IApprovalService.handleActionPage`) without a reason, and for code that calls the exported `ApprovalService.redeemActionToken` in process on a reject token without one.
+  
+  - FROM: the confirm page for a reject link had no reason field. A POST carrying only the `token` field rejected the request and recorded the fixed comment "Via action link", while every other reject door (the record-page action, MCP `run_action`, the `/reject` route, the SDK) refused a reject with no reason.
+  - TO: the reject confirm page carries a required "Reason for rejecting · 驳回理由" field, posted as `comment`, and the decision records that text as its comment. A POST whose `comment` is missing, blank or not a string (judged by the same rule `ApprovalService.decide()` applies) is answered the same confirm page again with the refusal "Enter a reason to reject this request. · 驳回需填写驳回理由。" and status `400`. Nothing is decided and the token is not consumed, so the approver can type a reason and send the same link again.
+  
+  - In process, FROM: `redeemActionToken(token)` on a live reject token consumed it, rejected the request with the comment "Via action link" and returned `{ ok: true, action: 'reject', … }`.
+  - In process, TO: `redeemActionToken(token, input?: { comment?: unknown })`. On a reject token whose `input.comment` is missing, blank or not a string it returns `{ ok: false, reason: 'reason_required', action: 'reject', request, approverId }`, a new arm of the `ActionTokenOutcome` type that `redeemActionToken` and `peekActionToken` return, without consuming the token or deciding. With a reason it decides and records that reason as the comment.
+  
+  **Not moved.** An approve link: its page has no reason field, a POST reads only `token`, and the decision still records "Via action link". A dead link (unknown, expired, used, already decided, handed to someone else) is still told on the result page with `200`, checked before the reason, and a GET still never decides. Both doors still answer the same status and bytes for the same body.
+  
+  The fix for a caller: send the reason in the form's `comment` field with the `token` when redeeming a reject link. In process, pass `{ comment }` as the second argument to `redeemActionToken` for a reject token, and handle the `reason_required` arm where you switch on the outcome's `reason`.
+- a03c3d4: feat(plugin-approvals): a record's activity shows its approval steps, to the users who can read its approvals
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record under approval used to show no approval in its activity: nothing wrote an activity entry for an approval step, so the activity stream's one-line approval entry was reachable only from items a host supplied by hand.
+  
+  - **One activity entry per approval step.** plugin-approvals now appends one `sys_activity` entry for each step it records in its decision log, about the record the request governs: submitted, approved (`Approved · Manager review`, the step's label after the dot), rejected (`Rejected · Manager review`), sent back for revision (`Sent back for revision · Manager review`), resubmitted, recalled, and cancelled (the record was deleted). Other actions (a reminder, a reassignment, a thread comment, …) write none, and an object that sets `enable.activities: false` gets none, as the CRUD mirror writes none for it. The entry carries no decision comment. It follows ADR-0052 §5, so no published vocabulary changes: `type` is the built-in `system`, the domain kind is `metadata.kind: 'approval'` (with the step's action, its label and the flow and step names beside it), and `source_object` / `source_id` name the request. A deployment without plugin-audit has no `sys_activity` and gets no entries.
+  - **Each entry reads in the reader's language.** The stored `summary` is the English line from plugin-approvals' own catalog (`approvalActivity*` messages, shipped in all eleven of its locales). A read that carries a locale is served the line re-composed in that locale, and the step's label is read from the app's language pack (`flows.<flow>.approvals.<node_id>.label`) the way the approvals tab reads it, else the stored label: a zh-CN reader sees `已批准 · 经理审批`. A system read, or a read with no locale, gets the stored English line. A failed append never fails the approval step; it is logged once at `error`.
+  - **Only the users who can read the record's approvals read those entries.** A read of `sys_activity` keeps an approval entry only when the approvals service would serve the caller its request: a participant (submitter, current or past approver), the override actor, or a reader of the record where the object opts into `enable.approvalsVisibleToReaders`. Every other entry is served as before, and plugin-audit's rule that the record must be readable still applies. The record page's activity count and its rows agree.
+  - **The stream draws each entry as the approval line, and 「看审批」 opens the approvals.** The console reads an activity row with `type: 'system'`, `metadata.kind: 'approval'` and a `sys_approval_request` source as the `approval` feed kind (`APPROVAL_ACTIVITY_FEED_TYPE`, exported from `@object-ui/plugin-detail`), so `approval` now counts as produced. The record page supplies the new `RecordViewApprovalsContext`, and the approval line's 「看审批」 opens the record's 审批 tab, the same place the approval tag in the header opens; with no approvals the reader is served, the line has no link. The entry keeps `sys_activity`'s own lifecycle (reaped after 14 days); the 审批 tab keeps the full history.
+- bb1c55d: docs(approvals): a reject reason is required at every human door — the contract docblock, the docs and the platform checklist say so
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Text only; no behaviour changes. `ApprovalService.decide()` already refuses a reject whose `comment` is missing, blank or not a string with `400 VALIDATION_ERROR` before any write, and an approve keeps its comment optional. The texts that still called the reason optional now state that rule: the `ApprovalDecisionInput.comment` and `IApprovalService.decide` docblocks in `@objectstack/spec` (the type is unchanged: `comment` stays optional in the interface, because an approve may omit it), and the `approval_reject` action's source comment in `@objectstack/plugin-approvals`, which said the target route does not judge the reason.
+- 40e22f1: fix(approvals, list): a list cell no longer opens an editor before it knows the record's approval lock, and the list reads the locks of a page in one request
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **What a list user sees.** On a list that edits in place, a double-click, Enter, F2 or a typed key on a cell whose record's approval lock or edit permission is still being read no longer opens an editor that the server would then refuse on save. The cell says "Checking whether this record can be edited…", and when the answer arrives the same edit goes ahead by itself (with the typed key), or the cell says why it does not: the record is locked while it is in approval, or the reader has no permission to edit it. Selecting another cell in the meantime drops the wait. Moving the selection with the arrow keys no longer sends a lock request per row: the first cell selected on a page asks the locks of every row on it at once.
+  
+  **New route.** `POST /api/v1/approvals/records/:object/locks` with the body `{ "recordIds": ["<id>", ...] }` (at least one id, at most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`, 200) answers `{ success: true, data: { records: [{ recordId, locked }] } }`, one entry per id in order. `locked` is what `GET /api/v1/approvals/records/:object/:recordId/lock` answers for that id, and `null` where that route answers 404: a record the caller cannot read and one that does not exist answer alike. Any other body (a key other than `recordIds`, an empty list, a non-string or blank id, more ids than the cap) and any query parameter are refused whole with `400 VALIDATION_ERROR`, never trimmed. A deployment whose approvals service does not implement the read answers `501`.
+  
+  **Contract and SDK.** `IApprovalService` gains the optional member `getRecordLocks(object, recordIds, context)`, entry `i` answering `recordIds[i]` exactly as `getRecordLock` does; the approvals plugin implements it in two reads whatever the page size (the caller's read of the ids, then one pending-request lookup judged by the record-lock hook's own judgement). `@objectstack/spec/contracts` exports `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS`. `@objectstack/client` gains `client.approvals.getRecordLocks(object, recordIds)`.
+  
+  **Components.** `GridCellFacts` (the select-first table's per-cell facts) gains the optional `checking: { text, settled }`: while present, an edit asked on the cell shows `text` and is asked again when `settled` settles; a toggle, paste or clear shows `text` and writes nothing. A host that sets no `checking` sees no change.
+- 0a1b69c: feat(approvals): a decided request's step line says where the record's approval went next: on to a later step, or ended
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The single approval request read (`GET /api/v1/approvals/requests/ID`) serves one more fact on a decided request's own route: `flow_route.outcome`, beside `ahead: 'decided'`. Before, a decided route stopped at the request's own step, so an approver reopening a request they had decided could not tell whether the record's approval went on to a later step or ended.
+  
+  - `outcome.step` is the run's latest request when it is a later one than this request (a request of the same flow run opened after it, on any node, a later round of the same node included; a pending one wins over a decided one). It is absent when no later request was opened in that run; a request a child run opened is not among them.
+  - `outcome.status` is that latest request's status, or this request's own when `step` is absent. `pending` with a `step` means the approval went on to that step and waits on its decision.
+  - `outcome.ended` is `true` only when the record's approval is known to have stopped: the request's run is a root run (not a `subflow` body or a `map` item, whose end is not the approval's), the flow body the run ran holds no `subflow` or `map` node anywhere, regions included (a child run files its requests under its own run, so this run's requests cannot show what it decided, before or after this request), and the run reports it stopped for good, with the same terminal set the dead-run sweep uses. The body the run ran is known only when the body armed now is the flow's newest registration and was registered before the run started, so a flow edited, rolled back or re-registered after a run started is never judged by its current body for that run. `false` means not known to have stopped: the run goes on, is a child run, ran a body that can start a child run, ran a body that is not known, cannot be read, or was opened before this release (the approval node now records on each new request whether its run is a root run).
+  
+  `outcome` is absent when nothing past the request is known: no later request was opened and the approval is not known to have ended, or several later requests are pending at once (parallel steps). A pending request's route never carries it. It is served to every reader of the request and says only where the same approval went: the later step's node id and label and that request's status, never the later request's id, approvers, comments or field values. The `ApprovalRequestRow.flow_route` contract type in `@objectstack/spec/contracts` gains the optional member, and `routeOutcome` in `@objectstack/plugin-approvals` is the rule.
+  
+  The approval request page (`@object-ui/app-shell`) draws one line under the decided step: "Went on to STEP, waiting for a decision", "Went on to STEP: DECISION", "Went on to STEP, then ended: DECISION", or "The approval ended here". No line is drawn when no outcome is served. `@object-ui/i18n` carries the four new `approvalsInbox` rows in every built-in locale, and the console's request type (`@object-ui/console`) mirrors the new member.
+  
+  Nothing to migrate: a caller that does not read `outcome` is unaffected.
+- 62daf7d: fix(approvals): a working-time SLA deadline whose calendar read errors no longer fails the request open or the whole list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When an approval step's escalation counts `working_time` and the working calendar read itself fails (an error that is not a calendar refusal, such as a driver error reading `sys_work_calendar`), opening the request threw after the `sys_approval_request` row was written and its approvers were told, so the approval node failed its flow run. The same error failed every list read and single read that included the row, and so every decision that loads it.
+  
+  That row is now served with no deadline and the error is logged as a warning; the open returns the request, the run suspends as usual, and the other rows of a list keep their deadlines. A calendar refusal is still served as `sla_due_refusal`, the deadline never falls back to wall-clock hours, and the escalation sweep still skips the row and asks the calendar again on its next pass. The served request shape is unchanged.
+- 83e545a: fix(approvals): the no-approver note names its position by its label
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a request opens with no one able to approve it and its approver list names an unstaffed position, its timeline note told the reader to add "a member who holds position 'regional_manager'", with the position's internal name, in every language. The note now stores the position as a reference, so a reader is served the position's label the way the administrators' routing note names one: the reader's language pack (`positions.<name>.label`) first, else the position's declared `label`, else the name as before. The English the row stores for audit keeps the name, and a note written before this change is shown exactly as it was.
+- a3381cc: fix(plugin-approvals): the decide refusal and the submitter notice name a no-approver position by its label, and the approver-type word is translated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a request opens on a slate that names no one but its submitter, three places tell people what to do next: the request's timeline note, the notice sent to the submitter, and the refusal when the submitter tries to approve it. Only the timeline note named a position by its label. The other two used the position's internal name (`legal`), and in all three the approver type stayed the English token (`position`) in every language, so a zh-CN reader read `担任 position '销售经理' 的成员`.
+  
+  - The decide refusal (`FORBIDDEN`, both the `excludeSubmitter` refusal and the administrator-override refusal) names each position by the decider's language pack label, then its declared label, then its name. The sentence itself stays English, as before.
+  - The submitter's `approval.comment` notice names the position the same way, per recipient at delivery. For a slate of one slot its body is the new `approvalNoApproverHoldingSlot` sentence, which carries the approver type's word and the position's label as catalog keys. A slate of several slots still sends one English `who`, with each position named by its declared label.
+  - The approver type is named by its own word in all eleven packs (`approvalApproverTypePosition`, `…Team`, `…Department`, `…OrgMembershipLevel`), and each slot is one `approvalNoApproverSlot` clause joined by `approvalNoApproverSlotSeparator`. A zh-CN reader now reads `担任岗位「销售经理」的成员`. A slot of any other type keeps its token, as the administrators' note does.
+  
+  The English is unchanged. Each `en` type word is the machine token, so the comment a request stores and the English refusal still read `position 'legal'` for a position with no label. Stored audit text is not rewritten.
+- 76bff41: fix(plugin-approvals): the decide refusal of a submitter's own approval, and a submitter notice that names several slots, read in the reader's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  **Widened door response.** The approvals decide door (`packages/rest/src/approvals-routes.ts`) gains one optional member, `userMessage`, at the top level of its flat `{ code, error }` refusal body. Two rows answer it today: the two `403 FORBIDDEN` decide refusals of a submitter's own approval, the `excludeSubmitter` refusal and the administrator-override self-approve refusal. It is absent whenever no producer marked one, so every other refusal body is unchanged.
+  
+  - **The decide refusal.** When the decision door refuses a submitter's own approval (the step sets `excludeSubmitter`, or the administrator override would approve the actor's own request), the thrown error now carries a `userMessage`: the same refusal, with its remedy, in the decider's language (`approvalDecideRefused*` in every approvals message pack). A position is named by the decider's pack label, then its declared label, then its name. The error's `message` is unchanged: it stays English for the developer and the log. With no reader language, `userMessage` is English and names no user id.
+  - **The REST door.** The approvals routes answer a refusal the service marked with `userMessage` at the top level of their flat `{ code, error }` body, beside `error`, on every mapped row. A refusal with no marking answers exactly as before.
+  - **The console.** The record page's `type: 'api'` actions (the request's Approve button) read a flat body's top-level `userMessage` as well as the `error.userMessage` of the ADR-0112 envelope, and show it in place of the English `error`. The Approval Center's inline decision toast shows a marked refusal as written, before its generic line.
+  - **The submitter notice.** A notice for a slate of 2 to 8 slots names each slot inline, one keyed type word and value per slot (`approvalNoApproverHoldingSlots2` to `…Slots8`, derived from each pack's own `approvalNoApproverHolding`, `approvalNoApproverSlot` and `approvalNoApproverSlotSeparator`), so the messaging service renders every slot in the recipient's language at delivery. A slate of more than 8 slots still names its slots in English inside the recipient's sentence. The literal English body is unchanged.
+- 24ff03c: feat(plugin-approvals): approval requests, actions and delegations carry a palette colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The console draws an object's icon as a white glyph on a square of the object's palette colour, and an object that declares no `color` is drawn in the neutral `gray`. Until now no built-in object declared one, so every platform object read the same. Approval requests, the approval action history and delegations are now `orange` (approvals and work routing).
+  
+  Each colour is one of the palette names (`OBJECT_COLORS`), picked by business family, not by status: people and organisation `blue`, security and access `purple`, approvals and work routing `orange`, messaging and notifications `pink`, integrations `teal`, reference data and preferences `green`, audit `amber`. Objects nobody opens in the console (credential and token stores, queues, run logs, engine bookkeeping) keep no `color` and stay `gray`. Nothing about the objects' fields, data or API changes.
+- 586c3a2: fix(plugin-approvals): the approvals inbox search finds a request by the record title, process label, object label and requester name its row shows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The inbox search box ("Search record, process, requester…", `GET /api/v1/approvals/requests?q=`) matched only the stored machine columns (`process_name`, `object_name`, `record_id`, `submitter_id`) and, where the caller reads it unmasked, the raw snapshot. Text a row actually shows, such as a record title, a process label, a requester's name or an object label, found nothing, while a machine fragment like `crm_` found every row.
+  
+  `q` now also matches the four labels a row shows, each worked out the way that caller is served it:
+  
+  - the record title, as served to the caller: a title field the caller may not read, or reads masked, does not match;
+  - the process label in the caller's language: the translated label where the reader's language pack has one, otherwise the stored label. A reader who is shown the translation is not found by the stored text;
+  - the object label, chosen the same way;
+  - the requester's display name.
+  
+  Matching stays case-sensitive, like the existing arms (`$contains`). The `q` parameter accepts the same values as before. A title that comes only from a deleted record's snapshot is not searched by this path.
+- f92d271: fix(plugin-approvals): the batch lock read answers a line of a held master as locked, as the single read does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `getRecordLocks` (`POST /api/v1/approvals/records/:object/locks`) answered `locked: false` for a master-detail line whose master is held by a locking approval, while `getRecordLock` answered `locked: true` and the line's write was refused `RECORD_LOCKED`. The batch read now asks the detail-row lock too, through its new batch form `detailRowsHeldByLockingApproval`: one read of the rows' master-detail columns plus one lookup per master-detail edge, whatever the page size, never one read per row. The answer's shape is unchanged (`{ locked }` or `null`); a list page that reads the batch door now stops offering an editor on such a line. The `getRecordLock` / `getRecordLocks` contract docblocks in `@objectstack/spec` now say a line of a held master answers `true`.
+- fd462c5: feat(plugin-approvals): the record lock reads say whether a row is held by its own approval or by its master's
+  
+  Clause-②: yes (widening: both lock doors' published entry gains a field)
+  Metadata-protocol: none
+  
+  Both approval lock reads (`IApprovalService.getRecordLock` and `getRecordLocks`, and their REST doors `GET /api/v1/approvals/records/:object/:recordId/lock` and `POST /api/v1/approvals/records/:object/locks`) now answer a locked record with `lockSource`, which approval holds it:
+  
+  - `'record'`: a pending request on the record itself, from a node whose `lockRecord` is not `false`. Deleting the record still goes through and cancels the request.
+  - `'master'`: the record is a `master_detail` line of a record so held. The server refuses the line's insert, update and delete with `409 RECORD_LOCKED`.
+  
+  When both hold (a line with a pending request of its own, under a held master), the answer is `'master'`, because that is the delete the server refuses. An unlocked record still answers `{ locked: false }`, with no `lockSource`, and `null` (`404 RECORD_NOT_FOUND` at the single door, `locked: null` in the batch door) still means unreadable or missing, never told apart. No request id, node, approvers or `pending` flag is served. A list can now hide Delete on a line whose master is under approval instead of offering a delete the server refuses.
+  
+  The `IApprovalService` return types gain the optional `lockSource?: 'record' | 'master'`, so an implementation may omit it on a locked answer and still satisfies the contract; the REST doors then serve `{ locked: true }` without a kind.
+  
+  Which rows count as readable is unchanged at both doors. The two doors keep different readability anchors on purpose: the single door counts any returned row, the batch door only the row whose id is the asked id; aligning them would narrow a published answer (seat ruling 7152650156 on #37151). So an id the database matches only under another spelling (a different letter case, `07` for a numeric `7`) answers `null` in the batch door. The single-record door counts the row it finds as readable and judges it, as before: a line of a held master answers `'master'`, because that check reads the row found, but a record's own request is looked up by the id as asked, so a record held by its own request may answer `{ locked: false }` under another spelling. A client asking with the ids the server gave it gets the same answer from both doors.
+  
+  `@objectstack/client`: `client.approvals.getRecordLock` and `getRecordLocks` type the answer with the optional `lockSource?: 'record' | 'master'`.
+- 66452df: feat(platform-objects,services,plugins): platform select options declare the colours they render with
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  The renderer now colours a select option only when its author declared a colour. Every platform-shipped option that took its colour from the renderer's value table now declares that colour itself, in the same palette family, so no platform badge turns neutral: `sys_notification.severity` and `inbox_message.severity` (info blue, warning yellow, critical red), and the status and state options of jobs, imports, emails, flow and sync runs, credentials, deliveries, receipts, uploads, files, invitations, signing and trusted keys, tasks, approval requests, metadata rows and audience-binding suggestions, and the `completed` activity type. Stored values and labels are unchanged.
+- 8e415bd: fix(approvals)!: an approver reassigns only their own slot
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is who may name a slot as the `from` of `POST /api/v1/approvals/requests/:id/reassign`: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of `POST /api/v1/approvals/requests/:id/reassign` (and `IApprovalService.reassign`) that is neither the system nor an administrator acting through the approval override.
+  
+  - TO: such a call may move only a slot held by the actor it names (an omitted `actorId` names the caller). A `from` naming any other slot is refused `403 FORBIDDEN`, and nothing moves: the slate is unchanged and no `reassign` action is recorded. The default actor holds its user id, its account's email and each position it holds; a named email or position address holds only that address and its equivalent spellings. Omitting `from` still hands over the actor's own slot.
+  - **Not moved.** The administrator override and the system still move any pending slot, and the administrator rescue of a slate that names no one is unchanged.
+  
+  The fix for a caller: ask the slot's holder to reassign it, or an administrator.
+- 99bd6d1: fix: a locked record's lines read as locked, and deleting the locked record still removes its lines
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Reading the lock answers for a line too.** `IApprovalService.getRecordLock` (and `GET /api/v1/approvals/records/:object/:recordId/lock`) now answers `{ locked: true }` for a `master_detail` child row while the record it belongs to is held by a locking pending approval: the same rows whose insert, update and delete the server refuses with `409 RECORD_LOCKED`. It used to answer `{ locked: false }` for them, so a page could offer an edit the server then refused. A row the caller cannot read still answers as a missing one.
+  
+  **Deleting a record while its approval is pending removes its lines again.** The delete lands and cancels the pending request, as before the lines were locked; its `master_detail` lines are removed with it. The whole delete is refused `409 RECORD_LOCKED`, and the record, its lines and its request stay, when the line object has a second relation that also cascades on delete, or when the delete does not run inside an open transaction: a datasource that declares `supports.transactionsUnsupported`, a cascade across datasources, a record and its lines together on a datasource other than the default one, or a delete carrying the handle of a transaction that has already finished. Server code that owns the transaction must not catch the refused delete and commit anyway. A line is never removed by deleting a different record, except that when the locked record is itself the child of a record whose delete cascades to it (a `master_detail` child, or a `lookup` child with `deleteBehavior: 'cascade'`), deleting that parent removes the locked record and its lines and cancels its request.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [a73edb3]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [d053c7d]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [c9b3f7a]
+- Updated dependencies [01e6af6]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [4026c44]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [89ea9bf]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [17ed9e7]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [a98c077]
+- Updated dependencies [236c804]
+- Updated dependencies [d71fe59]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [a5a5312]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6943af1]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [24ff03c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [c8d4b90]
+- Updated dependencies [00aa574]
+- Updated dependencies [15e80d2]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [fbb62e1]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [088852b]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [b3247dd]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [bc2aaf1]
+- Updated dependencies [4e55e4e]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/platform-objects@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes

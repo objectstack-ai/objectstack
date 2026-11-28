@@ -2,6 +2,7 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { enObjects } from './en.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * English (en) — Setup App Translations
@@ -23,6 +24,8 @@ import { enObjects } from './en.objects.generated.js';
  */
 export const en: TranslationData = {
   objects: enObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('en'),
   apps: {
     account: {
       label: 'Account',
@@ -75,7 +78,7 @@ export const en: TranslationData = {
 
         // Apps / Marketplace
         nav_marketplace_browse: { label: 'Browse Marketplace' },
-        nav_marketplace_installed: { label: 'Installed Apps' },
+        nav_packages: { label: 'Packages' },
         nav_cloud_connection: { label: 'Cloud Connection' },
 
         // People & Organization
@@ -118,6 +121,7 @@ export const en: TranslationData = {
         // list; the label is the short form of that object's `pluralLabel`.
         nav_scim_credentials: { label: 'SCIM Credentials' },
         nav_api_keys: { label: 'API Keys' },
+        nav_access_directory: { label: 'Positions and Permissions' },
 
         // Approvals. `nav_approvals_inbox` is the working surface (#7234); the
         // three below it are the engine's raw tables, kept as the admin view.
@@ -131,6 +135,7 @@ export const en: TranslationData = {
         nav_settings_localization: { label: 'Localization' },
         nav_exchange_rates: { label: 'Exchange Rates' },
         nav_units_of_measure: { label: 'Units of Measure' },
+        nav_standard_unit_settings: { label: 'Standard Unit Settings' },
         nav_work_calendars: { label: 'Working Calendars' },
         nav_work_calendar_exceptions: { label: 'Calendar Exceptions' },
         nav_settings_company: { label: 'Company' },
@@ -144,6 +149,7 @@ export const en: TranslationData = {
         nav_settings_knowledge: { label: 'Knowledge' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
         nav_recycle_bin: { label: 'Recycle Bin' },
+        nav_public_forms: { label: 'Public Forms' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
         nav_notification_templates: { label: 'Notification Templates' },
@@ -185,7 +191,7 @@ export const en: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadata workbench for developers, analysts, and implementers',
       navigation: {
         group_overview: { label: 'Overview' },

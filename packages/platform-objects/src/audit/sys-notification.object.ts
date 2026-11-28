@@ -30,6 +30,7 @@ export const SysNotification = ObjectSchema.create({
   label: 'Notification Event',
   pluralLabel: 'Notification Events',
   icon: 'bell',
+  color: 'pink',
   isSystem: true,
   managedBy: 'engine-owned',
   // ADR-0057: one 90d window across the whole notification pipeline
@@ -99,7 +100,7 @@ export const SysNotification = ObjectSchema.create({
         'Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.',
       icon: 'send',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/messaging/in-app-messages',
       requiredPermissions: ['setup.write'],
@@ -173,9 +174,9 @@ export const SysNotification = ObjectSchema.create({
     // (#27855); the stored values stay the lowercase codes the emitters write.
     severity: Field.select({
       options: [
-        { label: 'Info', value: 'info' },
-        { label: 'Warning', value: 'warning' },
-        { label: 'Critical', value: 'critical' },
+        { label: 'Info', value: 'info', color: 'blue' },
+        { label: 'Warning', value: 'warning', color: 'yellow' },
+        { label: 'Critical', value: 'critical', color: 'red' },
       ],
       label: 'Severity',
       required: false,

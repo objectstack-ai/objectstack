@@ -10,7 +10,7 @@
  * objectui#12617: the record header draws ONE primary action and the rest as
  * secondary buttons.
  *
- * `@objectstack/spec`'s action contract says "in `record_header` the first
+ * `@objectstack/spec`'s action contract says "in `record_page` the first
  * visible action becomes the primary button" and lets a renderer prefer a
  * `variant: 'primary'` action. `page:header` drew every action without a
  * declared variant with the filled style, so a header with three actions
@@ -75,7 +75,7 @@ const act = (name: string, label: string, extra: Record<string, unknown> = {}) =
   label,
   type: 'url',
   target: `https://example.com/${name}`,
-  locations: ['record_header'],
+  locations: ['record_page'],
   ...extra,
 });
 
@@ -98,7 +98,7 @@ async function overflowRows(): Promise<string[]> {
 }
 
 describe('page:header draws one primary action, the rest secondary (objectui#12617)', () => {
-  it('three record_header actions render as one filled primary + two outline buttons, then a labelled outline Edit', () => {
+  it('three record_page actions render as one filled primary + two outline buttons, then a labelled outline Edit', () => {
     renderRecordHeader([
       act('convert_lead', 'Convert Lead'),
       act('schedule_followup', 'Schedule Follow-up'),
@@ -154,11 +154,14 @@ describe('page:header draws one primary action, the rest secondary (objectui#126
     expect(isFilled(convert)).toBe(true);
   });
 
-  it('with no app action, the host Edit is the primary button', () => {
+  // objectstack#36049 — was "the host Edit is the primary button": with no
+  // app action the row now has no filled button; Edit is outline.
+  it('with no app action, the host Edit is an outline button and nothing is filled', () => {
     renderRecordHeader([]);
     const buttons = toolbarButtons().filter((b) => nameOf(b) !== 'More actions');
     expect(buttons.map(nameOf)).toEqual(['Edit']);
-    expect(isFilled(buttons[0])).toBe(true);
+    expect(isFilled(buttons[0])).toBe(false);
+    expect(isOutline(buttons[0])).toBe(true);
   });
 });
 

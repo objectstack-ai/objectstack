@@ -121,23 +121,16 @@ function recorded<T extends object>(target: T, via: 'entry' | 'props'): T {
 
 /* ── every field widget, re-registered with recorded props ───────────────── */
 
-interface LazyInternals {
-  _init: (payload: unknown) => unknown;
-  _payload: unknown;
-}
 type WidgetFn = (props: Record<string, unknown>) => React.ReactNode;
 
-/** The component a `React.lazy` resolves to. Module loading, not rendering. */
+/**
+ * The component a lazily loaded field widget resolves to. Module loading, not
+ * rendering: `getLazyFieldWidget` hands back the fields package's recoverable
+ * lazy component, whose `load()` resolves to the widget itself
+ * (objectstack#36608).
+ */
 async function resolveLazy(lazy: unknown): Promise<unknown> {
-  const internals = lazy as LazyInternals;
-  for (;;) {
-    try {
-      return internals._init(internals._payload);
-    } catch (pending) {
-      if (pending && typeof (pending as PromiseLike<unknown>).then === 'function') await pending;
-      else throw pending;
-    }
-  }
+  return (lazy as { load(): Promise<unknown> }).load();
 }
 
 const MEMO = Symbol.for('react.memo');
@@ -358,7 +351,10 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
   lookupAutofill: {
     readers: [LOOKUP],
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
-      + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
+      + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form. Honoured only '
+      + 'in a record form, which stamps the lookup (`withLookupAutofillTargets`), and in a line-item grid column; the key '
+      + 'written on a standalone form node\'s field is read and not executed (the pick fills nothing, and a development '
+      + 'build names the field), per ruling 7138010812.',
   },
   recordBeingEdited: {
     readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],

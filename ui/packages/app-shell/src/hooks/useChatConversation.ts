@@ -22,9 +22,16 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 // `@object-ui/plugin-chatbot` is already a static member of this package's
 // barrel closure (`index.ts` re-exports `AiChatPage`, which imports it), so
 // this adds no package edge and no eager bundle weight.
-import { chartAnswerParts, detectPendingApproval } from '@object-ui/plugin-chatbot/core';
+import { detectPendingApproval, QUESTION_SKIP_STORAGE_PREFIX, storedAnswerParts } from '@object-ui/plugin-chatbot/core';
+import type { StoredAnswerData } from '@object-ui/plugin-chatbot/core';
 // Type-only, so it is erased and pulls no barrel closure into the hook.
 import type { AnswerSource } from '@object-ui/plugin-chatbot';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /** Minimal UIMessage shape compatible with `@ai-sdk/react`'s `useChat`. */
 export interface HydratedUIMessagePart {
@@ -106,6 +113,15 @@ export interface UseChatConversationOptions {
    * fetch failing) falls through to creating a fresh conversation.
    */
   adoptLegacy?: (messages: HydratedUIMessage[]) => boolean;
+  /**
+   * The `metadata` the create on the first send carries
+   * (`CreateAiConversationRequestSchema.metadata`, `@objectstack/spec/api`).
+   * Absent = the create sends an empty body, as every caller did before. The
+   * app's AI inquiry page passes `{ activePackageId }`, so the row records the
+   * app it belongs to (ui ADR-0057 Amendment A4). Read at the moment of the
+   * create, so its identity does not matter.
+   */
+  createMetadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface UseChatConversationReturn {
@@ -170,67 +186,11 @@ export interface UseChatConversationReturn {
   rekeyScope: (newScope: string) => void;
 }
 
-/**
- * The subset of plugin-chatbot's `DraftReview` (mapMessages.ts) that the chat's
- * draft/publish + ADR-0038 verification cards are derived from. Mirrored here —
- * rather than imported — to keep this low-level hook free of a `@object-ui/
- * plugin-chatbot` dependency; the round-trip test in
- * `useChatConversation.test.tsx` runs these through the REAL detectors, so any
- * incompatible drift fails CI.
- */
-interface CachedDraftReview {
-  items: Array<{ type: string; name: string }>;
-  summary?: string;
-  packageId?: string;
-  autoPublishable?: boolean;
-  failedCount?: number;
-  materialized?: boolean;
-  verification?: { errors: number; warnings: number };
-  issues?: Array<{ severity: 'error' | 'warning'; code: string; message: string; fix?: string }>;
-  nextSteps?: string[];
-  /**
-   * objectui#10109 — the producer's incremental-edit marker (`apply_edit`
-   * answers `kind: 'edit'`). Kept through the cache because an edit's `items`
-   * can include the `app` it re-staged: without it a cache-fallback reload
-   * reads the edit as a whole-app build.
-   */
-  kind?: 'edit';
-}
-
-/** Mirrors the subset of plugin-chatbot's `ProposedPlan` the "Proposed plan" card needs. */
-interface CachedProposedPlan {
-  summary?: string;
-  objects: Array<{ name: string; label?: string; fieldCount: number }>;
-  counts: { objects: number; views: number; dashboards: number; seedData: number };
-  questions: string[];
-  assumptions: string[];
-  targetApp?: string;
-  /**
-   * objectstack#27480 — the extend-or-new question a `decision: 'iterate_or_new'`
-   * plan asks. Kept through the cache because without it a cache-fallback
-   * reload turns the question back into a plan with a "Build it" button.
-   */
-  iterateOrNew?: { app?: { name: string; label?: string } };
-}
-
 interface CacheableChatToolInvocation {
   toolCallId: string;
   toolName: string;
   state?: string;
   errorText?: string;
-  /**
-   * The detect-relevant shapes the live render already derived from the tool
-   * result (`uiMessageToChatMessage`). Present on assistant tool invocations
-   * that staged a draft (`apply_blueprint` …) or proposed a plan
-   * (`propose_blueprint`). We re-serialize these into a COMPACT tool `output`
-   * so the cards survive a cache-fallback reload — see
-   * `sanitizeChatMessagesForCache`.
-   */
-  draftReview?: CachedDraftReview;
-  proposedPlan?: CachedProposedPlan;
-  /** objectui#5695 — the confirm-replay verdict, so the 确认修改 card's terminal
-   *  state (已生效 / 已暂存为草稿 / 未生效) survives a cache-fallback reload. */
-  replayOutcome?: { kind: 'published' | 'drafted' | 'failed'; outcome?: string; error?: string; packageId?: string; dispatchError?: boolean };
   /**
    * objectui#9232 — the two halves of an ACTIONABLE approval, mirroring
    * objectui#8442 on the way IN to the cache. They travel differently and that
@@ -266,97 +226,14 @@ interface CacheableChatMessage {
   content?: string;
   toolInvocations?: CacheableChatToolInvocation[];
   /** The answer's charts, each at its `textOffset` into `content`. */
-  charts?: Parameters<typeof chartAnswerParts>[1];
-}
-
-/**
- * Rebuild the MINIMAL `{ status:'drafted', … }` envelope that
- * `mapMessages.detectDraftResult` re-parses, from the already-derived
- * `DraftReview`. Inverse of the detector: we keep only the fields it reads, so
- * the draft "Review N changes / Publish" card and the ADR-0038 verification
- * chip survive without re-storing the (potentially large) blueprint JSON.
- * `failed` is materialized to the right length because the detector counts
- * `failed.length`.
- */
-function draftReviewToCachedResult(dr: CachedDraftReview): Record<string, unknown> {
-  return {
-    status: 'drafted',
-    drafted: dr.items,
-    ...(dr.summary ? { summary: dr.summary } : {}),
-    ...(dr.packageId ? { packageId: dr.packageId } : {}),
-    ...(dr.autoPublishable ? { autoPublishable: true } : {}),
-    ...(dr.failedCount ? { failed: Array.from({ length: dr.failedCount }, () => null) } : {}),
-    ...(dr.materialized ? { materialized: true } : {}),
-    ...(dr.verification ? { verification: dr.verification } : {}),
-    ...(dr.issues && dr.issues.length ? { issues: dr.issues } : {}),
-    ...(dr.nextSteps && dr.nextSteps.length ? { nextSteps: dr.nextSteps } : {}),
-    ...(dr.kind === 'edit' ? { kind: 'edit' } : {}),
-  };
-}
-
-/**
- * Rebuild the MINIMAL `{ status:'blueprint_proposed', … }` envelope that
- * `mapMessages.detectProposedPlan` re-parses, from the already-derived
- * `ProposedPlan`. Object `fields` are materialized to the right length because
- * the detector reads `fields.length` as the per-object field count — the field
- * definitions themselves are dropped (the lean win).
- */
-function proposedPlanToCachedResult(pp: CachedProposedPlan): Record<string, unknown> {
-  return {
-    status: 'blueprint_proposed',
-    ...(pp.summary ? { summary: pp.summary } : {}),
-    counts: pp.counts,
-    questions: pp.questions,
-    ...(pp.targetApp ? { targetApp: pp.targetApp } : {}),
-    // objectstack#27480 — the two keys `detectProposedPlan` reads the question from.
-    ...(pp.iterateOrNew
-      ? {
-          decision: 'iterate_or_new',
-          ...(pp.iterateOrNew.app ? { existingAppOverlap: pp.iterateOrNew.app } : {}),
-        }
-      : {}),
-    blueprint: {
-      objects: pp.objects.map((o) => ({
-        name: o.name,
-        ...(o.label ? { label: o.label } : {}),
-        fields: Array.from({ length: o.fieldCount }, () => null),
-      })),
-      assumptions: pp.assumptions,
-    },
-  };
-}
-
-/**
- * Rebuild the MINIMAL replay envelope `mapMessages.detectReplayOutcome`
- * re-parses (objectui#5695). The detector keys off the persisted `replay_*`
- * toolCallId plus these fields; `detectDraftResult` stays quiet over the
- * drafted shapes because they carry no `drafted` items — so a rolled-back
- * publish can never rehydrate from cache as a live draft card.
- */
-function replayOutcomeToCachedResult(
-  ro: NonNullable<CacheableChatToolInvocation['replayOutcome']>,
-): Record<string, unknown> {
-  if (ro.kind === 'published') return { status: 'published' };
-  // A dispatch error round-trips as the bare `{error}` shape it was detected
-  // from, so re-detection keeps its provisional (supersedable) semantics.
-  if (ro.kind === 'failed' && ro.dispatchError) return { error: ro.error ?? 'replay dispatch failed' };
-  return {
-    status: 'drafted',
-    ...(ro.packageId ? { packageId: ro.packageId } : {}),
-    ...(ro.kind === 'failed'
-      ? {
-          publishFailed: true,
-          ...(ro.outcome ? { publishOutcome: ro.outcome } : {}),
-          ...(ro.error ? { publishError: ro.error } : {}),
-        }
-      : {}),
-  };
+  charts?: StoredAnswerData['charts'];
+  /** objectstack#37487 — the answer's verified record citations, cached as persisted. */
+  recordCitations?: StoredAnswerData['recordCitations'];
 }
 
 /**
  * Rebuild the MINIMAL HITL envelope `mapMessages.detectPendingApproval`
- * re-parses (objectui#9232). Inverse of that detector, exactly as
- * `draftReviewToCachedResult` is the inverse of `detectDraftResult`.
+ * re-parses (objectui#9232). Inverse of that detector.
  *
  * This exists because the id travels asymmetrically. The AI SDK `approval`
  * envelope is a persisted PART key, so the cache can write it and the
@@ -368,9 +245,8 @@ function replayOutcomeToCachedResult(
  *
  * The two keys the detector reads are the only two written: the framework's
  * real envelope also carries a human `message` and the proposed arguments, and
- * none of that is re-serialized — the same leanness the draft/plan inverses
- * take, and the reason a cached thread does not grow a copy of every pending
- * action's payload.
+ * none of that is re-serialized, which is why a cached thread does not grow a
+ * copy of every pending action's payload.
  */
 function pendingApprovalToCachedResult(pendingActionId: string): Record<string, unknown> {
   return { status: 'pending_approval', pendingActionId };
@@ -406,7 +282,8 @@ function messageCacheKey(conversationId: string): string {
 
 /**
  * Security — clear ALL cached AI-chat state from localStorage (per-user
- * conversation-id pointers AND per-conversation message bodies). Conversation
+ * conversation-id pointers, per-conversation message bodies, and the question
+ * card's per-conversation skip marks). Conversation
  * content + tool payloads are cached in plaintext (keyed by `objectstack:
  * ai-chat-*`); without this, on a shared machine the next profile user could
  * read the previous user's AI threads (which may contain data surfaced by the
@@ -418,7 +295,12 @@ export function purgeChatCaches(): void {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key && (key.startsWith(CACHE_PREFIX) || key.startsWith(MESSAGE_CACHE_PREFIX))) {
+      if (
+        key &&
+        (key.startsWith(CACHE_PREFIX) ||
+          key.startsWith(MESSAGE_CACHE_PREFIX) ||
+          key.startsWith(QUESTION_SKIP_STORAGE_PREFIX))
+      ) {
         doomed.push(key);
       }
     }
@@ -445,9 +327,8 @@ export function purgeChatCaches(): void {
  *      undefined for a result that is not one. An old entry restores exactly
  *      as it does today.
  *   2. A version bump or a discard would throw away everything the old writer
- *      got RIGHT — the transcript text, the draft "Review N changes / Publish"
- *      card, the ADR-0038 chip, the proposed plan, the objectui#5695 replay
- *      verdict — to recover one affordance. This cache is only ever read when
+ *      got RIGHT — the transcript text, the charts, the answer sources — to
+ *      recover one affordance. This cache is only ever read when
  *      the server returned no messages, so the discarded thread is the only
  *      thread the operator would have seen: a strictly worse trade.
  *   3. Old entries self-heal. The cache is rewritten from `runtimeMessages` on
@@ -509,45 +390,28 @@ export function sanitizeChatMessagesForCache(
       // the stream's own chart part is never stored, and a tool part carries
       // no position, so this is the one record that keeps both the chart and
       // its place. `hydratedMessagesToChatMessages` reads them back.
-      const parts: HydratedUIMessagePart[] = chartAnswerParts(
+      // objectstack#37487 — with every other kept data part
+      // (`STORED_ANSWER_DATA_PARTS`): the verified citations list is cached as
+      // the `data-record-citations` part, so its chips survive a cache reload.
+      const parts: HydratedUIMessagePart[] = storedAnswerParts(
         message.content ?? '',
-        message.role === 'assistant' ? message.charts : undefined,
+        message.role === 'assistant'
+          ? { charts: message.charts, recordCitations: message.recordCitations }
+          : {},
       );
       if (message.role === 'assistant') {
         for (const tool of message.toolInvocations ?? []) {
-          // Re-serialize the draft/plan affordance into a compact tool `output`.
-          // Without it, a cache-fallback reload (server returns no messages →
-          // `readMessageCache`) drops the draft "Review N changes / Publish"
-          // card, the ADR-0038 verification chip, and the "Proposed plan" card,
-          // because `mapMessages.detect*` read the result `output` that the
-          // earlier cache shape never kept. `output` (not a custom part field)
-          // is used because the AI SDK preserves it through `useChat` init,
-          // exactly as the server-backed tool-result merge relies on.
+          // objectui#9232 — the pending approval is re-minted into a compact
+          // tool `output`. `state` already survived this rebuild, so without
+          // it a cached `approval-requested` came back carrying nothing to
+          // decide with: the operator got Approve / Reject buttons whose only
+          // possible outcome was "No pending-action id found for this tool
+          // call". `output` (not a custom part field) is used because the AI
+          // SDK preserves it through `useChat` init, exactly as the
+          // server-backed tool-result merge relies on.
           //
-          // objectui#9232 — the pending-approval arm, and it is LAST on
-          // purpose. `state` already survived this rebuild, so a cached
-          // `approval-requested` came back carrying nothing to decide with:
-          // the operator got Approve / Reject buttons whose only possible
-          // outcome was "No pending-action id found for this tool call". That
-          // is the divergence objectui#8442 closed on the way OUT of server
-          // history, reopened on the way IN to the cache.
-          //
-          // ⚠️ `output` holds ONE envelope, and an invocation can carry more
-          // than one affordance at a time — `draftReview` and `pendingActionId`
-          // are independent KEYS on the invocation, not two readings of one
-          // result. Putting the pending arm first therefore did not merely
-          // reorder equals: it stopped the draft envelope reaching the cache
-          // for any turn carrying both, which is the same loss (the "Review N
-          // changes / Publish" card on a cache-fallback reload) that the other
-          // three arms exist to prevent, and which
-          // `AiChatPage.runtimeMessageSeam.test.tsx` already pinned. So the
-          // three existing arms keep `output` exactly as before and the
-          // pending envelope is minted only when none of them claims it.
-          //
-          // Losing the id is not the price of that, because the id does NOT
-          // depend on `output` alone here — it is also written as a part key
-          // below. The two carriers are not redundant; each reaches where the
-          // other cannot, and that is the whole design:
+          // The id is also written as a part key below. The two carriers are
+          // not redundant; each reaches where the other cannot:
           //
           //   * `output` is the only carrier that survives API mode's SDK
           //     store, because `useObjectChat`'s `aiInitialMessages` rebuilds
@@ -556,31 +420,13 @@ export function sanitizeChatMessagesForCache(
           //     that carries `output` and has no place for a cache-side key —
           //     and drops every other key, after which
           //     `extractToolInvocations` re-derives the id by re-parsing the
-          //     result. A pending-only turn — the only shape API mode can
-          //     actually produce, since `detectDraftResult` and
-          //     `detectPendingApproval` read ONE `parseResultEnvelope(result)`
-          //     and require different `status` values — lands here.
-          //   * the PART KEY is the only carrier left when a richer envelope
-          //     has taken `output`. Local mode keeps it, because
+          //     result.
+          //   * the PART KEY is the carrier local mode keeps, because
           //     `normalizeMessages` passes `toolInvocations` through verbatim,
           //     and `hydratedMessagesToChatMessages` lifts it on the way back.
-          //
-          // objectstack#25887 — a replay that still carries a `draftReview` is
-          // a drafted whole-app build (the live mapper keeps the review for
-          // that replay alone). Its draft envelope is cached, not the bare
-          // replay verdict: the verdict has no `drafted[]`, and without them a
-          // cache-fallback reload draws no result card. Re-detected under the
-          // same `replay_` id, the draft envelope still reads as a drafted
-          // replay, so the verdict survives too.
-          const cachedOutput = tool.replayOutcome && !tool.draftReview
-            ? replayOutcomeToCachedResult(tool.replayOutcome)
-            : tool.draftReview
-              ? draftReviewToCachedResult(tool.draftReview)
-              : tool.proposedPlan
-                ? proposedPlanToCachedResult(tool.proposedPlan)
-                : tool.pendingActionId
-                  ? pendingApprovalToCachedResult(tool.pendingActionId)
-                  : undefined;
+          const cachedOutput = tool.pendingActionId
+            ? pendingApprovalToCachedResult(tool.pendingActionId)
+            : undefined;
           // objectstack#31868 — the source block is a top-level key of the
           // data tool's result, so it is written as one into `output`, BESIDE
           // the envelope above rather than as a rival arm: it is not an
@@ -638,6 +484,8 @@ interface ServerMessage {
 interface ServerConversation {
   id: string;
   messages?: ServerMessage[];
+  /** `AiConversationSchema.metadata` (`@objectstack/spec/api`), as the conversation routes return it. */
+  metadata?: Record<string, unknown>;
 }
 
 function contentToParts(content: unknown): HydratedUIMessagePart[] {
@@ -689,10 +537,9 @@ const APPROVAL_STATES = new Set(['approval-requested', 'approval-responded']);
  * tool-call parts that requested them. The server persists conversations in
  * ModelMessage format, where a tool CALL (assistant message) and its RESULT (a
  * separate `tool` row) live in different messages. The chat UI needs the output
- * ON the call part so `detectDraftResult` can rebuild the publish/preview
- * affordances after a reload — otherwise the result, and the whole `tool` row
- * (which the UI never renders directly), is dropped and the build card + publish
- * button vanish on refresh.
+ * ON the call part so the result detectors can rebuild the cards after a
+ * reload — otherwise the result, and the whole `tool` row (which the UI never
+ * renders directly), is dropped and the cards vanish on refresh.
  *
  * ⚠️ The state rewrite below is deliberately NARROW (objectui#9233). Collapsing
  * a dangling `input-streaming` / `input-available` into a terminal state is why
@@ -854,7 +701,7 @@ export function aiMessageRowsToServerMessages(rows: RawAiMessageRow[] | undefine
 }
 
 export async function fetchConversation(apiBase: string, id: string): Promise<ServerConversation | null> {
-  const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     credentials: 'include',
   });
   if (res.status === 404 || res.status === 403) return null;
@@ -862,12 +709,15 @@ export async function fetchConversation(apiBase: string, id: string): Promise<Se
   return (await res.json()) as ServerConversation;
 }
 
-async function createConversation(apiBase: string): Promise<ServerConversation> {
-  const res = await fetch(`${apiBase}/conversations`, {
+async function createConversation(
+  apiBase: string,
+  metadata?: Readonly<Record<string, unknown>>,
+): Promise<ServerConversation> {
+  const res = await authFetch(`${apiBase}/conversations`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: metadata ? JSON.stringify({ metadata }) : '{}',
   });
   if (!res.ok) throw notSentCreateError(`POST conversation failed: ${res.status}`, res.status);
   return (await res.json()) as ServerConversation;
@@ -879,7 +729,7 @@ function notSentCreateError(message: string, status?: number): Error {
 }
 
 async function deleteConversation(apiBase: string, id: string): Promise<void> {
-  await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     credentials: 'include',
   }).catch(() => {
@@ -899,6 +749,7 @@ export function useChatConversation(
     resumeMode = 'resume',
     legacyScope,
     adoptLegacy,
+    createMetadata,
   } = options;
   // Ref'd so the resolve effect reads the LATEST predicate without depending on
   // its identity (hosts pass inline closures; re-resolving on every render of
@@ -924,14 +775,14 @@ export function useChatConversation(
   // event handler, after commit) acts for the surface the user is looking at.
   // Synced in a LAYOUT effect: those run before every passive effect of the
   // commit, the host's replay effect included.
-  const latestRef = useRef({ userId, scope, apiBase });
+  const latestRef = useRef({ userId, scope, apiBase, createMetadata });
   // Mirror of `conversationId`, written eagerly beside every create/settle so
   // a call landing before the re-render still sees the held id.
   const conversationIdRef = useRef<string | undefined>(conversationId);
   useLayoutEffect(() => {
-    latestRef.current = { userId, scope, apiBase };
+    latestRef.current = { userId, scope, apiBase, createMetadata };
     conversationIdRef.current = conversationId;
-  }, [userId, scope, apiBase, conversationId]);
+  }, [userId, scope, apiBase, createMetadata, conversationId]);
   // The cache key the hook has SETTLED on with no conversation: nothing to
   // resume, so the first send mints the row. `undefined` while a resolve runs
   // or once a conversation is held.
@@ -955,7 +806,7 @@ export function useChatConversation(
       if (mountedRef.current) setCreateError(undefined);
       entry.promise = (async (): Promise<string | undefined> => {
         try {
-          const fresh = await createConversation(base);
+          const fresh = await createConversation(base, latestRef.current.createMetadata);
           // The row exists and is the (user, scope)'s, whatever happens next.
           writeCache(key, fresh.id);
           // Adopt only while the hook is still waiting on THIS key. A resolve

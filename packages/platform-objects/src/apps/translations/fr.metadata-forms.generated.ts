@@ -77,8 +77,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Noms des champs de cet objet, du plus important au moins important — la première entrée l’emporte là où une seule peut figurer (ADR-0085). Détermine les colonnes par défaut des listes et des listes associées, les cartes, les aperçus d’enregistrements enfants, la carte de survol de l’enregistrement et le sélecteur d’enregistrements. Un nom qui n’est pas un champ de cet objet est refusé à la publication."
       },
       relatedLists: {
-        label: "Listes associées",
-        helpText: "Ordre métier des listes associées de cet objet sur sa page d’enregistrement, de la plus importante à la moins importante. Chaque entrée est un nom d’objet enfant (par ex. task), ou object.field lorsque cet enfant a plusieurs relations avec cet objet. Les listes indiquées viennent en premier ; les autres suivent dans l’ordre dérivé. Un nom qui ne correspond à aucune relation pointant vers cet objet ne place rien : l’enregistrement ou la validation de l’objet le refuse donc."
+        label: "Onglets de la page d’enregistrement",
+        helpText: "Les onglets de la page d’enregistrement après la vue d’ensemble, dans l’ordre. Chaque entrée est un nom d’objet enfant (par ex. task), object.field lorsque cet enfant a plus d’une relation avec cet objet, un onglet intégré (sys_attachment, sys_approval_request, sys_activity) ou une entrée avec son propre titre et ses propres colonnes, définie dans les paramètres de l’objet de Studio. Dès qu’un élément est listé, une liste associée qu’aucune entrée ne nomme n’affiche aucun onglet, y compris une liste ajoutée par un autre paquet, jusqu’à ce que cet objet la nomme ; les pièces jointes ne s’affichent que si elles sont listées. Vide : toutes les listes s’affichent dans l’ordre par défaut. Un nom qui ne correspond à aucune relation pointant vers cet objet est refusé à l’enregistrement de l’objet."
       },
       searchableFields: {
         label: "Champs de recherche",
@@ -114,7 +114,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Réduire",
-        helpText: "Indique si la section peut être réduite, sur le formulaire de saisie et la page de détail de l’enregistrement. Non défini : non."
+        helpText: "Indique si la section peut être réduite. Le formulaire de saisie applique le réglage tel quel. Sur la page d’enregistrement par défaut, le lecteur peut réduire chaque groupe titré ; le réglage n’y fixe que l’état initial : Collapsed commence réduit, les autres ouverts. Non défini : non.",
+        options: {
+          none: "Aucun — toujours ouvert dans le formulaire de saisie, sans bascule",
+          expanded: "Déplié — repliable, ouvert au départ",
+          collapsed: "Replié — repliable, fermé au départ"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Visible si",
@@ -134,7 +139,56 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "Type",
-        helpText: "Type de champ"
+        helpText: "Type de champ",
+        options: {
+          text: "Texte",
+          textarea: "Zone de texte",
+          email: "E-mail",
+          url: "Adresse URL",
+          phone: "Téléphone",
+          password: "Mot de passe",
+          markdown: "Texte Markdown",
+          html: "Contenu HTML",
+          richtext: "Texte enrichi",
+          number: "Nombre",
+          currency: "Devise",
+          percent: "Pourcentage",
+          date: "Date (sans heure)",
+          datetime: "Date et heure",
+          time: "Heure",
+          boolean: "Booléen",
+          toggle: "Interrupteur",
+          select: "Sélection",
+          multiselect: "Sélection multiple",
+          radio: "Bouton radio",
+          checkboxes: "Cases à cocher",
+          lookup: "Recherche (référence)",
+          master_detail: "Maître–détail",
+          tree: "Arborescence",
+          image: "Fichier image",
+          file: "Fichier",
+          avatar: "Photo de profil",
+          video: "Vidéo",
+          audio: "Fichier audio",
+          formula: "Formule (calculée)",
+          summary: "Synthèse (cumul)",
+          autonumber: "Numérotation automatique",
+          composite: "Composite (intégré)",
+          repeater: "Répéteur (tableau intégré)",
+          record: "Enregistrement (table à clés)",
+          location: "Emplacement (GPS)",
+          address: "Adresse",
+          code: "Code source",
+          json: "Données JSON",
+          color: "Couleur",
+          rating: "Note",
+          slider: "Curseur",
+          signature: "Signature manuscrite",
+          qrcode: "QR / Code-barres",
+          progress: "Progression",
+          tags: "Étiquettes",
+          vector: "Embedding vectoriel"
+        }
       },
       "fields.description": {
         label: "Description",
@@ -186,7 +240,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "Domaine de valeurs",
-        helpText: "Norme à laquelle doit appartenir la valeur écrite ; une écriture portant une valeur hors du domaine est refusée"
+        helpText: "Norme à laquelle doit appartenir la valeur écrite ; une écriture portant une valeur hors du domaine est refusée",
+        options: {
+          iana_time_zone: "Fuseau horaire IANA",
+          iso_4217_currency: "Code devise ISO 4217",
+          iso_3166_alpha2: "Code pays ISO 3166-1 alpha-2"
+        }
       },
       "fields.rows": {
         label: "Lignes",
@@ -226,7 +285,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "Nature",
-        helpText: "Catégorie du cycle de vie (sélection à valeur unique / bouton radio uniquement) : une étape du parcours, la fin réussie ou la fin non réussie. Obligatoire sur chaque option du champ d’étape."
+        helpText: "Catégorie du cycle de vie (sélection à valeur unique / bouton radio uniquement) : une étape du parcours, la fin réussie ou la fin non réussie. Obligatoire sur chaque option du champ d’étape.",
+        options: {
+          open: "Ouvert",
+          won: "Gagné",
+          lost: "Perdu"
+        }
       },
       "fields.reference": {
         label: "Référence",
@@ -238,7 +302,20 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "Comportement à la suppression",
-        helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
+        helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé",
+        options: {
+          set_null: "Mettre à null",
+          cascade: "Cascade (supprimer les enfants)",
+          restrict: "Restreindre (bloquer la suppression)"
+        }
+      },
+      "fields.transferBehavior": {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ",
+        options: {
+          none: "Aucun (restent chez leur propriétaire)",
+          cascade: "Cascade (proposer de les déplacer avec l'enregistrement référencé)"
+        }
       },
       "fields.multiple": {
         label: "Multiple",
@@ -250,7 +327,15 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "Type de retour",
-        helpText: "Type de résultat des formules"
+        helpText: "Type de résultat des formules",
+        options: {
+          text: "Texte",
+          number: "Nombre",
+          boolean: "Booléen",
+          date: "Date (sans heure)",
+          currency: "Devise",
+          percent: "Pourcentage"
+        }
       },
       "fields.summaryOperations": {
         label: "Opérations de synthèse",
@@ -266,7 +351,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "Fonction",
-        helpText: "Fonction d’agrégation"
+        helpText: "Fonction d’agrégation",
+        options: {
+          count: "Nombre",
+          sum: "Somme",
+          avg: "Moyenne",
+          min: "Minimum",
+          max: "Maximum"
+        }
       },
       "fields.autonumberFormat": {
         label: "Format de numérotation automatique",
@@ -276,9 +368,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Langue",
         helpText: "Langage de l’éditeur (par ex. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
+      },
       "fields.trackHistory": {
         label: "Suivre l’historique",
-        helpText: "Résumer ce champ dans la chronologie d’activité de l’enregistrement"
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       "fields.visibleWhen": {
         label: "Visible si",
@@ -298,6 +394,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Suivre l’historique"
+      },
+      "enable.fieldHistory": {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle des champs modifiés dans la chronologie d’activité de l’enregistrement. Par défaut, activé. Désactivé n’affiche plus de valeurs pour tout l’objet, quoi que dise un champ."
       },
       "enable.searchable": {
         label: "Recherchable"
@@ -363,15 +463,31 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "Index unique",
-        helpText: "Portée d’unicité (ADR-0120). Non défini : non unique. L’ancienne valeur nue true (qui signifie global) n’est pas proposée ; un index qui la porte la conserve jusqu’à ce que vous choisissiez une portée."
+        helpText: "Portée d’unicité (ADR-0120). Non défini : non unique. L’ancienne valeur nue true (qui signifie global) n’est pas proposée ; un index qui la porte la conserve jusqu’à ce que vous choisissiez une portée.",
+        options: {
+          global: "Global — un seul détenteur dans toute l'installation, sur exactement ces colonnes",
+          organization: "Organisation — un détenteur par organisation (le pilote ajoute la colonne d'organisation en tête)"
+        }
       },
       ownership: {
         label: "Propriété",
-        helpText: "Modèle de propriété des enregistrements. En l’absence de valeur, user s’applique."
+        helpText: "Modèle de propriété des enregistrements. En l’absence de valeur, user s’applique.",
+        options: {
+          user: "Utilisateur — owner_id réattribuable plus owning_business_unit_id",
+          business_unit: "Unité commerciale — owning_business_unit_id seul, sans owner_id",
+          org: "Organisation",
+          none: "Aucun — pas de propriétaire par enregistrement, aucun des deux ancrages"
+        }
       },
       sharingModel: {
         label: "Modèle de partage",
-        helpText: "Visibilité par défaut des enregistrements à l’échelle de l’organisation pour les utilisateurs internes. Un objet personnalisé qui l’omet est résolu en private à l’exécution (ADR-0090 D1)."
+        helpText: "Visibilité par défaut des enregistrements à l’échelle de l’organisation pour les utilisateurs internes. Un objet personnalisé qui l’omet est résolu en private à l’exécution (ADR-0090 D1).",
+        options: {
+          private: "Privé — propriétaire uniquement",
+          public_read: "Lecture publique — tout le monde lit, le propriétaire écrit",
+          public_read_write: "Lecture/écriture publique — tout le monde lit et écrit",
+          controlled_by_parent: "Contrôlé par le parent — dérivé de l'enregistrement maître"
+        }
       },
       sharing: {
         label: "Partage",
@@ -395,7 +511,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "Par défaut",
-        helpText: "public : couvert par les octrois génériques '*'. private : nécessite un octroi explicite par objet, et est exempté de la sécurité au niveau des lignes générique."
+        helpText: "public : couvert par les octrois génériques '*'. private : nécessite un octroi explicite par objet, et est exempté de la sécurité au niveau des lignes générique.",
+        options: {
+          public: "Public — couvert par les autorisations génériques (*)",
+          private: "Privé — nécessite une autorisation explicite par objet"
+        }
       },
       requiredPermissions: {
         label: "Autorisations requises",
@@ -411,11 +531,22 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "Audiences autorisées",
-        helpText: "Audiences qu’un nouveau lien peut désigner ; toute autre est refusée. Non défini : lien uniquement. Chaque audience nécessite toujours le lien lui-même : connecté nécessite en plus un utilisateur connecté, et e-mail nécessite en plus que l’adresse du destinataire figure sur la liste du lien."
+        helpText: "Audiences qu’un nouveau lien peut désigner ; toute autre est refusée. Non défini : lien uniquement. Chaque audience nécessite toujours le lien lui-même : connecté nécessite en plus un utilisateur connecté, et e-mail nécessite en plus que l’adresse du destinataire figure sur la liste du lien.",
+        options: {
+          public: "Tout public",
+          link_only: "Lien uniquement — toute personne disposant du lien",
+          signed_in: "Connecté — utilisateurs connectés disposant du lien",
+          email: "E-mail — destinataires listés disposant du lien"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Autorisations permises",
-        helpText: "Niveaux d’autorisation qu’un nouveau lien peut accorder ; tout autre est refusé. Non défini : consultation uniquement."
+        helpText: "Niveaux d’autorisation qu’un nouveau lien peut accorder ; tout autre est refusé. Non défini : consultation uniquement.",
+        options: {
+          view: "Afficher",
+          comment: "Commenter",
+          edit: "Modifier"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Expiration maximale (jours)",
@@ -461,9 +592,25 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Changer de propriétaire",
         helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
       },
+      actionLayout: {
+        label: "Disposition des actions",
+        helpText: "L’ordre des actions de cet objet et celles qui sont des boutons, par portée : pinned (au plus 3 boutons, dans l’ordre) et more (l’ordre du menu Plus ; une action nommée dans aucun des deux suit dans son ordre par défaut). Non défini : chaque surface choisit ses boutons selon l’ordre des actions, comme avant."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste ; $import / $export seulement dans pinned. Au plus 3 épinglées. Non épinglés, la page affiche toujours son propre menu Importer / Exporter. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
+      },
+      "actionLayout.record": {
+        label: "Enregistrement",
+        helpText: "L’en-tête de l’enregistrement (page de l’enregistrement, aperçu latéral, barre du bas sur téléphone), sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans l’en-tête de l’enregistrement ou son menu Plus. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé sur la page de l’enregistrement ; un tel nom n’affiche rien."
+      },
       editMode: {
         label: "Mode de modification",
-        helpText: "Intention d’interaction de modification pour les enregistrements de cet objet. En l’absence de valeur, le moteur de rendu choisit sa propre valeur par défaut. Intention commune à tous les moteurs de rendu, et non un style."
+        helpText: "Intention d’interaction de modification pour les enregistrements de cet objet. En l’absence de valeur, le moteur de rendu choisit sa propre valeur par défaut. Intention commune à tous les moteurs de rendu, et non un style.",
+        options: {
+          modal: "Modale — formulaire de modification en boîte de dialogue sur la vue actuelle",
+          page: "Page — accéder à une route de modification dédiée en pleine page"
+        }
       },
       fileAccessDelegate: {
         label: "Délégué d’accès aux fichiers",
@@ -475,7 +622,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "Classe",
-        helpText: "Contrat de persistance des lignes de cet objet"
+        helpText: "Contrat de persistance des lignes de cet objet",
+        options: {
+          record: "Enregistrement (vérité métier — permanent)",
+          audit: "Audit (registre de conformité — conserver → archiver → supprimer)",
+          telemetry: "Télémétrie (journal haute fréquence — conservation courte)",
+          transient: "Transitoire (état éphémère — expiration par TTL)",
+          event: "Événement (messages du bus — TTL très court)"
+        }
       },
       "lifecycle.retention": {
         label: "Rétention",
@@ -503,7 +657,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "Stratégie",
-        helpText: "Stratégie de stockage"
+        helpText: "Stratégie de stockage",
+        options: {
+          rotation: "Rotation (partitions temporelles + suppression de la plus ancienne)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Fragments",
@@ -511,7 +668,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "Unité",
-        helpText: "Durée couverte par un fragment"
+        helpText: "Durée couverte par un fragment",
+        options: {
+          day: "Jour",
+          week: "Semaine",
+          month: "Mois"
+        }
       },
       "lifecycle.archive": {
         label: "Archive",
@@ -642,7 +804,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "Affichage du pourcentage",
-        helpText: "Comment la valeur est affichée en lecture seule, dans les cellules de liste et sur la page de l’enregistrement. Non défini : une barre de progression à côté du pourcentage. Bar : toujours la barre de progression, pour une progression. Plain : le pourcentage seul, pour un taux ou une probabilité."
+        helpText: "Comment la valeur est affichée en lecture seule, dans les cellules de liste et sur la page de l’enregistrement. Non défini : une barre de progression à côté du pourcentage. Bar : toujours la barre de progression, pour une progression. Plain : le pourcentage seul, pour un taux ou une probabilité.",
+        options: {
+          bar: "Barre",
+          plain: "Simple"
+        }
       },
       currencyConfig: {
         label: "Configuration de la devise",
@@ -650,7 +816,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Mode de devise",
-        helpText: "dynamic (par défaut) : le champ n’a pas de devise propre, et les montants s’affichent dans la devise par défaut du locataire (le paramètre localization.currency). fixed : le champ a une seule devise, defaultCurrency. record : chaque enregistrement a sa propre devise, stockée dans le champ désigné par currencyField."
+        helpText: "dynamic (par défaut) : le champ n’a pas de devise propre, et les montants s’affichent dans la devise par défaut du locataire (le paramètre localization.currency). fixed : le champ a une seule devise, defaultCurrency. record : chaque enregistrement a sa propre devise, stockée dans le champ désigné par currencyField.",
+        options: {
+          dynamic: "Dynamique — la devise par défaut du locataire",
+          fixed: "Fixe — une devise pour ce champ",
+          record: "Enregistrement — chaque enregistrement indique sa devise"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Champ de devise",
@@ -747,7 +918,19 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "Comportement à la suppression",
-        helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé"
+        helpText: "Ce qui se passe lorsque l’enregistrement référencé est supprimé",
+        options: {
+          cascade: "Cascade (supprimer les enfants)",
+          restrict: "Restreindre (bloquer la suppression)"
+        }
+      },
+      transferBehavior: {
+        label: "Comportement au changement de propriétaire",
+        helpText: "Indique si « Changer de propriétaire » sur l'enregistrement référencé peut aussi déplacer les enregistrements qui pointent vers lui par ce champ",
+        options: {
+          none: "Aucun (restent chez leur propriétaire)",
+          cascade: "Cascade (proposer de les déplacer avec l'enregistrement référencé)"
+        }
       },
       relatedListFilter: {
         label: "Filtre de la liste associée",
@@ -789,6 +972,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Colonnes de la liste associée",
         helpText: "Colonnes de la liste associée de cette relation sur la page de détail du parent, sous forme de noms de champs de cet objet (l’enfant), par ex. name, status. Non défini : dérivées de l’objet enfant. Noms uniquement — les libellés, types de cellule et formats proviennent des définitions de champs de l’enfant."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Grille (modifier les lignes dans un tableau)",
+          form: "Formulaire (ouvrir chaque ligne dans son formulaire complet)"
+        }
+      },
       inlineTitle: {
         label: "Titre en ligne",
         helpText: "Titre de la grille maître-détail en ligne sur l’enregistrement parent."
@@ -823,7 +1014,15 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Type de retour",
-        helpText: "Type de valeur déclaré de la formule, renseigné à partir du type CEL déduit. Les consommateurs le lisent au lieu de réanalyser l’expression. Currency : un montant d’argent, dans la devise déclarée par la Configuration de la devise de ce champ (dynamic si non définie)."
+        helpText: "Type de valeur déclaré de la formule, renseigné à partir du type CEL déduit. Les consommateurs le lisent au lieu de réanalyser l’expression. Currency : un montant d’argent, dans la devise déclarée par la Configuration de la devise de ce champ (dynamic si non définie).",
+        options: {
+          text: "Texte",
+          number: "Nombre",
+          boolean: "Booléen",
+          date: "Date (sans heure)",
+          currency: "Devise",
+          percent: "Pourcentage"
+        }
       },
       summaryOperations: {
         label: "Opérations de synthèse",
@@ -835,7 +1034,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "Fonction",
-        helpText: "Fonction d’agrégation"
+        helpText: "Fonction d’agrégation",
+        options: {
+          count: "Nombre",
+          sum: "Somme",
+          min: "Minimum",
+          max: "Maximum",
+          avg: "Moyenne"
+        }
       },
       "summaryOperations.field": {
         label: "Champ",
@@ -861,9 +1067,17 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lecture seule",
         helpText: "Le champ est en lecture seule dans les formulaires"
       },
+      uiReadonly: {
+        label: "Lecture seule dans l'interface",
+        helpText: "Personne ne peut modifier ce champ à la main dans la console (boîtes de dialogue, page de l'enregistrement, grilles, glisser-déposer du kanban, du calendrier et du Gantt, la feuille de temps), tandis que les actions, les imports, l'API et les flux continuent de l'écrire, chaque écriture étant jugée par les validations de l'objet. Laissez-le désactivé lorsque Lecture seule est activé : celui-ci bloque déjà toute écriture client. L’assistant intégré qui agit pour le compte d’une personne ne le respecte pas encore."
+      },
       hidden: {
         label: "Masqué",
         helpText: "Masquer le champ dans les vues d’interface par défaut"
+      },
+      showOnCreate: {
+        label: "Afficher à la création",
+        helpText: "Demander ce champ à la création d’un enregistrement. Désactivé : la boîte de création, la création en pleine page et une création ouverte par une action l’omettent ; la modification, la page de l’enregistrement et les listes l’affichent toujours. Un champ obligatoire est toujours demandé et ne peut donc pas être désactivé."
       },
       searchable: {
         label: "Recherchable",
@@ -881,6 +1095,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Lecture seule si",
         helpText: "Prédicat CEL sur l’enregistrement (par ex. record.status == 'paid') — le champ est en lecture seule tant qu’il est TRUE, ce qui est appliqué côté serveur : la modification d’un champ verrouillé par une mise à jour est ignorée et la valeur stockée est conservée. Lit les colonnes propres de l’enregistrement ; objectstack validate refuse une lecture via un champ de référence."
       },
+      uiReadonlyWhen: {
+        label: "Lecture seule dans l'interface si",
+        helpText: "Prédicat CEL sur l'enregistrement (p. ex. record.status != 'draft') : tant qu'il vaut TRUE, personne ne peut modifier le champ d'un enregistrement existant dans la console (la boîte d'édition, la page de l'enregistrement, les grilles, le glisser-déposer du kanban, du calendrier et du Gantt, la feuille de temps) ; la boîte de création d'un nouvel enregistrement ne l'évalue pas. Les actions, les imports, l'API et les flux continuent de l'écrire, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement, comme Lecture seule si. L’assistant intégré qui agit pour le compte d’une personne ne le respecte pas encore."
+      },
       requiredWhen: {
         label: "Obligatoire si",
         helpText: "Prédicat CEL sur l’enregistrement — le champ est obligatoire tant qu’il est TRUE, ce qui est appliqué côté serveur comme un contrôle de transition : une écriture qui laisse la valeur manquante est refusée lorsque l’enregistrement était conforme avant elle, de sorte qu’une ligne à laquelle la valeur manque déjà continue d’accepter les modifications sans rapport. Pour une règle que chaque écriture doit respecter, utilisez une règle de script de validations. Refusé avec storage.notNull."
@@ -897,9 +1115,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Interne",
         helpText: "Ne jamais renvoyer la valeur de ce champ par le chemin de données générique : le moteur omet la clé des résultats find/findOne et des corps de réponse de création et de mise à jour, avec la projection par défaut comme lorsqu’un client nomme le champ dans ?select=. Le stockage, le filtrage et l’indexation ne sont pas affectés."
       },
+      fieldHistory: {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
+      },
       trackHistory: {
         label: "Suivre l’historique",
-        helpText: "Afficher les modifications de valeur de ce champ sous forme d’entrées dans la chronologie d’activité de l’enregistrement (ADR-0052 §5b). Activation par champ."
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       widget: {
         label: "Widget",
@@ -959,7 +1181,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Langue",
-        helpText: "expression = formule pure ; js = JavaScript en bac à sable"
+        helpText: "expression = formule pure ; js = JavaScript en bac à sable",
+        options: {
+          expression: "Expression pure (L1)",
+          js: "JavaScript (L2 en bac à sable)"
+        }
       },
       "body.source": {
         label: "Source",
@@ -1022,7 +1248,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Exécuter en arrière-plan, sans bloquer la transaction"
       },
       onError: {
-        label: "En cas d’erreur"
+        label: "En cas d’erreur",
+        options: {
+          abort: "Interrompre",
+          log: "Journaliser"
+        }
       },
       timeoutMs: {
         label: "Délai d’expiration (ms)",
@@ -1030,7 +1260,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "Exécuter en tant que",
-        helpText: "Identité des opérations de données ctx.api : hériter de l’écriture déclenchante (par défaut), system (privilèges élevés) ou user (l’utilisateur déclencheur)"
+        helpText: "Identité des opérations de données ctx.api : hériter de l’écriture déclenchante (par défaut), system (privilèges élevés) ou user (l’utilisateur déclencheur)",
+        options: {
+          inherit: "Hériter (écriture déclenchante)",
+          system: "Système (élevé)",
+          user: "Utilisateur (utilisateur déclencheur)"
+        }
       },
       condition: {
         label: "Condition",
@@ -1052,15 +1287,54 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Données d’amorçage",
-    description: "Données de fixture / d’initialisation appliquées à la publication"
+    description: "Données de fixture / d’initialisation appliquées à la publication",
+    fields: {
+      object: {
+        label: "Objet"
+      },
+      mode: {
+        label: "Mode"
+      }
+    }
   },
   picklist: {
     label: "Liste de sélection",
-    description: "Liste d’options partagée que les champs de sélection référencent par son nom"
+    description: "Liste d’options partagée que les champs de sélection référencent par son nom",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      options: {
+        label: "Options"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   mapping: {
     label: "Mappage d’import",
-    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import"
+    description: "Mappage de champs d’import/export réutilisable (renommage + transformations), référencé par son nom lors de l’import",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      targetObject: {
+        label: "Objet cible"
+      },
+      mode: {
+        label: "Mode"
+      },
+      sourceFormat: {
+        label: "Format source"
+      }
+    }
   },
   view: {
     label: "Vue",
@@ -1203,7 +1477,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Barre d’outils compacte",
-        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre de paramètres de la vue"
+        helpText: "Regrouper Groupe/Couleur/Densité/Masquer les champs dans une seule fenêtre « Paramètres de la vue ». Activé par défaut : absent ou `true`, le moteur de rendu dessine cette barre d’outils compacte ; `false` dessine la barre d’outils large, avec un bouton par contrôle. La barre compacte ne dessine pas de bouton Actualiser, donc `userActions.refresh` ne régit que la barre large ; le tirer pour actualiser n’est affecté par aucune des deux clés."
       },
       rowHeight: {
         label: "Hauteur de ligne",
@@ -1355,11 +1629,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Configuration de la navigation au clic sur un élément (tiroir par défaut, page, new_window ou none)"
+        helpText: "Configuration de la navigation au clic sur un élément : la taille du tiroir, et `preventNavigation` pour une liste dont les lignes n'ouvrent rien (`mode` est obsolète — le nom de l'enregistrement ouvre la page, l'icône au survol le panneau latéral)"
       },
       "navigation.mode": {
         label: "Mode",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[OBSOLÈTE] Sur la liste d'un objet (une vue de liste, les `listViews` d'un objet), ne détermine plus la façon dont un enregistrement s'ouvre : dans la console, pour tous les lecteurs, le nom de l'enregistrement ouvre la page complète et l'icône qui apparaît à côté au survol ouvre le panneau latéral. Là, `drawer`, `page` et `new_window` sont toujours analysés et ne changent rien, omettez donc la clé ; `none` signifie toujours que les lignes n'ouvrent rien — préférez `preventNavigation: true`. Un bloc de page qui porte `navigation` (un bloc de liste, la chronologie, une vue intégrée) respecte toujours chaque valeur."
       },
       "navigation.preventNavigation": {
         label: "Empêcher la navigation",
@@ -1371,7 +1645,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "Taille",
-        helpText: "Catégorie de taille de la superposition pour le détail en tiroir : 'auto' (par défaut — le moteur de rendu la déduit du nombre de champs et de la fenêtre d’affichage ; l’IA n’écrit rien) ou un remplacement grossier sm/md/lg/xl/full. Préférez ceci à la `width` en pixels ; le mode page l’ignore."
+        helpText: "Catégorie de largeur du tiroir d’enregistrement : 'auto' (par défaut) conserve la largeur fixe par défaut de l’hôte, la même pour chaque objet quel que soit son nombre de champs (le panneau latéral d’enregistrement de la console s’ouvre à 460px), ou un remplacement grossier sm/md/lg/xl/full (un plafond de 480/720/960/1200/1600px, toujours borné à la fenêtre d’affichage). Une largeur que le lecteur fait glisser l’emporte sur les deux. Préférez ceci à la `width` en pixels ; sans effet là où l’enregistrement s’ouvre en page (dans la console, tout enregistrement sur un téléphone), ni sur un écran de la largeur d’un téléphone, que le tiroir remplit."
       },
       "navigation.width": {
         label: "Largeur",
@@ -1384,8 +1658,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Verrouillé par",
         helpText: "Utilisateur qui a verrouillé la configuration de la vue"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
+      },
+      object: {
+        label: "Objet"
       }
     }
+  },
+  form: {
+    label: "Formulaire"
   },
   page: {
     label: "Page",
@@ -1426,7 +1710,14 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Type",
-        helpText: "Nature de la page. « Liste / Interface » lie une vue source à une surface organisée — son apparence (grille / kanban / calendrier / …) est une visualisation définie sous Interface, et non un type de page."
+        helpText: "Nature de la page. « Liste / Interface » lie une vue source à une surface organisée — son apparence (grille / kanban / calendrier / …) est une visualisation définie sous Interface, et non un type de page.",
+        options: {
+          list: "Page de liste / d'interface",
+          record: "Page d'enregistrement",
+          home: "Page d'accueil",
+          app: "Page d'application",
+          utility: "Panneau utilitaire"
+        }
       },
       template: {
         label: "Modèle",
@@ -1539,7 +1830,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "Action sur l’enregistrement",
-        helpText: "Comment un clic sur un enregistrement ouvre son détail"
+        helpText: "Comment un clic sur un enregistrement ouvre son détail",
+        options: {
+          drawer: "Tiroir (aperçu à droite)",
+          page: "Page complète",
+          none: "Non cliquable"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Afficher le nombre d’enregistrements",
@@ -1582,6 +1878,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filtres",
         description: "Filtres par défaut et globaux appliqués à l’ensemble des widgets."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "Avancé",
         description: "Réglages d’accessibilité et de performances."
@@ -1590,30 +1890,30 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Nom",
-        helpText: "Identifiant unique snake_case"
+        helpText: "Nom interne unique de ce tableau de bord : lettres minuscules, chiffres et tirets bas, en commençant par une lettre (par exemple sales_overview)."
       },
       label: {
         label: "Libellé",
-        helpText: "Nom d’affichage"
+        helpText: "Le titre que les utilisateurs voient pour ce tableau de bord."
       },
       description: {
         label: "Description"
       },
       columns: {
         label: "Colonnes",
-        helpText: "Colonnes de la grille (12 par défaut)"
+        helpText: "Nombre de colonnes sur lesquelles les widgets sont disposés, de 1 à 24. Laissez vide pour que le tableau de bord choisisse une largeur adaptée à ses widgets."
       },
       gap: {
         label: "Espacement",
-        helpText: "Espace entre les widgets, par pas de 0,25rem (4 = 1rem)"
+        helpText: "Espace à laisser entre les widgets. Plus le nombre est grand, plus ils sont espacés ; laissez vide pour l’espacement standard."
       },
       refreshIntervalSeconds: {
         label: "Intervalle d’actualisation (secondes)",
-        helpText: "Actualisation automatique (secondes)"
+        helpText: "Fréquence à laquelle le tableau de bord recharge ses données, en secondes. Laissez vide ou saisissez 0 pour désactiver le rechargement automatique."
       },
       header: {
         label: "En-tête",
-        helpText: "Configuration de l’en-tête du tableau de bord (titre, sous-titre, actions)"
+        helpText: "Ce qui s’affiche en haut du tableau de bord : son titre, sa description et les boutons d’action."
       },
       "header.showTitle": {
         label: "Afficher le titre",
@@ -1641,7 +1941,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets du tableau de bord avec leur position et leur taille"
+        helpText: "Les graphiques, chiffres et tableaux de ce tableau de bord, et l’emplacement de chacun."
       },
       "widgets.id": {
         label: "ID du widget"
@@ -1696,11 +1996,42 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Plage de dates",
-        helpText: "Sélecteur de plage de dates par défaut"
+        helpText: "La période affichée à l’ouverture du tableau de bord, et si les utilisateurs peuvent choisir leurs propres dates."
+      },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Aujourd'hui",
+          yesterday: "Hier",
+          this_week: "Cette semaine",
+          last_week: "La semaine dernière",
+          this_month: "Ce mois-ci",
+          last_month: "Le mois dernier",
+          next_month: "Le mois prochain",
+          this_quarter: "Ce trimestre",
+          last_quarter: "Le trimestre dernier",
+          next_quarter: "Le trimestre prochain",
+          this_year: "Cette année",
+          last_year: "L'année dernière",
+          last_7_days: "7 derniers jours",
+          last_30_days: "30 derniers jours",
+          last_90_days: "90 derniers jours",
+          next_30_days: "30 prochains jours",
+          custom: "Personnalisé…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
       },
       globalFilters: {
         label: "Filtres globaux",
-        helpText: "Filtres appliqués à tous les widgets"
+        helpText: "Filtres que les utilisateurs peuvent utiliser pour restreindre tous les widgets à la fois, ou seulement ceux que vous choisissez."
       },
       "globalFilters.name": {
         label: "Nom"
@@ -1731,6 +2062,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "Widgets cibles"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
@@ -1868,7 +2203,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "Mode",
-        helpText: "Mode sémantique de l’action. Lu aujourd’hui uniquement par l’heuristique d’intervention humaine de l’IA — aucun moteur de rendu ne s’en sert."
+        helpText: "Mode sémantique de l’action. Lu aujourd’hui uniquement par l’heuristique d’intervention humaine de l’IA — aucun moteur de rendu ne s’en sert.",
+        options: {
+          create: "Créer",
+          edit: "Modifier",
+          delete: "Supprimer",
+          custom: "Personnalisé"
+        }
       },
       order: {
         label: "Ordre",
@@ -1888,7 +2229,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Langue",
-        helpText: "expression = formule pure ; js = JavaScript en bac à sable"
+        helpText: "expression = formule pure ; js = JavaScript en bac à sable",
+        options: {
+          expression: "Expression pure (L1)",
+          js: "JavaScript (L2 en bac à sable)"
+        }
       },
       "body.source": {
         label: "Source",
@@ -2005,7 +2350,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "Opération",
-        helpText: "Écriture déclarative de champs sur un seul enregistrement : 'update' applique `patch`, fusionné sous les `params` collectés, à l’enregistrement courant EN TANT QU’APPELANT — jamais avec des privilèges système, de sorte que les autorisations de l’appelant, les hooks de l’objet et ses validations s’appliquent comme pour une modification par un utilisateur."
+        helpText: "Écriture déclarative de champs sur un seul enregistrement : 'update' applique `patch`, fusionné sous les `params` collectés, à l’enregistrement courant EN TANT QU’APPELANT — jamais avec des privilèges système, de sorte que les autorisations de l’appelant, les hooks de l’objet et ses validations s’appliquent comme pour une modification par un utilisateur.",
+        options: {
+          update: "Mettre à jour l'enregistrement actuel"
+        }
       },
       patch: {
         label: "Correctif",
@@ -2162,7 +2510,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
@@ -2244,9 +2593,52 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Plage de dates",
         helpText: "Période par défaut et sélecteur de plage personnalisée. La dimension doit être une dimension de date du jeu de données ; laissez vide lorsque le jeu de données en a exactement une."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Aujourd'hui",
+          yesterday: "Hier",
+          this_week: "Cette semaine",
+          last_week: "La semaine dernière",
+          this_month: "Ce mois-ci",
+          last_month: "Le mois dernier",
+          next_month: "Le mois prochain",
+          this_quarter: "Ce trimestre",
+          last_quarter: "Le trimestre dernier",
+          next_quarter: "Le trimestre prochain",
+          this_year: "Cette année",
+          last_year: "L'année dernière",
+          last_7_days: "7 derniers jours",
+          last_30_days: "30 derniers jours",
+          last_90_days: "90 derniers jours",
+          next_30_days: "30 prochains jours",
+          custom: "Personnalisé…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Options d’export",
         helpText: "Formats de téléchargement (csv, xlsx) et nom de fichier. Qui peut télécharger dépend de l’autorisation d’export sur l’objet du jeu de données."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2907,24 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Tâche en arrière-plan"
+    label: "Tâche en arrière-plan",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      schedule: {
+        label: "Planification"
+      },
+      enabled: {
+        label: "Activé"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   datasource: {
     label: "Source de données"
@@ -2525,10 +2934,41 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "Point de terminaison d’API",
-    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application"
+    description: "Une URL HTTP stable que d’autres systèmes appellent pour exécuter un flux ou manipuler les enregistrements de l’application",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      method: {
+        label: "Méthode"
+      },
+      path: {
+        label: "Chemin"
+      },
+      type: {
+        label: "Type"
+      },
+      "objectParams.object": {
+        label: "Objet"
+      },
+      "objectParams.operation": {
+        label: "Opération"
+      }
+    }
   },
   translation: {
-    label: "Traduction"
+    label: "Traduction",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      locale: {
+        label: "Langue"
+      }
+    }
   },
   email_template: {
     label: "Modèle d’e-mail",
@@ -2605,11 +3045,45 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même"
+    description: "Une page d’aide rédigée en Markdown, fournie par un package ou écrite par vous-même",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      group: {
+        label: "Groupe"
+      },
+      tags: {
+        label: "Mots-clés"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   book: {
     label: "Livre de documentation",
-    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées"
+    description: "Une table des matières qui regroupe les pages d’aide en sections ordonnées",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      audience: {
+        label: "Public"
+      },
+      groups: {
+        label: "Groupes"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   permission: {
     label: "Ensemble d’autorisations",
@@ -2713,15 +3187,66 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Règle de partage",
-    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration"
+    description: "Une règle qu’un package déclare pour partager des enregistrements ; les organisations créent les leurs dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      sharedWith: {
+        label: "Partagé avec"
+      },
+      accessLevel: {
+        label: "Niveau d’accès"
+      }
+    }
   },
   queue: {
     label: "File d’attente",
-    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration"
+    description: "Un groupe nommé de personnes dans lequel des enregistrements peuvent attendre jusqu’à ce que l’une d’elles prenne l’enregistrement ; les organisations y affectent leurs propres membres dans Configuration",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      members: {
+        label: "Membres"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   assignment_rule: {
     label: "Règle d’attribution",
-    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne"
+    description: "Une règle qu’un package déclare pour acheminer les nouveaux enregistrements vers une file d’attente ou une personne",
+    fields: {
+      name: {
+        label: "Nom"
+      },
+      label: {
+        label: "Libellé"
+      },
+      object: {
+        label: "Objet"
+      },
+      entries: {
+        label: "Entrées"
+      },
+      active: {
+        label: "Actif"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   agent: {
     label: "Agent IA",
@@ -2766,7 +3291,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Surface",
-        helpText: "Surface produit à laquelle cet agent se rattache (ADR-0063 §1). Seules les compétences dont la surface correspond — ou vaut 'both' — s’y rattachent, et l’ensemble d’outils de l’agent est l’union des outils de ces compétences. Par défaut : 'ask'."
+        helpText: "Surface produit à laquelle cet agent se rattache (ADR-0063 §1). Seules les compétences dont la surface correspond — ou vaut 'both' — s’y rattachent, et l’ensemble d’outils de l’agent est l’union des outils de ces compétences. Par défaut : 'ask'.",
+        options: {
+          ask: "Ask (surfaces conversationnelles)",
+          build: "Build (surfaces de création)"
+        }
       },
       instructions: {
         label: "Instructions",
@@ -2774,11 +3303,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modèle",
-        helpText: "Configuration du modèle d’IA (fournisseur, nom du modèle, température, etc.)"
+        helpText: "Configuration du modèle d’IA (nom du modèle, température, etc.)"
       },
       planning: {
         label: "Planification",
-        helpText: "Configuration du raisonnement autonome : le nombre maximal d’itérations de raisonnement avant que l’agent ne s’arrête (1–100, 10 par défaut)."
+        helpText: "Configuration du raisonnement autonome : un fusible contre les boucles incontrôlées, compté en appels au modèle (chacun, un appel au modèle plus son lot d’outils), après lequel l’agent s’arrête (1–1000, 10 par défaut)."
       },
       memory: {
         label: "Mémoire",
@@ -2803,6 +3332,9 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Garde-fous",
         helpText: "Règles de sécurité et politiques de contenu"
+      },
+      "model.model": {
+        label: "Modèle"
       }
     }
   },
@@ -2880,7 +3412,12 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Surface",
-        helpText: "Surface d’agent à laquelle cette compétence se rattache (ADR-0063 §3). La rattacher à un agent dont la surface diffère provoque un échec franc lors de la résolution, et non un saut silencieux. Par défaut : 'ask'."
+        helpText: "Surface d’agent à laquelle cette compétence se rattache (ADR-0063 §3). La rattacher à un agent dont la surface diffère provoque un échec franc lors de la résolution, et non un saut silencieux. Par défaut : 'ask'.",
+        options: {
+          ask: "Ask (surfaces conversationnelles)",
+          build: "Build (surfaces de création)",
+          both: "Les deux"
+        }
       },
       instructions: {
         label: "Instructions",
@@ -2889,6 +3426,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tools: {
         label: "Outils",
         helpText: "Noms des outils (prend en charge le joker : action_*)"
+      },
+      context: {
+        label: "Pack de contexte",
+        helpText: "Pack de contexte sur lequel s'appuie cette compétence (son nom). Nécessite get_record_context dans Outils. Via MCP, le prompt accepte alors un ID d'enregistrement facultatif"
       },
       triggerConditions: {
         label: "Conditions de déclenchement",
@@ -2904,5 +3445,51 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Valeur"
       }
     }
+  },
+  ai_context: {
+    label: "Pack de contexte IA",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The pack's identity and the object whose records it reads."
+      },
+      material: {
+        label: "Material",
+        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+      },
+      object: {
+        label: "Root object",
+        helpText: "The root object: the pack reads one record of it."
+      },
+      fields: {
+        label: "Fields",
+        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+      },
+      related: {
+        label: "Related lists",
+        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+      },
+      body: {
+        label: "Body",
+        helpText: "The one long-text field read as the record's body."
+      },
+      "body.field": {
+        label: "Body field",
+        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+      }
+    }
+  },
+  knowledge_source: {
+    label: "Source de connaissances"
   }
 };

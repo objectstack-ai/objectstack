@@ -4,40 +4,56 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 import type { SettingsActionHandler } from '../settings-service.types.js';
 
 /**
- * Knowledge — RAG infrastructure: which adapter stores vectors, and
- * how big chunks are. The embedder itself is configured in the AI
- * namespace (see `ai.manifest.ts`) because it's shared between
- * knowledge sources and any future agent that needs to embed ad-hoc
- * inputs.
+ * Knowledge — the settings the knowledge service and its store read. The
+ * embedder itself is configured in the AI namespace (see `ai.manifest.ts`)
+ * because it's shared between knowledge sources and any future agent that
+ * needs to embed ad-hoc inputs.
  *
- * Adapter list — two of these plugin packages are built in this repo and one
- * is not, which is the difference that matters to an operator told to mount
- * one of them:
- *   - memory    @objectstack/knowledge-memory   built here (dev / test ref)
- *   - ragflow   @objectstack/knowledge-ragflow  built here (external RAGFlow)
- *   - turso     @objectstack/knowledge-turso    NOT built here — libSQL native
- *                                               F32_BLOB, works for cloud
- *                                               Turso AND local file mode
+ * Every key here has a reader (ADR-0049 enforce-or-remove: a setting nothing
+ * reads is not offered). The Turso group (`turso_url`, `turso_auth_token`) is
+ * not declared here: its one reader, `@objectstack/knowledge-turso`, adds it
+ * to this page when it reads them (`contributeKnowledgeTursoSettings`), so a
+ * deployment whose store is `@objectstack/knowledge-pgvector` shows no Turso
+ * fields.
  *
- * Spelled out for `turso` because the undated claim that used to stand here —
- * "mirrors the plugin packages currently published" — stopped being true and
- * nothing caught it. The package IS published on the public npm registry, but
- * on its own version track: `latest` was 6.9.0 (published 2026-05-27) while
- * this repo shipped 17.2.0, and 6.9.0 exact-pins `@objectstack/spec@6.9.0`, so
- * mounting it into an app on this platform version resolves a SECOND spec
- * rather than reusing this one. Its source lives in the ObjectOS Cloud
- * monorepo (see this repo's README). Measured against the registry on
- * 2026-08-23 with `@objectstack/spec` + `@objectstack/cli` as positive
- * controls; re-measure before treating those numbers as current.
+ *   - `chunk_target` — the knowledge service's splitter (#37098), read through
+ *     `KnowledgeServicePlugin` each time it splits: the longest passage, in
+ *     characters, beneath a knowledge source's own `split.maxChars`, and
+ *     lowered further by the embedder's input limit. It applies to every
+ *     adapter that takes the service's passages, the in-memory one included.
  *
- * As with the AI manifest, the real adapter wiring happens in the
- * knowledge plugins; this manifest is the canonical settings surface
- * for "what knowledge backend is wired" and saves operators from
- * grepping defineStack() during onboarding / incident response.
+ * The keys this page no longer offers, and why each `version` bump:
+ *
+ *   - 2: `chunk_overlap` — nothing ever read it; the splitter cuts without
+ *     overlap, so it was retired rather than implemented (#37098).
+ *   - 3: the `ragflow` adapter option and its three keys (`ragflow_base_url`,
+ *     `ragflow_api_key`, `ragflow_default_dataset`), with
+ *     `@objectstack/knowledge-ragflow` (#37004).
+ *   - 4 (#37104): `adapter`, `over_fetch` and `enforce_rls`, none of which any
+ *     code read. The store a knowledge source uses is the one its own
+ *     `adapter` names, among those mounted — `requires: ['knowledge']` mounts
+ *     one, chosen by the platform database (`resolveKnowledgeStore` in
+ *     `@objectstack/core`) — so a page-level choice changed nothing; the
+ *     `index_status` action (`os knowledge status`) answers each source's
+ *     store. Search refills from fixed factors (`SEARCH_FIRST_ROUND_FACTOR`,
+ *     `SEARCH_REFILL_FACTOR` in `@objectstack/service-knowledge`), never a
+ *     setting. And every search re-checks each hit as the asking user
+ *     (`applyPermissionFilter`), with no switch: a toggle that appeared to
+ *     turn that off must not exist.
+ *   - 5: `turso_url` and `turso_auth_token`, with the Turso group, leave this
+ *     declaration for the store that reads them, which contributes them where
+ *     it does (above). A row saved for either is kept: where the store is
+ *     mounted it is read as before, elsewhere it is not served.
+ *
+ * The spec's `SettingsManifest.version` contract is "increment when keys are
+ * renamed/removed". A `sys_setting` row stored for a removed key is kept,
+ * never deleted; the service no longer resolves it, so the page loads without
+ * it, and a write naming the key is refused `400 UNKNOWN_KEY`, the answer
+ * every undeclared key gets.
  */
 const manifest = {
   namespace: 'knowledge',
-  version: 1,
+  version: 5,
   label: 'Knowledge',
   icon: 'BookOpen',
   description:
@@ -49,82 +65,12 @@ const manifest = {
   category: 'Infrastructure',
   order: 35,
   specifiers: [
-    // ── Adapter selection ─────────────────────────────────────────
-    { type: 'group', id: 'adapter', label: 'Backend', required: false,
-      description: 'Choose where document chunks and their vectors are stored.' },
-    { type: 'select', key: 'adapter', label: 'Adapter', required: true, default: 'memory',
-      options: [
-        { value: 'memory', label: 'In-memory (dev / test only)' },
-        { value: 'turso', label: 'Turso / libSQL (cloud or local)' },
-        { value: 'ragflow', label: 'RAGFlow (external)' },
-      ],
-    },
-    // Warnings are `info_banner` rows with `bannerSeverity: 'warning'`, never a
-    // sentence inside a description; each `id` addresses its copy under
-    // `settings.knowledge.banners.<id>` in the locale bundles.
-    { type: 'info_banner', id: 'adapter_switch_warning', label: 'Existing indices are not migrated',
-      required: false, bannerSeverity: 'warning',
-      bannerText:
-        'Switching adapter does NOT migrate existing indices — documents indexed under the ' +
-        'previous adapter become unreachable until re-indexed.' },
-
-    // ── Turso / libSQL ────────────────────────────────────────────
-    { type: 'group', id: 'turso', label: 'Turso / libSQL', required: false,
-      visible: "${data.adapter === 'turso'}",
-      description:
-        'Works against managed Turso (libsql://…), local file (file:./knowledge.db), ' +
-        'or in-memory (:memory:). In a cloud deployment with a database per organization, leave blank to ' +
-        'reuse that organization\'s own database connection.' },
-    { type: 'text', key: 'turso_url', label: 'Connection URL', required: false,
-      description: 'Examples: libsql://your-tenant.turso.io · file:./.objectstack/knowledge.db · :memory:',
-      visible: "${data.adapter === 'turso'}" },
-    { type: 'password', key: 'turso_auth_token', label: 'Auth token',
-      required: false, encrypted: true,
-      description: 'Only required for managed Turso URLs. Leave blank for local file / :memory:.',
-      visible: "${data.adapter === 'turso'}" },
-
-    // ── RAGFlow ───────────────────────────────────────────────────
-    { type: 'group', id: 'ragflow', label: 'RAGFlow', required: false,
-      visible: "${data.adapter === 'ragflow'}",
-      description: 'External RAGFlow deployment. See https://ragflow.io for self-host instructions.' },
-    { type: 'text', key: 'ragflow_base_url', label: 'Base URL', required: true,
-      description: 'Example: http://localhost:9380',
-      visible: "${data.adapter === 'ragflow'}" },
-    { type: 'password', key: 'ragflow_api_key', label: 'API key',
-      required: true, encrypted: true,
-      visible: "${data.adapter === 'ragflow'}" },
-    { type: 'text', key: 'ragflow_default_dataset', label: 'Default dataset id',
-      required: false,
-      description: 'Used when a knowledge source does not name its own RAGFlow dataset.',
-      visible: "${data.adapter === 'ragflow'}" },
-
     // ── Indexing defaults ─────────────────────────────────────────
     { type: 'group', id: 'indexing', label: 'Indexing defaults', required: false,
-      description: 'A value set on a knowledge source itself wins over these defaults.',
-      visible: "${data.adapter !== 'memory'}" },
+      description: 'A value set on a knowledge source itself wins over these defaults.' },
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
-      description: 'Soft cap on chunk size in characters before token-aware splitting kicks in.',
-      visible: "${data.adapter !== 'memory'}" },
-    { type: 'number', key: 'chunk_overlap', label: 'Chunk overlap (chars)',
-      required: false, default: 80, min: 0, max: 2048,
-      description: 'Characters retained from the previous chunk so context survives the boundary.',
-      visible: "${data.adapter !== 'memory'}" },
-    { type: 'number', key: 'over_fetch', label: 'Over-fetch multiplier',
-      required: false, default: 4, min: 1, max: 20,
-      description: 'Search fetches this many times the requested number of results, so enough are left to return after they are filtered by document details.',
-      visible: "${data.adapter === 'turso'}" },
-
-    // ── Permissions ───────────────────────────────────────────────
-    { type: 'group', id: 'permissions', label: 'Permissions', required: false },
-    { type: 'toggle', key: 'enforce_rls', label: 'Enforce RLS on search',
-      required: false, default: true,
-      description: 'Re-check every hit against the caller\'s record-level permissions.' },
-    { type: 'info_banner', id: 'enforce_rls_warning', label: 'Leave RLS on in production',
-      required: false, bannerSeverity: 'warning',
-      bannerText:
-        'Disabling skips the platform\'s unique safeguard against vector-store data leakage — ' +
-        'leave on in production.' },
+      description: "Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model's input limit can lower it." },
 
     // ── Probe ─────────────────────────────────────────────────────
     { type: 'action_button', id: 'test', label: 'Test connection',
@@ -133,87 +79,72 @@ const manifest = {
   ],
 };
 
-/** Knowledge — RAG vector-store backend configuration. */
+/**
+ * Knowledge — RAG vector-store backend configuration. Not in
+ * `builtinSettingsManifests`: `@objectstack/service-knowledge` registers it
+ * when it is mounted, so a deployment without the knowledge service offers no
+ * Knowledge page (#33933).
+ */
 export const knowledgeSettingsManifest = manifest as unknown as SettingsManifest;
 
 /**
- * The sentence every answer on a remote adapter carries, so a green "Test
- * connection" is never read as a connection that succeeded.
+ * The sentence every answer carries, so a green "Test connection" is never
+ * read as a connection that succeeded.
  */
 const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempted.';
 
 /**
  * Handler for `knowledge/test` ("Test connection"), registered by
- * `SettingsServicePlugin`'s default `actionHandlers` map (#24769).
+ * `@objectstack/service-knowledge` with the manifest it contributes (#33933).
  *
- * It checks form completeness only — a Turso auth token beside a managed
- * `libsql://` URL, a RAGFlow Base URL and API key — and opens NO connection.
+ * It checks the libSQL fields for completeness only — a Turso auth token
+ * beside a managed `libsql://` URL — and opens NO connection. It reads
+ * `turso_url` and `turso_auth_token` and nothing else: the page names no
+ * adapter (#37104), so a payload or a stored row still carrying `adapter`
+ * (a value saved before this version) is not read, and neither is any other
+ * key the page no longer declares. The two fields are on the page only where
+ * `@objectstack/knowledge-turso` contributes them; elsewhere `values` carries
+ * neither, and the check answers from what the payload sends.
+ *
  * Nothing in this repository replaces it with a live probe:
- * `@objectstack/service-knowledge`, `@objectstack/knowledge-memory` and
- * `@objectstack/knowledge-ragflow` neither read this namespace nor register
- * `knowledge/test` (a plugin that did would call
+ * `@objectstack/service-knowledge` registers exactly this handler, and no
+ * adapter package registers `knowledge/test` (a plugin that did would call
  * `SettingsService.registerAction`, which replaces this handler). So every
- * answer on a remote adapter says no connection was attempted, and none names
- * a package whose mounting would make this check live — none does.
+ * answer says no connection was attempted, and none names a package whose
+ * mounting would make this check live — none does.
  */
 export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values, payload }) => {
   const overrides = extractOverrides(payload);
   const merged: Record<string, unknown> = { ...values, ...overrides };
-  const adapter = String(merged.adapter ?? 'memory');
 
-  if (adapter === 'memory') {
-    return {
-      ok: true,
-      severity: 'warning',
-      message: 'In-memory adapter — no external service to probe. Indices are wiped on restart; do not use in production.',
-    };
-  }
-
-  if (adapter === 'turso') {
-    const url = merged.turso_url;
-    if (!url) {
-      return {
-        ok: true,
-        severity: 'info',
-        message:
-          'No URL configured — adapter will reuse the tenant\'s primary libSQL connection at runtime. ' +
-          FORM_CHECK_ONLY,
-      };
-    }
-    const u = String(url);
-    if (u.startsWith('libsql://') && !merged.turso_auth_token) {
-      return {
-        ok: false,
-        severity: 'error',
-        message: 'Managed Turso URL requires an auth token.',
-      };
-    }
+  const url = merged.turso_url;
+  if (!url) {
     return {
       ok: true,
       severity: 'info',
       message:
-        `Turso adapter configured (${u}). ${FORM_CHECK_ONLY} Live calls need @objectstack/knowledge-turso, ` +
-        'which this platform does not ship: it is built in the ObjectOS Cloud monorepo ' +
-        'and published on its own version track, so check that it offers a release ' +
-        'compatible with your platform version before mounting it.',
+        'No Turso URL configured — where the knowledge store is @objectstack/knowledge-turso (a platform ' +
+        'database other than PostgreSQL), it uses its own file, knowledge.db under .objectstack/data/, never ' +
+        'the platform database. ' +
+        FORM_CHECK_ONLY,
     };
   }
-
-  if (adapter === 'ragflow') {
-    if (!merged.ragflow_base_url) {
-      return { ok: false, severity: 'error', message: 'RAGFlow requires a Base URL.' };
-    }
-    if (!merged.ragflow_api_key) {
-      return { ok: false, severity: 'error', message: 'RAGFlow requires an API key.' };
-    }
+  const u = String(url);
+  if (u.startsWith('libsql://') && !merged.turso_auth_token) {
     return {
-      ok: true,
-      severity: 'info',
-      message: `RAGFlow adapter configured (${merged.ragflow_base_url}). ${FORM_CHECK_ONLY}`,
+      ok: false,
+      severity: 'error',
+      message: 'Managed Turso URL requires an auth token.',
     };
   }
-
-  return { ok: false, severity: 'error', message: `Unknown adapter: ${adapter}` };
+  return {
+    ok: true,
+    severity: 'info',
+    message:
+      `Turso URL configured (${u}). ${FORM_CHECK_ONLY} It is read at startup by the ` +
+      '@objectstack/knowledge-turso plugin registered beside the knowledge service, which is the store a ' +
+      'platform database other than PostgreSQL gets.',
+  };
 };
 
 function extractOverrides(payload: unknown): Record<string, unknown> {

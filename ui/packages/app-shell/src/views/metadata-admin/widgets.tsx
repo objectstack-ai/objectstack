@@ -3,7 +3,7 @@
 /**
  * Built-in widget renderers for SchemaForm.
  *
- * These cover the common widget hints declared in spec `*.form.ts`
+ * These cover the common widget hints declared in spec `*.metadata-form.ts`
  * files (e.g. `widget: 'ref:object'`, `widget: 'master-detail'`).
  *
  * Each widget receives `WidgetProps`:
@@ -45,7 +45,7 @@ import {
   objectColorOrDefault,
   cn,
 } from '@object-ui/components';
-import { OBJECT_COLORS, type ObjectColor } from '@objectstack/spec/data';
+import { OBJECT_COLORS, resolveFieldHistory, type ObjectColor } from '@objectstack/spec/data';
 import type { RegistryComponentMeta } from '@object-ui/core';
 import { builderRulesOfSpecFilter } from '@object-ui/core';
 import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plus, Search, Trash2 } from 'lucide-react';
@@ -53,8 +53,11 @@ import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
+import type { SupportedLocale } from './i18n.js';
+import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
 import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
 import type { FormFieldSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
+import { positionsReached, type CapabilityAudience } from '../capabilityAudience.js';
 import { usePredicateScope } from '@object-ui/react';
 import { buildPredicateCtx, visibleOptions, type PredicateCtx } from './predicate.js';
 import { foldFilterGroupToSpecRules, FILTER_FOLD_REFUSAL_KEYS } from '../viewFilterFold.js';
@@ -67,15 +70,20 @@ import { datasetSelectOptions } from './inspectors/dataset-picker-options.js';
 import type { DatasetCatalogEntry } from './previews/useDatasetCatalog.js';
 import { useMonacoFallback } from './useMonacoFallback.js';
 import { DraftChip } from '../studio-design/StudioDraftMark.js';
+import { ContextPackRelatedEntries, isContextPackEntrySchema } from './ContextPackRelatedEntries.js';
 import {
   type LoadState,
   isLoading,
   loadErrorOf,
   loadedData,
+  mapLoaded,
   NOT_ASKED,
   offeredOptions,
   usePickerLoad,
 } from './loadState.js';
+import type { MetadataClient } from '@object-ui/data-objectstack';
+import { useMetadataClient } from './useMetadata.js';
+import { readFields } from './previews/object-fields-io.js';
 
 /* -------------------------------------------------------------------------- */
 /* The option catalogs a picker reads off {@link WidgetContext}                */
@@ -93,6 +101,14 @@ export interface ObjectFieldOption {
    * column carries them (objectstack#27515). Absent when none are declared.
    */
   options?: Array<{ value: string; label: string }>;
+  /**
+   * The field's declared `multiple: true` — a `select` / `lookup` / `user`
+   * whose stored value is a list. Read by the `filter-builder` widget alone:
+   * with the type it decides which operators the runtime `FilterBuilder`
+   * offers the column (`operatorsForField`), membership and the empty checks
+   * on a list. Absent otherwise.
+   */
+  multiple?: boolean;
 }
 
 /** One entry of the source object's view catalog (`view-ref`). */
@@ -309,6 +325,22 @@ export interface WidgetContext {
    * does for a completed load that found no permission sets.
    */
   permissionSets?: LoadState<RegistryItemOption[]>;
+  /**
+   * The capabilities the environment knows, joined with the permission sets
+   * granting each and the positions holding them — fuels the
+   * `ref-multi:capability` picker of an audience gate (`requiredPermissions`
+   * on a list view or a dashboard). Absent reads as {@link NOT_ASKED}, unless
+   * {@link WidgetContext.loadCapabilityAudience} is given.
+   */
+  capabilityAudience?: LoadState<CapabilityAudience>;
+  /**
+   * Reads {@link WidgetContext.capabilityAudience} when it is not given: the
+   * `ref-multi:capability` picker calls it once it is on screen, so a host
+   * whose audience row sits in a closed section sends no request. Keep it
+   * stable (`useCapabilityAudienceLoader`), or the picker reads again on
+   * every render.
+   */
+  loadCapabilityAudience?: () => Promise<CapabilityAudience>;
 }
 
 /* Stable empties for the arms that have no catalog to offer yet — `idle` and
@@ -831,6 +863,18 @@ interface RefMultiRegistry {
   addPlaceholderKey: string;
   /** The add picker's placeholder once every declared item is picked. */
   allAddedKey: string;
+  /** What the picked names mean, drawn under the list (the capability picker's position preview). */
+  footer?: (selected: readonly string[], context: WidgetContext | undefined, locale: SupportedLocale) => React.ReactNode;
+  /** A second line under an offered item (the capability picker: the permission sets granting it). */
+  detail?: (name: string, context: WidgetContext | undefined, locale: SupportedLocale) => string | undefined;
+  /**
+   * A CLOSED list (objectstack#34908): no typed-name box on any arm. A catalog
+   * nobody fed says `unreadKey`, a completed read that found nothing says
+   * `noneKey`, a failed read shows only the failure notice — so a name that
+   * matches nothing can never be added. Names already stored stay listed and
+   * removable on every arm.
+   */
+  closed?: { unreadKey: string; noneKey: string };
 }
 
 /**
@@ -848,6 +892,11 @@ interface RefMultiRegistry {
  *    a text box that adds the typed names. ⛔ Never the raw-JSON face an
  *    unregistered hint falls back to;
  *  - LOADED — an add picker offering the declared items not yet picked.
+ *
+ * A registry declared `closed` (the capability picker, objectstack#34908)
+ * offers no text box on any arm: FAILED shows only its notice, `idle` and an
+ * empty load each say why nothing can be added, LOADING shows a disabled
+ * picker.
  *
  * A stored name the LOADED catalog does not declare stays in the list, flagged
  * `(not found)`, so it is neither dropped nor read as a declared item
@@ -966,17 +1015,39 @@ function RefMultiWidget({
             <SelectContent>
               {remaining.map((o) => (
                 <SelectItem key={o.name} value={o.name}>
-                  <span className="flex items-center gap-2">
-                    {o.label && o.label !== o.name && <span>{o.label}</span>}
-                    <code className="text-xs text-muted-foreground">{o.name}</code>
+                  <span className="flex flex-col">
+                    <span className="flex items-center gap-2">
+                      {o.label && o.label !== o.name && <span>{o.label}</span>}
+                      <code className="text-xs text-muted-foreground">{o.name}</code>
+                    </span>
+                    {registry.detail?.(o.name, context, locale) && (
+                      <span className="text-[11px] text-muted-foreground" data-testid={`${testId}-detail`}>
+                        {registry.detail(o.name, context, locale)}
+                      </span>
+                    )}
                   </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+        ) : registry.closed ? (
+          // A closed list offers no typed-name box: say why nothing can be
+          // added (a failed read already shows its notice above).
+          loadError ? null : loading ? (
+            <Select value="" disabled>
+              <SelectTrigger data-testid={`${testId}-add`} aria-label={addLabel}>
+                <SelectValue placeholder={t('engine.form.loadingOptions', locale)} />
+              </SelectTrigger>
+            </Select>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-testid={`${testId}-closed`}>
+              {t(declared ? registry.closed.noneKey : registry.closed.unreadKey, locale)}
+            </p>
+          )
         ) : (
           freeform
         ))}
+      {registry.footer?.(selected, context, locale)}
     </div>
   );
 }
@@ -992,6 +1063,86 @@ const PERMISSION_REGISTRY: RefMultiRegistry = {
 
 function RefMultiPermissionWidget(props: WidgetProps) {
   return <RefMultiWidget {...props} registry={PERMISSION_REGISTRY} />;
+}
+
+/**
+ * Who an audience gate lets in through a position: the positions whose
+ * permission sets grant every picked capability, read off the same catalog
+ * the picker offers. Advisory — the server's read gate is the authority.
+ */
+function CapabilityAudienceFooter({
+  selected,
+  context,
+  locale,
+}: {
+  selected: readonly string[];
+  context: WidgetContext | undefined;
+  locale: SupportedLocale;
+}) {
+  const state = context?.capabilityAudience ?? NOT_ASKED;
+  if (state.status !== 'loaded') return null;
+  const positions = state.data.positions;
+  let text: string;
+  if (selected.length === 0) text = t('engine.form.audienceEveryone', locale);
+  else if (positions === null) text = t('engine.form.audiencePositionsUnread', locale);
+  else {
+    const reached = positionsReached(selected, positions) ?? [];
+    text = reached.length === 0
+      ? t('engine.form.audienceNoPosition', locale)
+      : tFormat('engine.form.audiencePositions', locale, { positions: reached.map((p) => p.label ?? p.name).join(', ') });
+  }
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="ref-multi-capability-audience">
+      {text}
+    </p>
+  );
+}
+
+/**
+ * The `ref-multi:capability` registration: the capabilities the environment
+ * knows (declared, or granted by a permission set), each offered with the
+ * permission sets granting it, and the positions the picked set reaches. The
+ * list is CLOSED: no arm offers a typed-name box, so a gate cannot name a
+ * capability nothing declares or grants (objectstack#34908).
+ */
+const CAPABILITY_REGISTRY: RefMultiRegistry = {
+  type: 'capability',
+  closed: { unreadKey: 'engine.form.capabilitiesUnread', noneKey: 'engine.form.capabilitiesNone' },
+  detail: (name, context, locale) => {
+    const state = context?.capabilityAudience;
+    if (state?.status !== 'loaded') return undefined;
+    const sets = state.data.capabilities.find((c) => c.name === name)?.grantedBy ?? [];
+    return sets.length > 0 ? tFormat('engine.form.capabilityGrantedBy', locale, { sets: sets.join(', ') }) : undefined;
+  },
+  catalog: (context) =>
+    context?.capabilityAudience
+      ? mapLoaded(context.capabilityAudience, (audience) =>
+          audience.capabilities.map((c) => ({ name: c.name, label: c.label })),
+        )
+      : undefined,
+  addLabelKey: 'engine.form.addCapabilityPlain',
+  addPlaceholderKey: 'engine.form.addCapability',
+  allAddedKey: 'engine.form.allCapabilitiesAdded',
+  footer: (selected, context, locale) => (
+    <CapabilityAudienceFooter selected={selected} context={context} locale={locale} />
+  ),
+};
+
+function RefMultiCapabilityWidget(props: WidgetProps) {
+  const { context } = props;
+  // The host hands down a loader, not a catalog: read it here, once the row is
+  // on screen. A catalog the host already holds wins.
+  const read = usePickerLoad<CapabilityAudience>(
+    context?.capabilityAudience ? null : context?.loadCapabilityAudience ?? null,
+  );
+  const effective = React.useMemo<WidgetContext | undefined>(
+    () =>
+      context?.capabilityAudience || !context?.loadCapabilityAudience
+        ? context
+        : { ...context, capabilityAudience: read },
+    [context, read],
+  );
+  return <RefMultiWidget {...props} context={effective} registry={CAPABILITY_REGISTRY} />;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1154,7 +1305,7 @@ function ObjectSelectorWidget({
 /* field-selector — smart field picker (depends on selected object)          */
 /* -------------------------------------------------------------------------- */
 
-/** One entry of the `field-selector` catalog, as the REST endpoint spells it. */
+/** One entry of the `field-selector` catalog, read off the served object document. */
 interface FieldSelectorOption {
   name: string;
   label: string;
@@ -1165,50 +1316,41 @@ interface FieldSelectorOption {
 const EMPTY_FIELD_SELECTOR_OPTIONS: FieldSelectorOption[] = [];
 
 /**
- * Fetch the bound object's field catalog for {@link FieldSelectorWidget}
- * (objectui#5227).
+ * Fetch the bound object's field catalog for {@link FieldSelectorWidget}.
  *
- * This is the one loader in this family that does NOT go through
- * `MetadataClient` — it is a raw `fetch` to a REST path no other widget here
- * uses — which is why objectui#5170 missed it and why the option catalogs on
- * {@link WidgetContext} do not reach it. It had TWO ways to render
- * a fault as a measurement, and a union that guarded only the first would have
- * left the second wide open:
+ * The catalog is read off the object document the server mounts at
+ * `GET /api/v1/meta/object/:name`, through the console's {@link MetadataClient}
+ * (`useMetadataClient`) and {@link readFields} — the read `useObjectFields`
+ * makes for the other field pickers in this directory. One route serves an object's fields; this
+ * widget asks it rather than a path of its own that no server mounts.
  *
- *   1. the `catch` wrote `setFields([])` — byte-identical to a successful
- *      response with no fields — and cleared the loading flag, so a dropped
- *      connection rendered as a completed, empty picker;
- *   2. it never checked `res.ok`, so a 4xx/5xx whose body happens to parse as
- *      JSON landed in the SUCCESS branch with `data.fields` undefined, and the
- *      old `|| []` rendered that refusal as "no fields" — worse than (1),
- *      because no error was ever raised for the `catch` to swallow.
+ * It reads the draft-overlaid object (`?preview=draft`) for the reason
+ * `useObjectFields` does: every host of this widget is an authoring surface,
+ * and an object's fields are picked before its first publish.
  *
- * Both now leave through the same door: a throw, which {@link usePickerLoad}
- * can only turn into the `error` arm. The message follows the convention the
- * other raw-`fetch` callers in this package already use (`useRecordApprovals`,
- * `suggestedBindingsApi`, `studio-design/packages-io`): the server's own
- * message when it sent one, otherwise the status.
+ * Three answers, kept apart:
+ *  - a refused or failed read THROWS (the client's own error, carrying the
+ *    server's message), which {@link usePickerLoad} turns into the `error` arm;
+ *  - no object of that name (the client's `null` on 404) answers `null`, which
+ *    the widget renders as a failure naming the missing object — never as a
+ *    list with no fields;
+ *  - a served object answers its fields, possibly none.
+ *
+ * The console client's transport carries the stored bearer token beside the
+ * session cookie (`metadataClientFactory.ts`), so a session held by its token
+ * alone is read as itself.
  */
-async function fetchFieldSelectorOptions(objectName: string): Promise<FieldSelectorOption[]> {
-  const res = await fetch(`/api/v1/objects/${objectName}/fields`);
-  // Read the body BEFORE branching on `ok`: a refusal usually carries the more
-  // useful sentence, and a non-JSON body must not be mistaken for a refusal
-  // that said nothing (it still throws below — it just cannot add a cause).
-  let payload: any = null;
-  try {
-    payload = await res.json();
-  } catch {
-    /* empty or non-JSON body */
-  }
-  if (!res.ok) {
-    const detail = payload?.error?.message ?? payload?.error ?? payload?.message;
-    throw new Error(
-      typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`,
-    );
-  }
-  // `payload.fields` narrows to the list; anything else is an answer we cannot
-  // read, and the completed-load arm is the only one that reaches here.
-  return Array.isArray(payload?.fields) ? (payload.fields as FieldSelectorOption[]) : [];
+async function fetchFieldSelectorOptions(
+  client: MetadataClient,
+  objectName: string,
+): Promise<FieldSelectorOption[] | null> {
+  const obj = await client.withPreviewDrafts(true).get<Record<string, unknown>>('object', objectName);
+  if (!obj) return null;
+  return readFields(obj.fields).entries.map((e) => ({
+    name: e.name,
+    label: typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name,
+    type: typeof e.def.type === 'string' ? e.def.type : 'text',
+  }));
 }
 
 function FieldSelectorWidget({
@@ -1232,13 +1374,25 @@ function FieldSelectorWidget({
   // directory landed for the other pickers (objectui#5170) and for the
   // References panel before them (objectui#5110). `null` while no object is
   // bound is the `idle` arm: a question never asked is not a failure.
+  //
+  // The load keys on the object name alone: the client is read through a ref
+  // when the load runs, because a re-minted client is the same transport, not
+  // a new question (ui/AGENTS.md #10 — no correctness rests on its identity).
+  const client = useMetadataClient();
+  const clientRef = React.useRef(client);
+  React.useLayoutEffect(() => {
+    clientRef.current = client;
+  }, [client]);
   const loadFields = React.useMemo(
-    () => (objectName ? () => fetchFieldSelectorOptions(objectName) : null),
+    () => (objectName ? () => fetchFieldSelectorOptions(clientRef.current, objectName) : null),
     [objectName],
   );
-  const fieldsState = usePickerLoad<FieldSelectorOption[]>(loadFields);
-  const fields = loadedData(fieldsState, EMPTY_FIELD_SELECTOR_OPTIONS);
-  const loadError = loadErrorOf(fieldsState);
+  const fieldsState = usePickerLoad<FieldSelectorOption[] | null>(loadFields);
+  const fields = loadedData(fieldsState, EMPTY_FIELD_SELECTOR_OPTIONS) ?? EMPTY_FIELD_SELECTOR_OPTIONS;
+  // A completed read that found no such object is a failure to show, in the
+  // designer's language, not an empty catalog.
+  const objectMissing = fieldsState.status === 'loaded' && fieldsState.data === null;
+  const loadError = objectMissing ? t('engine.form.objectNotFound', locale) : loadErrorOf(fieldsState);
 
   const multiple = fieldSpec?.multiple ?? false;
 
@@ -1730,6 +1884,141 @@ function StringTagsWidget({
 }
 
 /* -------------------------------------------------------------------------- */
+/* related-list-entries — chip input for an object's `relatedLists`           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The name an object's `relatedLists` entry places: the bare string, or the
+ * object form's `list` (objectstack#35897 / #35899). The spec's own reader is
+ * `relatedListEntryName`; this one also answers a half-typed draft value.
+ */
+function relatedListEntryChipName(entry: unknown): string | undefined {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && typeof (entry as { list?: unknown }).list === 'string') {
+    return (entry as { list: string }).list;
+  }
+  return undefined;
+}
+
+/**
+ * `relatedLists` on the generic object form (objectstack#35923 review M1):
+ * the `string-tags` face, over a list whose entries are a bare name OR the
+ * object form `{ list, label?, columns? }`. `string-tags` casts its value to
+ * `string[]` and renders each element as a React child, so an object entry
+ * (which Studio's record-page tabs editor writes as soon as a title or
+ * columns are set) broke the form. Here every entry keeps its stored form:
+ * add appends a bare name, remove drops one entry, and an object entry's
+ * chip shows its title and columns beside the name. Those are edited in
+ * Studio's object settings (Record page tabs), which reads the relationships.
+ */
+function RelatedListEntriesWidget(props: WidgetProps) {
+  // objectstack#37143 — the same block edits a context pack's `related`
+  // (`{ object, field?, fields? }` entries, ADR-0160 D1). Told apart by the
+  // entry schema it is handed, never by the type's name; the pack's root is
+  // the row its `dependsOn` names (`object`).
+  const { schema, fieldSpec, formData } = props;
+  if (isContextPackEntrySchema(schema)) {
+    const dep = (Array.isArray(fieldSpec?.dependsOn) ? fieldSpec!.dependsOn![0] : fieldSpec?.dependsOn) || 'object';
+    const rootValue = formData?.[dep];
+    return (
+      <ContextPackRelatedEntries
+        naming={controlNaming(props)}
+        schema={schema}
+        root={typeof rootValue === 'string' && rootValue ? rootValue : undefined}
+        value={props.value}
+        onChange={props.onChange}
+        readOnly={props.readOnly}
+      />
+    );
+  }
+  return <RelatedListNameEntries {...props} />;
+}
+
+/** The object form's `relatedLists` face: names and `{ list, … }` entries as chips. */
+function RelatedListNameEntries({
+  id,
+  ariaLabelledBy,
+  required,
+  value,
+  onChange,
+  readOnly,
+}: WidgetProps) {
+  const locale = useMetadataLocale();
+  const entries = Array.isArray(value) ? (value as unknown[]) : [];
+  const [draft, setDraft] = React.useState('');
+  const names = entries.map(relatedListEntryChipName);
+
+  function add(raw: string) {
+    const parts = raw
+      .split(/[,\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const next = [...entries];
+    for (const p of parts) if (!names.includes(p) && !next.includes(p)) next.push(p);
+    onChange(next);
+    setDraft('');
+  }
+  function remove(idx: number) {
+    const next = entries.slice();
+    next.splice(idx, 1);
+    onChange(next.length > 0 ? next : undefined);
+  }
+
+  return (
+    <div className="rounded border border-input bg-background p-1.5">
+      <div className="flex flex-wrap items-center gap-1">
+        {entries.map((entry, i) => {
+          const name = names[i] ?? '?';
+          const details = entry && typeof entry === 'object' ? (entry as { label?: unknown; columns?: unknown }) : undefined;
+          const label = typeof details?.label === 'string' ? details.label : undefined;
+          const columns = Array.isArray(details?.columns) ? details.columns.filter((c): c is string => typeof c === 'string') : [];
+          return (
+            <span
+              key={i}
+              data-testid={`related-list-entry-${name}`}
+              className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+            >
+              <span className="font-mono">{name}</span>
+              {label && <span>{label}</span>}
+              {columns.length > 0 && <span className="font-mono text-[10px] text-muted-foreground">[{columns.join(', ')}]</span>}
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label={tFormat('engine.form.removeNamed', locale, { name })}
+                  onClick={() => remove(i)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          );
+        })}
+        <input
+          {...controlNaming({ id, ariaLabelledBy, required })}
+          type="text"
+          value={draft}
+          disabled={readOnly}
+          placeholder={entries.length === 0 ? t('engine.form.tagsPlaceholder', locale) : ''}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault();
+              add(draft);
+            } else if (e.key === 'Backspace' && !draft && entries.length > 0) {
+              remove(entries.length - 1);
+            }
+          }}
+          onBlur={() => draft && add(draft)}
+          className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none"
+        />
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* multiselect — pick from a fixed option set (array of enum)                 */
 /* -------------------------------------------------------------------------- */
 
@@ -2061,13 +2350,19 @@ function ViewRefWidget({ id, ariaLabelledBy, required, value, onChange, readOnly
   );
 }
 
+/** True when the array's JSON Schema refuses an empty array (`minItems` of 1 or more). */
+export function emptyArrayRefused(schema: unknown): boolean {
+  const min = (schema as { minItems?: unknown } | undefined)?.minItems;
+  return typeof min === 'number' && min >= 1;
+}
+
 /**
  * Ordered multi object-field picker. Used for props that reference a list of
  * fields (kanban card `columns`, gallery `visibleFields`, chart
  * `yAxisFields`, `searchableFields`, …). Preserves order; supports reorder
  * and removal; values outside the catalog are retained.
  */
-function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded }: WidgetProps) {
+function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy, copilotAdded, schema }: WidgetProps) {
   const locale = useMetadataLocale();
   const fieldsState = context?.objectFields ?? NOT_ASKED;
   // objectui#5228 — the failure is decided here, before the catalog is read:
@@ -2091,7 +2386,10 @@ function FieldRefMultiWidget({ value, onChange, readOnly, context, ariaLabelledB
   const removeAt = (i: number) => {
     const next = selected.slice();
     next.splice(i, 1);
-    onChange(next);
+    // objectstack#37143 — an array its schema bounds below (`minItems: 1`, a
+    // context pack's `fields`) has no empty value: removing the last chip
+    // removes the key, never writes `[]` the save door refuses.
+    onChange(next.length === 0 && emptyArrayRefused(schema) ? undefined : next);
   };
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -2874,7 +3172,7 @@ function groupOfStoredRules(shown: { logic: 'and' | 'or'; rules: unknown[] } | n
 export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
   value?: FilterElementLite[];
   onChange: (rules: FilterElementLite[]) => void;
-  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }> }>;
+  fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }>; multiple?: boolean }>;
   readOnly?: boolean;
   /**
    * Why `fields` is empty, when the reason is that the catalog failed to load
@@ -2933,12 +3231,16 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
   // picklist column's value as a picker over them and stores the option's
   // `value` — the runtime list filter's control, not a second editor. Without
   // them a picklist column got a free-text box, and the label an author typed
-  // there matched no record.
+  // there matched no record. `multiple` travels too: with the type it decides
+  // the operators the builder offers (`operatorsForField`), so a list-valued
+  // column is offered membership and the empty checks, never `equals` / `in`,
+  // which the data door refuses on a list.
   const fbFields = fields.map((f) => ({
     value: f.name,
     label: f.label || f.name,
     type: f.type,
     ...(f.options ? { options: f.options } : {}),
+    ...(f.multiple === true ? { multiple: true } : {}),
   }));
   const storedRules = rulesOfStoredElements(rules);
   const summary = storedRules.length
@@ -3431,6 +3733,62 @@ function DynamicConfigWidget({ value, onChange, readOnly, fieldSpec, formData, c
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* field-history — follow the default / on / off for `fieldHistory` (#36482)  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The three-way control for a `fieldHistory` key — the object's
+ * `enable.fieldHistory` and a field's own (#36290). The key has no default on
+ * purpose: unset follows the platform, and only an author who chose writes
+ * `true` or `false`. A switch drew unset as off and had no way back to it
+ * once toggled; this control makes unset a state of its own.
+ *
+ *  - Default — removes the key (`onChange(undefined)`), and names what it
+ *    resolves to for the row in front of it. A field row (one carrying a
+ *    `type`) asks `resolveFieldHistory` from `@objectstack/spec/data`, the
+ *    same predicate the activity writer keeps or drops values with, so the
+ *    label cannot drift from the writer: off for a media or JSON type unless
+ *    `trackHistory: true`, and off for a credential type whatever its flags
+ *    say. The object's `enable` block resolves to on. The row cannot see the object's own `enable.fieldHistory` (a field
+ *    form, a repeater row); the help text says the object's off wins.
+ *  - On / Off — write `true` / `false`.
+ *
+ * A stored value that is not a boolean reads as Default, as the writer reads
+ * it (only a literal `false` turns values off). The choices, what each writes
+ * and their wording are `fieldHistoryChoice.ts`'s, shared with the object
+ * field inspector's Field History row (#36290).
+ */
+function FieldHistoryWidget({ value, onChange, readOnly, formData, id, ariaLabelledBy, required }: WidgetProps) {
+  const locale = useMetadataLocale();
+  const row = formData ?? {};
+  const defaultOn = typeof row.type === 'string'
+    ? resolveFieldHistory({ type: row.type, trackHistory: row.trackHistory }, undefined)
+    : true;
+  return (
+    <Select
+      value={fieldHistoryChoiceOf(value)}
+      onValueChange={(next) => onChange(fieldHistoryValueOf(next))}
+      disabled={readOnly}
+    >
+      <SelectTrigger {...controlNaming({ id, ariaLabelledBy, required })} data-testid="field-history-choice" className="h-8 text-sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {fieldHistoryOptions(defaultOn, locale).map((o) => (
+          <SelectItem
+            key={o.value}
+            value={o.value}
+            data-default-on={o.value === 'default' ? (defaultOn ? 'true' : 'false') : undefined}
+          >
+            {o.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 // `satisfies` (not a `Record<string, …>` annotation) so the KEY SET survives as
 // a literal union — that union is what makes `WIDGET_LABELLING` below exhaustive
 // BY CONSTRUCTION: adding a widget here without deciding how the host's label
@@ -3441,6 +3799,7 @@ export const WIDGETS = {
   'ref:component': RefComponentWidget,
   'ref:dataset': RefDatasetWidget,
   'ref-multi:permission': RefMultiPermissionWidget,
+  'ref-multi:capability': RefMultiCapabilityWidget,
   'filter-mode': FilterModeWidget,
   'object-selector': ObjectSelectorWidget,
   'field-selector': FieldSelectorWidget,
@@ -3455,10 +3814,12 @@ export const WIDGETS = {
   'condition': ConditionWidget,
   'master-detail': MasterDetailWidget,
   'string-tags': StringTagsWidget,
+  'related-list-entries': RelatedListEntriesWidget,
   'multiselect': MultiSelectWidget,
   'code': CodeWidget,
   'secret': SecretWidget,
   'dynamic-config': DynamicConfigWidget,
+  'field-history': FieldHistoryWidget,
 } satisfies Record<string, WidgetRenderer>;
 
 /** Every key of {@link WIDGETS}, as a literal union. */
@@ -3553,6 +3914,7 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'ref:component': 'control',
   'ref:dataset': 'control',
   'ref-multi:permission': 'group',
+  'ref-multi:capability': 'group',
   'filter-mode': 'group',
   'object-selector': 'control',
   'field-selector': 'control',
@@ -3567,10 +3929,12 @@ export const WIDGET_LABELLING: Record<RegisteredWidgetKey, WidgetLabelling> = {
   'condition': 'group',
   'master-detail': 'group',
   'string-tags': 'control',
+  'related-list-entries': 'control',
   'multiselect': 'group',
   'code': 'group',
   'secret': 'control',
   'dynamic-config': 'group',
+  'field-history': 'control',
 };
 
 /**

@@ -1,5 +1,371 @@
 # @objectstack/types
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 6b7b305: fix: the 5xx fault log and `ObjectLogger` print an error's `cause` chain
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A server fault thrown with the original error on `cause` used to log the wrapper's message and stack only, so the root cause was missing from the operator's line. `logServerFault` (`@objectstack/types`) now prints the chain as `causes` beside `stack` on its console fallback, and `ObjectLogger` (`@objectstack/core`) prints it as `error.causes` for every `logger.error` / `logger.fatal` that passes an error. Each link carries its message and stack; a cycle stops at the first repeat and a chain stops after five links, each saying so in a last link. Nothing reaches a response body.
+  
+  `@objectstack/service-record-context` drops the `Caused by:` suffix it appended to a failed read's stack, since the fault line now renders the `cause` itself.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- 51b67f1: feat(refusals)!: one refusal names several declared reasons, each in the person's language
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered refusal-reasons-list-literal-judged -->
+  
+  **BREAKING** accept-set narrowing beside a widening, shipped as `minor`. The widening is the new `reasons` list below. The narrowing is what that list makes of a `reasons` key that was ignored before: three sources that save and run on the previous release are refused now (see the migration at the end).
+  
+  A hook or a `script` action that declares `refusals` can now refuse with several declared sentences at once, for example when it checks a whole selection and refuses all of it. Under one declared code it throws an ordered list of the code's declared reasons, each with its own `params`, instead of one `reason`:
+  
+  ```js
+  throw { code: 'SUBMIT_REFUSED', params: { count }, reasons: [
+    { reason: 'on_report', params: { name: 'Taxi 12' } },
+    { reason: 'approved', params: { name: 'Hotel 7' } },
+  ] };
+  ```
+  
+  - Each listed reason's sentence is picked in the caller's locale and its holes are filled from that reason's own `params`, as a single reason's sentence is. The answer's `userMessage` is those sentences joined by a line break, in the order thrown, then the code's own `message` as the last line (its holes are filled from the throw's top-level `params`). The code's status and the code on the wire are unchanged.
+  - Every door that answers the refusal also carries each listed reason's sentence structured, as `details.refusals: [{ reason, message }, …]`. The `/data` door bounds `userMessage` at 500 characters as before, and `details.refusals` is not bounded, so each listed line stays whole there. The closing line (the code's own `message`) is not on `details.refusals`: on a list long enough that `/data` cuts `userMessage`, the closing line is lost on that door. A client that renders the list reads the lines from `details.refusals`.
+  - Every listed reason must be one the code declares under `reasons`. One that is not makes the whole throw the loud `500` fault naming the hook or action, the code and the reason. Under a code that declares no `reasons`, every listed reason is undeclared. A literal list in the source (`throw { code, reasons: [{ reason: 'x' }] }`, or `e.reasons = [{ reason: 'x' }]` on an error the body throws) is refused when the hook or action is saved. Only a `reasons` key that is a direct member of the thrown object is a list; one nested deeper (`params: { reasons: [ … ] }`) is the body's own data, as before.
+  - A throw that carries both a `reason` and a `reasons` list, an empty list, or a `reasons` value that is not a list of `{ reason, params? }` is the same loud fault.
+  - The sandboxed body and the in-process hook handler read the list the same way and answer byte-identically.
+  
+  The catalogue entry (`message`, `status`, `reasons`, `params`) and the translation keys do not change, so no `os i18n` key is added. A throw with one `reason`, or none, is answered exactly as before.
+  
+  New exports: `@objectstack/spec` adds `isUndeclaredThrownReason`, `unreadableHookRefusalListAtRun`, `unreadableActionRefusalListAtRun` and the `HookRefusalThrownReason` and `RefusalListProblem` types (`data`); `hookRefusalReasonsThrownIn` now answers `HookRefusalThrownReason[]` (a listed pair carries `listed: true`). `@objectstack/types` adds `declaredRefusalLines` and the `DeclaredRefusalLine` type. `@objectstack/runtime` adds no export; its `SandboxError` gains an optional `refusals`, the list the doors read.
+  
+  **Migration (FROM → TO).** Each row was accepted and answered as if the `reasons` key were absent; it is refused now.
+  
+  | FROM (accepted before, refused now) | Where it is refused | TO |
+  |:---|:---|:---|
+  | A literal `throw { code: 'X', reasons: [{ reason: 'y' }] }` where `X` declares no `reasons` (a literal `y` under a code that declares `reasons` without it was already refused) | At save: `HookSchema` / `ActionSchema` at `body.source` (the metadata save door, `defineStack`, `os validate`, compile, an artifact's parse) | Declare `reasons` on `X` with `y` and its `message`, or remove the `reasons` key |
+  | `e.code = 'X'; e.reasons = [{ reason: 'y' }]; throw e` with `y` undeclared under `X` | At save, as above | Declare `y` under `refusals.X.reasons`, or remove the `e.reasons` assignment |
+  | A body that throws a declared code with a `reasons` property of its own: an empty list, a value that is not a list of `{ reason, params? }`, a list beside a `reason`, or a list naming an undeclared reason | At run: the loud `500` fault naming the hook or action and the code, where the declared sentence and status answered before | Rename the body's own property (for example to `items`, or put it under `params`), or throw it as the declared list |
+  
+  One-line fix: a `reasons` key on a thrown refusal is now the declared list, so name only reasons the code declares there, or rename the key.
+
+### Patch Changes
+
+- 9abc732: fix(share-links): the share-link page names the shared object by its label in the reader's language and no longer lists the fields the object hides
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `GET /api/v1/share-links/{token}/resolve` answers two more facts, on both of its mounts (the sharing plugin's route and the runtime dispatcher's `/share-links` domain):
+  
+  - `link.object_label` — the shared object's label in the request's locale: the request's `Accept-Language` top tag, else the i18n service's default locale, translated the way `GET /meta/object/NAME` translates it: the translation bundle over the served `label`, with the deployment's fallback locale and authored language, and the object's packaged declaration read through the metadata protocol. A renamed object therefore keeps its rename and is not given the bundle's translation of its old label. With no i18n service, or no bundle entry for that locale, the served label is served. An object that declares no label carries no `object_label`.
+  - `fields[NAME].hidden: true` — for a field the object declares hidden, including the injected scope and queue columns, which are hidden at their source. A field that is not hidden carries no `hidden` key.
+  
+  Both public share-link routes (`/resolve` and `/messages`), on both mounts, now answer `Vary: X-Share-Password, X-Share-Password-Encoding, Accept-Language` (the new `SHARE_LINK_PUBLIC_VARY` in `@objectstack/types`). Before, they sent only the two password headers. They still send `Cache-Control: no-store`.
+  
+  `ShareLinkResolvedLink` and `ShareLinkFieldDisplay` (`@objectstack/types`) gain the two optional keys, and `buildShareLinkResolveAnswer` takes an optional fourth argument with the request's `Accept-Language` value, the i18n service and the metadata protocol. `registerShareLinkRoutes` (`@objectstack/plugin-sharing`) takes optional `i18n` and `protocol` resolvers, which `SharingServicePlugin` wires to the kernel's `i18n` and `protocol` services.
+  
+  The console's share-link page (`@object-ui/console`) titles the page with the label ("Shared Client Brief"), falling back to the object's name from a server that does not send one, and leaves off every field the answer marks hidden, as the record page does. Its resolve and messages requests state the console's UI language as `Accept-Language`, so the label arrives in the language the rest of the page is in.
+  
+  Nothing to migrate: a caller that reads neither key is unaffected.
+- 9c57bd2: refactor(studio): every Studio address comes from one builder; no address changes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Studio redesign groundwork (#36895, epic #36890). Every place that produced a `/studio...` URL now calls one builder, so a later change can move an item type to its metadata address in one place. Every address is byte-for-byte what it was: no link, bookmark or redirect changes.
+  
+  - **Console.** `studioAddress.ts` in `@object-ui/app-shell` builds every Studio address: the landing, a package, a pillar, an item (`studioItemPath`), the "All metadata" area, and the draft review links. `studioAddressTable.ts` lists every address family, every `?surface=` spelling and every query parameter, with what each becomes on the metadata address. The retired `/interfaces` redirect keeps exactly the parameters that table marks. New exports from `@object-ui/app-shell`: `STUDIO_ROOT_PATH`, `STUDIO_HOME_PILLAR`, `studioLandingPath`, `studioPackagePath`. Existing exports keep their names and values.
+  - **Server.** `studioChangesReviewLink` and `studioItemReviewLink`, new in `@objectstack/types`, build the review links that `os meta register` prints and that the MCP authoring tools return after a draft save. The text an AI is handed is unchanged.
+  - **Guards.** A test under `ui/` refuses a hand-built Studio address in any ui source. A test in `@objectstack/types` refuses one in any server package, and holds the review links quoted by the `objectstack-mcp-build` skill's evals equal to what the builder returns.
+- 8d60333: fix(service-record-context): get_record_context leaves out a related child the caller is not served, and both MCP doors hand over the caller's queryable fields and their page cap
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0160 D3 "Object level", as amended, and its second amendment. No pack, key or code changes. The published surface widens by optional members only: `RecordContextDoor.pageCap?()`, and `StdioDataBridgeDeps.security` may carry `getQueryableFields`; `@objectstack/types` adds `resolveQueryReadPageCap`.
+  
+  - **A related child this caller is not served is left out, not refused.** The answer carries the root and every served section, with the one `not_visible` note, and names the child nowhere; nothing of the child is read after its object-level judgement, its published definition included. A child is still refused whole, as before, when a gate refuses it for everyone: the read guard, or API exposure — which is now asked before the served definition, so a child whose package is disabled (`OBJECT_PACKAGE_DISABLED`, which also serves its object to nobody) keeps its `PERMISSION_DENIED` refusal. A served-definition read that fails refuses the call, unnamed, and is never read as a narrowing.
+  - **Both doors supply `queryableFieldsOf`.** The `/mcp` door and the stdio door now hand the executor the security service's `getQueryableFields` answer for the caller they resolved, so a related list's `where` or `orderBy` is judged on that answer before the read. A field outside it drops the section with the note, and is never refused by the engine's guard; a masked field this caller is served whole (its unmask capability held) is now filtered and sorted on, where the fallback dropped the section.
+  - **A door's page cap is a stated cut.** A door may report its page cap (`pageCap`, optional); the executor then asks a related list for at most that many rows, cuts the list one row under it, and states the cut. Both doors report the deployment's smaller read limit (`OS_DATA_MAX_PAGE_SIZE`, `OS_DATA_QUERY_ROW_BUDGET`). Before, under a maximum page size below a list's cut plus its probe row, the `/mcp` door refused the whole call `MAX_RECORDS_EXCEEDED` and the stdio door read the full list.
+  - The `related_truncated` note kind's doc line, and the `rows` and `truncated` descriptions of a related list in the tool's output schema, now say a list is cut at its entry's `limit`, at the row cap, or below either at the door's page cap.
+  - `@objectstack/types` exports `resolveQueryReadPageCap()`: the smaller of `OS_DATA_MAX_PAGE_SIZE` and `OS_DATA_QUERY_ROW_BUDGET`, `undefined` when neither is set. Both doors answer `pageCap` from this one function, so they cut at the same row.
+- c059e60: Clause-②: yes (widening) — `@objectstack/types` gains root exports (`FLOW_RUNTIME_STATE_KEY`, `flowRuntimeStateOf`, `FlowRuntimeStateAnswer`), and the open door's `get_metadata_item` answer on a flow gains the key `runtimeState`; nothing that was accepted is refused, and no key a caller sends is added
+  Metadata-protocol: none
+  
+  An MCP definition reader now says when an admin has switched a flow off. The open authoring door's `get_metadata_item` answers a flow with `runtimeState: { enabled }`, the engine's own reading (the one `GET /automation/_status` serves), placed ahead of the item; the switch moves only that bit and leaves the definition, `status: 'active'` included, as it was, so before this a switched-off approval read as running. The app-docs answer-order text sent on `initialize` (`packageDocAnswerRule`) now tells the agent that `runtimeState.enabled: false` means the process is switched off and does not run. `@objectstack/types` exports the key and the reading (`FLOW_RUNTIME_STATE_KEY`, `flowRuntimeStateOf`) for a host's own reader.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [52a2398]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [9062756]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [61722e9]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [59392ed]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+
 ## 18.6.0
 
 ### Patch Changes

@@ -2,7 +2,8 @@
 
 /**
  * objectui#11795 — Studio stays a desktop tool, and on a phone it says so: one
- * line under the header (`engine.studio.desktopHint`), shown below `md` (the
+ * line under the strip that opens the menu (`engine.studio.desktopHint`;
+ * objectstack#37456 — Studio has no top bar), shown below `md` (the
  * width `useIsMobile` answers for), and nowhere wider.
  *
  * The REAL surface on its Data tab; the chat dock and the panels it does not
@@ -10,8 +11,12 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.b2r4';
@@ -46,10 +51,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 import { t } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
@@ -97,7 +102,8 @@ function renderSurfaceAt(width: number) {
   return render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+        <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -106,22 +112,24 @@ function renderSurfaceAt(width: number) {
 const HINT = t('engine.studio.desktopHint', 'en');
 
 describe('StudioDesignSurface — the one-line desktop hint on a phone (objectui#11795)', () => {
-  it('a phone-width window shows the hint once, under the header', async () => {
+  it('a phone-width window shows the hint once, under the strip that opens the menu', async () => {
     renderSurfaceAt(390);
 
     const hint = await screen.findByText(HINT);
     expect(hint).toHaveAttribute('role', 'note');
     expect(screen.getAllByText(HINT)).toHaveLength(1);
-    // Directly below the Studio header, above the pillar.
-    expect(hint.previousElementSibling?.tagName).toBe('HEADER');
+    // Directly below the phone's strip (the menu's drawer control), above the pillar.
+    expect(hint.previousElementSibling).toHaveAttribute('data-testid', 'studio-mobile-strip');
   });
 
   it('the control: from `md` up, no hint', async () => {
     renderSurfaceAt(768);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    // The left column is up (its way back drawn), and the phone's line is not.
+    await screen.findByTestId('studio-package-back');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(screen.queryByText(HINT)).toBeNull();
   });
 });

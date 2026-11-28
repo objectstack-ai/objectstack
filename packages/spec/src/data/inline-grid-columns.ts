@@ -31,7 +31,8 @@
  *     ownership columns) or {@link INLINE_GRID_SORT_FIELDS} (a line's sort
  *     position: the grid stamps it on drag-reorder instead);
  *   - the relationship field back to the parent, and any name in `exclude`;
- *   - a field flagged `system`, `readonly` or `hidden`;
+ *   - a field flagged `system`, `readonly`, `uiReadonly` or `hidden` (a cell is
+ *     an edit by hand, so the hand lock skips it as the server lock does);
  *   - a field whose `type` is in {@link INLINE_GRID_NON_EDITABLE_TYPES}.
  *
  * NOTHING is dropped by the column budget. Past `maxColumns` (default
@@ -141,9 +142,10 @@ function cellTypeOf(type: unknown): string {
   switch (type) {
     case 'number':
     case 'percent':
-    case 'rating':
     case 'slider':
       return 'number';
+    case 'rating':
+      return 'rating';
     case 'currency':
       return 'currency';
     case 'date':
@@ -155,12 +157,20 @@ function cellTypeOf(type: unknown): string {
     case 'select':
     case 'picklist':
     case 'radio':
+      return 'select';
     case 'boolean':
     case 'toggle':
-      return 'select';
+      return 'boolean';
+    case 'multiselect':
+    case 'checkboxes':
+      return 'multiselect';
+    case 'tags':
+      return 'tags';
     case 'lookup':
     case 'master_detail':
       return 'lookup';
+    case 'user':
+      return 'user';
     case 'file':
     case 'image':
     case 'avatar':
@@ -170,16 +180,26 @@ function cellTypeOf(type: unknown): string {
   }
 }
 
-/** Lower is kept first when filling the visible budget; a cell type absent here sorts last (5). */
+/**
+ * Lower is kept first when filling the visible budget; a cell type absent here
+ * sorts last (5). The five cell types #36043 added keep the priority their
+ * field types had before it (a check cell was a select, a rating a number, the
+ * other three plain text), so which derived columns are visible is unchanged.
+ */
 const CELL_FILL_PRIORITY: Readonly<Record<string, number>> = {
   select: 0,
+  boolean: 0,
   currency: 1,
   number: 1,
+  rating: 1,
   lookup: 2,
   date: 3,
   datetime: 3,
   time: 3,
   text: 4,
+  user: 4,
+  multiselect: 4,
+  tags: 4,
 };
 
 /** A field's own key, read the way the renderer reads `def?.key` off an untyped bag. */
@@ -222,7 +242,7 @@ export function deriveInlineGridColumns(
   const candidates: Candidate[] = [];
   for (const [name, field] of Object.entries(fields as AnyRec)) {
     if (INLINE_GRID_SYSTEM_FIELDS.has(name) || exclude.has(name) || INLINE_GRID_SORT_FIELDS.has(name)) continue;
-    if (prop(field, 'system') || prop(field, 'readonly') || prop(field, 'hidden')) continue;
+    if (prop(field, 'system') || prop(field, 'readonly') || prop(field, 'uiReadonly') || prop(field, 'hidden')) continue;
     if (INLINE_GRID_NON_EDITABLE_TYPES.has(prop(field, 'type'))) continue;
     candidates.push({
       name,

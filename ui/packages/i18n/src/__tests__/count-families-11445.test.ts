@@ -119,11 +119,12 @@ const COUNT_NEUTRAL = {
     'grid.bulk.succeeded',
     'grid.bulk.resultFailed',
     'grid.bulk.resultNotConfirmed',
+    'grid.bulk.resultRefused',
+    'grid.bulk.resultPaused',
     'calendar.moreEvents',
     'calendar.unscheduled',
     'view.moreViews',
     'detail.showDiscussion',
-    'console.ai.buildDoctorDrawer.timeline',
     'marketplace.installedCount',
     'approvalsInbox.approveN',
     'approvalsInbox.rejectN',
@@ -135,6 +136,16 @@ const COUNT_NEUTRAL = {
     // objectstack#30325 — the install confirm's "Sample records: up to N"
     // value; the noun is the row's label, the number stands after "up to".
     'marketplace.install.preview.atMost',
+    // objectstack#35315 — the Change Owner cascade's "left past the cap: N";
+    // the number stands after a label and a colon, a counter in zh/ja/ko.
+    'console.changeOwner.cascadeRemaining',
+    // objectstack#37327 — a kanban lane's "Cards not loaded: N"; the number
+    // stands after a label and a colon in every pack.
+    'kanban.notLoaded',
+    // objectstack#36423 — a kanban card's foot counts, "Open comments: N" and
+    // "Attachments: N"; the number stands after a label and a colon in every pack.
+    'kanban.cardFooter.comments',
+    'kanban.cardFooter.attachments',
   ],
   /** Every pack phrases it count-invariantly: an `(s)` marker in `en`/`de`/
    *  `fr`/`es`/`pt` (the convention `perm-home-namespace-3546.test.tsx` pins),
@@ -143,16 +154,9 @@ const COUNT_NEUTRAL = {
     'grid.import.imported',
     'grid.import.skippedCount',
     'console.ai.pendingDrafts.count',
-    'console.ai.buildDoctorDrawer.allLive',
-    'console.ai.buildDoctorDrawer.discrepancies',
-    'console.ai.buildDoctorDrawer.issueCount',
-    'console.ai.buildDoctorDrawer.platformNoise',
     'home.pendingDrafts.publishedVerified',
     'home.pendingDrafts.capabilityWarn',
     'preview.history.items',
-    // objectstack#32984 — the build card's "N to fix" chip: the number stands
-    // before an infinitive or after a label, or takes a counter, in every pack.
-    'chatbot.build.issuesCount',
   ],
   /** A relative time whose unit is abbreviated in every pack (`5m ago`,
    *  `vor 5 Min.`, `5 мин назад`, `منذ 5 د`); an abbreviation does not inflect. */

@@ -50,9 +50,9 @@ import { applyConversionsToStoredItem } from '../conversions/stored';
 import type { ConversionNotice } from '../conversions/types';
 import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/registry';
 import { ComponentPropsMap } from './component.zod';
-import { pageForm } from './page.form';
+import { pageForm } from './page.metadata-form';
 import { InterfacePageConfigSchema } from './page.zod';
-import { viewForm } from './view.form';
+import { viewForm } from './view.metadata-form';
 import { AddRecordConfigSchema, ListViewSchema, ObjectListViewSchema } from './view.zod';
 
 const STRIP_ID = 'add-record-mode-form-view-removed';
@@ -63,7 +63,7 @@ const FILL_ID = 'add-record-enabled-defaulted';
 const MODE_PRESCRIPTION =
   /`addRecord\.mode` was removed in @objectstack\/spec 18\.1\.0 \(ADR-0049 enforce-or-remove\) — no renderer ever read it.*Delete the key.*Run `os migrate meta --from 17`/s;
 const FORM_VIEW_PRESCRIPTION =
-  /`addRecord\.formView` was removed in @objectstack\/spec 18\.1\.0 \(ADR-0049 enforce-or-remove\) — no renderer ever read it.*Delete the key, and to give the Add button its own form declare it as `formViews\.create`.*Run `os migrate meta --from 17`/s;
+  /`addRecord\.formView` was removed in @objectstack\/spec 18\.1\.0 \(ADR-0049 enforce-or-remove\) — no renderer ever read it.*Delete the key\. The create form lays out by the object's `fieldGroups`; to leave a field out of it, set `showOnCreate: false` on that field\..*Run `os migrate meta --from 17`/s;
 const ENABLED_PRESCRIPTION =
   /`addRecord\.enabled` is required since @objectstack\/spec 18\.1\.0.*Write `enabled: true` to show the Add button.*`enabled: false`.*Run `os migrate meta --from 17`/s;
 

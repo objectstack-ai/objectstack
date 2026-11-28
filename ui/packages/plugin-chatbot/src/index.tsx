@@ -300,15 +300,16 @@ export * from './renderer';
 
 // Shared composition layer over the vendored AI Elements (used by both
 // Studio's sidebar panel and Console's floating chatbot).
-export { ChatbotEnhanced, publishHealthFromResponse } from './ChatbotEnhanced';
+export { ChatbotEnhanced } from './ChatbotEnhanced';
+// ADR-0038 L3 — the publish-health parse every publish-drafts host shares.
+export { publishHealthFromResponse } from './publishHealth';
+export type { PublishHealth } from './publishHealth';
 export type {
   ChatbotEnhancedProps,
   ChatbotEnhancedToolInvocation,
   ChatSource as ChatbotEnhancedSource,
   ChatbotLabels,
   ToolDecisionState,
-  PublishHealth,
-  PublishOutcome,
 } from './ChatbotEnhanced';
 
 /**
@@ -330,7 +331,7 @@ export type {
  * Pinned at compile time in `__tests__/chat-message-contract.test.ts`.
  *
  * `<Chatbot>` renders only the core fields; the enhanced surface (tool calls,
- * reasoning, sources, build progress, charts) is `<ChatbotEnhanced>`.
+ * reasoning, sources, charts) is `<ChatbotEnhanced>`.
  */
 export type { ChatbotEnhancedMessage } from './ChatbotEnhanced';
 
@@ -345,35 +346,28 @@ export * as AIElements from './elements';
 export {
   uiMessageToChatMessage,
   uiMessagesToChatMessages,
-  detectDraftResult,
-  detectProposedPlan,
-  detectBuilderHandoff,
   detectRecordHandoff,
   detectRecordWrite,
   detectAnswerSource,
   detectSampleDataCleanup,
   detectPackageRemoval,
-  detectProposedChanges,
-  detectReplayOutcome,
-  detectAuthoringVerdict,
-  detectBuiltAppPackage,
   detectPendingApproval,
-  buildProgressFromDraftReview,
+  extractDraftReview,
   chartsFromParts,
   chartAnswerParts,
+  storedAnswerParts,
+  storedAnswerData,
+  STORED_ANSWER_DATA_PARTS,
 } from './mapMessages';
 export type {
   ChartAnswerPart,
-  DraftReview,
-  ProposedPlan,
-  BuilderHandoff,
+  StoredAnswerData,
+  StoredAnswerPart,
   RecordWrite,
   RecordWriteField,
   SampleDataCleanup,
   PackageRemoval,
   PackageRemovalObject,
-  ProposedChanges,
-  ReplayOutcome,
 } from './mapMessages';
 // The answer-source block's type: the union of the two published contracts it
 // is lifted through (an object query's `source`, `query_dataset`'s
@@ -439,3 +433,18 @@ export type {
 // sends after 确认 / 取消; readers skip such a turn instead of showing it as
 // the person's own words.
 export { isHitlContinuation } from './hitlContinuation';
+
+// The card an AI's clarifying question is answered on: questions in,
+// `onAnswer(text)` / `onSkip()` out. The host detects the question and
+// decides when the card replaces the composer.
+export { QuestionCard } from './QuestionCard';
+export type { QuestionCardProps, QuestionCardQuestion, QuestionCardOption } from './QuestionCard';
+// ChatbotEnhanced keeps a skipped question skipped per conversation in
+// localStorage under this prefix; a host's sign-out cleanup clears it.
+export { QUESTION_SKIP_STORAGE_PREFIX } from './chat/questionSkip';
+
+// The card that lists the drafts an ask turn saved (the `data-draft-review`
+// part), with Studio review links. `ChatbotEnhanced` draws it itself; the
+// reader is exported for hosts that render their own transcript.
+export { DraftReviewCard } from './chat/DraftReviewCard';
+export type { DraftReviewCardProps } from './chat/DraftReviewCard';

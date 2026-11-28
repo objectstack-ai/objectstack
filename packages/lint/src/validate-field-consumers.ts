@@ -25,8 +25,9 @@
  * reference is therefore credited to the object whose declaration ENCLOSES it
  * (`object` / `objectName` / `targetObject` / `data.object` / `config.objectName`
  * / `list.data.object` / a `dataset` resolved through the dataset's object / a
- * map keyed by object name / a flow's trigger object), and only when that
- * object actually declares the token. Inside a text blob (a hook handler, an
+ * map keyed by object name / a flow's trigger object / the child object an
+ * object-form `relatedLists` entry names in `list` — {@link relatedListChildOf}),
+ * and only when that object actually declares the token. Inside a text blob (a hook handler, an
  * action body, a CEL source) the nearest preceding mention of a declared object
  * is a second candidate — a handler that loads one object and reads its own
  * genuinely reads both, and under-crediting is the noisy direction.
@@ -219,7 +220,12 @@ import {
   resolveDisplayField,
 } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta, ServiceObject } from '@objectstack/spec/data';
-import { fieldGroupsPlaceRelationship, isGroupPlaceableRelationship, referenceTargetOf } from '@objectstack/spec/data';
+import {
+  fieldGroupsPlaceRelationship,
+  isGroupPlaceableRelationship,
+  referenceTargetOf,
+  relatedListEntryName,
+} from '@objectstack/spec/data';
 import type {
   DefaultRowScope,
   FieldPermission,
@@ -945,7 +951,8 @@ function creditInlineGridSortField(
 /**
  * [#21091] An inline collection's form factor when it is DECLARED — `grid` or
  * `form`, the values `inlineEdit` and a detail entry's `inlineMode` both name.
- * Anything else (`true`, absent) leaves it to the renderer to resolve, which
+ * Anything else (absent; a boolean, which the spec refuses since #35926 and
+ * the renderer reads as absent) leaves it to the renderer to resolve, which
  * this rule does not reproduce: `undefined`.
  */
 function formFactorOf(v: unknown): 'grid' | 'form' | undefined {
@@ -965,8 +972,8 @@ function formFactorOf(v: unknown): 'grid' | 'form' | undefined {
  * The derived grid's columns are a subset of the derived form's fields, so
  * the condition decides nothing the columns had not already credited: a form
  * that is not offered has no field the grid does not draw. That is why an
- * `inlineMode` this rule cannot resolve (the renderer's smart default for
- * `inlineEdit: true`) is passed as `undefined` without changing the verdict.
+ * `inlineMode` this rule cannot resolve (the renderer's smart default for an
+ * absent `inlineEdit`) is passed as `undefined` without changing the verdict.
  */
 function creditDerivedRowForm(
   ledger: ConsumerLedger,
@@ -1072,6 +1079,56 @@ function creditChildEntryField(
   }
 }
 
+/**
+ * The object key whose entries are the record page's related lists
+ * (`ObjectSchema.relatedLists`). Typed against the spec, so a rename there
+ * fails this package's typecheck instead of silently turning the crediting
+ * below off.
+ */
+const RELATED_LISTS_KEY = 'relatedLists' satisfies keyof ServiceObject;
+
+/**
+ * Is `rec` an entry of an object's own `relatedLists`, in its object form
+ * (`RelatedListEntryObjectSchema`: `{ list, label?, columns? }`)? Only the
+ * object root's top-level key qualifies; a bare-string entry is no record and
+ * never reaches here.
+ */
+function isRelatedListEntry(rec: AnyRec, root: string, segments: readonly string[]): boolean {
+  return (
+    root === 'objects' &&
+    segments.length === 1 &&
+    segments[0] === RELATED_LISTS_KEY &&
+    relatedListEntryName(rec) !== undefined
+  );
+}
+
+/**
+ * [#37502] The object an object-form `relatedLists` entry's subtree is read
+ * against: the CHILD its `list` names (`child`, or `child.field` for one FK of
+ * a child with several), never the parent that declares the list.
+ *
+ * The entry's `columns` are child FIELD NAMES (`RelatedListEntryObjectSchema`:
+ * "as field names of the child object"), drawn in the list's tab and in the
+ * body table a field group places, so each is a display site of the child.
+ * Read against the declaring parent, a column credited the parent's field of
+ * the same name and left the child's own column uncredited: the blank
+ * starter's company lists its contacts with a `phone` column, which kept an
+ * undisplayed `company.phone` silent. The `list` itself, `child.field`, names
+ * the child's relationship the list joins on, and is read against the child
+ * the same way.
+ *
+ * A child this stack does not declare (a platform object, another package's
+ * object) answers `undefined`, so its columns resolve to no object and are
+ * counted unresolved, like every other field-shaped token that lands nowhere:
+ * they are never the parent's.
+ */
+function relatedListChildOf(ledger: ConsumerLedger, rec: AnyRec): string | undefined {
+  const name = relatedListEntryName(rec);
+  if (name === undefined) return undefined;
+  const child = name.includes('.') ? name.slice(0, name.indexOf('.')) : name;
+  return ledger.isObject(child) ? child : undefined;
+}
+
 /** The object context a record establishes for its own subtree, if any. */
 function contextOf(ledger: ConsumerLedger, rec: AnyRec, ctx: string | undefined): string | undefined {
   const named = (v: unknown): string | undefined => (ledger.isObject(v) ? v : undefined);
@@ -1130,7 +1187,10 @@ function walk(
     return;
   }
   const rec = node as AnyRec;
-  const inner = contextOf(ledger, rec, ctx);
+  // [#37502] A related list's entry is read against the child it lists.
+  const inner = isRelatedListEntry(rec, root, segments)
+    ? relatedListChildOf(ledger, rec)
+    : contextOf(ledger, rec, ctx);
   // [#20929] An entry of a child collection: its grid draws `childObject`'s
   // fields, whatever object the enclosing view is bound to.
   const childEntry: ChildEntryKind | undefined = CHILD_COLLECTION_KEYS.has(leafKey) ? 'collection' : entryKind;

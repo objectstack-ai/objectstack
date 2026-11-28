@@ -14,10 +14,26 @@
  *
  * Backed entirely by the existing `/api/v1/packages` REST surface
  * (see framework `http-dispatcher.handlePackages`).
+ *
+ * objectstack#36834 — the page has two faces, chosen by the URL's `face` param
+ * (`readPackagesFace` in `packageSource.ts`):
+ *   - the DEVELOPMENT surface (no `face`): the one Studio opens, every action
+ *     above, unchanged;
+ *   - the ADMINISTRATION face (`?face=admin`, Setup → Packages): every package
+ *     of every source, one line per app with its modules folded under it, a
+ *     Source filter, and in the detail sheet only enable / disable and delete
+ *     (with its keep-data choice); New Package lands in Studio on the new
+ *     package, and Import sits beside it (objectstack#37139). Publish, revert,
+ *     discard drafts, adopt loose items and manifest edit stay on the
+ *     development surface.
+ *
+ * objectstack#37139 — the development face's whole-package actions (Edit,
+ * Export, Duplicate, Revert, Adopt loose items) are shared with Studio's 「⋯」
+ * package menu through `packageActions.tsx`.
  */
 
 import * as React from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Package as PackageIcon,
   Plus,
@@ -76,22 +92,36 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  ToggleGroup,
+  ToggleGroupItem,
   cn,
 } from '@object-ui/components';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
 import { useMetadataClient } from './useMetadata.js';
+import { newAppStep } from '../studio-design/newAppDoor.js';
 import { PackageFormDialog } from './PackageFormDialog.js';
+import {
+  AdoptLooseItemsDialog,
+  DuplicatePackageForm,
+  EditPackageDialog,
+  PACKAGES_API,
+  adoptLooseItems,
+  adoptedText,
+  exportPackageFile,
+  packagesApiJson,
+  revertPackage,
+} from './packageActions.js';
 import { readPackageRemovalContents, type PackageRemovalState } from './packageRemovalContents.js';
 import { PackageRemovalSummary } from './PackageRemovalSummary.js';
 import { useAdapter } from '@object-ui/react';
+import { useObjectLabel } from '@object-ui/i18n';
 import { PageHeader } from '../../layout/PageHeader.js';
 import { errorCodeIs } from '@object-ui/types';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 import { refusedItemsText } from '../../preview/publishRefusal.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { duplicatePackage, forgetPackageListReads, isSpecPackageId } from '../studio-design/packages-io.js';
-import { PackageIdInput } from '../studio-design/PackageIdInput.js';
+import { duplicatePackage, forgetPackageListReads } from '../studio-design/packages-io.js';
 import { useWorkspaceAdminStatus } from '@object-ui/auth';
 import { getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import {
@@ -108,13 +138,23 @@ import { useProtocolCheckSkippedText } from '../../console/marketplace/protocolC
 import { ProtocolCheckSkippedNote } from '../../console/marketplace/ProtocolCheckSkippedNote.js';
 import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type { PackagePublishResult } from '@objectstack/spec/system';
-import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
+import { studioHomePath } from '../studio-design/studioAddress.js';
+import { PackageCustomizationsPanel } from '../studio-design/PackageCustomizationsPanel.js';
+import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import {
+  PACKAGE_SOURCES,
+  PACKAGES_ADMIN_FACE,
+  PACKAGES_FACE_PARAM,
+  PACKAGES_NEW_PACKAGE_VALUE,
+  PACKAGES_NEW_PARAM,
+  PACKAGES_PACKAGE_PARAM,
   PACKAGES_SOURCE_PARAM,
   PackageSourceRefusal,
+  readPackagesFace,
   readServedSource,
   readSourceFilter,
   type PackageSource,
+  type PackagesFace,
 } from './packageSource.js';
 
 /* -------------------------------------------------------------------------- */
@@ -202,7 +242,10 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
   writable?: unknown;
 };
 
-const API = '/api/v1/packages';
+// objectstack#37139 — the package REST surface and the whole-package actions
+// live in `packageActions.tsx`, shared with Studio's 「⋯」 package menu.
+const API = PACKAGES_API;
+const apiJson = packagesApiJson;
 
 /**
  * The code `PATCH /packages/:id/disable` answers, with `409`, while a
@@ -211,54 +254,6 @@ const API = '/api/v1/packages';
  * names every such rule and the remedy; the refusal carries no `details`.
  */
 const DISABLE_RESTRICTED_BY_VALIDATION_RULE = 'PACKAGE_DISABLE_RESTRICTED_BY_VALIDATION_RULE';
-
-async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
-  // objectstack#29119 — every write this page sends (publish, revert, discard,
-  // delete, adopt, enable/disable, import) may change the package list, so the
-  // list reads from before it are forgotten however it ends, the session's
-  // held list the app → Studio entries read included.
-  const writes = (init?.method ?? 'GET').toUpperCase() !== 'GET';
-  const res = await fetch(path, {
-    credentials: 'include',
-    headers: { Accept: 'application/json', ...(init?.headers || {}) },
-    ...init,
-  }).finally(() => {
-    if (writes) forgetPackageListReads();
-  });
-  const text = await res.text();
-  const payload = text ? JSON.parse(text) : null;
-  if (!res.ok || payload?.success === false) {
-    // The ADR-0112 envelope first, by the ONE shared rule — a producer-marked
-    // `error.userMessage` outranks the diagnostic `error.message`, and
-    // `error.code` rides along behind whichever won. This helper used to read
-    // `error.message` and stop, so a marked sentence arrived on the wire (both
-    // doors serving these package routes emit the channel) and had nowhere to
-    // appear. See {@link readEnvelopeFailureText}.
-    //
-    // The two rungs BELOW it stay, and stay here rather than moving into the
-    // shared reader: they are not the ADR-0112 envelope. A bare-string `error`
-    // and a top-level `message` are older runtimes' shapes, live for this page
-    // and not for the Studio readers, and folding them in would have handed
-    // every other consumer of the rule a tolerant dialect it never asked for.
-    const msg =
-      readEnvelopeFailureText(payload) ||
-      payload?.error ||
-      payload?.message ||
-      `Request failed (${res.status})`;
-    const err = new Error(typeof msg === 'string' ? msg : `Request failed (${res.status})`) as Error & {
-      code?: string;
-      details?: unknown;
-    };
-    // ADR-0141 D2 — the envelope's `code` and `details` ride on the error, so a
-    // caller that draws a refusal from its facts (`DEPENDENCY_MISSING` at the
-    // import door) can; every other caller reads the message as before.
-    if (typeof payload?.error?.code === 'string') err.code = payload.error.code;
-    if (payload?.error?.details !== undefined) err.details = payload.error.details;
-    throw err;
-  }
-  // Runtime wraps successful payloads in { data, ... } or returns the object directly.
-  return (payload?.data ?? payload) as T;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Scope badge                                                                 */
@@ -345,6 +340,10 @@ function sourceRefusalText(e: PackageSourceRefusal, locale: string): string {
       return tFormat('engine.packages.source.filterUnknown', locale, { value: e.subject });
     case 'PACKAGE_SOURCE_FILTER_REPEATED':
       return tFormat('engine.packages.source.filterRepeated', locale, { value: e.subject });
+    case 'PACKAGES_FACE_UNKNOWN':
+      return tFormat('engine.packages.face.unknown', locale, { value: e.subject });
+    case 'PACKAGES_FACE_REPEATED':
+      return tFormat('engine.packages.face.repeated', locale, { value: e.subject });
   }
 }
 
@@ -491,9 +490,16 @@ function groupInstalledApps(rows: readonly PackageListRow[]): InstalledAppGroup[
   return rows.filter((r) => !folded.has(r.id)).map((r) => ({ row: r, modules: modulesOf.get(r.id) ?? [] }));
 }
 
-/** Whether the search text names a row, by id or name — the list's one rule. */
-function rowMatches(row: PackageListRow, q: string): boolean {
-  return row.id.toLowerCase().includes(q) || (row.pkg?.manifest.name || '').toLowerCase().includes(q);
+/**
+ * Whether the search text names a row, by id or name — the list's one rule.
+ * The name is the one the row shows (`shownName`, the translated package name
+ * where the bundle carries one, objectstack#35513) and the manifest's own, so
+ * a search in either language finds the row.
+ */
+function rowMatches(row: PackageListRow, q: string, shownName: (row: PackageListRow) => string): boolean {
+  return row.id.toLowerCase().includes(q)
+    || (row.pkg?.manifest.name || '').toLowerCase().includes(q)
+    || shownName(row).toLowerCase().includes(q);
 }
 
 /**
@@ -584,15 +590,30 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
   );
 }
 
+/**
+ * A package's Studio address: the builder on the package's Data pillar. The
+ * administration face's create lands here, and its "Open in Studio" link
+ * points here (objectstack#36834).
+ */
+const studioPackagePath = (packageId: string) => studioHomePath(packageId);
+
 /* -------------------------------------------------------------------------- */
 /* Create-package dialog                                                       */
 /* -------------------------------------------------------------------------- */
 
 /**
  * CreatePackageDialog — thin wrapper over the spec-driven {@link PackageFormDialog}.
- * Kept as a named export so existing call sites (ResourceListPage, the Studio
- * package switcher) don't change. The form fields + validation now come from
- * the manifest spec (`package-schema`), not a hand-written field list.
+ * The one create-package dialog: Setup → Packages (its New Package button and
+ * the `?new=package` door the console's new-package entries open,
+ * objectstack#36908) and ResourceListPage's create-a-base-first prompt. The
+ * form fields + validation come from the manifest spec (`package-schema`),
+ * not a hand-written field list.
+ *
+ * objectstack#37134 — every opening offers 「同时创建应用」, ticked by
+ * default: the wrapper hands the dialog the app step (`newAppStep`,
+ * objectstack#36748), so a package created here comes with its app unless the
+ * author unticks it. `onCreated` still answers with the package id, so where
+ * each caller lands afterwards does not change.
  */
 export function CreatePackageDialog({
   open,
@@ -603,11 +624,15 @@ export function CreatePackageDialog({
   onOpenChange: (v: boolean) => void;
   onCreated: (id: string) => void;
 }) {
+  const client = useMetadataClient();
+  const locale = useMetadataLocale();
+  const newApp = React.useMemo(() => newAppStep(client, locale), [client, locale]);
   return (
     <PackageFormDialog
       mode="create"
       open={open}
       onOpenChange={onOpenChange}
+      newApp={newApp}
       onSaved={(r) => onCreated(r.id)}
     />
   );
@@ -631,34 +656,9 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-/**
- * EditPackageDialog — thin wrapper over the spec-driven {@link PackageFormDialog}
- * in `edit` mode. The manifest form locks `id` / `type` / `namespace` / scope
- * as immutable and submits only name / description / version — all the REST
- * `PATCH /api/v1/packages/:id` persists. Kept as a named export so existing
- * call sites don't change.
- */
-export function EditPackageDialog({
-  pkg,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  pkg: InstalledPackageRow | null;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onSaved: (updated: InstalledPackageRow) => void;
-}) {
-  return (
-    <PackageFormDialog
-      mode="edit"
-      open={open}
-      onOpenChange={onOpenChange}
-      manifest={pkg?.manifest ?? null}
-      onSaved={(r) => onSaved((r.package as unknown as InstalledPackageRow) ?? (pkg as InstalledPackageRow))}
-    />
-  );
-}
+// objectstack#37139 — moved to `packageActions.tsx` (Studio's 「⋯」 menu opens
+// it too); still exported from here so existing call sites don't change.
+export { EditPackageDialog };
 
 /**
  * What *Delete app* removes (ADR-0070 D4, Q3). `structure` removes the
@@ -671,6 +671,7 @@ type DeleteMode = '' | 'structure' | 'all';
 export function PackageDetailSheet({
   pkg,
   appBase,
+  face = 'development',
   open,
   onOpenChange,
   onChanged,
@@ -680,11 +681,22 @@ export function PackageDetailSheet({
    *  has no console app context) to hide those links; every lifecycle action
    *  still works without it. */
   appBase?: string;
+  /**
+   * objectstack#36834 — which face of the Packages page opened the sheet. The
+   * `admin` face (Setup → Packages) offers the administration actions only:
+   * View info, Disable / Enable and Delete, plus "Open in Studio" on an
+   * authored package. Edit, Publish, Revert, Export, Duplicate, Adopt loose
+   * items and the pending changes' Publish / Discard stay on the development
+   * face. On the administration face a read-only base also draws what this
+   * deployment changed on it (objectstack#36908).
+   */
+  face?: PackagesFace;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onChanged: () => void;
 }) {
   const locale = useMetadataLocale();
+  const { packageName, packageDescription } = useObjectLabel();
   // `ce986aafc` — the console's metadata client, for the ONE action on this
   // sheet that must report: "publish drafts" promotes metadata, and the runtime
   // authoring gate's findings for those promotions ride the response. This hook
@@ -734,8 +746,6 @@ export function PackageDetailSheet({
   });
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [dupOpen, setDupOpen] = React.useState(false);
-  const [dupName, setDupName] = React.useState('');
-  const [dupId, setDupId] = React.useState('');
   const fieldId = React.useId();
 
   React.useEffect(() => {
@@ -824,13 +834,16 @@ export function PackageDetailSheet({
   // `true` for a writable base and for a module of an installed app, which
   // stays read-only for every other write action above and below.
   const disableable = pkg.disableable === true;
+  // objectstack#36834 — the authoring actions are offered on the development
+  // face only; the administration face keeps the reads, Disable / Enable and
+  // Delete.
+  const authoring = face !== 'admin';
   // The name the delete dialog asks the author to type: the one the sheet's
-  // title shows.
-  const displayName = pkg.manifest.name || id;
+  // title shows — the package's name in the reader's language where its
+  // translation bundle carries one (objectstack#35513), else `manifest.name`.
+  const displayName = packageName({ id, name: pkg.manifest.name });
+  const shownDescription = packageDescription({ id, description: pkg.manifest.description });
   const deleteArmed = deleteMode !== '' && deleteTyped.trim() === displayName.trim();
-  // The spec's id rule (`isSpecPackageId`), the one the landing's duplicate form
-  // and the duplicate route judge by, not a second one (objectui#11855).
-  const dupArmed = dupName.trim().length > 0 && isSpecPackageId(dupId.trim());
 
   // objectui#13339 — the sheet's one message line answers the action the
   // author started LAST. An action that runs straight away clears it as it
@@ -989,7 +1002,7 @@ export function PackageDetailSheet({
   const revert = () =>
     run(
       'revert',
-      () => apiJson(`${API}/${encodeURIComponent(id)}/revert`, { method: 'POST' }),
+      () => revertPackage(id),
       t('engine.packages.detail.reverted', locale),
     );
 
@@ -1061,26 +1074,20 @@ export function PackageDetailSheet({
   };
 
   // ADR-0070 D4 — duplicate this base into a NEW writable package
-  // (re-namespaced). The Studio landing's inline duplicate form, on this sheet
-  // (objectui#11784): the same id input (`PackageIdInput`), the same id rule
-  // (`isSpecPackageId`) and the same call (`duplicatePackage`, which also refuses
-  // a 200 whose verdict is `success: false`), instead of a `window.prompt`.
+  // (re-namespaced). An inline duplicate form, on this sheet
+  // (objectui#11784): `DuplicatePackageForm` (`packageActions.tsx`, shared
+  // with Studio's package menu) asks for the name and id by the spec's id
+  // rule, and the same call (`duplicatePackage`, which also refuses a 200
+  // whose verdict is `success: false`) sends it, instead of a `window.prompt`.
   const toggleDuplicate = () => {
     if (dupOpen) {
       setDupOpen(false);
       return;
     }
-    startAction(() => {
-      setDupName(tFormat('engine.studio.landing.dupDefaultName', locale, { name: displayName }));
-      setDupId(`${id}-copy`);
-      setDupOpen(true);
-    });
+    startAction(() => setDupOpen(true));
   };
 
-  const duplicateApp = async () => {
-    const target = dupId.trim();
-    const name = dupName.trim();
-    if (!name || !isSpecPackageId(target)) return;
+  const duplicateApp = async (target: string, name: string) => {
     setBusy('duplicate');
     setMsg(null);
     try {
@@ -1113,19 +1120,8 @@ export function PackageDetailSheet({
     setBusy('adopt');
     setMsg(null);
     try {
-      const r = await apiJson<ReassignOrphanedMetadataResponse>(
-        `${API}/${encodeURIComponent(id)}/adopt-orphans`,
-        { method: 'POST' },
-      );
-      const count = r.reassignedCount;
-      setMsg({
-        kind: 'ok',
-        text: tFormat(
-          count === 1 ? 'engine.packages.detail.adoptedOne' : 'engine.packages.detail.adoptedOther',
-          locale,
-          { count },
-        ),
-      });
+      const count = await adoptLooseItems(id);
+      setMsg({ kind: 'ok', text: adoptedText(count, locale) });
       onChanged();
     } catch (e: any) {
       setMsg({ kind: 'err', text: e?.message ?? 'Adopt failed' });
@@ -1144,25 +1140,7 @@ export function PackageDetailSheet({
       enabled ? t('engine.packages.detail.disabled', locale) : t('engine.packages.detail.enabled', locale),
     );
 
-  const exportPkg = () =>
-    run(
-      'export',
-      async () => {
-        const manifest = await apiJson<any>(`${API}/${encodeURIComponent(id)}/export`);
-        const blob = new Blob([JSON.stringify(manifest, null, 2)], {
-          type: 'application/json',
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${id}.package.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      },
-      t('engine.packages.detail.exported', locale),
-    );
+  const exportPkg = () => run('export', () => exportPackageFile(id), t('engine.packages.detail.exported', locale));
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1170,7 +1148,7 @@ export function PackageDetailSheet({
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <PackageIcon className="h-4 w-4" />
-            {pkg.manifest.name || id}
+            {displayName}
           </SheetTitle>
           <SheetDescription className="font-mono text-xs">{id}</SheetDescription>
         </SheetHeader>
@@ -1184,12 +1162,44 @@ export function PackageDetailSheet({
           <DetailRow label={t('engine.packages.col.status', locale)}>
             <StatusBadge pkg={pkg} />
           </DetailRow>
-          {pkg.manifest.description && (
-            <DetailRow label={t('engine.packages.detail.description', locale)}>{pkg.manifest.description}</DetailRow>
+          {shownDescription && (
+            <DetailRow label={t('engine.packages.detail.description', locale)}>{shownDescription}</DetailRow>
           )}
         </div>
 
-        {appBase && (
+        {/* objectstack#36834 — the administration face sends an authored
+            package's author to Studio, where its design and its authoring
+            actions are; it browses no metadata itself. */}
+        {!authoring && pkg.source === 'authored' && (
+          <>
+            <Separator className="my-4" />
+            <Link
+              to={studioPackagePath(id)}
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+              onClick={() => onOpenChange(false)}
+              data-testid="pkg-detail-open-in-studio"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              {t('engine.packages.detail.openInStudio', locale)}
+            </Link>
+          </>
+        )}
+
+        {/* objectstack#36908 — what this deployment changed on an installed
+            app, and the way into Studio to change it: the removed Studio
+            home's per-app line and "Customizations in this environment" panel,
+            drawn where an administrator now looks the app up. A read-only
+            base only: an authored package is changed in place, a `.custom`
+            pair is read through its base, and a kernel package takes no
+            customization. */}
+        {!authoring && !writable && !isKernel && !isCustomizationPackage(id) && (
+          <>
+            <Separator className="my-4" />
+            <PackageCustomizationsPanel key={id} packageId={id} locale={locale} onNavigate={() => onOpenChange(false)} />
+          </>
+        )}
+
+        {authoring && appBase && (
           <>
             <Separator className="my-4" />
             <Link
@@ -1203,7 +1213,7 @@ export function PackageDetailSheet({
           </>
         )}
 
-        {drafts && drafts.length > 0 && (
+        {authoring && drafts && drafts.length > 0 && (
           <>
             <Separator className="my-4" />
             <div className="space-y-2">
@@ -1295,19 +1305,19 @@ export function PackageDetailSheet({
               <Eye className="mr-1.5 h-3.5 w-3.5" />
               {t('engine.packages.detail.viewInfo', locale)}
             </Button>
-            {writable && (
+            {authoring && writable && (
               <Button size="sm" variant="outline" onClick={() => startAction(() => setEditOpen(true))} disabled={!!busy}>
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 {t('engine.packages.detail.edit', locale)}
               </Button>
             )}
-            {writable && (
+            {authoring && writable && (
               <Button size="sm" onClick={publish} disabled={!!busy}>
                 <Upload className="mr-1.5 h-3.5 w-3.5" />
                 {busy === 'publish' ? t('engine.packages.detail.publishing', locale) : t('engine.packages.detail.publish', locale)}
               </Button>
             )}
-            {writable && (
+            {authoring && writable && (
               <Button size="sm" variant="outline" onClick={revert} disabled={!!busy}>
                 <Undo2 className="mr-1.5 h-3.5 w-3.5" />
                 {t('engine.packages.detail.revert', locale)}
@@ -1332,11 +1342,13 @@ export function PackageDetailSheet({
                 {enabled ? t('engine.packages.detail.disable', locale) : t('engine.packages.detail.enable', locale)}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={exportPkg} disabled={!!busy}>
-              <Download className="mr-1.5 h-3.5 w-3.5" />
-              {busy === 'export' ? t('engine.packages.detail.exporting', locale) : t('engine.packages.detail.export', locale)}
-            </Button>
-            {writable && (
+            {authoring && (
+              <Button size="sm" variant="outline" onClick={exportPkg} disabled={!!busy}>
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                {busy === 'export' ? t('engine.packages.detail.exporting', locale) : t('engine.packages.detail.export', locale)}
+              </Button>
+            )}
+            {authoring && writable && (
               <Button
                 size="sm"
                 variant="outline"
@@ -1348,7 +1360,7 @@ export function PackageDetailSheet({
                 {busy === 'duplicate' ? t('engine.packages.detail.duplicating', locale) : t('engine.packages.detail.duplicate', locale)}
               </Button>
             )}
-            {writable && (
+            {authoring && writable && (
               <Button size="sm" variant="outline" onClick={() => startAction(() => setAdoptOpen(true))} disabled={!!busy}>
                 <Inbox className="mr-1.5 h-3.5 w-3.5" />
                 {busy === 'adopt' ? t('engine.packages.detail.adopting', locale) : t('engine.packages.detail.adoptOrphans', locale)}
@@ -1367,44 +1379,16 @@ export function PackageDetailSheet({
               </Button>
             )}
           </div>
-          {writable && dupOpen && (
-            <div className="flex flex-col gap-1.5 rounded-md border p-2.5" data-testid="pkg-detail-dup-form">
-              <input
-                autoFocus
-                value={dupName}
-                onChange={(e) => setDupName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && dupArmed && !busy) void duplicateApp();
-                  if (e.key === 'Escape') setDupOpen(false);
-                }}
-                placeholder={t('engine.studio.landing.dupNamePlaceholder', locale)}
-                aria-label={t('engine.studio.landing.dupNamePlaceholder', locale)}
-                data-testid="pkg-detail-dup-name-input"
-                className="h-7 w-full rounded-md border bg-background px-2 text-[11px] outline-none focus:ring-1 focus:ring-primary"
-              />
-              <PackageIdInput
-                value={dupId}
-                onChange={setDupId}
-                onEnter={() => {
-                  if (dupArmed && !busy) void duplicateApp();
-                }}
-                onEscape={() => setDupOpen(false)}
-                placeholder={t('engine.studio.landing.dupIdPlaceholder', locale)}
-                locale={locale}
-                testId="pkg-detail-dup-id-input"
-              />
-              <div className="flex items-center gap-1.5">
-                <Button size="sm" onClick={() => void duplicateApp()} disabled={!!busy || !dupArmed}>
-                  <Copy className="mr-1.5 h-3.5 w-3.5" />
-                  {busy === 'duplicate'
-                    ? t('engine.packages.detail.duplicating', locale)
-                    : t('engine.packages.detail.duplicateGo', locale)}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setDupOpen(false)} disabled={!!busy}>
-                  {t('engine.cancel', locale)}
-                </Button>
-              </div>
-            </div>
+          {authoring && writable && dupOpen && (
+            <DuplicatePackageForm
+              sourceId={id}
+              displayName={displayName}
+              busy={!!busy}
+              duplicating={busy === 'duplicate'}
+              onDuplicate={(target, name) => void duplicateApp(target, name)}
+              onCancel={() => setDupOpen(false)}
+              locale={locale}
+            />
           )}
         </div>
 
@@ -1589,26 +1573,13 @@ export function PackageDetailSheet({
           </AlertDialogContent>
         </AlertDialog>
 
-        <AlertDialog open={adoptOpen} onOpenChange={setAdoptOpen}>
-          <AlertDialogContent data-testid="pkg-detail-adopt-dialog">
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {tFormat('engine.packages.detail.adoptTitle', locale, { name: displayName })}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('engine.packages.detail.adoptDescription', locale)}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel data-testid="pkg-detail-adopt-cancel">
-                {t('engine.cancel', locale)}
-              </AlertDialogCancel>
-              <AlertDialogAction data-testid="pkg-detail-adopt-confirm" onClick={() => void adoptOrphans()}>
-                {t('engine.packages.detail.adoptOrphans', locale)}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <AdoptLooseItemsDialog
+          open={adoptOpen}
+          onOpenChange={setAdoptOpen}
+          displayName={displayName}
+          onConfirm={() => void adoptOrphans()}
+          locale={locale}
+        />
 
         <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
           <AlertDialogContent data-testid="pkg-detail-discard-dialog">
@@ -1645,11 +1616,21 @@ export function PackageDetailSheet({
 
 export function PackagesPage() {
   const locale = useMetadataLocale();
+  // A package's name in the reader's language (objectstack#35513): the
+  // `packages.<id>.name` row of the served translation document, else
+  // `manifest.name`. Display only — the edit and view dialogs keep reading
+  // the manifest as authored.
+  const { packageName } = useObjectLabel();
+  const rowName = React.useCallback(
+    (row: PackageListRow) => (row.pkg ? packageName({ id: row.id, name: row.pkg.manifest.name }) : row.id),
+    [packageName],
+  );
   // ADR-0141 D2 — the import door's `DEPENDENCY_MISSING` refusal, one line per
   // unmet dependency, from the locale packs (the `engine.*` table is en/zh only).
   const dependencyMissingText = useDependencyMissingText();
   const protocolCheckSkippedText = useProtocolCheckSkippedText();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   // App base = path up to (and excluding) `/component/...`, so links to
   // `/apps/:app/metadata/...` work regardless of nesting.
   const appBase = React.useMemo(() => {
@@ -1687,11 +1668,17 @@ export function PackagesPage() {
   // The Source filter is URL state (`?source=`), one closed spelling; an
   // unknown or repeated value is refused below, not ignored.
   const [searchParams, setSearchParams] = useSearchParams();
-  const sourceFilter: { value: PackageSource | null; refusal: string | null } = (() => {
+  // objectstack#36834 — the face is URL state too (`?face=admin`), read
+  // beside the Source filter; an unknown or repeated value is refused the same
+  // way, and the refused page draws the development surface's header.
+  const sourceFilter: { value: PackageSource | null; face: PackagesFace; refusal: string | null } = (() => {
     try {
-      return { value: readSourceFilter(searchParams.getAll(PACKAGES_SOURCE_PARAM)), refusal: null };
+      const value = readSourceFilter(searchParams.getAll(PACKAGES_SOURCE_PARAM));
+      return { value, face: readPackagesFace(searchParams.getAll(PACKAGES_FACE_PARAM), value), refusal: null };
     } catch (e) {
-      if (e instanceof PackageSourceRefusal) return { value: null, refusal: sourceRefusalText(e, locale) };
+      if (e instanceof PackageSourceRefusal) {
+        return { value: null, face: 'development', refusal: sourceRefusalText(e, locale) };
+      }
       throw e;
     }
   })();
@@ -1770,19 +1757,75 @@ export function PackagesPage() {
     if (fresh && fresh !== selected) setSelected(fresh);
   }, [packages, selected]);
 
+  // objectstack#36834 — Setup → Packages opens the ADMINISTRATION face
+  // (`?face=admin`, or the retired Installed Apps address `?source=marketplace`):
+  // the administrator's view this page first drew for marketplace installs
+  // (objectstack#34722, ADR-0146 D1), now over every source. One line per app
+  // with its modules folded under it, the columns an administrator reads (Name,
+  // Version, Status, Source, Update), a Source filter, New Package — which
+  // lands in Studio on the new package — and none of the developer's doors:
+  // the platform packages switch and the authoring actions stay on the
+  // development surface (this page with no `face`). Import sits in both faces'
+  // headers beside New Package (objectstack#37139): it creates a package from
+  // a file, which is not an action on one package.
+  const adminFace = sourceFilter.face === 'admin';
+
+  // objectstack#36908 — the console's new-package doors land here with New
+  // Package open (`SETUP_NEW_PACKAGE_PATH`, `?new=package` on this face), the
+  // way they used to land on the Studio home's create dialog. Read on arrival
+  // and dropped from the address with a replace, so a refresh or Back does not
+  // open the dialog again. The effect is keyed on the primitives it reads
+  // (ui/AGENTS.md #10).
+  const newParam = searchParams.get(PACKAGES_NEW_PARAM);
+  React.useEffect(() => {
+    if (newParam !== PACKAGES_NEW_PACKAGE_VALUE) return;
+    if (adminFace) setCreateOpen(true);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(PACKAGES_NEW_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [newParam, adminFace, setSearchParams]);
+
+  // objectstack#37139 — Studio's 「Manage in Setup…」 lands here on one
+  // package (`setupPackagePath`, `?package=ID`): once the list has loaded, that
+  // package's detail sheet opens, where it is enabled, disabled or deleted. Read
+  // on arrival and dropped with a replace, as `?new=package` is above, so a
+  // refresh or Back does not open it again. Keyed on primitives and the loaded
+  // list (ui/AGENTS.md #10).
+  const packageParam = searchParams.get(PACKAGES_PACKAGE_PARAM);
+  React.useEffect(() => {
+    if (packageParam === null || loading) return;
+    const target = packages.find((p) => p.manifest.id === packageParam);
+    if (target) {
+      setSelected(target);
+      setDetailOpen(true);
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(PACKAGES_PACKAGE_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [packageParam, loading, packages, setSearchParams]);
+
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((r) => {
       if (sourceFilter.value && r.source !== sourceFilter.value) return false;
       const kernel = r.pkg?.manifest.scope === 'system' || r.pkg?.manifest.scope === 'cloud';
-      if (kernel && !showKernel) return false;
+      // The administration face lists no platform package: it has no switch to
+      // show them, and nothing on them is the administrator's to change.
+      if (kernel && (adminFace || !showKernel)) return false;
       if (!q) return true;
-      return (
-        r.id.toLowerCase().includes(q) ||
-        (r.pkg?.manifest.name || '').toLowerCase().includes(q)
-      );
+      return rowMatches(r, q, rowName);
     });
-  }, [rows, query, showKernel, sourceFilter.value]);
+  }, [rows, query, showKernel, sourceFilter.value, adminFace, rowName]);
 
   // objectui#13166 — the Actions column follows the cells it sits over: it is
   // drawn only when a row IN VIEW carries an action. Gating it on the page-level
@@ -1793,41 +1836,32 @@ export function PackagesPage() {
   // same moment its cells do.
   const showActionsColumn = showMarketplaceActions && filtered.some((r) => rowActionEntry(r) !== null);
 
-  // objectui#13356 — Setup's "Installed Apps" entry opens this page with
-  // `?source=marketplace` (its nav item's `params`, sent as the query string).
-  // That view is titled for the entry that opened it, and when no row is a
-  // marketplace install its empty state says so, instead of blaming a filter
-  // the administrator never set. "No packages match your filters." stays for
-  // the case where marketplace installs exist and the search hides them.
-  //
-  // objectstack#34722 — that view is the administrator's door (ADR-0146 D1:
-  // Setup carries app installation; Studio is the developer's surface): it
-  // draws one line per installed app with its modules folded under it, the
-  // columns an administrator reads (Name, Version, Status, Source, Update),
-  // and none of the developer's doors — Import, New Package and the platform
-  // packages switch stay on Studio's Overview → Packages, this same page
-  // opened without `source` (ruling 甲 on objectstack#25098).
-  const installedAppsView = sourceFilter.value === 'marketplace';
-  const noMarketplaceInstalls = installedAppsView && !rows.some((r) => r.source === 'marketplace');
+  // objectui#13356 — a view filtered to marketplace installs that holds none
+  // says so in its empty state, instead of blaming a filter the administrator
+  // never set. "No packages match your filters." stays for the case where
+  // marketplace installs exist and the search hides them.
+  const noMarketplaceInstalls =
+    sourceFilter.value === 'marketplace' && !rows.some((r) => r.source === 'marketplace');
 
-  // The Installed Apps lines: grouped over the rows the Source filter keeps,
-  // then searched — a group is shown when its app or one of its modules
-  // matches, and a module the search found is shown without a click.
+  // The administration face's lines: grouped over the rows the Source filter
+  // keeps (a module folds only under an app of its own Source), then searched —
+  // a group is shown when its app or one of its modules matches, and a module
+  // the search found is shown without a click.
   const appGroups = React.useMemo(() => {
-    if (!installedAppsView) return [];
+    if (!adminFace) return [];
     const q = query.trim().toLowerCase();
     const scoped = rows.filter((r) => {
-      if (r.source !== 'marketplace') return false;
+      if (sourceFilter.value && r.source !== sourceFilter.value) return false;
       return !(r.pkg?.manifest.scope === 'system' || r.pkg?.manifest.scope === 'cloud');
     });
     return groupInstalledApps(scoped)
       .map((g) => {
         if (!q) return { ...g, matchedModules: false };
-        const matchedModules = g.modules.some((m) => rowMatches(m, q));
-        return rowMatches(g.row, q) || matchedModules ? { ...g, matchedModules } : null;
+        const matchedModules = g.modules.some((m) => rowMatches(m, q, rowName));
+        return rowMatches(g.row, q, rowName) || matchedModules ? { ...g, matchedModules } : null;
       })
       .filter((g): g is InstalledAppGroup & { matchedModules: boolean } => g !== null);
-  }, [installedAppsView, rows, query]);
+  }, [adminFace, rows, query, sourceFilter.value, rowName]);
   const [expandedApps, setExpandedApps] = React.useState<ReadonlySet<string>>(() => new Set());
   const moduleIdBase = React.useId();
   const toggleApp = (id: string) =>
@@ -1838,11 +1872,11 @@ export function PackagesPage() {
       return next;
     });
 
-  // The catalog is asked about each installed app's line — never about a
-  // module, which updates with its app — and only in the Installed Apps view.
+  // The catalog is asked about each marketplace app's line — never about a
+  // module, which updates with its app — and only on the administration face.
   // Keyed on the candidates' ids, versions and package ids (primitives), so a
   // reload that serves the same installs asks nothing again.
-  const updateCandidates: UpdateCandidate[] = installedAppsView
+  const updateCandidates: UpdateCandidate[] = adminFace
     ? groupInstalledApps(rows.filter((r) => r.source === 'marketplace'))
         .map((g) => g.row)
         .filter((r): r is PackageListRow & { install: LocalInstallEntry } => !!r.install && !r.install.notLoaded)
@@ -1852,20 +1886,32 @@ export function PackagesPage() {
   const [updateRead, setUpdateRead] = React.useState<UpdateRead>({ state: 'reading' });
   const updateSeq = React.useRef(0);
   React.useEffect(() => {
-    if (!installedAppsView || loading) return;
+    if (!adminFace || loading) return;
     const seq = ++updateSeq.current;
     setUpdateRead({ state: 'reading' });
     void readUpdateTargets(updateCandidates, appBase).then((read) => {
       if (updateSeq.current === seq) setUpdateRead(read);
     });
     // `updateKey` spells `updateCandidates`; the array itself is rebuilt each render.
-  }, [installedAppsView, loading, updateKey, appBase]);
+  }, [adminFace, loading, updateKey, appBase]);
   const updateCount = updateRead.state === 'read' ? updateRead.targets.size : 0;
   const updatesUnavailable = updateRead.state === 'read' && updateRead.unavailable;
 
   const clearSourceFilter = () => {
     const next = new URLSearchParams(searchParams);
     next.delete(PACKAGES_SOURCE_PARAM);
+    setSearchParams(next, { replace: true });
+  };
+
+  // objectstack#36834 — the administration face's Source filter writes the
+  // same `?source=` the list reads, and writes `face` with it: a list opened
+  // from the retired Installed Apps address (`?source=marketplace`, no `face`)
+  // stays on this face when "All" clears the filter.
+  const setSourceFilter = (value: PackageSource | null) => {
+    const next = new URLSearchParams(searchParams);
+    next.set(PACKAGES_FACE_PARAM, PACKAGES_ADMIN_FACE);
+    if (value) next.set(PACKAGES_SOURCE_PARAM, value);
+    else next.delete(PACKAGES_SOURCE_PARAM);
     setSearchParams(next, { replace: true });
   };
 
@@ -1941,22 +1987,18 @@ export function PackagesPage() {
           description under the title inside Setup, beside it elsewhere — is
           the header's own. Refresh is its icon button; New stays rightmost. */}
       <PageHeader
-        title={
-          installedAppsView
-            ? t('engine.packages.installedApps.title', locale)
-            : t('engine.packages.title', locale)
-        }
+        title={t('engine.packages.title', locale)}
         subtitle={
-          installedAppsView
-            ? t('engine.packages.installedApps.description', locale)
+          adminFace
+            ? t('engine.packages.admin.description', locale)
             : t('engine.packages.description', locale)
         }
         icon={<PackageIcon className="h-4 w-4" />}
         refresh={{ onRefresh: () => void load(), label: t('engine.packages.refresh', locale), busy: loading }}
-        // objectstack#34722 — Import and New Package are developer doors:
-        // Studio's Packages keeps them, Setup's Installed Apps draws neither.
+        // objectstack#37139 — Import beside New Package on both faces: Setup →
+        // Packages draws it as the development face does, and it works the same.
         actions={
-        installedAppsView ? undefined : <>
+        <>
           {importInput}
           <Button
             variant="outline"
@@ -1973,7 +2015,7 @@ export function PackagesPage() {
         // objectui#12705 — too narrow for both actions and the description:
         // New Package stays labelled and Import goes into a `⋯`.
         foldedActions={
-        installedAppsView ? undefined : <>
+        <>
           {importInput}
           {newPackageButton}
           <DropdownMenu>
@@ -1997,7 +2039,7 @@ export function PackagesPage() {
       {/* objectstack#34722 — what the catalog says about the installed apps,
           once: how many have a newer version, or that it could not be asked.
           An unread catalog is never drawn as "up to date". */}
-      {installedAppsView && !loading && !error && updateCount > 0 && (
+      {adminFace && !loading && !error && updateCount > 0 && (
         <p className="mb-4 flex items-center gap-2 text-sm font-medium" data-testid="pkg-updates-summary">
           <Info className="h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
           {updateCount === 1
@@ -2005,7 +2047,7 @@ export function PackagesPage() {
             : tFormat('engine.packages.installedApps.updatesSummary', locale, { count: updateCount })}
         </p>
       )}
-      {installedAppsView && !loading && !error && updatesUnavailable && (
+      {adminFace && !loading && !error && updatesUnavailable && (
         <p className="mb-4 flex items-start gap-2 text-sm text-muted-foreground" data-testid="pkg-updates-unavailable">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           {t('engine.packages.installedApps.updatesUnavailable', locale)}
@@ -2036,10 +2078,38 @@ export function PackagesPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        {/* The Installed Apps view is titled for its filter and is Setup's
-            only door to this list (ruling 甲 on objectstack#25098): no chip
-            that clears the filter into the developer's full list. */}
-        {sourceFilter.value && !installedAppsView && (
+        {/* objectstack#36834 — the administration face's Source filter: All
+            and the closed set of origins, writing `?source=`. */}
+        {adminFace && (
+          <div className="flex items-center gap-2" data-testid="pkg-source-picker">
+            <span className="text-sm text-muted-foreground" id={`${moduleIdBase}source-picker-label`}>
+              {t('engine.packages.col.source', locale)}
+            </span>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              value={sourceFilter.value ?? 'all'}
+              // A press on the value already chosen answers `''`: the filter
+              // stays as it is rather than reading as "no choice".
+              onValueChange={(v) => {
+                if (v === 'all') setSourceFilter(null);
+                else if ((PACKAGE_SOURCES as readonly string[]).includes(v)) setSourceFilter(v as PackageSource);
+              }}
+              aria-labelledby={`${moduleIdBase}source-picker-label`}
+            >
+              <ToggleGroupItem value="all" data-testid="pkg-source-picker-all">
+                {t('engine.packages.source.all', locale)}
+              </ToggleGroupItem>
+              {PACKAGE_SOURCES.map((value) => (
+                <ToggleGroupItem key={value} value={value} data-testid={`pkg-source-picker-${value}`}>
+                  {t(`engine.packages.source.${value}`, locale)}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
+        )}
+        {sourceFilter.value && !adminFace && (
           <div className="flex items-center gap-2" data-testid="pkg-source-filter">
             <span className="text-sm text-muted-foreground">
               {t('engine.packages.col.source', locale)}:
@@ -2050,7 +2120,7 @@ export function PackagesPage() {
             </Button>
           </div>
         )}
-        {kernelCount > 0 && !installedAppsView && (
+        {kernelCount > 0 && !adminFace && (
           <div className="flex items-center gap-2" data-testid="pkg-show-platform">
             <Switch id="show-kernel" checked={showKernel} onCheckedChange={setShowKernel} />
             <Label htmlFor="show-kernel" className="text-sm text-muted-foreground">
@@ -2112,7 +2182,7 @@ export function PackagesPage() {
               </EmptyDescription>
             </Empty>
           </div>
-        ) : installedAppsView ? (
+        ) : adminFace ? (
           // objectstack#34722 — the administrator's columns: Name, Version,
           // Status, Source, Update. The package id and the Scope badge are the
           // developer's reading, on Studio's Packages.
@@ -2159,9 +2229,9 @@ export function PackagesPage() {
                               }
                               aria-label={
                                 open
-                                  ? tFormat('engine.packages.installedApps.hideModules', locale, { name: p?.manifest.name || rowId })
+                                  ? tFormat('engine.packages.installedApps.hideModules', locale, { name: p ? packageName({ id: rowId, name: p.manifest.name }) : rowId })
                                   : tFormat('engine.packages.installedApps.showModules', locale, {
-                                      name: p?.manifest.name || rowId,
+                                      name: p ? packageName({ id: rowId, name: p.manifest.name }) : rowId,
                                       count: modules.length,
                                     })
                               }
@@ -2175,7 +2245,7 @@ export function PackagesPage() {
                             </Button>
                           ) : null}
                           <div className="flex min-w-0 flex-col">
-                            <span>{p?.manifest.name || rowId}</span>
+                            <span>{p ? packageName({ id: rowId, name: p.manifest.name }) : rowId}</span>
                             {!module && modules.length > 0 && (
                               <span className="text-xs font-normal text-muted-foreground">
                                 {modules.length === 1
@@ -2200,7 +2270,10 @@ export function PackagesPage() {
                         <SourceBadge source={source} />
                       </TableCell>
                       <TableCell>
-                        {module ? null : <InstalledAppUpdateCell rowId={rowId} read={updateRead} />}
+                        {/* Only a marketplace app has a catalog to update from. */}
+                        {module || source !== 'marketplace' ? null : (
+                          <InstalledAppUpdateCell rowId={rowId} read={updateRead} />
+                        )}
                       </TableCell>
                       {showActionsColumn && (
                         <TableCell className="text-right">
@@ -2248,7 +2321,7 @@ export function PackagesPage() {
                     onClick={p ? () => openDetail(p) : undefined}
                     data-testid={`pkg-row-${rowId}`}
                   >
-                    <TableCell className="font-medium">{p?.manifest.name || rowId}</TableCell>
+                    <TableCell className="font-medium">{p ? packageName({ id: rowId, name: p.manifest.name }) : rowId}</TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {rowId}
                     </TableCell>
@@ -2292,13 +2365,23 @@ export function PackagesPage() {
       <CreatePackageDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={async () => {
+        onCreated={async (id) => {
+          // objectstack#36834 — created from Setup, the empty package is
+          // designed next: straight into Studio on it, on its Data pillar.
+          // The development surface stays
+          // where it is and shows the new row.
+          if (adminFace) {
+            forgetPackageListReads();
+            navigate(studioPackagePath(id));
+            return;
+          }
           await load();
         }}
       />
       <PackageDetailSheet
         pkg={selected}
         appBase={appBase}
+        face={sourceFilter.face}
         open={detailOpen}
         onOpenChange={setDetailOpen}
         onChanged={() => void load()}

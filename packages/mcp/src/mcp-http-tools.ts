@@ -52,6 +52,8 @@ import { AggregationNodeSchema, SEARCH_COMPANION_FIELD } from '@objectstack/spec
 // [#35138] ADR-0079's one reading of an object's name field
 // (`nameField ?? displayNameField ?? derived`), which names a lookup group.
 import { resolveDisplayField } from '@objectstack/spec/data';
+// [#36167] Which served fields hold a list, read as the publish gate reads them.
+import { isMultiValueField } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
 import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
@@ -64,7 +66,7 @@ import { SystemFieldName } from '@objectstack/spec/system';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { actionsDoorAnswerOf, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { actionsDoorAnswerOf, declaredRefusalLines, declaredUserMessage, earnedAnswerOf, isEngineDuplicateRecordEnvelope, isSandboxCrash, isServerFault, logServerFault, mapDataError, resolveQueryReadLimits, resolveThrownHttpError, sandboxBusinessMessage, serverFaultProvenance, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -81,6 +83,10 @@ import {
   type ListDatasetsOutput,
   type QueryDatasetInput,
   type QueryDatasetOutput,
+  // [ADR-0160 D4] `get_record_context`'s name and input shape, declared once
+  // in spec; the description is the record-context service's definition.
+  GET_RECORD_CONTEXT_TOOL_NAME,
+  GetRecordContextInputSchema,
 } from '@objectstack/spec/ai';
 // [#15942 / #16293] The confirmation member the delete tools require. Imported,
 // never hand-spelled: the gate that refuses and the client that retries have to
@@ -92,6 +98,7 @@ import {
   type AIToolDefinition,
   type ActionConfirmationRequiredDetails,
   type ImportObjectResult,
+  type Logger,
   type RemoteTable,
 } from '@objectstack/spec/contracts';
 import {
@@ -131,7 +138,7 @@ import {
 } from './metadata-completeness.js';
 // [#30892] The file seam and what `read_file` renders from it.
 import { READ_FILE_MAX_BYTES, ReadFileExtractionBusyError, renderReadFile, type McpFileBridge } from './file-content.js';
-import { actionConfirmationElicitorFor, type McpActionCallDoor } from './action-confirmation-elicitation.js';
+import { actionCallDoorFor, type McpActionCallDoor, type McpActionCallDoorFacts } from './action-confirmation-elicitation.js';
 import type { McpLatestPer } from './types.js';
 // [#35145] `expand` and `related`: the relation reads, judged before any read.
 import {
@@ -427,7 +434,7 @@ export interface McpDataBridge {
    * `input.terms`, ranked and capped at `opts.maxResults`. Runs AS the
    * principal: the host reads the docs through the ADR-0046 §6.7 docs-audience
    * gate, so a page the caller may not read is never searched. On an OAuth
-   * grant the principal is the agent envelope, judged on the token's grant.
+   * grant the audience is the delegating person's own permission sets.
    *
    * OPTIONAL: a host that cannot read docs for the caller omits both doc
    * members ({@link searchPackageDocs}, {@link readPackageDoc}) and neither
@@ -441,6 +448,50 @@ export interface McpDataBridge {
    * not found). OPTIONAL — see {@link searchPackageDocs}.
    */
   readPackageDoc?(input: ReadPackageDocInput): Promise<ReadPackageDocOutput>;
+  /**
+   * [ADR-0149 D2] `search_knowledge`: the passages of the app's knowledge
+   * sources that answer `input.query`, from the sources whose `aiExposed` is
+   * not `false`. Runs AS the principal through the knowledge service's one
+   * executor (`@objectstack/service-knowledge`, `createKnowledgeTools`), which
+   * re-checks every object-source hit against the caller's row-level
+   * security; the tool layer adds and removes nothing.
+   *
+   * OPTIONAL: a host with no `knowledge` service, or one whose service carries
+   * no `knowledgeTools`, omits both knowledge members ({@link searchKnowledge},
+   * {@link knowledgeToolDefinitions}) and the tool does not register.
+   */
+  searchKnowledge?(input: Record<string, unknown>): Promise<unknown>;
+  /**
+   * [ADR-0149 D2] The knowledge tool's `AIToolDefinition`, as the knowledge
+   * service defines it: `registerKnowledgeTools` registers `search_knowledge`
+   * under that definition's description and argument schema, so
+   * `packages/mcp` holds no second copy of either. OPTIONAL — see
+   * {@link searchKnowledge}.
+   */
+  knowledgeToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description' | 'parameters'>>;
+  /**
+   * [ADR-0160 D4] `get_record_context`: one record through its context pack,
+   * read AS the principal by the record-context service's one executor
+   * (`@objectstack/service-record-context`, `executeGetRecordContext`). The
+   * bridge builds the executor's door from its own read members and the
+   * tool layer's read guard (`opts.readGuard`, the system-object refusal and
+   * its AI-read attestation, the guard every read tool asks), so the tool
+   * adds no gate and skips none. Refuses by throwing an ADR-0112 coded error.
+   *
+   * OPTIONAL: a host with no `record-context` service omits both members
+   * ({@link getRecordContext}, {@link recordContextToolDefinitions}) and the
+   * tool does not register.
+   */
+  getRecordContext?(
+    input: Record<string, unknown>,
+    opts: { readGuard: (objectName: string) => Promise<string | undefined> },
+  ): Promise<unknown>;
+  /**
+   * [ADR-0160 D4] The tool's `AIToolDefinition`, as the record-context service
+   * defines it: the tool registers under that definition's description, so
+   * `packages/mcp` holds no second copy. OPTIONAL — see {@link getRecordContext}.
+   */
+  recordContextToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description'>>;
 }
 
 /** [#35442] Where a manual page lives: its name, app, title, manual and the console address to cite. */
@@ -516,6 +567,15 @@ export interface RegisterObjectToolsOptions {
    * still runs under the principal's permissions and RLS.
    */
   grantedScopes?: readonly string[];
+  /**
+   * [#37666] Where a tool's 5xx fault lines go (`logServerFault`,
+   * `@objectstack/types`, and `run_action` / `resume_run`'s operator lines):
+   * the host's logger, so they go through its sink and its configured redact
+   * list. `MCPServerRuntime` hands its own (the kernel's `ObjectLogger`,
+   * through the plugin context). Omitted, the lines fall back to the console.
+   * It changes where a line is written, never what the tool answers.
+   */
+  logger?: Logger;
 }
 
 /** One declared input parameter of a business action, LLM-facing. */
@@ -634,6 +694,10 @@ export interface McpActionBridge {
    * the person through `door.elicitConfirmation` first, once every admission
    * gate has passed: `accept` runs the call, any other answer refuses it, and
    * nothing is handed off. Without `door` the call is handed off as above.
+   * [#34325] `facts.elicitsCapableClients`, passed only without `door`, says
+   * this door would have asked a client that advertised `elicitation`: the
+   * `no_confirmation_service` refusal then names that route too. A bridge
+   * that does not read `facts` answers exactly as before.
    */
   runAction(
     name: string,
@@ -649,6 +713,7 @@ export interface McpActionBridge {
       params?: Record<string, unknown>;
     } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
   /**
    * [#30771] The capability refusal `runAction` would throw for an action on
@@ -677,7 +742,8 @@ export interface McpActionBridge {
    * gated action resolves to `ActionConfirmationPending` instead, as
    * {@link runAction} does, and the run stays parked. [#33712] `door` as on
    * {@link runAction}: an elicited `accept` resumes the run, any other
-   * answer refuses it and the run stays parked.
+   * answer refuses it and the run stays parked. [#34325] `facts` as on
+   * {@link runAction}.
    *
    * OPTIONAL, like {@link McpDataBridge.aggregate}. A host that cannot resume
    * runs omits it, and `resume_run` is then not registered.
@@ -686,6 +752,7 @@ export interface McpActionBridge {
     runId: string,
     input: { values?: Record<string, unknown> } & AIActionConfirmation,
     door?: McpActionCallDoor,
+    facts?: McpActionCallDoorFacts,
   ): Promise<unknown>;
 }
 
@@ -731,6 +798,8 @@ export interface RegisterActionToolsOptions {
    * tools require `actions:execute`; undefined = not scope-limited.
    */
   grantedScopes?: readonly string[];
+  /** [#37666] `list_actions`', `run_action`'s and `resume_run`'s fault lines, as {@link RegisterObjectToolsOptions.logger}. */
+  logger?: Logger;
 }
 
 const DEFAULT_MAX_LIMIT = 50;
@@ -957,6 +1026,24 @@ function servedFieldOf(fields: Record<string, unknown>, name: unknown): Record<s
   if (typeof name !== 'string' || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
   const def = fields[name];
   return def !== null && typeof def === 'object' ? (def as Record<string, unknown>) : undefined;
+}
+
+/**
+ * [#36167] The fields of the served definition `def` that hold a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`), the predicate the
+ * publish gate reads them with, among the field names the tool judges with;
+ * `undefined` when there is no definition.
+ */
+function multiValueFieldsOfServed(
+  def: Record<string, unknown> | null,
+  judged: readonly string[],
+): string[] | undefined {
+  const map = fieldMapOf(def ?? undefined);
+  if (!map) return undefined;
+  return judged.filter((name) => {
+    const field = servedFieldOf(map, name);
+    return typeof field?.type === 'string' && isMultiValueField({ type: field.type, multiple: field.multiple === true });
+  });
 }
 
 /**
@@ -1289,9 +1376,13 @@ function fixedAmountCurrencies(
  * [#31317] A driver string code (`SQLITE_BUSY`) answers what `/actions`
  * answers, which is the `/api/v1/data` door's fault: `500 DATABASE_ERROR`.
  */
-function errorResultFromThrown(err: unknown, request: string, objectName?: string) {
+function errorResultFromThrown(err: unknown, request: string, objectName: string | undefined, logger: Logger | undefined) {
   const answer = actionsDoorAnswerOf(err, objectName);
-  for (const line of answer.operatorLines) console.error(`[MCP] ${request}: ${line}`);
+  // [#37666] The host's logger when one is handed ({@link RegisterActionToolsOptions.logger}), else the console.
+  for (const line of answer.operatorLines) {
+    if (logger) logger.error(`[MCP] ${request}: ${line}`);
+    else console.error(`[MCP] ${request}: ${line}`);
+  }
   const envelope = {
     code: answer.code,
     message: answer.message,
@@ -1299,7 +1390,11 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
     ...(answer.declaredCode !== undefined ? { declaredCode: answer.declaredCode } : {}),
     ...(answer.userMessage !== undefined ? { userMessage: answer.userMessage } : {}),
   };
-  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) return codedErrorResult(envelope);
+  // [#37512] Its `details` stay withheld; a listed refusal an app declared at
+  // 403 still names its lines ({@link withRefusalReasonsRelay} says which).
+  if (answer.code === StandardErrorCode.enum.PERMISSION_DENIED) {
+    return withRefusalReasonsRelay(codedErrorResult(envelope), err, envelope);
+  }
   // A fault (5xx) carries nothing but the door's sanitised answer: a thrown
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
@@ -1309,9 +1404,96 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
   // the spelling checked against the registered vocabulary.
   const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
-  return relay === undefined
+  const flowed = relay === undefined
     ? result
     : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+  // [#37416] A declared refusal thrown as a `reasons` list names each line.
+  return withRefusalReasonsRelay(flowed, err, envelope);
+}
+
+/**
+ * [#37416] The lead of the plain text a refusal thrown as a declared `reasons`
+ * list carries beside its envelope ({@link withRefusalReasonsRelay}). Exported
+ * for the pin; not on the package entry.
+ */
+export const REFUSAL_REASONS_RELAY_LEAD =
+  'Tell the user every line below, whole and in this order, in place of userMessage:\n';
+
+/**
+ * [#37416] A refusal thrown as a declared `reasons` list (#36877, ruling
+ * 7178348458 term 3) names every line to the agent, whole, in order, with the
+ * refusal's closing line last — as a second text block, the
+ * {@link flowFailureRelaySentence} pattern: `content[0]` stays the door's
+ * envelope byte for byte, and the lines ride beside it as plain text.
+ *
+ * ## Why
+ *
+ * The runtime's refusal catalogue renders each listed reason in the caller's
+ * locale and answers them as `userMessage`, the lines joined by a line break
+ * with the code's own `message` closing them. The `/data` door bounds that
+ * `userMessage` at 500 characters (#5423), and the record data tools serve the
+ * door's value, so on a long list an agent read a cut sentence with its
+ * closing line lost. The doors carry the lines structured as
+ * `details.refusals`, unbounded; the closing line is on no list.
+ *
+ * ## How it is read
+ *
+ * - The lines through `declaredRefusalLines` (`@objectstack/types`), the one
+ *   recogniser every door reads `details.refusals` with: a non-empty list of
+ *   `{ reason, message }` on an error that also carries a declared
+ *   `userMessage`. ⛔ Never a second reading of the shape here. A thrown value
+ *   it does not recognise — a single-reason refusal among them — gets no block,
+ *   so it reads exactly as before.
+ * - The closing line from the thrown value's own declared `userMessage`
+ *   (`declaredUserMessage`, unbounded: the bound is the `/data` door's, applied
+ *   when it builds its answer), the part after the listed lines. When that
+ *   text does not begin with the listed lines, no closing line is invented and
+ *   the block carries the lines alone.
+ *
+ * ## When it is withheld
+ *
+ * - [#37512] The security gate's own refusal gets no block: a served
+ *   `PERMISSION_DENIED` with no `declaredCode` (the ruling on #7450,
+ *   {@link errorResultFromThrown}). A refusal an app's catalogue declared at
+ *   `403` under its own code is served as `PERMISSION_DENIED` too, the doors'
+ *   demotion of an unregistered code, with that code in `declaredCode`; it
+ *   gets the block. It is not the gate's refusal, and both REST doors serve
+ *   its lines whole to the same caller as `details.refusals` (`mapDataError`,
+ *   `thrownAnswerOf`). The relay never reads `details`, so the gate's
+ *   `positions` and `permissionSets` reach it on no path, and the `details`
+ *   withholding in {@link errorResultFromThrown} is unchanged.
+ * - An answer that serves no `userMessage` gets none: there is no sentence for
+ *   the lines to stand in for.
+ * - A fault (5xx) gets none. The block's lines are a refusal's reasons, and a
+ *   refusal catalogue declares only a 4xx (`declaredRefusalEntrySchema`,
+ *   `@objectstack/spec`), so a listed throw at a 5xx is no catalogue refusal.
+ *   The doors still serve its `userMessage` (and `/data` its
+ *   `details.refusals`); this tool serves the `userMessage` in the envelope,
+ *   and serves a fault no `details`.
+ */
+function withRefusalReasonsRelay<R extends { content: Array<{ type: 'text'; text: string }> }>(
+  result: R,
+  err: unknown,
+  served: { code?: string; status?: number; declaredCode?: string; userMessage?: string },
+): R {
+  if (served.code === StandardErrorCode.enum.PERMISSION_DENIED && served.declaredCode === undefined) return result;
+  if (served.userMessage === undefined) return result;
+  if (served.status !== undefined && isServerFault(served.status)) return result;
+  const text = refusalReasonsRelayText(err);
+  return text === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${REFUSAL_REASONS_RELAY_LEAD}${text}` }] };
+}
+
+/** [#37416] The listed lines, then the closing line when the declared `userMessage` carries it after them. */
+function refusalReasonsRelayText(err: unknown): string | undefined {
+  const lines = declaredRefusalLines(err);
+  if (lines === undefined) return undefined;
+  const listed = lines.map((line) => line.message);
+  const joined = listed.join('\n');
+  const whole = declaredUserMessage(err);
+  const closing = whole !== undefined && whole.startsWith(`${joined}\n`) ? whole.slice(joined.length + 1) : '';
+  return [...listed, ...(closing.trim() !== '' ? [closing] : [])].join('\n');
 }
 
 /**
@@ -1406,6 +1588,7 @@ type DataDoorTool =
   | 'query_records'
   | 'aggregate_records'
   | 'get_record'
+  | 'get_record_context'
   | 'create_record'
   | 'update_record'
   | 'delete_record';
@@ -1599,10 +1782,12 @@ function dataDoorErrorResult(
   err: unknown,
   tool: DataDoorTool | typeof DELETE_RECORDS_TOOL,
   objectName: string,
+  logger: Logger | undefined,
   beside?: NotRecordedMembers,
 ) {
   const envelope = dataDoorRefusalEnvelope(err, objectName);
-  if (envelope) return codedErrorResult({ ...envelope }, beside);
+  // [#37416] The door may cut `userMessage` at 500; a listed refusal's lines ride whole beside it.
+  if (envelope) return withRefusalReasonsRelay(codedErrorResult({ ...envelope }, beside), err, envelope);
   const door = dataDoorAnswerOf(err, objectName);
   if (isServerFault(door.status)) {
     logServerFault({
@@ -1610,7 +1795,7 @@ function dataDoorErrorResult(
       error: err,
       ...(door.code !== undefined ? { code: door.code } : {}),
       request: { method: 'tools/call', path: `${tool} ${objectName}` },
-    });
+    }, logger);
   }
   return codedErrorResult(door, isServerFault(door.status) ? undefined : beside);
 }
@@ -1677,7 +1862,10 @@ function sentFieldHead(name: string): string {
 /**
  * The field names a `where` the caller sent addresses, in order: each
  * condition key, through the logical operators. Other `$` keys are operators,
- * never names.
+ * never names. Nor is the search companion key (`SEARCH_COMPANION_FIELD`): it
+ * is the engine's own column, present only where search provisions it and in
+ * no schema's field list, so a `where` refused for another reason never names
+ * it as not recorded.
  */
 function whereFieldNames(where: unknown, into: string[]): string[] {
   if (Array.isArray(where)) {
@@ -1690,6 +1878,7 @@ function whereFieldNames(where: unknown, into: string[]): string[] {
       if (WHERE_LOGICAL_OPERATORS.has(key)) whereFieldNames(value, into);
       continue;
     }
+    if (key === SEARCH_COMPANION_FIELD) continue;
     into.push(key);
   }
   return into;
@@ -1774,14 +1963,15 @@ async function notRecordedMembersOf(
 async function recordReadErrorResult(
   bridge: McpDataBridge,
   err: unknown,
-  tool: 'query_records' | 'aggregate_records' | 'get_record',
+  tool: 'query_records' | 'aggregate_records' | 'get_record' | 'get_record_context',
   objectName: string,
   sentFields: readonly string[],
+  logger: Logger | undefined,
 ) {
   const refusal = dataDoorRefusalEnvelope(err, objectName) !== undefined
     || !isServerFault(dataDoorAnswerOf(err, objectName).status);
   const beside = refusal ? await notRecordedMembersOf(bridge, objectName, sentFields) : undefined;
-  return dataDoorErrorResult(err, tool, objectName, beside);
+  return dataDoorErrorResult(err, tool, objectName, logger, beside);
 }
 
 /**
@@ -1818,7 +2008,7 @@ type MetaDoorTool = 'list_objects' | 'describe_object' | 'validate_expression' |
  * code-less 4xx keeps its bare message. This is {@link rowRefusalOf}'s line,
  * drawn with the same reader.
  */
-function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: string) {
+function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName: string | undefined, logger: Logger | undefined) {
   const door = dataDoorAnswerOf(err);
   if (!isServerFault(door.status)) return errorResultWithCode(err);
   logServerFault({
@@ -1826,7 +2016,7 @@ function metaDoorErrorResult(err: unknown, tool: MetaDoorTool, objectName?: stri
     error: err,
     ...(door.code !== undefined ? { code: door.code } : {}),
     request: { method: 'tools/call', path: objectName !== undefined ? `${tool} ${objectName}` : tool },
-  });
+  }, logger);
   // [#31373] The `/data` door's `declaredCode` / `userMessage` are the record
   // data faces' members; this answer is unchanged by them.
   return codedErrorResult({ ...(door.code !== undefined ? { code: door.code } : {}), message: door.message, status: door.status });
@@ -2237,6 +2427,13 @@ interface DeleteEachOutcome {
  *
  * Measured on a booted stack: REST `DELETE` answers the sandboxed refusal
  * `400 HOOK_ABORTED` and the code hook's bare throw `500 INTERNAL_ERROR`.
+ *
+ * [#37512] A refusal thrown as a declared `reasons` list needs no relay block
+ * here ({@link withRefusalReasonsRelay}). It is coded, so its `reason` is the
+ * thrown value's own sentence, never the door's 500-character cut: the
+ * runtime's refusal catalogue sets that sentence to the same text as
+ * `userMessage`, every listed line whole and in order, its closing line last.
+ * So the group already names each line as ruling 7178348458 term 3 asks.
  */
 function rowRefusalOf(err: unknown, objectName: string): Omit<DeleteRefusalGroup, 'count' | 'recordIds'> | undefined {
   const door = dataDoorAnswerOf(err, objectName);
@@ -2599,6 +2796,16 @@ const OBJECT_QUERY_SOURCE_DESCRIPTION =
   'Quote the answer\'s source.line as the source of any figure you give from it.';
 
 /**
+ * [#35138] The one line `query_records`, `aggregate_records` and `get_record`
+ * describe the `notRecorded` / `ifNotRecorded` members with
+ * ({@link NotRecordedMembers}): read up front, so a refusal that carries them
+ * is never read as an empty answer. It names nothing; the members do.
+ */
+const NOT_RECORDED_DESCRIPTION =
+  'A refusal that carries notRecorded means what it names is not recorded in this app: '
+  + 'follow its ifNotRecorded, and never report 0 or empty for it.';
+
+/**
  * [#35138] The caller's locale ladder for a sentence the tools compose into a
  * result ({@link McpDataBridge.userTextLocales}): `[]`, which the shared
  * picker writes in `en`, when the bridge has no member or its answer throws.
@@ -2867,6 +3074,10 @@ interface GatePassContext {
  * or an object it does not serve, adds none; a target it does not serve is
  * not judged, as at the gate.
  *
+ * [#36167] The subject's definition is read once, by the handler, which also
+ * hands its list-valued fields to the shared validator; `subject` is that read
+ * (`null` when the bridge serves none).
+ *
  * [#33147] The field being authored resolves through the same served
  * definition, and nothing else: a field the caller is not served reads as
  * one the object does not declare, so the answer never says whether it
@@ -2887,11 +3098,10 @@ async function gatePassFindings(
   site: AuthoredExpressionSite,
   objectName: string,
   expression: string,
+  subject: Record<string, unknown> | null,
   context: GatePassContext,
 ): Promise<{ errors: GatePassFinding[]; warnings: GatePassFinding[] }> {
-  if (!bridge.servedObjectDefinitionOf) return NO_GATE_PASS_FINDINGS;
-  const subject = await bridge.servedObjectDefinitionOf(objectName);
-  if (!subject) return NO_GATE_PASS_FINDINGS;
+  if (!bridge.servedObjectDefinitionOf || !subject) return NO_GATE_PASS_FINDINGS;
   const { authoredExpressionHopTargets, judgeAuthoredSiteExpression } = await import('@objectstack/lint');
   const targets: Array<Record<string, unknown>> = [];
   const hops = site === 'flow_condition' ? [] : authoredExpressionHopTargets(subject, expression);
@@ -3133,6 +3343,9 @@ export function wireBridgeTools(
   // [#35442] `search_package_docs` / `read_package_doc`, only where the bridge
   // carries both doc members and the grant admits `data:read`.
   registered.push(...registerPackageDocTools(server, bridge, options));
+  // [ADR-0149 D2] `search_knowledge`, only where the bridge carries both
+  // knowledge members and the grant admits `data:read`.
+  registered.push(...registerKnowledgeTools(server, bridge, options));
   return registered;
 }
 
@@ -3315,10 +3528,10 @@ export function packageDocToolsServed(
  * - **No second gate.** Neither tool judges what the caller may read: the
  *   host's members read the `doc` items through the `/meta/doc` docs-audience
  *   gate (ADR-0046 §6.7) as the principal, so a page the caller may not read
- *   is neither found nor read, and reads as not found. On an OAuth grant the
- *   principal is the agent envelope, so the docs audience is judged on the
- *   token's grant, not the person's own permission sets; both descriptions
- *   say so.
+ *   is neither found nor read, and reads as not found. On an OAuth grant that
+ *   reaches these tools (the gate above), the docs audience is the delegating
+ *   person's own permission sets, never wider (ADR-0090 D10); both
+ *   descriptions say so.
  * - **The search is a substring match**, stated in the description: no
  *   server-side doc search exists, so the honest search is a term found in a
  *   page's title, a heading or its text (case aside). Pages that contain more
@@ -3348,7 +3561,7 @@ export function registerPackageDocTools(
         + 'aside. Pages that contain more of the terms come first, then pages where the terms sit higher (title, '
         + `then heading, then text), then by title; at most ${PACKAGE_DOC_SEARCH_MAX_RESULTS}, each with an excerpt `
         + 'and, where the page has one, the url to cite. Only pages this connection may read are searched; on an '
-        + 'OAuth connection that is judged on the connection\'s grant, not on the person\'s own permission sets. '
+        + 'OAuth connection, those the person\'s own permission sets open, never more. '
         + `Read a page with ${READ_PACKAGE_DOC_TOOL_NAME}.`,
       inputSchema: strictToolInput(
         {
@@ -3382,7 +3595,7 @@ export function registerPackageDocTools(
         'Read one page of an installed app\'s manual by its name (the name search_package_docs answers): its '
         + 'title, its manual, its Markdown content and, where the page has one, its url to cite. Send package when '
         + 'two apps ship a page of that name. A page this connection may not read answers as not found; on an OAuth '
-        + 'connection that is judged on the connection\'s grant, not on the person\'s own permission sets.',
+        + 'connection, the person\'s own permission sets decide, never more.',
       inputSchema: strictToolInput(
         {
           surface: `this ${READ_PACKAGE_DOC_TOOL_NAME} call`,
@@ -3418,6 +3631,103 @@ export function registerPackageDocTools(
   );
 
   return [SEARCH_PACKAGE_DOCS_TOOL_NAME, READ_PACKAGE_DOC_TOOL_NAME];
+}
+
+/** [ADR-0149 D2] The knowledge search tool's name, the one the cloud `service-ai` registry already holds. */
+export const SEARCH_KNOWLEDGE_TOOL_NAME = 'search_knowledge';
+
+/**
+ * [ADR-0149 D2] The `search_knowledge` definition this bridge and grant
+ * register, or `undefined` when the tool does not register: a bridge missing
+ * a knowledge member, a grant without `data:read` (the read family's gate,
+ * `aggregate_records`'s: an undefined grant keeps it), and a bridge that
+ * defines no `search_knowledge` are all `undefined`. The one gate:
+ * {@link registerKnowledgeTools} registers from it.
+ */
+export function knowledgeToolDefinition(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): Pick<AIToolDefinition, 'name' | 'description' | 'parameters'> | undefined {
+  if (!bridge) return undefined;
+  if (typeof bridge.searchKnowledge !== 'function' || typeof bridge.knowledgeToolDefinitions !== 'function') return undefined;
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return undefined;
+  const definition = bridge.knowledgeToolDefinitions().find((d) => d.name === SEARCH_KNOWLEDGE_TOOL_NAME);
+  return definition?.description ? definition : undefined;
+}
+
+/**
+ * [ADR-0160 D4] The `get_record_context` definition this bridge registers, or
+ * `undefined`: a bridge missing either record-context member, or one whose
+ * service defines no such tool, registers nothing. The grant's gate is the
+ * read family's (`data:read`), applied where the tool registers.
+ */
+export function recordContextToolDefinition(
+  bridge: Partial<McpDataBridge> | undefined,
+): Pick<AIToolDefinition, 'name' | 'description'> | undefined {
+  if (!bridge) return undefined;
+  if (typeof bridge.getRecordContext !== 'function' || typeof bridge.recordContextToolDefinitions !== 'function') {
+    return undefined;
+  }
+  const definition = bridge.recordContextToolDefinitions().find((d) => d.name === GET_RECORD_CONTEXT_TOOL_NAME);
+  return definition?.description ? definition : undefined;
+}
+
+/**
+ * [ADR-0149 D2] Register `search_knowledge` over the bridge's knowledge
+ * members: the app's knowledge sources, searched by meaning.
+ *
+ * - **Read family.** Registers under `data:read` exactly as
+ *   `aggregate_records` and the dataset pair do; outside that grant the SDK
+ *   answers a call as an unknown tool.
+ * - **Optional.** A bridge without both knowledge members (no `knowledge`
+ *   service on the host) registers nothing, and nothing else on the surface
+ *   changes.
+ * - **One definition.** The description and the argument schema are the
+ *   knowledge service's definition ({@link McpDataBridge.knowledgeToolDefinitions}),
+ *   its JSON Schema taken through zod's `fromJSONSchema` the way a bridged
+ *   registry tool's is, so a client is listed the shape the definition
+ *   declares and an undeclared argument is refused before dispatch.
+ * - **No second gate, none bypassed.** Every call goes to the bridge member,
+ *   which runs the knowledge service's executor AS the principal: only the
+ *   sources whose `aiExposed` is not `false` are searched, every object-source
+ *   hit is re-checked against the caller's row-level security, and a refusal
+ *   comes back in its ADR-0112 envelope ({@link errorResultWithCode}).
+ */
+export function registerKnowledgeTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const definition = knowledgeToolDefinition(bridge, options);
+  if (!definition) return [];
+  let inputSchema: unknown;
+  try {
+    inputSchema = z.fromJSONSchema(definition.parameters as never);
+  } catch {
+    inputSchema = undefined;
+  }
+  // The definition is the knowledge service's own and declares an object; one
+  // that does not convert to an object schema is not registered rather than
+  // registered taking no arguments, which would drop every `query`.
+  if (!(inputSchema instanceof z.ZodObject)) return [];
+  const search = bridge.searchKnowledge!.bind(bridge);
+  server.registerTool(
+    SEARCH_KNOWLEDGE_TOOL_NAME,
+    {
+      description: definition.description,
+      inputSchema: inputSchema as z.ZodObject,
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        return textResult(await search(args));
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+  return [SEARCH_KNOWLEDGE_TOOL_NAME];
 }
 
 /**
@@ -3574,6 +3884,8 @@ export function registerObjectTools(
   };
   const allowSystem = options.allowSystemObjects === true;
   const maxLimit = options.maxQueryLimit ?? DEFAULT_MAX_LIMIT;
+  // [#37666] The host's logger for the tools' 5xx fault lines; undefined = the console fallback.
+  const faultLogger = options.logger;
   // OAuth tool-family gating (#2698). undefined = not scope-limited.
   // A tool outside the grant is NOT registered at all — the SDK then
   // rejects it as unknown, which doubles as dispatch-time enforcement.
@@ -3669,18 +3981,24 @@ export function registerObjectTools(
             status: 503,
           });
         } catch (err) {
-          return metaDoorErrorResult(err, 'list_objects');
+          return metaDoorErrorResult(err, 'list_objects', undefined, faultLogger);
         }
       },
     );
 
+    // #36806, #37448: the uiReadonly clause names the console as a whole — every
+    // console surface honours the hand lock but the in-app assistant acting for
+    // a person, whose writes run in the AI service and do not read it yet.
     server.registerTool(
       note('describe_object'),
       {
         description:
           'Get the schema of a data object as you may read it, with what a write needs: name, label, description; '
           + 'each field\'s name, type, label, description (where set: the author\'s, or the platform\'s on a column '
-          + 'it injects), required, readonly (leave it out of a write), system, '
+          + 'it injects), required, readonly (leave it out of a write), uiReadonly / uiReadonlyWhen where set '
+          + '(a person cannot edit the field on any console surface, though the in-app assistant acting for a person '
+          + 'does not honour it yet; '
+          + 'your write may still set it, judged by the validations), system, '
           + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
           + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
@@ -3697,7 +4015,7 @@ export function registerObjectTools(
           if (!def) return errorResult(`Object "${objectName}" not found`);
           return textResult(def);
         } catch (err) {
-          return metaDoorErrorResult(err, 'describe_object', objectName);
+          return metaDoorErrorResult(err, 'describe_object', objectName, faultLogger);
         }
       },
     );
@@ -3837,6 +4155,23 @@ export function registerObjectTools(
           }
           const { role, scope, slot, optionLabels, traversalHydration, gatePasses, faultOutcome: outcomeOf } =
             VALIDATE_SITE_MAP[site ?? 'formula'];
+          // The gate's envelope verdict first: `validateExpression` treats a
+          // blank source as "not authored" and answers ok, while the save gate
+          // refuses it. Each issue is the spec schema's own (code and message),
+          // so the tool and the gate cannot drift apart on this rule.
+          const slotParse = slot.safeParse(expression);
+          // [#32872, #36167] The subject as this caller is served it, read once
+          // where the gate judges the site with passes of its own: those passes
+          // read it, and so does the list-valued field set below.
+          const subject = slotParse.success && gatePasses && bridge.servedObjectDefinitionOf
+            ? await bridge.servedObjectDefinitionOf(objectName)
+            : null;
+          // [#36167] The object's list-valued fields, which the publish gate
+          // hands the shared validator (`ExprSchemaHint.multiValueFields`), so
+          // `record.<list> == <scalar>` is refused here as `list-equality` in
+          // the gate's words. `describeObject`'s projection carries no
+          // `multiple`; the served definition does. Absent, as before.
+          const multiValueFields = multiValueFieldsOfServed(subject, fields);
           const faultOutcome = outcomeOf?.({
             severity: severity ?? 'error',
             triggerKind: triggerKind ?? 'record_change',
@@ -3854,6 +4189,7 @@ export function registerObjectTools(
             fieldTypes,
             scope,
             ...(optionFields ? { optionFields } : {}),
+            ...(multiValueFields ? { multiValueFields } : {}),
             // [#32640] The gate's relationship-traversal checks, where it runs them.
             ...(traversalHydration ? { traversalHydration } : {}),
             ...(faultOutcome ? { faultOutcome } : {}),
@@ -3867,11 +4203,6 @@ export function registerObjectTools(
             // on the same flow). Absent, the hint is byte for byte as before.
             ...(variables !== undefined ? { flowVariables: variables.map((v) => v.name) } : {}),
           } as const;
-          // The gate's envelope verdict first: `validateExpression` treats a
-          // blank source as "not authored" and answers ok, while the save gate
-          // refuses it. Each issue is the spec schema's own (code and message),
-          // so the tool and the gate cannot drift apart on this rule.
-          const slotParse = slot.safeParse(expression);
           const result = slotParse.success
             ? validateExpression(role, expression, hint)
             : {
@@ -3887,7 +4218,7 @@ export function registerObjectTools(
           // flow condition, every other pass the gate runs there, in the
           // gate's own words.
           const gate = slotParse.success && gatePasses
-            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, {
+            ? await gatePassFindings(bridge, (name) => guard(name) === undefined, gatePasses, objectName, expression, subject, {
                 severity,
                 field,
                 triggerKind,
@@ -3912,7 +4243,7 @@ export function registerObjectTools(
             },
           });
         } catch (err) {
-          return metaDoorErrorResult(err, 'validate_expression', objectName);
+          return metaDoorErrorResult(err, 'validate_expression', objectName, faultLogger);
         }
       },
     );
@@ -3926,6 +4257,7 @@ export function registerObjectTools(
           'matched, so do not sum, count or rank the rows as if whole: read on with offset, or use aggregate_records ' +
           'where offered. ' +
           OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+          NOT_RECORDED_DESCRIPTION + ' ' +
           'A filter value "{current_user_id}" stands for you, e.g. approvals waiting on you: objectName ' +
           '"sys_approval_request", where {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}. ' +
           // [ruling B] A person field holds a user id; names repeat, so email.
@@ -4066,7 +4398,7 @@ export function registerObjectTools(
           return textResult(withDelegationNotice(answer, diagnosed.statement));
         } catch (err) {
           // [#35138] …with what the call named that the caller's schema does not show.
-          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }));
+          return recordReadErrorResult(bridge, err, 'query_records', objectName, queryRecordsSentFields({ where, fields, orderBy }), faultLogger);
         }
       },
     );
@@ -4082,6 +4414,7 @@ export function registerObjectTools(
             'totals and breakdowns. An amount whose records each carry their own currency is answered only grouped by ' +
             'its currency code field. Name a lookup group by its <key>__label, never by the id. ' +
             OBJECT_QUERY_SOURCE_DESCRIPTION + ' ' +
+            NOT_RECORDED_DESCRIPTION + ' ' +
             // [aggregate order and cut] A ranking question ("the top five
             // customers by revenue") is answered by the database: ordered,
             // cut, and the number of groups before the cut stated.
@@ -4278,7 +4611,7 @@ export function registerObjectTools(
           } catch (err) {
             // [#35138] …with what the call named that the caller's schema does not show.
             return recordReadErrorResult(
-              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }),
+              bridge, err, 'aggregate_records', objectName, aggregateRecordsSentFields({ where, groupBy, aggregations }), faultLogger,
             );
           }
         },
@@ -4296,6 +4629,8 @@ export function registerObjectTools(
           `To read it with the records that point at it, pass related: up to ${GET_RECORD_MAX_RELATED_LISTS} child ` +
           `objects, e.g. [{"object":"crm_opportunity"}], each list at most ${relatedMaxRows} rows; the answer is then ` +
           '{ record, related: [...] }. ' +
+          // [#35138] get_record sends no field names, so its notRecorded only ever names an object.
+          NOT_RECORDED_DESCRIPTION + ' ' +
           WITHHELD_FIELDS_DESCRIPTION,
         inputSchema: strictToolInput(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
@@ -4400,10 +4735,38 @@ export function registerObjectTools(
           return textResult({ record: served, related: lists });
         } catch (err) {
           // [#35138] …and an object the caller's schema does not show is said to be not recorded.
-          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, []);
+          return recordReadErrorResult(bridge, err, 'get_record', refusedOn ?? objectName, [], faultLogger);
         }
       },
     );
+    // [ADR-0160 D4] `get_record_context`, beside `get_record`, where the
+    // bridge carries the record-context members and defines the tool.
+    const contextDefinition = recordContextToolDefinition(bridge);
+    if (contextDefinition) {
+      const readContext = bridge.getRecordContext!.bind(bridge);
+      server.registerTool(
+        note(GET_RECORD_CONTEXT_TOOL_NAME),
+        {
+          description: contextDefinition.description,
+          inputSchema: GetRecordContextInputSchema,
+          annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        },
+        async (args: { objectName: string; recordId: string; context?: string; anchor?: string }) => {
+          // The root's read guard first, as `get_record` asks it: a caller it
+          // refuses gets `get_record`'s answer, whether or not a pack exists.
+          const bad = await readGuard(args.objectName);
+          if (bad) return errorResult(bad);
+          try {
+            return textResult(await readContext(args, { readGuard }));
+          } catch (err) {
+            // The record tools' renderer: a root the caller is not served is
+            // answered as `get_record` answers it, and every coded refusal of
+            // the executor keeps its code, sentence and status.
+            return recordReadErrorResult(bridge, err, GET_RECORD_CONTEXT_TOOL_NAME, args.objectName, [], faultLogger);
+          }
+        },
+      );
+    }
   } // end canRead (data:read)
 
   if (canWrite) {
@@ -4429,7 +4792,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'create_record', objectName, faultLogger));
         }
       },
     );
@@ -4463,7 +4826,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'update_record', objectName, faultLogger));
         }
       },
     );
@@ -4513,7 +4876,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName));
+          return landedWriteResultOrError(err, objectName, (e) => dataDoorErrorResult(e, 'delete_record', objectName, faultLogger));
         }
       },
     );
@@ -4667,7 +5030,7 @@ export function registerObjectTools(
             // (`declaredCode`, `userMessage`). A code-less throw keeps this
             // catch's rendering (#31218 says why).
             if (thrownRefusalEnvelope(err) !== undefined) {
-              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName);
+              return dataDoorErrorResult(err, DELETE_RECORDS_TOOL, objectName, faultLogger);
             }
             return errorResultWithCode(err);
           }
@@ -4709,6 +5072,8 @@ export function registerActionTools(
     return name;
   };
   const allowSystem = options.allowSystemObjects === true;
+  // [#37666] `list_actions`' fault line goes to the host's logger when one is handed.
+  const faultLogger = options.logger;
   // OAuth tool-family gating (#2698): the whole action surface requires
   // `actions:execute`. Not registered = unknown tool = fail-closed.
   if (options.grantedScopes && !options.grantedScopes.includes(MCP_OAUTH_SCOPE_ACTIONS)) {
@@ -4742,7 +5107,7 @@ export function registerActionTools(
           ...(faced.refusedFaces.length > 0 ? { refusedFaces: faced.refusedFaces } : {}),
         });
       } catch (err) {
-        return metaDoorErrorResult(err, 'list_actions');
+        return metaDoorErrorResult(err, 'list_actions', undefined, faultLogger);
       }
     },
   );
@@ -4764,6 +5129,10 @@ export function registerActionTools(
         'you are answered status "pending_confirmation" with a pendingId: do not retry, tell the user to approve ' +
         'it. A refusal ACTION_CONFIRMATION_REQUIRED (declined, cancelled, timed out, or no confirmation service) ' +
         'means nothing ran; do not retry unless the user asks. ' +
+        // [#35778] The no-service reason's next step, door-neutral: true
+        // whether or not the client could have confirmed in place.
+        'On details.reason "no_confirmation_service" a person performs it in the app: do not make the same change ' +
+        'with another tool. ' +
         // [ADR-0151 D3 rule 3] An AI service account is refused, never handed off.
         'Under an AI service account\'s own key the call is refused whatever it sends: hand the action to a ' +
         'person, or its author declares ai.requiresConfirmation: false when it is safe unattended. ' +
@@ -4880,18 +5249,23 @@ export function registerActionTools(
         };
         // [#33712] Step 1 of the amended confirmation contract: a client that
         // advertised `elicitation` on a server that read its `initialize` (the
-        // stdio door) is asked in place. Otherwise the bridge is called
-        // exactly as before and hands a gated call off.
-        const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-        const result = elicitConfirmation
-          ? await bridge.runAction(actionName, request, { elicitConfirmation })
-          : await bridge.runAction(actionName, request);
+        // stdio door) is asked in place. Otherwise the bridge hands a gated
+        // call off. [#34325] On that door a client without the capability is
+        // named to the bridge (`facts.elicitsCapableClients`), so a no-service
+        // refusal names the client route; the per-request HTTP server calls
+        // the bridge exactly as before.
+        const { door, facts } = actionCallDoorFor(server, extra);
+        const result = door
+          ? await bridge.runAction(actionName, request, door)
+          : facts
+            ? await bridge.runAction(actionName, request, undefined, facts)
+            : await bridge.runAction(actionName, request);
         return textResult(result);
       } catch (err) {
         return landedWriteResultOrError(
           err,
           objectName,
-          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName),
+          (thrown) => errorResultFromThrown(thrown, `run_action ${actionName}`, objectName, faultLogger),
         );
       }
     },
@@ -4971,13 +5345,16 @@ export function registerActionTools(
           // at the closed input, as on `run_action`.
           const request = { values };
           // [#33712] As `run_action`: asked in place where the client can be.
-          const elicitConfirmation = actionConfirmationElicitorFor(server, extra);
-          const result = elicitConfirmation
-            ? await resumeRun(runId, request, { elicitConfirmation })
-            : await resumeRun(runId, request);
+          // [#34325] And the same door facts for a no-service refusal.
+          const { door, facts } = actionCallDoorFor(server, extra);
+          const result = door
+            ? await resumeRun(runId, request, door)
+            : facts
+              ? await resumeRun(runId, request, undefined, facts)
+              : await resumeRun(runId, request);
           return textResult(result);
         } catch (err) {
-          return errorResultFromThrown(err, `resume_run ${runId}`);
+          return errorResultFromThrown(err, `resume_run ${runId}`, undefined, faultLogger);
         }
       },
     );

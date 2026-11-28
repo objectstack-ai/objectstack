@@ -22,7 +22,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 const APP = 'com.objectstack.account';
@@ -71,11 +71,21 @@ const { approvalsApiStub, ADAPTER, AUTH, I18N } = vi.hoisted(() => {
   };
   const AUTH = { user: { id: 'u_1', email: 'approver@example.com' } };
   const I18N = {
-    t: (key: string, options?: Record<string, unknown>) => String(options?.defaultValue ?? key),
+    // Interpolates like i18next, so a line built from values shows them.
+    t: (key: string, options?: Record<string, unknown>) =>
+      String(options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (whole, name: string) =>
+        options && name in options ? String(options[name]) : whole),
     language: 'en',
   };
 
   return { approvalsApiStub, ADAPTER, AUTH, I18N };
+});
+
+// objectstack#36463: the inline decision's failure toast is read off sonner.
+const toasts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+vi.mock('sonner', async (importOriginal) => {
+  const real = await importOriginal<Record<string, any>>();
+  return { ...real, toast: Object.assign((...args: unknown[]) => real.toast(...args), real.toast, toasts) };
 });
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -143,6 +153,8 @@ function hidingClasses(el: Element | null): string[] {
 
 beforeEach(() => {
   for (const fn of Object.values(approvalsApiStub)) fn.mockClear();
+  toasts.error.mockClear();
+  toasts.success.mockClear();
 });
 afterEach(cleanup);
 
@@ -194,5 +206,196 @@ describe('Approvals Inbox — inline Approve / Reject shown by default (objectst
       expect(el).not.toHaveClass('w-20');
       expect(el).toHaveClass('w-px', 'whitespace-nowrap');
     }
+  });
+});
+
+// objectstack#36463 — a decide refusal the server marked for the end user
+// (`userMessage`, the decider's language) is the inline Approve's failure
+// toast, ahead of the page's generic "not allowed" line; an unmarked refusal
+// keeps that line. `approvalsApi.call` parks the body on `err.details`.
+describe('Approvals Inbox — a marked decide refusal is shown as written (objectstack#36463)', () => {
+  const MARKED = '此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。';
+  const refusal = (userMessage?: string) => Object.assign(
+    new Error("FORBIDDEN: 'u_1' submitted this request, and its approval step sets excludeSubmitter, so they cannot approve it."),
+    {
+      code: 'FORBIDDEN',
+      status: 403,
+      details: { code: 'FORBIDDEN', error: 'refused', ...(userMessage !== undefined ? { userMessage } : {}) },
+    },
+  );
+
+  async function approveQuickFailingWith(err: Error) {
+    approvalsApiStub.approve.mockRejectedValueOnce(err);
+    const rowFor = await renderInbox();
+    fireEvent.click(rowFor('Quick Invoice').approve);
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+    return toasts.error.mock.calls[0][0];
+  }
+
+  it('the marked text is the toast', async () => {
+    expect(await approveQuickFailingWith(refusal(MARKED))).toBe(MARKED);
+  });
+
+  it('CONTROL: an unmarked refusal keeps the generic line', async () => {
+    expect(await approveQuickFailingWith(refusal())).toBe('You are not allowed to perform this action.');
+  });
+});
+
+// A bulk approve that partly fails names each failed row WITH its reason —
+// the refusal's own text (`userMessage` first, through the same reader the
+// inline Approve uses above), else the page's generic line. When more rows
+// fail than the toast lists, its "Show all" action opens a dialog listing
+// every one.
+describe('Approvals Inbox — a partly failed bulk approve says why each row failed', () => {
+  const MARKED = '此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。';
+  const markedRefusal = () => Object.assign(new Error('FORBIDDEN: submitter cannot approve'), {
+    code: 'FORBIDDEN',
+    status: 403,
+    details: { code: 'FORBIDDEN', error: 'refused', userMessage: MARKED },
+  });
+  const decidedRefusal = () => Object.assign(new Error('INVALID_STATE: already decided'), {
+    code: 'INVALID_STATE',
+    status: 409,
+    details: { code: 'INVALID_STATE', error: 'already decided' },
+  });
+  const ALREADY_DECIDED = 'This request was already decided. Refresh the list.';
+
+  const row = (n: number) => ({
+    id: `req_${n}`,
+    record_id: `inv_${n}`,
+    record_title: `Bulk Invoice ${n}`,
+    process_name: 'invoice_approval',
+    process_label: 'Invoice Approval',
+    object_name: 'showcase_invoice',
+    object_label: 'Invoice',
+    status: 'pending',
+    pending_approvers: ['u_1'],
+    submitter_id: 'u_2',
+    submitter_name: 'Sam Submitter',
+    // Newest first is the inbox's order: row 1 is the newest, so it lists first.
+    submitted_at: `2026-08-${String(30 - n).padStart(2, '0')}T00:00:00.000Z`,
+  });
+
+  let originalList: ReturnType<typeof approvalsApiStub.listRequests.getMockImplementation>;
+  beforeEach(() => { originalList = approvalsApiStub.listRequests.getMockImplementation(); });
+  afterEach(() => {
+    approvalsApiStub.listRequests.mockImplementation(originalList!);
+    approvalsApiStub.approve.mockReset();
+    approvalsApiStub.approve.mockImplementation(async () => ({ data: row(0), finalized: true }) as any);
+  });
+
+  /** Render `count` actionable rows; the returned function runs one bulk approve. */
+  async function renderRows(count: number) {
+    const rows = Array.from({ length: count }, (_, i) => row(i + 1));
+    approvalsApiStub.listRequests.mockImplementation(async () => ({ data: rows }) as any);
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/system/approvals`]}>
+        <Routes>
+          <Route path="/apps/:appName/system/approvals" element={<ApprovalsInboxPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const box = await screen.findByTestId('approvals-inbox-table-scroller');
+    /** Select every row, confirm a bulk approve in which the `fail` rows are refused. */
+    return async (fail: Record<string, () => Error>) => {
+      const before = approvalsApiStub.approve.mock.calls.length;
+      approvalsApiStub.approve.mockImplementation((async (id: string) => {
+        if (fail[id]) throw fail[id]();
+        return { data: rows.find(r => r.id === id), finalized: true };
+      }) as any);
+      for (const r of rows) {
+        const link = await within(box).findByRole('link', { name: r.record_title });
+        const tr = link.closest('tr') as HTMLElement;
+        fireEvent.click(within(tr).getByRole('checkbox', { name: 'Select request' }));
+      }
+      fireEvent.click(await screen.findByRole('button', { name: `Approve ${count}` }));
+      const dialog = await screen.findByRole('alertdialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: `Approve ${count}` }));
+      await waitFor(() => expect(approvalsApiStub.approve).toHaveBeenCalledTimes(before + count));
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+      // The run is over once the selection it cleared is gone.
+      await waitFor(() => expect(screen.queryByRole('button', { name: `Approve ${count}` })).toBeNull());
+    };
+  }
+
+  async function bulkApprove(count: number, fail: Record<string, () => Error>) {
+    await (await renderRows(count))(fail);
+  }
+
+  it('one refused row: the toast names that row with its marked reason', async () => {
+    await bulkApprove(2, { req_2: markedRefusal });
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+    const [title, options] = toasts.error.mock.calls[0] as [string, Record<string, any>];
+    expect(title).toBe('1 succeeded, 1 failed');
+    // The failed row, and why — the server's marked text, not a bare title.
+    expect(options.description).toBe(`Bulk Invoice 2: ${MARKED}`);
+    expect(toasts.success).not.toHaveBeenCalled();
+    // Everything fits in the toast: no overflow action; it still stays until
+    // dismissed, so the reasons can be read.
+    expect(options.action).toBeUndefined();
+    expect(options.duration).toBe(Infinity);
+  });
+
+  it('CONTROL: every row succeeds — a success toast and no failure feedback', async () => {
+    await bulkApprove(3, {});
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    expect(toasts.error).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('approvals-bulk-failures')).toBeNull();
+  });
+
+  it('more failures than the toast lists: "Show all" reaches every row and its reason', async () => {
+    await bulkApprove(6, {
+      req_1: markedRefusal, req_2: decidedRefusal, req_3: decidedRefusal,
+      req_4: markedRefusal, req_5: decidedRefusal,
+    });
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+    const [title, options] = toasts.error.mock.calls[0] as [string, Record<string, any>];
+    expect(title).toBe('1 succeeded, 5 failed');
+    // The toast lists the first three, each with its reason …
+    expect(options.description).toBe([
+      `Bulk Invoice 1: ${MARKED}`,
+      `Bulk Invoice 2: ${ALREADY_DECIDED}`,
+      `Bulk Invoice 3: ${ALREADY_DECIDED}`,
+    ].join('\n'));
+    expect(options.action.label).toBe('Show all (5)');
+    // The toast stays until dismissed, so its action cannot time out.
+    expect(options.duration).toBe(Infinity);
+    act(() => options.action.onClick());
+    const list = await screen.findByTestId('approvals-bulk-failures');
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(5);
+    const expected: Array<[string, string]> = [
+      ['Bulk Invoice 1', MARKED], ['Bulk Invoice 2', ALREADY_DECIDED], ['Bulk Invoice 3', ALREADY_DECIDED],
+      ['Bulk Invoice 4', MARKED], ['Bulk Invoice 5', ALREADY_DECIDED],
+    ];
+    for (const [title, reason] of expected) {
+      const item = items.find(li => li.textContent?.startsWith(title));
+      expect(item, title).toBeDefined();
+      expect(item).toHaveTextContent(reason);
+    }
+    expect(within(list).queryByText('Bulk Invoice 6')).toBeNull();
+  });
+
+  it("a toast's \"Show all\" opens its own run's rows, not a later run's", async () => {
+    const runBulk = await renderRows(6);
+    await runBulk({
+      req_1: markedRefusal, req_2: decidedRefusal, req_3: decidedRefusal,
+      req_4: markedRefusal, req_5: decidedRefusal,
+    });
+    await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
+    const first = toasts.error.mock.calls[0][1] as Record<string, any>;
+    expect(first.action.label).toBe('Show all (5)');
+    // A second, clean run while the first toast is still up.
+    await runBulk({});
+    await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
+    act(() => first.action.onClick());
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('Not decided: 5')).toBeInTheDocument();
+    const items = within(within(dialog).getByTestId('approvals-bulk-failures')).getAllByRole('listitem');
+    expect(items.map(li => li.firstElementChild?.textContent)).toEqual([
+      'Bulk Invoice 1', 'Bulk Invoice 2', 'Bulk Invoice 3', 'Bulk Invoice 4', 'Bulk Invoice 5',
+    ]);
   });
 });

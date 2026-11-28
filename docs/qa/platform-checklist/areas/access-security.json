@@ -405,7 +405,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -428,7 +428,7 @@
         {
           "clause": "the read-only badge renders AND the controls are actually disabled — checkboxes/Save inert, edit affordances absent",
           "oracle": "dom",
-          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock). The object designer's Form tab is the designed exception: on a read-only base it stays editable and saves the form view as a declared override in the base's .custom pair, not into the base (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx formViewReadOnly; ADR-0146 D2), so editable Form-tab controls are not a FAIL; they are inert only when the pair is walled or no form view is chosen",
+          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock). The object designer's Field layout tab (字段布局, formerly Form) is the designed exception: on a read-only base it stays editable and saves the object's field groups as the whole fieldGroups arrangement of the object extension in the base's .custom pair, not into the base (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx layoutWritable; ADR-0146 D10), so editable Field-layout controls are not a FAIL; they are inert only when the pair is walled",
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
@@ -500,6 +500,12 @@
           "date": "2026-11-14",
           "change": "acceptance[0].verify re-pointed (card #33332; QA run #33094 comment 6852480973): the run found the Form tab editable on a read-only base. That is by design: StudioDesignSurface.tsx makes the Form tab read-only only when no form view is chosen or the pair is walled, because its save lands as a declared override in the base's .custom pair (ADR-0146 D2), never in the base. The verify now names that exception so it is not scored as the lock failing. The clause is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-24",
+          "change": "acceptance[0].verify re-pointed (card #36505): the Form tab is renamed Field layout (字段布局) and edits the object's field groups only; no form view is read or written there. On a read-only base its edits go into the .custom pair's object extension as the whole fieldGroups arrangement (ADR-0146 D10), and it is read-only only where the pair is walled.",
+          "ref": "#36505"
         }
       ]
     },
@@ -845,7 +851,7 @@
       "title": "Field-level security: editable:false strips/denies writes API-side and renders read-only in the UI; masked-read half needs an authored readable:false grant",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -870,7 +876,7 @@
         "as contributor over the API: PATCH /api/v1/data/showcase_project/<id> {\"name\": \"<name> (edited)\"} — an editable field, then PATCH {\"budget\": 999999999} — the FLS-locked field",
         "re-read the project system-side; compare budget before/after",
         "as admin: PATCH the same budget field to a new value and re-read (the entitled side)",
-        "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the state of the budget and spent controls — the two budget figures the edit form renders (project.view.ts form section 'Budget & Schedule': budget, spent, start_date, end_date). budget_remaining is a formula field and is not on the edit form at all",
+        "in the console as the contributor: open the project's detail/edit form; screenshot; inspect the state of the budget and spent controls — the two budget figures the edit form renders as inputs (showcase_project's 'Budget & Schedule' field group, examples/app-showcase/src/data/objects/project.object.ts: budget, spent, start_date, end_date). budget_remaining is a formula field: the edit form draws it disabled in its trailing untitled section for every caller, so it says nothing about the lock",
         "read-mask half (see knownGaps): grant the STOCK showcase_client_liaison set (fixtures.requires[2] — the readable:false grant on budget, spent and budget_remaining; no scratch set is needed) to a fresh member who holds no showcase_contributor, then GET the project as that member and inspect that the three fields' KEYS are absent from the API body — a readable:false grant deletes the key (the strip mechanism, knownGaps[2]), and a key present with a null or placeholder value is not that shape — AND blank in the UI render",
         "as admin GET the same row — the unmasked contrast"
       ],
@@ -894,9 +900,9 @@
           "evidence": "trace + re-read"
         },
         {
-          "clause": "the UI renders the FLS state faithfully for the contributor: the budget figures the edit form carries (budget and spent) are visible (readable:true) but not editable — input disabled/read-only on the edit form. budget_remaining is a formula: it is never on the edit form and never editable for anyone, so it cannot discriminate the FLS lock and is not scored here",
+          "clause": "the UI renders the FLS state faithfully for the contributor: the budget figures the edit form carries (budget and spent) are visible (readable:true) but not editable — input disabled/read-only on the edit form. budget_remaining is a formula: it is never editable for anyone (the edit form draws it disabled in its trailing untitled section, whoever opens it), so it cannot discriminate the FLS lock and is not scored here",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the form rendered, assert the disabled/read-only state of the budget and spent controls (the form section names exactly those two of the three figures, examples/app-showcase/src/ui/views/project.view.ts); an EDITABLE budget or spent input for the contributor is the fail",
+          "verify": "after a screenshot confirms the form rendered, assert the disabled/read-only state of the budget and spent controls (the 'Budget & Schedule' field group names exactly those two of the three figures, examples/app-showcase/src/data/objects/project.object.ts); an EDITABLE budget or spent input for the contributor is the fail",
           "evidence": "screenshot + DOM read"
         },
         {
@@ -971,6 +977,12 @@
           "date": "2026-10-31",
           "change": "acceptance[4] (clause, verify) and steps[5] are made precise. The clause still said 'given the scratch readable:false grant' and 'absent or nulled'; since #9308 fixture 4 the stock showcase_client_liaison set is that grant (fixtures.requires[2], which already said so), and QA run #27409 measured the wire shape: the keys are absent. Source agrees: plugin-security field-masker.ts deletes a non-readable field from the result (the strip), and showcase-client-liaison-fixtures.dogfood.test.ts asserts key absence for all three budget figures. So the clause names the stock grant and all three fields, and a key present with null or a placeholder is a FAIL, never a pass: stronger, not weaker. The UI half is unchanged. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228",
           "ref": "#27409"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-27",
+          "change": "steps[4] and acceptance[3] re-anchored. Revision 4 read the two budget inputs off project.view.ts's default form, which the Console stopped loading with the internal-form retirement (#36425) and which #36553 deletes: the create and edit forms now lay a project out by showcase_project's fieldGroups, whose 'Budget & Schedule' group lists budget, spent, start_date and end_date. budget_remaining is no longer absent from the edit form: as an ungrouped formula field it is drawn disabled in the trailing untitled section, for every caller, so it still cannot discriminate the lock and is still not scored. Revision 4's text stays as the record of what was true at its base. No clause's assertion changed",
+          "ref": "#36553"
         }
       ]
     },
@@ -1835,7 +1847,7 @@
         {
           "clause": "only an explicit false withdraws (#21835 comment 5994082238, 「不算，写进文档」): another package's body of the view name that keeps the link with enabled true and allowAnonymous absent, or that names no public link, closes nothing, so the open form is still served (GET 200, POST 201)",
           "oracle": "test",
-          "verify": "pnpm --filter @objectstack/rest exec vitest run --maxWorkers=2 src/public-form-withdrawal.test.ts, the cases 'only an explicit false withdraws: a body with the link, enabled true and allowAnonymous absent closes nothing' and 'not a withdrawal: another package's body with the public link cleared leaves the form served'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the cases 'only an explicit false withdraws: an absent switch is not a withdrawal' and 'not a withdrawal: no body of the row, no sharing, the link cleared'. Mechanism: packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false). No stock fixture (knownGaps)",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run --maxWorkers=2 src/public-form-withdrawal.test.ts, the cases 'only an explicit false withdraws: a body with the link, enabled true and allowAnonymous absent closes nothing' and 'not a withdrawal: another package's body with the public link cleared leaves the form served'; and pnpm --filter @objectstack/metadata-core exec vitest run --maxWorkers=2 src/anonymous-form-intake.test.ts, the cases 'only an explicit false withdraws: an absent switch is not a withdrawal' and 'not a withdrawal: no body of the row, no sharing, the link cleared'. Mechanism: packages/spec/src/ui/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (a sharing withdraws only when it keeps a non-empty publicLink and sets enabled or allowAnonymous to false). No stock fixture (knownGaps)",
           "evidence": "the two test runs, naming the cases above as passed"
         },
         {
@@ -1874,7 +1886,7 @@
       },
       "source": [
         "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn (the one judgement the doors make over the environment's list: a body of the same view name withdraws a candidate matched by slot or by slug; the package is not compared)",
-        "packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
+        "packages/spec/src/ui/anonymous-form-intake.ts#anonymousFormExplicitWithdrawals (explicit only: a sharing that keeps its publicLink and sets enabled or allowAnonymous to false; a schema-parsed artifact carries the default enabled false, which counts)",
         "packages/rest/src/form-routes.ts#registerFormEndpoints (resolveFormBySlug: the environment's view list alone, judged against itself as the layer beneath each candidate; the Default Organization's legacy read was deleted with ADR-0131 C7, and the tenancy service is still read for the posture; a withdrawn form answers 404 FORM_NOT_FOUND on both doors)",
         "packages/metadata-protocol/src/protocol.ts#getMetaItems (the environment's view list the doors read: one item per package that ships a view name, ADR-0048; a package-less copy stands in for every package with no copy of its own, packages/metadata-protocol/src/protocol.ts#servedViewExpansion)",
         "packages/metadata-protocol/src/protocol.ts#organizationScopedWriteRefusal (every organization-scoped write refused 403 NOT_OVERRIDABLE, ADR-0131 D6; PR #22515 deleted the intake-specific organization refusals and the row anchor revision 1 cited, and since PR #22447 the /meta doors hand the protocol no organization, so an organization-active administrator's save is environment-wide)",

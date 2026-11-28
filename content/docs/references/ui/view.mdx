@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, MetadataListCellTypeSchema, MetadataListColumnSchema, MetadataListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, Form, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, MetadataListCellType, MetadataListColumn, MetadataListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -79,7 +79,7 @@ Add record entry point configuration
 | **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
 | **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
 | **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the object's create form, never a named form. Delete the key. The create form lays out by the object's `fieldGroups`; to leave a field out of it, set `showOnCreate: false` on that field. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 
 ---
@@ -107,7 +107,7 @@ Appearance and visualization configuration
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 | **initialDate** | `string` | optional | Where the calendar opens: the month, week or day the active view mode shows that holds this date; omit it to open on today. A record anchor: `first_record` opens on the earliest start date (the startDateField value) among the records the view's filter selects, `next_record` on the earliest on or after the viewer's today (a `date` start field compares as a calendar day), and either opens on today when no record qualifies. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`); a fixed calendar date is not accepted, because it goes stale as time passes. |
 
@@ -186,6 +186,146 @@ Column footer summary configuration
 
 ---
 
+## Form
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | ✅ | The form's name, `OBJECT.KEY` (ADR-0159 D3): the name it is served under, the target of an action of `type: 'form'`, and the key a declared override names. The part before the last segment is the form's `object`. |
+| **object** | `string` | ✅ | The object the form submits into — its one binding (ADR-0159 D2). It must name an object the package can reference. |
+| **label** | `string \| Record<string, string>` | optional | The form's name in lists (Setup, Studio). When absent a surface shows `title`, then the name. |
+| **type** | `Enum<'simple' \| 'tabbed' \| 'wizard'>` | optional (default: `"simple"`) | Form layout: 'simple' (stacked sections, the default), 'tabbed' (one tab per section) or 'wizard' (one gated step per section). Where the form opens is the caller's choice, not the form's |
+| **layout** | `Enum<'vertical' \| 'horizontal'>` | optional | Field layout direction — 'vertical' (the renderer default) or 'horizontal'. Multi-column is not a layout value: set `columns` |
+| **columns** | `integer` | optional | Number of columns for the form body |
+| **title** | `string` | optional | Form title |
+| **description** | `string` | optional | Form description |
+| **defaultTab** | `string` | optional | Initially active tab (tabbed forms) |
+| **tabPosition** | `Enum<'top' \| 'bottom' \| 'left' \| 'right'>` | optional | Tab strip position (tabbed forms) |
+| **allowSkip** | `boolean` | optional | Wizard step-gate opt-out: allow entering a later step without submitting the one before it. Navigation freedom, NOT a validation exemption — the final submit still re-validates every step and returns to the first failing one. Default (absent/false): steps unlock in array order as each prior step submits validly. UI admission only, never authorization. |
+| **showStepIndicator** | `boolean` | optional | Show the wizard step indicator (renderer default: shown). Step progress (completed/current/upcoming/invalid) is derived from the step gate — this boolean is the only authorable progress surface. |
+| **splitDirection** | `never` | optional | [REMOVED] `view.form.splitDirection` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it set the pane orientation of a split form, and the split form renderer retired in the same release, so no form draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitSize** | `never` | optional | [REMOVED] `view.form.splitSize` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it sized the primary pane of a `type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **splitResizable** | `never` | optional | [REMOVED] `view.form.splitResizable` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it made the panes of a `type: 'split'` form resizable, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **drawerSide** | `never` | optional | [REMOVED] `view.form.drawerSide` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a drawer, so no form view ever read it. Delete the key: an object's list opens a record in its drawer from the hover icon, and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it opens with `formType='drawer'`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **drawerWidth** | `never` | optional | [REMOVED] `view.form.drawerWidth` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a drawer, so no form view ever read it, and a pixel width cannot be chosen without knowing the client viewport. Delete the key: a list's record drawer takes its starting width from the `navigation.size` bucket, and the React `ObjectForm` block keeps its own `drawerWidth` prop for the drawer it opens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **modalSize** | `Enum<'sm' \| 'default' \| 'lg' \| 'xl' \| 'full'>` | optional | Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal') |
+| **sections** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional |  |
+| **groups** | `{ name?: string; label?: string \| Record<string, string>; description?: string; collapsible?: boolean; … }[]` | optional | [LEGACY ALIAS → `sections`] Accepted for back-compat and folded onto `sections` at parse; `sections` wins when both are present. Prefer `sections`. |
+| **subforms** | `{ childObject: string; relationshipField?: string; columns?: object[]; amountField?: string; … }[]` | optional | Inline master-detail child collections |
+| **sharing** | `{ enabled?: boolean; publicLink?: string; password?: string; allowedDomains?: string[]; … }` | optional | Public sharing configuration for this form |
+| **submitBehavior** | `{ kind: 'thank-you'; title?: string; message?: string } \| { kind: 'redirect'; url: string; delayMs?: integer } \| { kind: 'continue' } \| { kind: 'next-record' }` | optional | Post-submit behavior. On the `redirect` arm, `url` is relative-only and interpolates only declared record fields as `{{record.field_name}}`, URL-escaped. |
+| **buttons** | `{ submit?: object; cancel?: object }` | optional | Form action-button visibility & labels; folded onto the flat renderer props by ObjectUI ObjectForm. |
+| **defaults** | `Record<string, any>` | optional | Initial field values for create-mode forms (folded into ObjectUI ObjectForm initial values;). |
+| **protection** | `{ lock: Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>; reason: string; docsUrl?: string }` | optional | Package author protection block — lock policy for this form. |
+| **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
+| **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
+| **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
+| **_packageId** | `string` | optional | Owning package machine id. |
+| **_packageVersion** | `string` | optional | Owning package version. |
+| **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never gates; a base's upgrade plan reads it only as advice. |
+
+### Nested Shape: `Form.sections[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **description** | `string` | optional | Optional description rendered under the section header. |
+| **collapsible** | `boolean` | optional (default: `false`) | Whether the section renders a disclosure control, so a reader can close it and open it again. Default `false`: a section declaring neither collapse key is always open and shows no control. ⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take the control away. The renderer resolves that from the DECLARATION; parse never rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is refused on a wizard step and beside `group`; `false` is accepted in both, because it declares exactly what those surfaces already deliver. |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that reopens it, and it outranks an explicit `collapsible: false`, so writing `collapsed: true` alone is a correct way to say "collapsed by default". The implication is a renderer rule, never a parse-time rewrite: `{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed `collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not collapse) and beside `group`, whose field group declares the pair. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open. |
+| **visibleOn** | `never` | optional | [REMOVED] `view.form.sections[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the form view's deprecated spelling of a section's conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate, which hides the whole section when false) is unchanged. Where a section writes both, `visibleWhen` is the one that was in effect: delete `visibleOn`. |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional | Fields per row, 1–4 ('1'–'4' parse to the number). Declared: the author's ceiling — at most that many per row where the container is wide enough; a renderer collapses it on narrow containers. Undeclared: the renderer's choice by available width — the parse adds no default, so declare `columns: 1` to keep a section single-column. |
+| **pane** | `never` | optional | [REMOVED] `view.form.sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of a `type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key: a `tabbed` form gives each section its own tab, and a `simple` form stacks them. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | optional |  |
+
+### Nested Shape: `Form.groups[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **name** | `string` | optional | Stable section identifier for i18n lookup (snake_case) |
+| **label** | `string \| Record<string, string>` | optional | Display label — the default-language string, or an inline locale map (`{ en, "zh-CN" }`) resolved at render time |
+| **description** | `string` | optional | Optional description rendered under the section header. |
+| **collapsible** | `boolean` | optional (default: `false`) | Whether the section renders a disclosure control, so a reader can close it and open it again. Default `false`: a section declaring neither collapse key is always open and shows no control. ⚠️ `collapsed: true` IMPLIES this key — an explicit `collapsible: false` beside it does NOT take the control away. The renderer resolves that from the DECLARATION; parse never rewrites the pair, so a parsed section still reports the `false` that was authored. Only `true` is refused on a wizard step and beside `group`; `false` is accepted in both, because it declares exactly what those surfaces already deliver. |
+| **collapsed** | `boolean` | optional (default: `false`) | Whether the section starts closed. Default `false`. ⚠️ `collapsed: true` IMPLIES `collapsible` and is sufficient ON ITS OWN — a section that starts closed always carries the disclosure control that reopens it, and it outranks an explicit `collapsible: false`, so writing `collapsed: true` alone is a correct way to say "collapsed by default". The implication is a renderer rule, never a parse-time rewrite: `{ collapsed: true }` still parses to `collapsible: false, collapsed: true`, so the parsed `collapsible` must never be read as "a control renders". Only `true` is refused on a wizard step (steps do not collapse) and beside `group`, whose field group declares the pair. |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open. |
+| **visibleOn** | `never` | optional | [REMOVED] `view.form.sections[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the form view's deprecated spelling of a section's conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate, which hides the whole section when false) is unchanged. Where a section writes both, `visibleWhen` is the one that was in effect: delete `visibleOn`. |
+| **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional | Fields per row, 1–4 ('1'–'4' parse to the number). Declared: the author's ceiling — at most that many per row where the container is wide enough; a renderer collapses it on narrow containers. Undeclared: the renderer's choice by available width — the parse adds no default, so declare `columns: 1` to keep a section single-column. |
+| **pane** | `never` | optional | [REMOVED] `view.form.sections[].pane` was removed in @objectstack/spec 18.3.0 (ADR-0050) — it placed a section in one pane of a `type: 'split'` form, and `split` left the form view `type` in the same release, so no form view draws panes. Delete the key: a `tabbed` form gives each section its own tab, and a `simple` form stacks them. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | optional |  |
+
+### Nested Shape: `Form.subforms[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **childObject** | `string` | ✅ | Child object whose records are entered inline |
+| **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected when omitted) |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| …>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **amountField** | `string` | optional | Numeric child column summed for the running total |
+| **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
+| **title** | `string` | optional | Section title |
+| **addLabel** | `string` | optional | Add-row button label |
+| **minRows** | `number` | optional |  |
+| **maxRows** | `number` | optional |  |
+
+### Nested Shape: `Form.sharing`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **enabled** | `boolean` | optional (default: `false`) | Enable public sharing |
+| **publicLink** | `string` | optional | Public slug of the form, chosen by the author: not a URL, and never generated. `/forms/x`, `forms/x` and `x` name one slug, `x`. It is served to anonymous visitors only while `enabled` and `allowAnonymous` are both true: the REST form door answers `GET /api/v1/forms/:slug` (default API base), and a host that serves the console shows the form at `/_console/f/:slug` and redirects `/forms/:slug` there, query string carried. |
+| **password** | `string` | optional | Password required to access shared link |
+| **allowedDomains** | `string[]` | optional | Restrict access to specific email domains (e.g. ["example.com"]) |
+| **expiresAt** | `string` | optional | Expiration date/time in ISO 8601 format |
+| **allowAnonymous** | `boolean` | optional (default: `false`) | Allow access without authentication |
+
+### Nested Shape: `Form.submitBehavior[kind='thank-you']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'thank-you'` | ✅ |  |
+| **title** | `string` | optional | Heading of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+| **message** | `string` | optional | Body of the confirmation panel. May name a field of the submitted record as `{{record.field_name}}`, and only a field the engine generates on insert (an `autonumber` field, e.g. a case number): a hook-derived value never reaches an anonymous visitor. |
+
+### Nested Shape: `Form.submitBehavior[kind='redirect']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'redirect'` | ✅ |  |
+| **url** | `string` | ✅ | Where the browser goes after a successful submit. (1) RELATIVE paths only — it must start with `/`, and absolute or protocol-relative URLs are refused, which is what closes the open-redirect face; (2) interpolation ONLY from declared record fields, spelled `{{record.field_name}}`, and every interpolated value is URL-escaped when the redirect is built; (3) a verbatim redirect on the resolved relative path is the intended consumption. To send the browser OUT of the app, use an app navigation item (`{ type: 'url', url }`) instead. |
+| **delayMs** | `integer` | optional |  |
+
+### Nested Shape: `Form.buttons`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **submit** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Submit button |
+| **cancel** | `{ show?: boolean; label?: string \| Record<string, string> }` | optional | Cancel button |
+| **reset** | `never` | optional | [REMOVED] `view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset button, and its label was never read. Delete the key: a form has `submit` and `cancel` buttons only, and Cancel leaves the form without saving. `reset.show: true` used to clear the form after each save (the ObjectForm fold that ObjectView and the record form page render); a form converted by this release no longer clears after a save, and a form that should declares `submitBehavior: { kind: 'continue' }`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+
+### Nested Shape: `Form.protection`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
+| **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
+| **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `Form.overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
+
+
+---
+
 ## FormButtonConfig
 
 ### Properties
@@ -206,7 +346,7 @@ Column footer summary configuration
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| 'markdown' \| 'html' \| 'richtext' \| 'number' \| 'currency' \| 'percent' \| 'date' \| … +35 more>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineMetadataForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `never` | optional | [REMOVED] `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -224,7 +364,7 @@ Column footer summary configuration
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater by its object-field type: the JSON editor it maps to is shared with json, composite and record, which stay one cell); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -293,7 +433,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false, or cannot be evaluated — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and every write picking the option would be refused, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
@@ -336,7 +476,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **field** | `string` | ✅ | Field name (snake_case) |
 | **type** | `Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>` | optional | Field type (auto-infers widget if omitted) |
-| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
+| **options** | `{ label: string; value: string; description?: string; color?: string; … }[]` | optional | Options for select/multiselect/radio/checkboxes fields (per-option `default` is not accepted here — declare the pre-selected choice on the object definition). On a metadata form (schema-bound, built by `defineMetadataForm`), an enum-typed row may list its members here, to give them human labels or to offer a deliberate subset. An option `value` is a lowercase system identifier, so a row whose members cannot be spelled as option values (a hyphen, a capital) omits `options`: the control derives the members from the served JSON Schema, and their meanings go in `helpText`. |
 | **reference** | `string` | optional | Target object name for lookup/master_detail fields |
 | **publicPicker** | `never` | optional | [REMOVED] `view.form.sections[].fields[].publicPicker` was removed in @objectstack/spec 17.6.0 (ADR-0087 D2) — an anonymous public form no longer offers record search: lookup, `master_detail` and `user` fields are always left off the anonymous rendering, and the anonymous record-search route (`GET /forms/:slug/lookup/:field`) no longer exists. Delete the key (the whole `publicPicker` block). To let a visitor choose from a fixed list, use a `select` field with static `options`; to let them pick an existing record, put the form behind sign-in. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **maxLength** | `integer` | optional | Maximum character length (positive integer; for text/textarea/email/url/phone) |
@@ -354,7 +494,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | **required** | `boolean` | optional | Required override |
 | **hidden** | `boolean` | optional | Hidden override |
 | **colSpan** | `integer` | optional | Absolute column span (1-4). The renderer clamps it to the form grid's current column count, so the cell starts at a real column boundary at every surface width and never overflows (`colSpan: 4` in a 3-column grid renders as 3); a `colSpan` within the column count renders as authored, and `colSpan: 1` emits no span class at all. |
-| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater reaches it through the wide `field:grid` widget it maps to); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
+| **span** | `Enum<'auto' \| 'full'>` | optional (default: `"auto"`) | Relative field width. 'auto' (default — omit it): the renderer sizes the field from its widget type × the current column count — only textarea, markdown, html, richtext and repeater, plus a file or image field whose object field declares `multiple: true`, resolve to the full column count (repeater by its object-field type: the JSON editor it maps to is shared with json, composite and record, which stay one cell); an authored `colSpan` still wins over that default (`colSpan: 1` keeps such a field in one cell). 'full': resolves to the form grid's full column count. How far down the container-query tiers that span is emitted is the renderer's, not this key's: the renderer emits one clamped col-span class per multi-column tier (`@md:col-span-2 @2xl:col-span-3` for a 3-column grid), so the field takes the whole row at every multi-column tier, not just the widest. |
 | **widget** | `string` | optional | Custom widget/component name (overrides type-based inference) |
 | **language** | `string` | optional | Code editor language (for type=code) |
 | **keyField** | `{ field?: string; label?: string \| Record<string, string>; placeholder?: string \| Record<string, string>; helpText?: string \| Record<string, string>; … }` | optional | Key column config for record-typed fields |
@@ -376,7 +516,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | ✅ | Display label (human-readable, any case allowed) |
-| **value** | `string` | ✅ | Stored value (lowercase machine identifier) |
+| **value** | `string` | ✅ | Stored value (lowercase machine identifier, one character or more) |
 | **description** | `string` | optional | Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text. |
 | **color** | `string` | optional | Color code for badges/charts |
 | **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Per-option visibility predicate (CEL) — option is offered only when TRUE (else omitted). Env: the live `record` plus the host predicate scope, which binds `current_user`. The one VISIBILITY predicate the SERVER also enforces — the rule validator refuses a write of a value whose predicate is false, or cannot be evaluated — so a user-gated CHOICE belongs here. e.g. P`record.country == 'cn'` or P`'admin' in current_user.positions`. On an OBJECT field's option it reads the record's OWN columns: the server never reads a related record there, so a read THROUGH a reference field (`record.account.tier`) would fault and every write picking the option would be refused, and `objectstack validate` refuses it — enforce such a restriction with a `validations[]` `script` rule, whose `condition` is read one hop through a reference. |
@@ -474,7 +614,7 @@ Form-view select option — the object-field option shape minus the per-option `
 | :--- | :--- | :--- | :--- |
 | **childObject** | `string` | ✅ | Child object whose records are entered inline |
 | **relationshipField** | `string` | optional | FK on the child pointing back to the parent (auto-detected when omitted) |
-| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| …>; width?: number; … }[]` | optional | Editable grid columns (derived from the child object when omitted). Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, … }` — objectui GridColumn); identity-only entries (`{ name }`) hydrate everything else from the child object's fields. Unknown keys and the retired `field` spelling are refused at parse. |
 | **amountField** | `string` | optional | Numeric child column summed for the running total |
 | **totalField** | `string` | optional | Parent field to receive the rolled-up sum |
 | **title** | `string` | optional | Section title |
@@ -548,7 +688,7 @@ Gallery/card view configuration
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -689,8 +829,134 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. A list view board whose lanes come from a lookup field draws one page of records: its `sum`, `avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. Only on a board handed its records whole, without their query, does `sum` total the records handed in and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
+| **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
+| **cardFooter** | `{ comments?: boolean; attachments?: boolean }` | optional | The counts each card shows at its foot, each read for the whole board over its loaded cards in grouped reads, never one per card. Omit to show none. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
+
+### Nested Shape: `KanbanConfig.summary[type='sum']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'sum'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane totals over all of its records (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='avg']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'avg'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane averages over all of its records (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='min']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'min'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose smallest value over all of the lane's records the lane shows (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='max']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'max'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose largest value over all of the lane's records the lane shows (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.cardFooter`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **comments** | `boolean` | optional | Show how many comment threads of the record are open (not resolved). Omit or false: not shown, and not read. |
+| **attachments** | `boolean` | optional | Show how many files are attached to the record (objects with enable.files). Omit or false: not shown, and not read. |
+
+
+---
+
+## KanbanLaneSummary
+
+Lane foot statistic: none, the count of the lane's records, or the sum, average, minimum or maximum of a field over all of the lane's records
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+**Type:** `none`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'none'` | ✅ |  |
+
+---
+
+#### Option 2
+
+**Type:** `count`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'count'` | ✅ |  |
+
+---
+
+#### Option 3
+
+**Type:** `sum`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'sum'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane totals over all of its records (e.g. amount) |
+
+---
+
+#### Option 4
+
+**Type:** `avg`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'avg'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane averages over all of its records (e.g. amount) |
+
+---
+
+#### Option 5
+
+**Type:** `min`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'min'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose smallest value over all of the lane's records the lane shows (e.g. amount) |
+
+---
+
+#### Option 6
+
+**Type:** `max`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'max'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose largest value over all of the lane's records the lane shows (e.g. amount) |
+
+---
 
 
 ---
@@ -788,11 +1054,11 @@ Map view configuration
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -908,7 +1174,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (its `size`, and on a page block its `mode`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it. |
 | **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ListView.pagination`
@@ -925,6 +1191,10 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. A list view board whose lanes come from a lookup field draws one page of records: its `sum`, `avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. Only on a board handed its records whole, without their query, does `sum` total the records handed in and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
+| **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
+| **cardFooter** | `{ comments?: boolean; attachments?: boolean }` | optional | The counts each card shows at its foot, each read for the whole board over its loaded cards in grouped reads, never one per card. Omit to show none. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
 
@@ -935,7 +1205,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 | **initialDate** | `string` | optional | Where the calendar opens: the month, week or day the active view mode shows that holds this date; omit it to open on today. A record anchor: `first_record` opens on the earliest start date (the startDateField value) among the records the view's filter selects, `next_record` on the earliest on or after the viewer's today (a `date` start field compares as a calendar day), and either opens on today when no record qualifies. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`); a fixed calendar date is not accepted, because it goes stale as time passes. |
 
@@ -948,7 +1218,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -1096,7 +1366,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1119,7 +1389,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
 | **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
 | **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the object's create form, never a named form. Delete the key. The create form lays out by the object's `fieldGroups`; to leave a field out of it, set `showOnCreate: false` on that field. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ListView.emptyState`
 
@@ -1141,6 +1411,83 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 
 ---
 
+## MetadataListCellType
+
+How a metadata list cell draws its value
+
+### Allowed Values
+
+* `text`
+* `badge`
+* `boolean`
+* `count`
+* `list`
+* `summary`
+
+
+---
+
+## MetadataListColumn
+
+One column of a metadata type list
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
+
+
+---
+
+## MetadataListView
+
+List layout of a metadata type: its schema binding and its columns
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'> }[]` | ✅ | Columns of the list, in display order |
+
+### Nested Shape: `MetadataListView.data[provider='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'object'` | ✅ |  |
+| **object** | `string` | ✅ | Target object name |
+
+### Nested Shape: `MetadataListView.data[provider='value']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'value'` | ✅ |  |
+| **items** | `any[]` | ✅ | Static data array |
+
+### Nested Shape: `MetadataListView.data[provider='schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'schema'` | ✅ |  |
+| **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
+| **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
+
+### Nested Shape: `MetadataListView.columns[number]`
+
+One column of a metadata type list
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
+
+
+---
+
 ## NavigationConfig
 
 ### Properties
@@ -1151,7 +1498,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (its `size`, and on a page block its `mode`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it. |
 | **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 
@@ -1185,11 +1532,11 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1296,7 +1643,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **view** | `never` | optional | [REMOVED] `view.list.navigation.view` was removed in @objectstack/spec 17.5.0 (ADR-0049 enforce-or-remove) — it named the form view to open for a record detail, and no layer resolved a view by that name: the value was passed straight into the navigation-MODE argument of the console's `onNavigate`, where anything other than `edit` or `view` matched no branch, so the key selected nothing and could silently deaden the row click. Delete the key; to choose what opens for a record, assign a `record` page to the object and let `isDefault` pick the one that opens — page assignment is the machinery that resolves a detail layout, and a list view's navigation block only decides HOW the detail is surfaced (its `size`, and on a page block its `mode`). |
 | **preventNavigation** | `boolean` | optional (default: `false`) | Disable standard navigation entirely |
 | **openNewTab** | `boolean` | optional (default: `false`) | Open the record's full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place |
-| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it. |
+| **size** | `Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>` | optional (default: `"auto"`) | Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it. |
 | **width** | `string \| number` | optional | [DEPRECATED → size] Pixel/percent width of the drawer (e.g. "600px"). A pixel width cannot be chosen at authoring time without knowing the client viewport — use the `size` bucket. |
 
 ### Nested Shape: `ObjectListView.pagination`
@@ -1313,6 +1660,10 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. A list view board whose lanes come from a lookup field draws one page of records: its `sum`, `avg`, `min` and `max` still cover every record of each lane, and its `count` counts that page. Only on a board handed its records whole, without their query, does `sum` total the records handed in and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
+| **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
+| **cardFooter** | `{ comments?: boolean; attachments?: boolean }` | optional | The counts each card shows at its foot, each read for the whole board over its loaded cards in grouped reads, never one per card. Omit to show none. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **columns** | `string[]` | ✅ | Fields to show on cards |
 
@@ -1323,7 +1674,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
 | **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
-| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value |
+| **colorField** | `string` | optional | Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()) or a Tailwind color utility class (bg-…, text-…), else the default event color: a value that is no color is never turned into one |
 | **allDayField** | `string` | optional | Field carrying the all-day flag for each event (names a boolean field, not a value): a record whose flag is true is drawn as an all-day band rather than at a clock time, and one whose flag is absent or false is not all-day. Omit to leave the renderer inference in place — an event with no end date draws as all-day |
 | **initialDate** | `string` | optional | Where the calendar opens: the month, week or day the active view mode shows that holds this date; omit it to open on today. A record anchor: `first_record` opens on the earliest start date (the startDateField value) among the records the view's filter selects, `next_record` on the earliest on or after the viewer's today (a `date` start field compares as a calendar day), and either opens on today when no record qualifies. Or a wrapped date-macro token, resolved each time the calendar opens: `{today}`, `{next_month_start}`, `{current_quarter_start}`, `{3_months_from_now}` (the full vocabulary is `DATE_MACRO_TOKENS` and the parameterised `DATE_MACRO_PARAM_RE` grammar in `@objectstack/spec/data`); a fixed calendar date is not accepted, because it goes stale as time passes. |
 
@@ -1336,7 +1687,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **titleField** | `string` | ✅ | Field displayed as the task title |
 | **progressField** | `string` | optional | Field providing the task completion percentage |
 | **dependenciesField** | `string` | optional | Field listing the task's predecessor (dependency) record ids |
-| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value |
+| **colorField** | `string` | optional | Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the default bar color: a value that is no color is never turned into one |
 | **parentField** | `string` | optional | Field holding the parent task id (builds the summary → step tree) |
 | **typeField** | `string` | optional | Field whose value maps to task/summary/milestone |
 | **baselineStartField** | `string` | optional | Baseline (planned) start field |
@@ -1484,7 +1835,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1507,7 +1858,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **enabled** | `boolean` | ✅ | Show the add record entry point — REQUIRED: `true` draws the Add button, `false` declares it off |
 | **position** | `Enum<'top' \| 'bottom' \| 'both'>` | optional (default: `"top"`) | Position of the add record button: `top` (the toolbar, the default), `bottom` (under the list) or `both` |
 | **mode** | `never` | optional | [REMOVED] `addRecord.mode` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button always opens the create form, never an inline row or a mode of its own choosing. Delete the key; the create form opens the way the object list's New opens it. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
-| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the create form chosen by convention, never a named form. Delete the key, and to give the Add button its own form declare it as `formViews.create` on the object's view container (without one, the default form is used). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
+| **formView** | `never` | optional | [REMOVED] `addRecord.formView` was removed in @objectstack/spec 18.1.0 (ADR-0049 enforce-or-remove) — no renderer ever read it: the Add button opens the object's create form, never a named form. Delete the key. The create form lays out by the object's `fieldGroups`; to leave a field out of it, set `showOnCreate: false` on that field. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 
 ### Nested Shape: `ObjectListView.emptyState`
 
@@ -1669,7 +2020,7 @@ User action toggles for the view toolbar
 | **sort** | `boolean` | optional (default: `true`) | Allow users to sort records |
 | **search** | `boolean` | optional (default: `true`) | Allow users to search records |
 | **filter** | `boolean` | optional (default: `true`) | Allow users to filter records |
-| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload |
+| **refresh** | `boolean` | optional (default: `true`) | Allow users to reload the view data from the backend without a full page reload. Governs only the wide toolbar's Refresh button (`compactToolbar: false`): the default toolbar has no Refresh, so the toggle changes nothing there. |
 | **rowHeight** | `boolean` | optional (default: `true`) | Allow users to toggle row height/density |
 | **group** | `boolean` | optional (default: `true`) | Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block. |
 | **addRecordForm** | `boolean` | optional (default: `false`) | Add records through a form instead of inline |
@@ -1770,7 +2121,7 @@ Tab configuration for multi-tab view interface
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -1789,11 +2140,11 @@ Tab configuration for multi-tab view interface
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1869,11 +2220,11 @@ Tab configuration for multi-tab view interface
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2146,7 +2497,7 @@ This schema accepts one of the following structures:
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -2167,11 +2518,11 @@ This schema accepts one of the following structures:
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2241,7 +2592,7 @@ This schema accepts one of the following structures:
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -2330,7 +2681,7 @@ This schema accepts one of the following structures:
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -2338,7 +2689,7 @@ This schema accepts one of the following structures:
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **columnState** | `never` | optional | [REMOVED] `view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is no longer applied, so every reader sees the view's own column order and widths. The console keeps column widths in each reader's browser and saves a column order into the view itself. Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a width, set `width` on the column. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='list'].config`
@@ -2356,11 +2707,11 @@ This schema accepts one of the following structures:
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; titleField?: string; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2408,13 +2759,6 @@ This schema accepts one of the following structures:
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
 | **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
 
-### Nested Shape: `ViewItemWire[viewKind='list'].columnState`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
-
 ---
 
 #### Option 2
@@ -2437,7 +2781,7 @@ This schema accepts one of the following structures:
 | **_lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | optional | Item-level lock — controls overlay & delete (ADR-0010). |
 | **_lockReason** | `string` | optional | Human-readable reason shown when a write is refused by _lock. |
 | **_lockSource** | `Enum<'artifact' \| 'package' \| 'env-forced'>` | optional | Layer that set _lock (artifact \| package \| env-forced). |
-| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced'>` | optional | Origin of the item (package \| org \| env-forced). |
+| **_provenance** | `Enum<'package' \| 'org' \| 'env-forced' \| 'platform'>` | optional | Origin of the item (package \| org \| env-forced \| platform). |
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
@@ -2445,7 +2789,7 @@ This schema accepts one of the following structures:
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
-| **columnState** | `{ order?: string[]; widths?: Record<string, number> }` | optional | Studio round-trip: column order/widths (runtime-only state, written by the console grid and stored on the view's row, which has no per-user scope — not authored) |
+| **columnState** | `never` | optional | [REMOVED] `view.columnState` was removed in @objectstack/spec 19.0.0 (ADR-0049 enforce-or-remove) — it held one column order and set of widths on a shared view row; nothing writes it any more, and a stored layout is no longer applied, so every reader sees the view's own column order and widths. The console keeps column widths in each reader's browser and saves a column order into the view itself. Delete the key. To ship a column order, list `columns` in that order (or set `fieldOrder`); to ship a width, set `width` on the column. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **options** | `never` | optional | Refused: a view item record carries no top-level `options` bag. Its per-kind blocks live under `config` (`config.kanban`, `config.timeline`, …); the legacy `options.KIND` bag belongs to the flattened list overlay only. |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].config`
@@ -2490,13 +2834,6 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
 | **basedOn** | `string` | ✅ | Recorded, never a gate: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. Nothing is refused, merged or rebased on it; it tells a person re-basing the override where it started. One reader, as advice: a base's upgrade plan lists an override whose `basedOn` is not the installed base version as stale, beside each override whose base item the upgrade changes (ADR-0146 D2, as amended). |
-
-### Nested Shape: `ViewItemWire[viewKind='form'].columnState`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **order** | `string[]` | optional | Column order as field names, leftmost first (runtime-only state — written by the console grid, never authored). |
-| **widths** | `Record<string, number>` | optional | Column widths in pixels, keyed by field name (runtime-only state — written by the console grid, never authored). |
 
 ---
 

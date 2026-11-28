@@ -475,6 +475,7 @@ export type {
   FileUploadResult,
   AggregateParams,
   AggregateResult,
+  ListViewGroupHeaderAnswer,
   DataSourceMutationEvent,
   BulkWriteRowError,
   BulkWriteResult,
@@ -1273,6 +1274,7 @@ export type {
   ActionContext,
   ActionResult,
   ActionFieldError,
+  ActionRefusalLine,
   // The `undo` payload of `ActionResult`, moved down from `@object-ui/core`'s
   // `UndoManager` with it (objectui#6349, batch 4); core re-exports it.
   UndoableOperation,
@@ -1293,7 +1295,11 @@ export {
   OBJECTUI_LOCAL_PARAM_FIELD_TYPES,
   ACTION_PARAM_FIELD_TYPES,
   actionRendersAt,
+  actionFoldedIntoMenu,
   placedHeaderActions,
+  arrangedHeaderActions,
+  readActionLayoutArm,
+  type ActionLayoutArm,
   resolveDeclaredActionIds,
 } from './ui-action.js';
 
@@ -1645,3 +1651,9 @@ export {
     // `resetInflightGetsForTesting` is test-only and stays off the barrel
     // (objectui#13453); tests import it from `http-inflight` directly.
 } from './http-inflight.js';
+
+// The one avatar-initials rule (objectstack#36346). Same argument for the same
+// home: its callers — the field renderers, the kanban card owner, the history
+// timeline, the user menu in `@object-ui/auth` and the presence stack — have no
+// package in common lower than this one.
+export { getPersonInitials } from './person-initials.js';

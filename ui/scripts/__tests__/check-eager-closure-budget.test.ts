@@ -847,9 +847,10 @@ describe('ceiling sensitivity, judged live (objectui#5924)', () => {
     // objectui#12030 down to 3049.3 on objectstack#22044, the payback of the
     // objectui#11717 raise, objectui#13410 down to 3000.1 when the chat UI left
     // the first load, objectstack#25925 down to 1935.6 after the spec's shared
-    // chunks and the move into objectstack) — a rendering derived in the test
+    // chunks and the move into objectstack, objectstack#37572 down to 1854.8
+    // when the spec's module-scope initializers became droppable) — a rendering derived in the test
     // would agree with the renderer by construction and pin nothing.
-    expect(result.message).toContain('1935.6');
+    expect(result.message).toContain('1854.8');
   });
 
   it('is exactly one regression wide, from either side of the line', () => {
@@ -1283,7 +1284,10 @@ describe('chunk membership (objectui#9345)', () => {
       expect(PER_CHUNK_MEMBERSHIP.framework).toContain('types');
       expect(PER_CHUNK_MEMBERSHIP_CARVE_OUTS).toEqual({
         types: [{ subtree: 'src/zod', chunk: 'types-zod' }],
-        fields: [{ subtree: 'src/widgets/date-picker', chunk: 'fields-date-picker' }],
+        fields: [
+          { subtree: 'src/widgets/date-picker', chunk: 'fields-date-picker' },
+          { subtree: 'src/widgets/grid-field', chunk: 'fields-grid' },
+        ],
       });
     });
 
@@ -1686,7 +1690,7 @@ describe('main', () => {
     // about the FIXTURE while the gate under test behaved correctly. The number
     // this case is actually about is "the report's chunk count, echoed".
     expect(outputs.closure_chunks).toBe(String(fixture.files.length));
-    expect(outputs.closure_gzip_kb).toBe('1935.6');
+    expect(outputs.closure_gzip_kb).toBe('1854.8');
   });
 
   it('exits 1 — a verdict about the BUNDLE — when over budget', () => {
@@ -2668,10 +2672,12 @@ describe('the prose attached to the baselines (objectui#7046)', () => {
    * re-pinned the constant onto a branch tip of their own and left the same
    * shape. ⛔ Still exact and positional — a back-fill of the
    * squash reds here again, and is re-pinned to two strings the same way.
+   * objectstack#37572's back-fill did exactly that: the branch commit
+   * `003fde60` and the squash `50b4bf82` that landed it.
    */
   it('records what each baseline carries as data, so the pin cannot go vacuous', () => {
-    expect(commitsCarriedBy(BASELINE)).toEqual([BASELINE.commit]);
-    expect(BASELINE.squashMerge).toBeNull();
+    expect(commitsCarriedBy(BASELINE)).toEqual([BASELINE.commit, BASELINE.squashMerge]);
+    expect(BASELINE.squashMerge).toBe('50b4bf82');
     expect(commitsCarriedBy(PER_CHUNK_BASELINE)).toEqual([]);
   });
 

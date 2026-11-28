@@ -5,8 +5,9 @@
  * Studio handle on the same route opens (objectui#12540).
  *
  * On a console page route the app bar's pencil, the app switcher's Studio row
- * and the sidebar's Design (objectui#12520) all open the page's surface in
- * Studio's Interfaces pillar, `/studio/PACKAGE/interfaces?surface=page:NAME`,
+ * and the sidebar's Design (objectui#12520) all open the page in Studio, at
+ * its All-metadata item page `/studio/PACKAGE/metadata/page/NAME` since
+ * objectstack#36502 retired the Interfaces pillar,
  * through `appStudioRoutePath`. The page's own button opened the
  * metadata-admin page instead, so the one handle labelled "Edit in studio" was
  * the one that did not open Studio. It now goes through the same derivation:
@@ -23,6 +24,13 @@
  * posture in `PageView.editInStudioFollowsPackagePosture-12615`; every case
  * here is a caller who passes the first, on a package the list serves
  * writable.
+ *
+ * objectstack#36111 — the floating pencil is the phone's face since the page
+ * header and the shell's button group arrived: from the phone breakpoint up
+ * the top bar's 「Edit app」 (and the group's, once the shell turns it on)
+ * opens the same surface through the same gate
+ * (`ShellPageActions-36111`). So this file reads the pencil at a
+ * phone's width.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -108,13 +116,15 @@ async function mountUnder(app: Record<string, unknown> | undefined) {
 }
 
 beforeEach(() => {
+  // The pencil's face: a phone (objectstack#36111).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   navigateSpy.mockClear();
   // objectui#12615 — the app's package is served writable, so the pencil's
   // package half passes and this file's own questions are the ones asked.
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: unknown) => ({
-      ok: true,
+      headers: new Headers(), ok: true,
       status: 200,
       json: async () =>
         String(url).endsWith('/api/v1/packages')
@@ -125,17 +135,18 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   cleanup();
   vi.unstubAllGlobals();
 });
 
 describe('Edit in studio opens the page in Studio, as the app bar pencil does (objectui#12540)', () => {
-  it('lands on the page surface in Studio\'s Interfaces pillar — the pencil\'s derivation, for the same app and page', async () => {
+  it('lands on the page\'s All-metadata item page in Studio (objectstack#36502) — the pencil\'s derivation, for the same app and page', async () => {
     await mountUnder(OWNED);
     fireEvent.click(screen.getByTestId('page-edit-in-studio-button'));
     expect(navigateSpy).toHaveBeenCalledTimes(1);
     const target = navigateSpy.mock.calls[0][0];
-    expect(target).toBe('/studio/com.objectstack.cloud/interfaces?surface=page:welcome');
+    expect(target).toBe('/studio/com.objectstack.cloud/metadata/page/welcome');
     // The app bar's inputs on this route: the app, the author gate, the route type and name.
     expect(target).toBe(appStudioRoutePath(OWNED, true, { type: 'page', name: 'welcome' }));
   });

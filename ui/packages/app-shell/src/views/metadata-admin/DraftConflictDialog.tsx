@@ -72,6 +72,50 @@
  * A create, with nothing read, calls the client directly with
  * `ifNoneMatch: '*'`: the door refuses it when the name already holds a draft,
  * instead of writing the new skeleton over it.
+ *
+ * ## The published layer (objectstack#36601)
+ *
+ * A Studio Save is a draft save and then that one item's publish, so it leaves
+ * no draft behind, and a draft pin alone cannot tell two editors apart: each
+ * opened the item with no draft, each asserts none, and the later Save used to
+ * publish over the earlier one. The guard therefore also holds the PUBLISHED
+ * layer's version for the same buffer:
+ *
+ *  6. A load records what its `/layers` read served as `overlayVersion`
+ *     ({@link publishedPinOf}) with `recordPublished`: a token pins the publish
+ *     `If-Match`, a served `null` (no published row) `If-None-Match: *`, and a
+ *     server that serves no `overlayVersion` pins nothing — the publish goes
+ *     unpinned, as before.
+ *  7. {@link DraftVersionGuard.publish} sends that pin; a publish that lands
+ *     holds its receipt's `version`, the published row it left.
+ *  8. A `409 METADATA_CONFLICT` on the publish opens the same dialog, worded for
+ *     a live change: reload (the caller's `beforeReload` runs first, so the
+ *     draft the Save just wrote is taken back before the buffer is re-read),
+ *     overwrite after the confirmation (re-sent pinned to the refusal's
+ *     `currentVersion`), or keep editing (nothing goes live).
+ *  9. objectstack#36726 — a reload whose `beforeReload` leaves a draft pending
+ *     (`'kept'`: one that was there before the Save, a copilot's, which the
+ *     Save wrote into and never discards) re-reads THAT draft, now carrying
+ *     the page's edits. Its publish stays pinned to the version the conflict
+ *     was raised on until the author re-confirms: the next Save is refused and
+ *     asked again, and only an overwrite, a publish that lands, or a load that
+ *     reads no pending draft (the buffer is then the live row) takes the
+ *     fresh read's pin. A reload over a discarded draft re-reads the live row
+ *     and is pinned to it at once, as before.
+ * 10. objectstack#37440 — the Save's publish is also pinned to the DRAFT it
+ *     promotes when its caller passes `draftVersion`: the version its own
+ *     draft save's receipt returned (`heldDraftVersion` right after a guarded
+ *     save), ⛔ never a fresh re-read, which would pin another writer's draft.
+ *     A draft another writer changed in between is refused
+ *     `409 METADATA_CONFLICT` and nothing is published. That refusal carries
+ *     the same code as the published row's (rule 8) and does not say which
+ *     pin refused, so the guard reads the draft at the address once: still
+ *     the pinned version, the live row moved and rule 8 asks; moved, gone, or
+ *     unreadable, the refusal is the draft's, nothing is asked, and it is
+ *     thrown marked ({@link isPublishDraftMoved}): the caller ⛔ never
+ *     discards that draft — it now holds the other writer's change — and the
+ *     next Save's draft write, still pinned to the old receipt, is refused and
+ *     asked about by rule 4.
  */
 
 import * as React from 'react';
@@ -86,289 +130,30 @@ import {
   buttonVariants,
   cn,
 } from '@object-ui/components';
-import type { MetadataClient, MetadataClientSaveOptions } from '@object-ui/data-objectstack';
-import { GetMetaItemResponseSchema, MetadataConflictErrorSchema } from '@objectstack/spec/api';
-import { errorCodeIs } from '@object-ui/types';
+import type { MetadataClient } from '@object-ui/data-objectstack';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
 
-/** What a guarded save ended in, when it did not throw. */
-export type DraftSaveOutcome = 'saved' | 'reloaded';
-
-/** The author's answer to a conflict. */
-export type DraftConflictChoice = 'reload' | 'overwrite' | 'cancel';
-
-/** The item a refused save addressed. */
-export interface DraftConflict {
-  type: string;
-  name: string;
-}
-
-/**
- * The version-conflict refusal of the `/meta` draft door, told apart from the
- * door's OTHER 409 (`DESTRUCTIVE_CHANGE`) by its code, never by its prose.
- */
-export function isDraftVersionConflict(err: unknown): boolean {
-  return (err as { status?: unknown } | null | undefined)?.status === 409 && errorCodeIs(err, 'METADATA_CONFLICT');
-}
-
-/**
- * The precondition a guarded draft save is sent with: exactly one of the two
- * headers, by construction never both.
- */
-export type DraftPin = { readonly ifMatch: string } | { readonly ifNoneMatch: '*' };
-
-/**
- * A served `version` — a token, or `null` for "no row at this address" — as the
- * pin a save to that address sends. An empty token pins nothing: the client
- * sends no `If-Match` for it.
- */
-function pinOfVersion(version: string | null): DraftPin | null {
-  if (version === null) return { ifNoneMatch: '*' };
-  return version.length > 0 ? { ifMatch: version } : null;
-}
-
-/**
- * What a load's DRAFT read (`MetadataClient.getDraft`, at the address the
- * buffer's saves write) says the next draft save is pinned with:
- *
- *  - `null` — no pending draft (the drafts ledger lists none, or the read
- *    answered 404 `NO_DRAFT`): `If-None-Match: *`;
- *  - the envelope's `version`, read through `GetMetaItemResponseSchema`'s own
- *    member: a token pins `If-Match`, a served `null` pins `If-None-Match: *`;
- *  - an envelope that carries no `version` (a server from before the read
- *    served one) pins nothing, and the save goes unpinned as it always did.
- */
-export function draftPinOf(answer: unknown): DraftPin | null {
-  if (answer === null) return { ifNoneMatch: '*' };
-  if (!answer || typeof answer !== 'object' || !('version' in answer)) return null;
-  const version = GetMetaItemResponseSchema.shape.version.safeParse((answer as { version: unknown }).version);
-  return version.success && version.data !== undefined ? pinOfVersion(version.data) : null;
-}
-
-/**
- * The pin an "overwrite" re-sends with: the refused save's `currentVersion`,
- * parsed by the spec's `MetadataConflictErrorSchema` off the body the client
- * kept. A body that does not carry one (a server from before the field)
- * pins nothing, and the overwrite is sent unpinned, as it was before.
- */
-function pinOfConflict(err: unknown): DraftPin | null {
-  const body = MetadataConflictErrorSchema.safeParse((err as { body?: unknown } | null | undefined)?.body);
-  return body.success ? pinOfVersion(body.data.currentVersion) : null;
-}
-
-/**
- * Whether a draft read was REFUSED for this session (`403`): the read reached
- * a draft row and the server withheld it, so the row exists and its body is
- * not this session's to hold. Told apart by status, never by prose.
- */
-export function isDraftReadRefused(err: unknown): boolean {
-  return (err as { status?: unknown } | null | undefined)?.status === 403;
-}
-
-/** What {@link readDraftForSave} answers. */
-export interface DraftReadForSave<T> {
-  /** The served draft envelope, or `null`: no pending draft, or a read that failed. */
-  answer: T | null;
-  /** The pin the next draft save at the read's address is sent with. */
-  pin: DraftPin | null;
-  /**
-   * The server's refusal, present only when the read was refused `403`
-   * ({@link isDraftReadRefused}). `answer` is then `null` although a draft is
-   * pending: a load that sees `refused` installs no buffer, because one seeded
-   * from the published layer would be saved over the draft it never read.
-   */
-  refused?: unknown;
-}
-
-/**
- * A load's draft read at `packageId` — the address the buffer's draft saves
- * write — with the pin it serves for that address. Read and pin come from one
- * call so a load cannot pin a save to a read of another address (see the
- * module header). A read that fails resolves `answer: null`, as the loads'
- * `.catch(() => null)` always did, and pins nothing: a failure says nothing
- * about the row. A read refused `403` says the row is there and withheld, and
- * carries the refusal as `refused`. Record the pin with `recordRead` where the
- * buffer is installed, not here: a load that is cancelled installs nothing.
- */
-export async function readDraftForSave<T = unknown>(
-  client: Pick<MetadataClient, 'getDraft'>,
-  type: string,
-  name: string,
-  packageId: string | null | undefined,
-  // objectstack#26649 — the bundle member whose draft this is; omitted, the
-  // canonical member's. The save it pins is addressed by its body's member.
-  member?: string,
-): Promise<DraftReadForSave<T>> {
-  try {
-    const answer = await client.getDraft<T>(type, name, {
-      ...(packageId ? { packageId } : {}),
-      ...(member ? { member } : {}),
-    });
-    return { answer, pin: draftPinOf(answer) };
-  } catch (err) {
-    return isDraftReadRefused(err) ? { answer: null, pin: null, refused: err } : { answer: null, pin: null };
-  }
-}
-
-function itemKey(type: string, name: string, packageId: string | null | undefined): string {
-  return JSON.stringify([type, name, packageId ?? null]);
-}
-
-function receiptVersion(receipt: unknown): string | null {
-  const version = (receipt as { version?: unknown } | null | undefined)?.version;
-  return typeof version === 'string' && version.length > 0 ? version : null;
-}
-
-/** `options` sent with `pin` in place of whatever precondition they carried. */
-function pinned(options: MetadataClientSaveOptions, pin: DraftPin | null): MetadataClientSaveOptions {
-  if (!pin) return options;
-  const { ifMatch: _ifMatch, ifNoneMatch: _ifNoneMatch, ...rest } = options;
-  return { ...rest, ...pin };
-}
-
-export interface DraftVersionGuardDeps {
-  /** The client to save through, read at the moment of the save. */
-  client: () => Pick<MetadataClient, 'save'>;
-  /** Ask the author how to resolve a conflict. */
-  ask: (conflict: DraftConflict) => Promise<DraftConflictChoice>;
-  /** Replace the buffer with the saved version (the caller's load). */
-  reload: () => void;
-  /** The error a save the author chose not to send ends in. */
-  notSaved: (conflict: DraftConflict) => Error;
-}
-
-/**
- * The React-free half of the guard: the pins held for one buffer, the
- * one-at-a-time queue, and the conflict branch. {@link useDraftSaveGuard} binds
- * it to a client, a dialog and the caller's reload.
- */
-export class DraftVersionGuard {
-  /**
-   * The pin held per item (type, name, package) this buffer saves. One entry in
-   * the usual case; a surface whose one buffer switches between items (the
-   * hook panel) keeps each item's own.
-   */
-  private readonly held = new Map<string, DraftPin>();
-  private tail: Promise<void> | null = null;
-  /** Bumped by a reload: a save queued before it carries the replaced buffer. */
-  private epoch = 0;
-
-  constructor(private deps: DraftVersionGuardDeps) {}
-
-  /** Re-bind inputs that change between renders (the client, the reload, the locale's text). */
-  bind(deps: Pick<DraftVersionGuardDeps, 'client' | 'reload' | 'notSaved'>): void {
-    this.deps = { ...this.deps, ...deps };
-  }
-
-  /** The pin held, for the item `save` would address (tests read it). */
-  heldFor(type: string, name: string, packageId?: string | null): DraftPin | null {
-    return this.held.get(itemKey(type, name, packageId)) ?? null;
-  }
-
-  /** The buffer was installed with no draft read behind it: nothing describes it. */
-  forget = (): void => {
-    this.held.clear();
-  };
-
-  /**
-   * The buffer was installed from a load whose draft read, at the address the
-   * buffer's saves write (`type`, `name`, `packageId`), served `pin` — what
-   * {@link readDraftForSave} returned. `null` pins nothing, as `forget()`.
-   */
-  recordRead = (type: string, name: string, packageId: string | null | undefined, pin: DraftPin | null): void => {
-    this.pin(itemKey(type, name, packageId), pin);
-  };
-
-  /**
-   * Save `item` through the client. A non-draft save (no `mode: 'draft'`) is
-   * passed straight through: the guard pins drafts only.
-   */
-  save = (
-    type: string,
-    name: string,
-    item: unknown,
-    options: MetadataClientSaveOptions = {},
-  ): Promise<DraftSaveOutcome> => {
-    if (options.mode !== 'draft') {
-      return this.deps.client().save(type, name, item, options).then(() => 'saved' as const);
-    }
-    const epoch = this.epoch;
-    const run = (): Promise<DraftSaveOutcome> => this.run(epoch, type, name, item, options);
-    // Started at once when nothing is in flight, so the request leaves in the
-    // same tick as before; queued behind the save in flight otherwise.
-    const result = this.tail ? this.tail.then(run) : run();
-    const settled = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.tail = settled;
-    void settled.then(() => {
-      if (this.tail === settled) this.tail = null;
-    });
-    return result;
-  };
-
-  private async run(
-    epoch: number,
-    type: string,
-    name: string,
-    item: unknown,
-    options: MetadataClientSaveOptions,
-  ): Promise<DraftSaveOutcome> {
-    // The author chose to reload while this save waited: its buffer is gone.
-    if (epoch !== this.epoch) return 'reloaded';
-    const key = itemKey(type, name, options.packageId);
-    let pin = this.held.get(key) ?? null;
-    const client = this.deps.client();
-    for (;;) {
-      try {
-        const receipt = await client.save(type, name, item, pinned(options, pin));
-        this.hold(key, receipt);
-        return 'saved';
-      } catch (err) {
-        if (!isDraftVersionConflict(err)) throw err;
-        const conflict: DraftConflict = { type, name };
-        const choice = await this.deps.ask(conflict);
-        if (choice === 'reload') {
-          this.held.clear();
-          this.epoch += 1;
-          this.deps.reload();
-          return 'reloaded';
-        }
-        if (choice !== 'overwrite') throw this.deps.notSaved(conflict);
-        // The author has seen that the draft moved and chose this buffer over
-        // the version the refusal names, so the re-send is pinned to THAT
-        // version: a save landing between the refusal and the confirmation is
-        // refused again and asked about, never overwritten. Held, too, so a
-        // refusal of the re-send for another reason (a destructive change the
-        // caller confirms) retries over the same version.
-        pin = pinOfConflict(err);
-        this.pin(key, pin);
-      }
-    }
-  }
-
-  private hold(key: string, receipt: unknown): void {
-    const version = receiptVersion(receipt);
-    this.pin(key, version ? { ifMatch: version } : null);
-  }
-
-  private pin(key: string, pin: DraftPin | null): void {
-    if (pin) this.held.set(key, pin);
-    else this.held.delete(key);
-  }
-}
-
-export interface DraftSaveGuard {
-  /** A guarded `client.save` — same arguments, resolves what it ended in. */
-  save: DraftVersionGuard['save'];
-  /** Call where the buffer is installed from a load's draft read (rule 3 above). */
-  recordRead: DraftVersionGuard['recordRead'];
-  /** Call where the buffer is installed with no draft read behind it (rule 3 above). */
-  forget: () => void;
-  /** The conflict dialog; render it once, anywhere in the caller's tree. */
-  dialog: React.ReactElement;
-}
+export {
+  isPublishConflictKeptEditing,
+  isPublishDraftMoved,
+  isDraftVersionConflict,
+  draftReceiptVersion,
+  draftPinOf,
+  publishedPinOf,
+  isDraftReadRefused,
+  readDraftForSave,
+  DraftVersionGuard,
+  heldDraftVersionOf,
+  type BeforeReloadOutcome,
+  type DraftSaveOutcome,
+  type DraftConflictChoice,
+  type DraftConflict,
+  type DraftPin,
+  type DraftReadForSave,
+  type DraftVersionGuardDeps,
+  type DraftSaveGuard,
+} from './draftVersionGuard.js';
+import { DraftVersionGuard, heldDraftVersionOf, type DraftConflict, type DraftConflictChoice, type DraftSaveGuard } from './draftVersionGuard.js';
 
 /**
  * One guard for one editing buffer. `onReload` replaces the buffer with the
@@ -405,6 +190,9 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
   React.useLayoutEffect(() => {
     guard.bind({ client: () => client, reload: onReload, notSaved: notSavedIn(locale) });
   });
+  // objectstack#37440 — one function for the guard's life, as the guard's own
+  // members are: a Save callback may name it among its dependencies.
+  const [heldDraftVersion] = React.useState(() => heldDraftVersionOf(guard));
   // A dialog left open by an unmount answers "keep editing": nothing is sent.
   const pendingRef = React.useRef(pending);
   React.useLayoutEffect(() => {
@@ -420,6 +208,9 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
     save: guard.save,
     recordRead: guard.recordRead,
     forget: guard.forget,
+    recordPublished: guard.recordPublished,
+    publish: guard.publish,
+    heldDraftVersion,
     dialog: <DraftConflictDialog conflict={pending?.conflict ?? null} onChoose={choose} />,
   };
 }
@@ -449,6 +240,8 @@ export function DraftConflictDialog({ conflict, onChoose }: DraftConflictDialogP
     type: conflict ? translateMetadataType(conflict.type, locale) : '',
     name: conflict?.name ?? '',
   };
+  // objectstack#36601 — a live change is worded as one; the choices are the same.
+  const live = conflict?.layer === 'published';
   return (
     <AlertDialog
       open={open}
@@ -468,13 +261,17 @@ export function DraftConflictDialog({ conflict, onChoose }: DraftConflictDialogP
             <div className="flex-1">
               <AlertDialogTitle>
                 {confirming
-                  ? t('engine.draftConflict.overwriteTitle', locale)
-                  : t('engine.draftConflict.title', locale)}
+                  ? t(live ? 'engine.draftConflict.publishedOverwriteTitle' : 'engine.draftConflict.overwriteTitle', locale)
+                  : t(live ? 'engine.draftConflict.publishedTitle' : 'engine.draftConflict.title', locale)}
               </AlertDialogTitle>
               <AlertDialogDescription className="mt-1">
                 {confirming
-                  ? tFormat('engine.draftConflict.overwriteDescription', locale, vars)
-                  : tFormat('engine.draftConflict.description', locale, vars)}
+                  ? tFormat(
+                      live ? 'engine.draftConflict.publishedOverwriteDescription' : 'engine.draftConflict.overwriteDescription',
+                      locale,
+                      vars,
+                    )
+                  : tFormat(live ? 'engine.draftConflict.publishedDescription' : 'engine.draftConflict.description', locale, vars)}
               </AlertDialogDescription>
             </div>
           </div>

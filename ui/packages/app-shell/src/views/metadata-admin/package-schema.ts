@@ -7,7 +7,7 @@
  * {@link ./page-schema} / view-schema / report-schema.
  *
  * Why: package create / edit / view used to be THREE hand-rolled forms
- * (CreatePackageDialog, EditPackageDialog, BuilderLanding's inline form) with
+ * (CreatePackageDialog, EditPackageDialog, the old Studio home's inline form) with
  * two DIFFERENT id regexes — a package created via one surface was rejected by
  * another, and neither matched what the server accepts. Rendering the
  * spec-derived form through {@link SchemaForm} gives one field definition and

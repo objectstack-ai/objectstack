@@ -9,9 +9,36 @@ export { brandingSettingsManifest } from './branding.manifest.js';
 export { storageSettingsManifest, storageTestActionHandler } from './storage.manifest.js';
 export {
   aiSettingsManifest,
+  aiEmbedderSettingsSpecifiers,
+  withAiEmbedderSection,
   aiTestActionHandler,
   aiTestEmbedderActionHandler,
+  aiProviderTestActionHandler,
+  aiProviderTestActionHandlers,
 } from './ai.manifest.js';
+export {
+  AI_PROVIDERS,
+  AI_MODEL_RULE_KEYS,
+  AI_MODEL_RULE_COPY,
+  aiModelRuleCopy,
+  aiModelRuleBreaches,
+  aiModelRuleRefusal,
+  aiModelRulePredicate,
+  aiProviderModels,
+  isAiProviderEnabled,
+  parseAiModelList,
+  registerAiModelRules,
+  resolveAiModelConfiguration,
+  type AiProviderId,
+  type AiProviderModels,
+  type AiModelChoice,
+  type AiModelConfiguration,
+  type AiModelRule,
+  type AiModelRuleBreach,
+  type AiModelRuleCopy,
+  type AiModelRuleHost,
+  type AiSettingReader,
+} from './ai-models.js';
 export { knowledgeSettingsManifest, knowledgeTestActionHandler } from './knowledge.manifest.js';
 export { localizationSettingsManifest } from './localization.manifest.js';
 export { companySettingsManifest } from './company.manifest.js';
@@ -23,11 +50,18 @@ import { smsSettingsManifest } from './sms.manifest.js';
 import { brandingSettingsManifest } from './branding.manifest.js';
 import { storageSettingsManifest } from './storage.manifest.js';
 import { aiSettingsManifest } from './ai.manifest.js';
-import { knowledgeSettingsManifest } from './knowledge.manifest.js';
 import { localizationSettingsManifest } from './localization.manifest.js';
 import { companySettingsManifest } from './company.manifest.js';
 
-/** Convenience aggregate — pass to `SettingsServicePlugin({ manifests })`. */
+/**
+ * Convenience aggregate — pass to `SettingsServicePlugin({ manifests })`.
+ *
+ * The knowledge base is not here, and neither is the `ai` namespace's embedder
+ * section: both configure `@objectstack/service-knowledge`, which contributes
+ * them (with their Setup entry and their two actions) when it is mounted, so a
+ * deployment without that service offers no knowledge settings at all.
+ * `knowledgeSettingsManifest` stays exported for that contribution.
+ */
 export const builtinSettingsManifests = [
   brandingSettingsManifest,
   companySettingsManifest,
@@ -38,5 +72,4 @@ export const builtinSettingsManifests = [
   smsSettingsManifest,
   storageSettingsManifest,
   aiSettingsManifest,
-  knowledgeSettingsManifest,
 ];

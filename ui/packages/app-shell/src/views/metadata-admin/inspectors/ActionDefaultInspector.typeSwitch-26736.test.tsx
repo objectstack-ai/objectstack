@@ -32,6 +32,9 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector, TYPE_SCOPED_KEYS } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
@@ -83,7 +86,7 @@ const SCRIPT_ACTION: Draft = {
   name: 'invoice_sync',
   label: 'Sync',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };
@@ -180,6 +183,9 @@ describe('typeSwitchPin — TYPE_SCOPED_KEYS matches the spec (objectstack#26736
   const base = (type: string): Draft =>
     type === 'script'
       ? { name: 'probe', label: 'Probe', type, body: { language: 'expression', source: 'true' } }
+      : type === 'ask_ai'
+      // ADR-0160 D7: `ask_ai` takes no target, so its minimal action has none.
+      ? { name: 'probe', label: 'Probe', type }
       : { name: 'probe', label: 'Probe', type, target: type === 'url' ? 'https://example.com' : 'probe_target' };
   const SAMPLE: Record<string, unknown> = {
     body: { language: 'expression', source: 'true' },

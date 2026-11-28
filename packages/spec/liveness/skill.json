@@ -58,6 +58,13 @@
       "evidence": "packages/mcp/src/skill-prompts.ts#projectSkillPrompt — a row declaring false is never projected, so registerSkillPrompts (the per-request HTTP prompt surface and any host server that calls it) and MCPServerRuntime.bridgePrompts (the long-lived stdio server) neither list nor get it, whatever its tools binding.",
       "note": "the owner's opt-out of MCP prompt projection: false = written for the in-product agents only (their tools, their approval card). Absent or true = offered as before, where the server serves the bound tools. The cloud agent runtime does not read it; resolution, binding and activation are unchanged."
     },
+    "context": {
+      "status": "live",
+      "verifiedAt": "2026-11-26",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/mcp/src/skill-prompts.ts#skillPromptRecordContext — resolves the skill's pack name by ADR-0150 D3 from the skill's package and, when it names a pack, the prompt lists one optional recordId argument and skillPromptResult answers a given id with the fixed get_record_context line and the call's arguments as one JSON object (objectName, recordId, context); packages/lint/src/validate-ai-tool-references.ts#validateAiSkillContext — a name that resolves to no pack is reported (ai-skill-context-unknown).",
+      "note": "ADR-0160 D8: the context pack the skill works from. Parse requires get_record_context in tools, so skillBindingServed withholds the skill's prompt on a connection that does not serve the tool; the long-lived stdio server, which has no binding filter, offers the record argument only where it registers the tool. The cloud in-app runtime (row 9) is its second reader and lands there (carrier: cloud)."
+    },
     "active": {
       "status": "live",
       "verifiedAt": "2026-09-15",

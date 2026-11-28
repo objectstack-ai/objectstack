@@ -56,6 +56,14 @@ const REPO_ROOT = decodeURIComponent(new URL(import.meta.url).pathname)
   .slice(0, -SELF_DEPTH_BELOW_REPO_ROOT)
   .join('/');
 
+// The shared inline-edit session this file pins is entered by a double-click
+// on a value of the record page's sectioned face, which carries this title.
+// That is the face at this config's 1280 px window, where the sidebar now
+// starts expanded (objectstack#36112). The field-list face (the pinned left
+// column on a wider page, objectstack#36147) titles a value "Click to edit",
+// and a click there edits that one field in place and saves it alone, with no
+// session and no save bar (objectstack#36475): not what this file pins
+// (objectstack#36321).
 const EDIT_HINT = 'Double-click to edit';
 
 function authToken(): string {
@@ -261,7 +269,7 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
   await expect(approvalTag, 'the header names the locking approval').toBeVisible();
   await expect(approvalTag, 'the approval tag carries the lock').toHaveAttribute('data-record-approval-locked', '');
 
-  // …and a double-click on the (former) budget field must NOT open a session.
-  await budgetGroupOnPage().dblclick();
+  // …and a click on the (former) budget field must NOT open a session.
+  await budgetGroupOnPage().click();
   await expect(saveBtn).toBeHidden();
 });

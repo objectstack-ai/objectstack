@@ -198,7 +198,7 @@
       "title": "Report drill-through scopes the drilled list to the exact bucket range",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -218,7 +218,7 @@
         "capture the drill request for the month click, including its date bounds",
         "count the rows in each drilled list (page through if paginated) and compare to the bucket's aggregate",
         "click a cell in showcase_status_priority_matrix (status × priority) and verify the drilled list is scoped by BOTH dimensions",
-        "screenshot the drill drawer each time (drill opens in-place as a drawer by default — chart.zod.ts drill target enum drawer|dialog|navigate)"
+        "screenshot the drill dialog each time (on a desktop a report or dataset-widget drill opens a centred, non-modal dialog over the standard list, its conditions as labelled chips — objectstack#36256, objectstack#36461; ReportView.tsx and DatasetWidget.tsx pass target \"dialog\", whatever chart.zod.ts's drill target default reads)"
       ],
       "acceptance": [
         {
@@ -246,10 +246,10 @@
           "evidence": "the two counts"
         },
         {
-          "clause": "the drilled list opens in the drawer (default drill target) with the clicked category as its heading context",
+          "clause": "the drilled list opens in a centred dialog (not a side drawer; nothing behind it dimmed or blurred) with the clicked category as its heading context and the drill's conditions as labelled filter chips on the list's toolbar (objectstack#36256, objectstack#36461)",
           "oracle": "screenshot",
-          "verify": "drawer screenshot shows the drilled records and a heading matching the clicked bucket's label",
-          "evidence": "drawer screenshot"
+          "verify": "at 1280×800 the dialog screenshot shows the drilled records, a heading matching the clicked bucket's label and a chip naming the clicked bucket's condition; the dialog is the centred one (ui/packages/plugin-dashboard/src/DrillDownDrawer.tsx's target 'dialog' branch, data-testid drill-down-dialog), not a full-height side sheet",
+          "evidence": "dialog screenshot"
         }
       ],
       "negative": [
@@ -262,7 +262,7 @@
       "source": [
         "#3358 §3",
         "#3415",
-        "packages/spec/src/ui/chart.zod.ts (drill semantics: derived filter from clicked category, target enum, drawer default)",
+        "packages/spec/src/ui/chart.zod.ts (drill semantics: derived filter from clicked category, target enum; its drawer default is not what the report and dataset-widget drills open, see objectstack#36256)",
         "packages/spec/src/ui/dashboard.zod.ts (ADR-0021 dataset-bound drill derives target+filter from the dataset row)",
         "examples/app-showcase/src/ui/reports/index.ts (drilldown: true on all four reports)"
       ],
@@ -278,6 +278,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-24",
+          "change": "steps[6], the clause acceptance[4] and the chart.zod.ts source line follow #36256 and #36461: on a desktop a report or dataset-widget drill opens a centred, non-modal dialog over the standard list with the drill's conditions as labelled chips, not the side drawer the clause read (milestone acceptance #37022 found the dialog on main 305fe60e; ReportView.tsx and DatasetWidget.tsx pass target 'dialog', DrillDownDrawer.tsx draws it). The source line no longer names chart.zod.ts's drawer default as what this drill opens",
+          "ref": "#37035"
         }
       ]
     },
@@ -700,7 +706,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -711,7 +717,7 @@
         "requires": [
           "the Revenue Pulse dashboard (showcase_revenue_pulse) — the framework#2501 acceptance fixture: one dateRange (default field issued_on) + one region filter (default field region) driving invoice AND account widgets, account widgets re-mapping via filterBindings (dateRange→signed_on, region→sales_region), one KPI opted out of both (filterBindings false) as the all-time reference",
           "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)",
-          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages with the body {id, name, version: '0.1.0', type: 'app'}: the manifest is strict, so a `label` key is refused as unrecognized, and `type` is required) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG): the Studio Interfaces pillar IS the app navigation tree (objectui app-shell StudioDesignSurface.tsx: \"Interfaces: the real App navigation tree\"), so a package with no app shows no dashboard to select (QA run #24573); D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. A scratch dashboard that carries Revenue Pulse's global filters gives each account-bound widget a filterBindings for them (e.g. dateRange→signed_on, region: false) before its first save: a widget the issued_on / region defaults cannot reach is refused 422 dashboard-filter-field-unknown. Delete the scratch package at teardown"
+          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages with the body {id, name, version: '0.1.0', type: 'app'}: the manifest is strict, so a `label` key is refused as unrecognized, and `type` is required) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG), so the dashboard opens in the running app, where its design mode is the authoring door since Studio's Interfaces pillar (which reached a dashboard only through an app's navigation, QA run #24573) retired with #36502; D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. A scratch dashboard that carries Revenue Pulse's global filters gives each account-bound widget a filterBindings for them (e.g. dateRange→signed_on, region: false) before its first save: a widget the issued_on / region defaults cannot reach is refused 422 dashboard-filter-field-unknown. Delete the scratch package at teardown"
         ]
       },
       "steps": [
@@ -840,7 +846,8 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[2] names the scratch package body POST /api/v1/packages takes ({id, name, version, type}; 'label' is refused) and the filterBindings a scratch dashboard needs before its first save (else 422 dashboard-filter-field-unknown) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 71). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
-        }
+        },
+        { "revision":  7, "date":  "2026-11-24", "change":  "fixtures.requires[2]: D2's authoring door is the running app's design mode, since Studio's Interfaces pillar retired with #36502; the app that carries the dashboard stays, now to open it in the app. No clause changed", "ref":  "#36502" }
       ]
     },
     {
@@ -1381,10 +1388,10 @@
     },
     {
       "id": "dashboards.report-measure-drill-scope",
-      "title": "A report drill lists exactly the records its measure counted: the dataset answer names each measure's drill scope, a derived measure gets none, and the drawer and its Open in list carry the scope with the bucket",
+      "title": "A report drill lists exactly the records its measure counted: the dataset answer names each measure's drill scope, a derived measure gets none, and the drill dialog and its Open in list carry the scope with the bucket",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -1401,8 +1408,8 @@
       "steps": [
         "POST /api/v1/analytics/dataset/query { datasetName: 'showcase_task_metrics', selection: { dimensions: ['status'], measures: ['task_count', 'est_hours', 'done_count', 'done_rate'] } }; read the answer's drillScopes",
         "open the report Hours by Status (Summary) in the console; click the row of a status S that holds a task with no estimate",
-        "read the drawer's record request and count; then GET /api/v1/data/showcase_task with filter status = S, and again with estimate_hours not null",
-        "click the drawer's Open in list; read the URL and the list's count"
+        "read the drill dialog's record request and count; then GET /api/v1/data/showcase_task with filter status = S, and again with estimate_hours not null",
+        "click the drill dialog's Open in list; read the URL and the list's count"
       ],
       "acceptance": [
         {
@@ -1412,20 +1419,20 @@
           "evidence": "the answer body"
         },
         {
-          "clause": "the drawer lists the bucket AND the measure scope, so its count matches the number clicked",
+          "clause": "the drill dialog (the centred dialog over the standard list, objectstack#36256 and objectstack#36461, not the side drawer) lists the bucket AND the measure scope, so its count matches the number clicked",
           "oracle": "network",
-          "verify": "the drawer's record request filters status = S and estimate_hours $null false; its count equals the second read (status S with an estimate set), which is lower than the status-only read (ui/packages/plugin-report/src/measureDrillScope.ts#scopeDrillFilter, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer)",
-          "evidence": "the drawer request, its count and the two reads"
+          "verify": "the drill dialog's record request filters status = S and estimate_hours $null false; its count equals the second read (status S with an estimate set), which is lower than the status-only read (ui/packages/plugin-report/src/measureDrillScope.ts#scopeDrillFilter, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer)",
+          "evidence": "the dialog's request, its count and the two reads"
         },
         {
           "clause": "Open in list carries the same scope, because the list route can write it exactly",
           "oracle": "dom",
-          "verify": "the list URL is /apps/<app>/showcase_task/data with filter[status]=S and filter[estimate_hours][null]=false, and the list shows the drawer's count (ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter)",
+          "verify": "the list URL is /apps/<app>/showcase_task/data with filter[status]=S and filter[estimate_hours][null]=false, and the list shows the dialog's count (ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter)",
           "evidence": "the URL and the list count"
         }
       ],
       "negative": [
-        "a drawer or list that shows every task of status S, the estimate-less one included, is a FAIL: it lists a superset of what the measure summed",
+        "a drill dialog or list that shows every task of status S, the estimate-less one included, is a FAIL: it lists a superset of what the measure summed",
         "a drill offered on a derived measure is a FAIL: no single record set is behind its number"
       ],
       "traps": [
@@ -1450,6 +1457,12 @@
           "date": "2026-11-10",
           "change": "initial — the per-measure drill scope on report drills and Open in list (#30651, #30735). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
           "ref": "#32270"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-24",
+          "change": "the title, steps[2] and [3], the clauses acceptance[1] and acceptance[2] and negative[0] follow #36256 and #36461: the report drill opens a centred dialog over the standard list with labelled chips, not the drawer they read (milestone acceptance #37022 on main 305fe60e; ReportView.tsx passes target 'dialog'). What the dialog must list, the bucket AND the measure scope, is unchanged",
+          "ref": "#37035"
         }
       ]
     },

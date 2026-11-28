@@ -38,6 +38,7 @@ import { datasourceDriverMongoToMongodb } from './entries/17/datasource-driver-m
 import { retryPolicyConverged } from './entries/17/retry-policy-converged.js';
 import { pageHeaderSubtitleAlias } from './entries/17/page-header-subtitle-alias.js';
 import { inlineActionApiParamsToBodyExtra } from './entries/17/inline-action-api-params-to-body-extra.js';
+import { fieldInlineEditBooleanRemoved } from './entries/18/field-inline-edit-boolean-removed.js';
 import { fieldMalformedScalePrecisionRemoved } from './entries/18/field-malformed-scale-precision-removed.js';
 import { permissionSetManagedByRemoved } from './entries/18/permission-set-managed-by-removed.js';
 import { personalViewDeclarationsRemoved } from './entries/18/view-personal-declarations-removed.js';
@@ -71,6 +72,7 @@ import { objectExternalSharingModelRemoved } from './entries/18/object-external-
 import { objectGridDefaultFiltersRemoved } from './entries/18/object-grid-default-filters-removed.js';
 import { objectGridDefaultSortRemoved } from './entries/18/object-grid-default-sort-removed.js';
 import { objectGridResizableColumnsRemoved } from './entries/18/object-grid-resizable-columns-removed.js';
+import { objectGridSingleClickEditRemoved } from './entries/18/object-grid-single-click-edit-removed.js';
 import { objectKanbanQuickAddRemoved } from './entries/18/object-kanban-quick-add-removed.js';
 import { pageHeaderBreadcrumbRemoved } from './entries/18/page-header-breadcrumb-removed.js';
 import { pageHeaderShowStarRemoved } from './entries/18/page-header-show-star-removed.js';
@@ -120,6 +122,7 @@ import { actionAriaRemoved } from './entries/18/action-aria-removed.js';
 import { dashboardWidgetChartConfigStructureRemoved } from './entries/18/dashboard-widget-chart-config-structure-removed.js';
 import { objectMasterDetailFormDetailSortFieldRemoved } from './entries/18/object-master-detail-form-detail-sort-field-removed.js';
 import { objectTenancyOrganizationFieldRemoved } from './entries/18/object-tenancy-organization-field-removed.js';
+import { viewColumnStateRemoved } from './entries/18/view-column-state-removed.js';
 import { viewItemOwnerHiddenRemoved } from './entries/18/view-item-owner-hidden-removed.js';
 import { viewOverlayOwnerHiddenRemoved } from './entries/18/view-overlay-owner-hidden-removed.js';
 import { viewListFilterableFieldsRemoved } from './entries/18/view-list-filterable-fields-removed.js';
@@ -133,6 +136,14 @@ import { currencyConfigPrecisionRemoved } from './entries/18/currency-config-pre
 import { permissionModifyAllAllowDeleteFalseToTrue } from './entries/18/permission-modify-all-allow-delete-false-to-true.js';
 import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-removed.js';
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
+// Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
+// identifier order.
+import { actionLocationsActedOn } from './entries/19/action-locations-acted-on.js';
+import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
+import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
+import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
+import { knowledgeSourceInertKeysRemoved } from './entries/19/knowledge-source-inert-keys-removed.js';
+import { permissionViewAllFieldsBesideRecordBypass } from './entries/19/permission-view-all-fields-beside-record-bypass.js';
 
 /**
  * One conversion of an OPEN major, with its place in that major's application
@@ -228,6 +239,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: elementTextVariantHeadingLevels, order: 59 },
   { conversion: emailTemplateCategoryIsSystemRemoved, order: 62 },
   { conversion: fieldColumnListsCanonicalized, order: 6 },
+  { conversion: fieldInlineEditBooleanRemoved, order: 84 },
   { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
   { conversion: fieldReferenceToAlias, order: 18 },
   { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
@@ -252,6 +264,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectGridDefaultFiltersRemoved, order: 35.5 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },
+  { conversion: objectGridSingleClickEditRemoved, order: 83 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
@@ -288,11 +301,35 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: translationWidgetSubCaptionRemoved, order: 55 },
   { conversion: tursoConfigEncryptionKeyRemoved, order: 74 },
   { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewColumnStateRemoved, order: 83 },
   { conversion: viewItemOwnerHiddenRemoved, order: 37 },
   { conversion: viewListFilterableFieldsRemoved, order: 71 },
   { conversion: viewListTabsRemoved, order: 46 },
   { conversion: viewOverlayOwnerHiddenRemoved, order: 39 },
   { conversion: viewPageMountRemoved, order: 29 },
+];
+
+/**
+ * Major 19's conversions, in {@link MAJOR_18_CONVERSIONS}'s shape and under
+ * its rules: one `{ conversion, order }` entry per conversion, SORTED BY THE
+ * CONVERSION'S IDENTIFIER, `order` saying where it applies (ascending, ties by
+ * `id`). Each is DEFINED in a module of its own, `./entries/19/<id>.ts`, the
+ * file named for its `id`, and imported after every major-18 conversion in
+ * this list's order. Step 19's `conversionIds` read
+ * `CONVERSIONS_BY_MAJOR[19]`, which is this list in `order`.
+ *
+ * The knowledge source's three (ADR-0161 K6) apply in the order rename the
+ * name, rename the content list, drop the inert keys; they touch no type the
+ * permission conversion or the agent's touches, so the ties at `order: 1` and
+ * `order: 2` are settled by `id`.
+ */
+const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: actionLocationsActedOn, order: 3 },
+  { conversion: agentModelProviderRemoved, order: 2 },
+  { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
+  { conversion: knowledgeSourceIdToName, order: 1 },
+  { conversion: knowledgeSourceInertKeysRemoved, order: 3 },
+  { conversion: permissionViewAllFieldsBesideRecordBypass, order: 1 },
 ];
 
 /**
@@ -302,8 +339,9 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  *
  * A released major's list is a plain array, closed with its release. The major
  * that retirements still add to is authored as sorted entries with an explicit
- * `order` ({@link MAJOR_18_CONVERSIONS}), so two retirements in flight do not
- * conflict here; the next major takes the same shape when it opens.
+ * `order` ({@link MAJOR_18_CONVERSIONS}, {@link MAJOR_19_CONVERSIONS}), so two
+ * retirements in flight do not conflict here; the next major takes the same
+ * shape when it opens.
  *
  * ⚠️ EVERY CALL THIS TABLE AND {@link ALL_CONVERSIONS} MAKE AT MODULE LOAD
  * CARRIES AN `@__PURE__` ANNOTATION — a major's `inApplicationOrder(…)` and
@@ -346,6 +384,7 @@ export const CONVERSIONS_BY_MAJOR: Readonly<Record<number, readonly MetadataConv
     inlineActionApiParamsToBodyExtra,
   ],
   18: /* @__PURE__ */ inApplicationOrder(MAJOR_18_CONVERSIONS),
+  19: /* @__PURE__ */ inApplicationOrder(MAJOR_19_CONVERSIONS),
 };
 
 /**

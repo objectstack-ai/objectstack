@@ -422,7 +422,7 @@ describe('redaction amendments (D7)', () => {
 
 describe('expiry amendments (D8)', () => {
   /** Expire org_a's sequence 0 (window 08:00): rows first, then the checkpoint — or stop between the two. */
-  const expire = async (s: Awaited<ReturnType<typeof sealedLedger>>, options: { keep?: string; first?: number; last?: number; digest?: string; removeCheckpoint?: boolean } = {}) => {
+  const expire = async (s: Awaited<ReturnType<typeof sealedLedger>>, options: { keep?: string; first?: number; last?: number; digest?: string; removeCheckpoint?: boolean; coveredTo?: string } = {}) => {
     const cp = s.checkpoint('org:org_a', 0);
     const body = checkpointBodyFromRow(cp);
     await s.amend({
@@ -433,7 +433,7 @@ describe('expiry amendments (D8)', () => {
       first_sequence: options.first ?? 0,
       last_sequence: options.last ?? 0,
       covered_from: body.window_start,
-      covered_to: body.window_end,
+      covered_to: options.coveredTo ?? body.window_end,
       last_removed_digest: options.digest ?? checkpointDigest(body),
       policy: 'archive.keep',
       policy_value: options.keep ?? '7d',
@@ -480,6 +480,25 @@ describe('expiry amendments (D8)', () => {
     s.clock.now = DAY0 + 30 * 24 * H;
     await expire(s, { digest: 'f'.repeat(64) });
     expect(faultKinds(await s.verifyNow())).toEqual(['org:org_a#1:link']);
+  });
+
+  it('never reads a checkpoint of an honoured range expired when its own window ends later than the range covers', async () => {
+    const s = await sealedLedger();
+    s.clock.now = DAY0 + 30 * 24 * H;
+    // Sequences 0–1 of org_a, signed as covering only window 08:00: checkpoint 1 (window 10:00) was not expired by it.
+    await expire(s, { last: 1, digest: checkpointDigest(checkpointBodyFromRow(s.checkpoint('org:org_a', 1))) });
+    const report = await s.verifyNow();
+    expect(faultKinds(report)).toEqual(['org:org_a#1:expiry']);
+    expect(verdicts(report)).toEqual({}); // r4 is judged, and unmodified
+  });
+
+  it('reports an amendment stored under a chain other than its signed organization, as it does a checkpoint', async () => {
+    const s = await sealedLedger();
+    s.clock.now = DAY0 + 30 * 24 * H;
+    await expire(s);
+    const [stored] = s.hot.table('sys_audit_amendment');
+    stored.chain_key = 'org:org_b';
+    expect(faultKinds(await s.verifyNow())).toEqual(['org:org_a#-:chain_key']);
   });
 
   it('never reads a row written back into an expired window as expired: no checkpoint holds it', async () => {

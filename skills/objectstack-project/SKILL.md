@@ -10,10 +10,10 @@ description: >
   `@objectstack/*`. Not for writing metadata (the domain skills) or crossing a
   protocol major (objectstack-upgrade).
 license: Apache-2.0
-compatibility: Requires @objectstack/cli 18.x and @objectstack/verify 18.x; the check lists below are that version's.
+compatibility: Requires @objectstack/cli 19.x and @objectstack/verify 19.x; the check lists below are that version's.
 metadata:
   author: objectstack-ai
-  version: "18.6.0"
+  version: "19.0.0-next.2"
   domain: process
   tags: project, process, testing, verify, release, changeset, upgrade, backfill, platform-gap
 ---

@@ -216,9 +216,9 @@ function serve(answer: () => Promise<unknown>) {
   const fetchMock = vi.fn(async (url: unknown) => {
     if (String(url).endsWith('/api/v1/packages')) {
       const body = await answer();
-      return { ok: true, status: 200, json: async () => body };
+      return { headers: new Headers(), ok: true, status: 200, json: async () => body };
     }
-    return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    return { headers: new Headers(), ok: true, status: 200, json: async () => ({ data: [] }) };
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -262,8 +262,8 @@ async function editAppOn(
 const SETUP_ROUTE = '/apps/com.objectstack.setup/dashboard/system_overview';
 const HOTCRM_ROUTE = '/apps/app.objectstack.hotcrm/dashboard/pipeline';
 const BASE_ROUTE = '/apps/com.example.my_base/dashboard/pipeline';
-const BASE_PENCIL = '/studio/com.example.my_base/interfaces?surface=dashboard:pipeline';
-const HOTCRM_VIEW = '/studio/app.objectstack.hotcrm/interfaces?surface=dashboard:pipeline';
+const BASE_PENCIL = '/studio/com.example.my_base/metadata/dashboard/pipeline';
+const HOTCRM_VIEW = '/studio/app.objectstack.hotcrm/metadata/dashboard/pipeline';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -291,7 +291,7 @@ describe('the app bar\'s Edit app follows the owning package\'s posture (objectu
     mountAt(HOTCRM_ROUTE);
     await settle();
     // ADR-0146 D5 — the eye is named for the app: 「Open {app} in Studio」.
-    expect(screen.getByRole('link', { name: 'Open CRM in Studio' })).toHaveAttribute('href', HOTCRM_VIEW);
+    expect(screen.getByRole('link', { name: 'Open CRM in App Studio' })).toHaveAttribute('href', HOTCRM_VIEW);
   });
 
   it('CONTROL — the pencil for a writable package, deep-linked, and the switcher row to the same target', async () => {
@@ -333,8 +333,8 @@ describe('no verdict, no pencil (objectui#12615)', () => {
   it('a failed list read draws no pencil', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: unknown) =>
       String(url).endsWith('/api/v1/packages')
-        ? { ok: false, status: 403, json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }) }
-        : { ok: true, status: 200, json: async () => ({ data: [] }) },
+        ? { headers: new Headers(), ok: false, status: 403, json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }) }
+        : { headers: new Headers(), ok: true, status: 200, json: async () => ({ data: [] }) },
     ));
     expect(await editAppOn(BASE_ROUTE)).toEqual({ pencil: null, eye: null, switcherRow: '', switcherPosture: '' });
   });
@@ -387,7 +387,7 @@ describe('the read-only entry draws WITH its text, named for the app (objectstac
     const entry = screen.getByTestId('app-view-in-studio-button');
     const words = entry.querySelector('[data-slot="view-in-studio-text"]');
     expect(words).not.toBeNull();
-    expect(words).toHaveTextContent(/^Open CRM in Studio$/);
+    expect(words).toHaveTextContent(/^Open CRM in App Studio$/);
     expect(words).not.toHaveClass('sr-only');
     expect(entry.querySelector('svg')).not.toBeNull();
   });

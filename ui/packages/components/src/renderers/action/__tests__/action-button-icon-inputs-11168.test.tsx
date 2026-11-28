@@ -67,9 +67,11 @@ import {
   useAction,
 } from '@object-ui/react';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
+import { translatePage } from '@objectstack/spec/system';
 import { manifestFromConfigs, validateTree } from '@objectstack/sdui-parser';
 import type { SchemaElement } from '@objectstack/sdui-parser';
 import { buttonVariants } from '../../../ui/button';
+import { toast as sonnerToast } from '../../../ui/sonner';
 // Module-scope side-effect imports: the registry must hold both renderers when
 // `SchemaRenderer` resolves the type, and the light `dom` project does not load
 // the components graph. Module scope, not a `beforeAll`, per AGENTS.md 测试纪律.
@@ -514,7 +516,7 @@ describe.each(BLOCKS)('%s — keys the runner acts on, forwarded by the block', 
   });
 
   it('`locations` members: a record-scoped placement refuses to run with no record in scope', async () => {
-    mount(node(type, { actionType: 'script', locations: ['list_toolbar', 'record_header'] }), {
+    mount(node(type, { actionType: 'script', locations: ['list', 'record_page'] }), {
       handlers: { script: serverAction() },
     });
     press();
@@ -524,7 +526,7 @@ describe.each(BLOCKS)('%s — keys the runner acts on, forwarded by the block', 
     expect(fetchSpy).not.toHaveBeenCalled();
     cleanup();
     // Control: object-level placements only — the same action runs without a record.
-    mount(node(type, { actionType: 'script', locations: ['list_toolbar'] }), {
+    mount(node(type, { actionType: 'script', locations: ['list'] }), {
       handlers: { script: serverAction() },
     });
     press();
@@ -604,5 +606,106 @@ describe('action:button — `size` publishes the five sizes the spec row declare
       expect(diagnoseCodes({ type: 'action:button', size }), `validator refuses size ${size}`).not.toContain('invalid-enum');
     }
     expect(diagnoseCodes({ type: 'action:button', size: 'xl' })).toContain('invalid-enum');
+  });
+});
+
+describe('action:button — a non-string label renders no text and never throws (#36717)', () => {
+  // The contract's `label` is `z.string()`, localized through the translation
+  // bundle entry for the component id. A locale map reaches the renderer only
+  // from metadata that skipped `validateComponentProps`; it must not
+  // white-screen the page, print `[object Object]`, or be translated.
+  const LOCALE_MAP = { en: 'Buy credits', 'zh-CN': '购买额度' };
+
+  it('an object label renders the button with no text, and a development warning fires once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mount(node('action:button', { id: 'label_guard_object', label: LOCALE_MAP, icon: undefined }));
+      const button = screen.getByRole('button');
+      expect(button.textContent).toBe('');
+      expect(document.body.textContent).not.toContain('[object Object]');
+      expect(document.body.textContent).not.toContain('购买额度');
+      expect(document.body.textContent).not.toContain('Buy credits');
+      cleanup();
+      // The same component again: still no throw, and no second warning.
+      mount(node('action:button', { id: 'label_guard_object', label: LOCALE_MAP, icon: undefined }));
+      expect(screen.getByRole('button').textContent).toBe('');
+      const labelWarnings = warn.mock.calls.filter((args) => String(args[0]).includes('non-string label'));
+      expect(labelWarnings).toHaveLength(1);
+      expect(String(labelWarnings[0][0])).toContain('label_guard_object');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object label still runs the action, and the runner is handed no label', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      mount(node('action:button', { id: 'label_guard_press', label: LOCALE_MAP }));
+      press();
+      await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+      expect((run.mock.calls[0][0] as ActionDef).label).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('an object label never reaches the auto-trigger refusal notice', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const notice = vi.spyOn(sonnerToast, 'warning').mockImplementation(() => 'id');
+    try {
+      // `SchemaRenderer`'s node gate hides the node before the renderer mounts, so
+      // the refusal path is reached the way `action:bar` reaches it: the renderer
+      // mounted directly, its own `visible` gate failing.
+      const Renderer = ComponentRegistry.get('action:button') as React.ComponentType<Record<string, unknown>>;
+      render(
+        <ActionProvider handlers={{ run }} onToast={toast} onNavigate={nav} onConfirm={confirm}>
+          <PredicateScopeProvider scope={{ data: DATA }}>
+            <Renderer
+              schema={{ ...node('action:button', { label: LOCALE_MAP, autoTrigger: true, visible: false }) }}
+              data-obj-id="label_guard_auto"
+            />
+          </PredicateScopeProvider>
+        </ActionProvider>,
+      );
+      await waitFor(() => expect(notice).toHaveBeenCalledTimes(1));
+      const [message, options] = notice.mock.calls[0] as [unknown, { id?: string } | undefined];
+      expect(String(message)).not.toContain('[object Object]');
+      expect(String(message)).toContain('probe_action');
+      expect(String(options?.id)).not.toContain('[object Object]');
+      expect(warn.mock.calls.some((args) => String(args[0]).includes('[object Object]'))).toBe(false);
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      notice.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it('CONTROL: a string label renders as written, and the runner is handed it', async () => {
+    mount(node('action:button', { id: 'label_guard_string', label: 'Buy credits' }));
+    expect(screen.getByRole('button')).toHaveTextContent('Buy credits');
+    press();
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect((run.mock.calls[0][0] as ActionDef).label).toBe('Buy credits');
+  });
+
+  it('CONTROL: a string label translated through the bundle key for its component id renders translated', () => {
+    const page = {
+      name: 'billing',
+      label: 'Billing',
+      type: 'app' as const,
+      regions: [
+        {
+          name: 'main',
+          components: [
+            { id: 'buy_credits', type: 'action:button', properties: { label: 'Buy credits', actionType: 'run' } },
+          ],
+        },
+      ],
+    };
+    const bundle = { 'zh-CN': { pages: { billing: { components: { buy_credits: { label: '购买额度' } } } } } };
+    const translated = translatePage(page, bundle as never, { locale: 'zh-CN' });
+    const component = translated.regions[0].components[0] as Record<string, unknown>;
+    mount(component);
+    expect(screen.getByRole('button')).toHaveTextContent('购买额度');
   });
 });

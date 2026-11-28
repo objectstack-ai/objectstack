@@ -28,7 +28,7 @@ import {
 // `IApprovalService.openNodeRequest` declares for its context parameter since
 // commit aa4b90d9a (the full-envelope ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ApprovalService } from './approval-service.js';
+import type { ApprovalRecordRun, ApprovalRootRun, ApprovalService } from './approval-service.js';
 import { registerApprovalReviseNode } from './approval-revise-node.js';
 
 /** Minimal surface of the automation engine this provider depends on. */
@@ -53,6 +53,21 @@ export interface ApprovalAutomationSurface {
   resume?(runId: string, signal?: { output?: Record<string, unknown>; branchLabel?: string }): Promise<unknown>;
   /** [#31696] The key the run `context`'s flow is filed under (`AutomationEngine.flowKeyOfRun`). */
   flowKeyOfRun?(context: unknown): string | undefined;
+  /**
+   * [ADR-0162 Execution item 7] The root run of the run `context` belongs to
+   * (`AutomationEngine.rootRunOf`): the run its tree was started on, at any
+   * depth. `undefined` means the engine could not place the run in its tree;
+   * the request it opens then records no root run, as on an engine without
+   * this member.
+   */
+  rootRunOf?(context: unknown): ApprovalRootRun | undefined;
+  /**
+   * [ADR-0162 Execution item 7] The run that carries the record of the run
+   * `context` belongs to (`AutomationEngine.recordRunOf`): the root run, or a
+   * `map` item run whose item is a record. `undefined` exactly where
+   * {@link rootRunOf} is.
+   */
+  recordRunOf?(context: unknown): ApprovalRecordRun | undefined;
 }
 
 interface MinimalLogger {
@@ -179,6 +194,17 @@ export function registerApprovalNode(
       if (!object) return { success: false, error: `Approval node '${node.id}': no target object in context` };
       if (!recordId) return { success: false, error: `Approval node '${node.id}': no record id in $record` };
 
+      // [ADR-0162 Execution item 7] The run's root run and record run,
+      // recorded on the request it opens. An engine that has none for this run
+      // (it could not read the run's tree whole: a run parked before runs
+      // recorded their root run, whose parent is no longer parked, or a child
+      // of one) and an engine that hands none (`rootRunOf` absent) both leave
+      // the columns empty: the step opens as it did before, and ADR-0162's
+      // checks treat its request as one that records no root run (not judged
+      // at open, down the order at abandonment).
+      const rootRun = automation.rootRunOf?.(context) ?? null;
+      const recordRun = automation.recordRunOf?.(context) ?? null;
+
       // Flow identity comes from engine-seeded variables (`$flowName` /
       // `$flowLabel`) so the request row can carry a human-readable origin;
       // `context.flowName` is a legacy fallback for direct callers.
@@ -209,6 +235,14 @@ export function registerApprovalNode(
           // The node object this run executes: a step naming the platform
           // administrators opens only when it belongs to the armed body.
           node,
+          // [#35863] Whether this run is the record's whole approval run or a
+          // child of another (a `subflow` body or a `map` item: the engine
+          // links those upward by `$parentRunId`). A child run's end is not
+          // the end of the record's approval, so a decided route may say
+          // "ended" only for a root run's request.
+          runRoot: !hasParentRun(context),
+          rootRun,
+          recordRun,
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,
@@ -255,4 +289,14 @@ export function registerApprovalNode(
   });
 
   logger?.info?.('[approvals] approval node executor registered');
+}
+
+/**
+ * [#35863] Whether `context` is a child run's: the engine starts a `subflow`
+ * body or a `map` item with the parent's run id as `$parentRunId`. Read the
+ * way the engine's own readers read it (a non-empty string).
+ */
+function hasParentRun(context: unknown): boolean {
+  const parent = (context as { $parentRunId?: unknown } | undefined)?.$parentRunId;
+  return typeof parent === 'string' && parent !== '';
 }

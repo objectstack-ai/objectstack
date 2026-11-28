@@ -5,7 +5,7 @@
  * and its Source filter (objectui#12675, objectui#12790; ruling B on
  * objectstack#23892).
  *
- * Setup's Packages is the ONE list of what is installed, so each row says
+ * The Packages page is the ONE list of what is installed, so each row says
  * which of three origins it has. The set is CLOSED: `code` / `marketplace` /
  * `authored`, and nothing else is ever drawn.
  *
@@ -65,15 +65,41 @@ export const PACKAGE_SOURCES = ['code', 'marketplace', 'authored'] as const sati
  */
 export const PACKAGES_SOURCE_PARAM = 'source';
 
+/**
+ * The Packages page's face, spelled as ONE URL query param (objectstack#36834).
+ *
+ * `?face=admin` opens the ADMINISTRATION face: every package of every source,
+ * a Source filter, enable / disable, delete and New Package (which lands in
+ * Studio on the new package) — and none of the authoring actions. Setup's
+ * "Packages" nav item reaches it by declaring
+ * `{ type: 'component', componentRef: 'developer:packages', params: { face: 'admin' } }`.
+ * With no `face` the page is the development surface Studio opens (the
+ * landing's "All packages" link), every action on it.
+ *
+ * The one value is {@link PACKAGES_ADMIN_FACE}; anything else is refused by
+ * name, as an unknown Source is. Page-local, like {@link PACKAGES_SOURCE_PARAM}.
+ */
+export const PACKAGES_FACE_PARAM = 'face';
+
+/** The one value {@link PACKAGES_FACE_PARAM} takes. */
+export const PACKAGES_ADMIN_FACE = 'admin';
+
+/** Which face of the Packages page is drawn. */
+export type PackagesFace = 'admin' | 'development';
+
 export type PackageSourceRefusalCode =
   /** The row's served `source` is absent, or outside {@link PACKAGE_SOURCES}. */
   | 'PACKAGE_SOURCE_UNKNOWN'
   /** `?source=` names a value outside {@link PACKAGE_SOURCES}. */
   | 'PACKAGE_SOURCE_FILTER_UNKNOWN'
   /** `?source=` appears more than once. */
-  | 'PACKAGE_SOURCE_FILTER_REPEATED';
+  | 'PACKAGE_SOURCE_FILTER_REPEATED'
+  /** `?face=` names a value other than {@link PACKAGES_ADMIN_FACE}. */
+  | 'PACKAGES_FACE_UNKNOWN'
+  /** `?face=` appears more than once. */
+  | 'PACKAGES_FACE_REPEATED';
 
-/** A refusal at the Source boundary, naming what it refused. */
+/** A refusal at the page's URL boundary (its Source and its face), naming what it refused. */
 export class PackageSourceRefusal extends Error {
   readonly code: PackageSourceRefusalCode;
   /** The package id, or the filter value(s), the refusal is about. */
@@ -128,8 +154,77 @@ export function readSourceFilter(values: readonly string[]): PackageSource | nul
   return value;
 }
 
+/**
+ * The face the URL asks for. Throws {@link PackageSourceRefusal} for a value
+ * other than {@link PACKAGES_ADMIN_FACE} or a repeated param.
+ *
+ * With no `face`, a `?source=marketplace` URL is the administration face too:
+ * that is the address Setup's retired "Installed Apps" entry opened, already
+ * the administrator's view of this list, and bookmarks and the marketplace
+ * page's "Installed" button still send it (objectstack#36834). Every other URL
+ * without `face` is the development surface.
+ *
+ * @param faceValues every occurrence of {@link PACKAGES_FACE_PARAM}.
+ * @param source the Source filter already read from the same URL.
+ */
+export function readPackagesFace(faceValues: readonly string[], source: PackageSource | null): PackagesFace {
+  if (faceValues.length > 1) {
+    throw new PackageSourceRefusal('PACKAGES_FACE_REPEATED', faceValues.join(', '));
+  }
+  if (faceValues.length === 1) {
+    const [value] = faceValues;
+    if (value !== PACKAGES_ADMIN_FACE) throw new PackageSourceRefusal('PACKAGES_FACE_UNKNOWN', value);
+    return 'admin';
+  }
+  return source === 'marketplace' ? 'admin' : 'development';
+}
+
 /** The Packages route, optionally filtered to one Source. */
 export function packagesHref(basePath: string, source?: PackageSource): string {
   const path = `${basePath}/component/developer/packages`;
   return source ? `${path}?${PACKAGES_SOURCE_PARAM}=${source}` : path;
+}
+
+/**
+ * The administration face's new-package deep link, spelled as ONE URL query
+ * param (objectstack#36908): `?new=package` opens New Package on arrival, read
+ * once and dropped from the address, so a refresh or Back does not open it a
+ * second time. Page-local, like {@link PACKAGES_SOURCE_PARAM}.
+ */
+export const PACKAGES_NEW_PARAM = 'new';
+
+/** The one value {@link PACKAGES_NEW_PARAM} takes. */
+export const PACKAGES_NEW_PACKAGE_VALUE = 'package';
+
+/**
+ * Setup → Packages (objectstack#36834): the package list's administration
+ * face, hosted under the Setup app's address. Studio's entries that name no
+ * package land here since the Studio home was removed (objectstack#36908,
+ * epic decision 9): `/studio` with no remembered package, a package Studio
+ * cannot find, and a retired Setup page whose URL names none.
+ */
+export const SETUP_PACKAGES_PATH = `${packagesHref('/apps/setup')}?${PACKAGES_FACE_PARAM}=${PACKAGES_ADMIN_FACE}`;
+
+/**
+ * Setup → Packages with New Package open (objectstack#36908): the console's
+ * new-package doors (Home's and the `/ai` screen's 「New blank app」, the
+ * 「Add app」 menu). The create lands in Studio on the new package.
+ */
+export const SETUP_NEW_PACKAGE_PATH = `${SETUP_PACKAGES_PATH}&${PACKAGES_NEW_PARAM}=${PACKAGES_NEW_PACKAGE_VALUE}`;
+
+/**
+ * The administration face opened on one package's row (objectstack#37139):
+ * `?package=ID` opens that package's detail sheet once the list has loaded,
+ * read once and dropped from the address like {@link PACKAGES_NEW_PARAM}.
+ * Page-local, like {@link PACKAGES_SOURCE_PARAM}.
+ */
+export const PACKAGES_PACKAGE_PARAM = 'package';
+
+/**
+ * Setup → Packages on one package's row (objectstack#37139): Studio's package
+ * menu's 「Manage in Setup…」, where the package is enabled, disabled or
+ * deleted.
+ */
+export function setupPackagePath(packageId: string): string {
+  return `${SETUP_PACKAGES_PATH}&${PACKAGES_PACKAGE_PARAM}=${encodeURIComponent(packageId)}`;
 }

@@ -17,11 +17,17 @@ import { describe, it, expect } from 'vitest';
 import React from 'react';
 import { render } from '@testing-library/react';
 import { OBJECT_COLORS } from '@objectstack/spec/data';
-import { ObjectIconTile, OBJECT_COLOR_TILE_CLASS, objectColorOrDefault } from '../custom/object-icon-tile';
+import {
+  ObjectIconTile,
+  NeutralIconTile,
+  OBJECT_COLOR_TILE_CLASS,
+  NEUTRAL_ICON_TILE_CLASS,
+  objectColorOrDefault,
+} from '../custom/object-icon-tile';
 
 /** Tailwind v4's default palette, in the sRGB hex its docs publish, for the shades the tile uses. */
 const HEX: Record<string, string> = {
-  'gray-500': '#6b7280',
+  'gray-200': '#e5e7eb', 'gray-500': '#6b7280', 'gray-700': '#374151',
   'blue-500': '#3b82f6', 'blue-600': '#2563eb',
   'teal-600': '#0d9488',
   'green-600': '#16a34a',
@@ -38,6 +44,10 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 const contrastWithWhite = (hex: string) => 1.05 / (luminance(hex) + 0.05);
+const contrast = (a: string, b: string) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
 
 describe('objectstack#35985 — ObjectIconTile', () => {
   it('has exactly one light and one dark background per palette name', () => {
@@ -88,5 +98,47 @@ describe('objectstack#35985 — ObjectIconTile', () => {
     rerender(<ObjectIconTile icon="users" title="Accounts" />);
     expect(container.firstElementChild!.getAttribute('role')).toBe('img');
     expect(container.firstElementChild!.getAttribute('aria-label')).toBe('Accounts');
+  });
+});
+
+describe('objectstack#36141 — NeutralIconTile', () => {
+  it('is a light grey square with a dark grey glyph, one value per theme, at 4.5:1 or better', () => {
+    const classes = NEUTRAL_ICON_TILE_CLASS.split(' ');
+    const pick = (re: RegExp) => classes.filter((c) => re.test(c)).map((c) => c.replace(/^(dark:)?(bg|text)-/, ''));
+    const [bg] = pick(/^bg-/);
+    const [fg] = pick(/^text-/);
+    const [darkBg] = pick(/^dark:bg-/);
+    const [darkFg] = pick(/^dark:text-/);
+    expect(classes).toHaveLength(4);
+    expect(contrast(HEX[bg], HEX[fg])).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(HEX[darkBg], HEX[darkFg])).toBeGreaterThanOrEqual(4.5);
+    // Light means lighter than every palette square (light theme), so it never reads as a colour of its own.
+    for (const name of OBJECT_COLORS) {
+      const shade = OBJECT_COLOR_TILE_CLASS[name].split(' ').find((c) => /^bg-/.test(c))!.replace(/^bg-/, '');
+      expect(luminance(HEX[bg]), name).toBeGreaterThan(luminance(HEX[shade]));
+    }
+  });
+
+  it('has the object tile\'s edge, glyph and corners at every size, and no palette colour', () => {
+    for (const size of ['xs', 'sm', 'md', 'lg'] as const) {
+      const a = render(<ObjectIconTile icon="users" size={size} />).container.firstElementChild!;
+      const b = render(<NeutralIconTile icon="users" size={size} />).container.firstElementChild!;
+      const shape = (el: Element) => el.className.split(' ').filter((c) => /^(h|w|rounded)-/.test(c)).sort();
+      expect(shape(b), size).toEqual(shape(a));
+      expect(b.querySelector('svg')!.getAttribute('class'), size).toBe(a.querySelector('svg')!.getAttribute('class'));
+      expect(b.hasAttribute('data-neutral-icon-tile')).toBe(true);
+      expect(b.hasAttribute('data-object-icon-tile')).toBe(false);
+      expect(b.className).not.toContain('text-white');
+    }
+  });
+
+  it('draws a host-resolved glyph, and is hidden beside a label or named alone', () => {
+    const Glyph = (props: { className?: string }) => <svg data-testid="host-glyph" className={props.className} />;
+    const { getByTestId, container, rerender } = render(<NeutralIconTile glyph={Glyph} />);
+    expect(getByTestId('host-glyph')).toBeTruthy();
+    expect(container.firstElementChild!.getAttribute('aria-hidden')).toBe('true');
+    rerender(<NeutralIconTile icon="chart-column" title="Reports" />);
+    expect(container.firstElementChild!.getAttribute('role')).toBe('img');
+    expect(container.firstElementChild!.getAttribute('aria-label')).toBe('Reports');
   });
 });

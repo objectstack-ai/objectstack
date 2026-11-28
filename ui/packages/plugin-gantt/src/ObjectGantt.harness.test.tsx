@@ -50,7 +50,9 @@ import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@obje
 import { I18nProvider } from '@object-ui/i18n';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
+import { toast } from 'sonner';
 import { ObjectGantt } from './ObjectGantt';
+import { GANTT_FETCH_STEP } from './ganttRowWalk';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // test-discipline section).
 import './index';
@@ -322,14 +324,25 @@ describe('ObjectGantt.rowCeiling-7210', () => {
 
   let calls: Array<Record<string, any>> = [];
 
-  /** An adapter that HONOURS `$top`, the way a real one does. */
-  function makeDataSource(storeSize: number) {
+  /**
+   * An adapter that HONOURS `$top` and `$skip`, the way a real one does. With
+   * `maxPageSize` it also refuses a `$top` over it, before reading anything,
+   * the way a host with `OS_DATA_MAX_PAGE_SIZE` set does (hosted: 5,000).
+   */
+  function makeDataSource(storeSize: number, maxPageSize?: number) {
     const store = makeRows(storeSize);
     return {
       find: vi.fn(async (_resource: string, params: any) => {
         calls.push({ ...(params ?? {}) });
         const top = typeof params?.$top === 'number' ? params.$top : store.length;
-        return { data: store.slice(0, top), total: store.length };
+        if (maxPageSize !== undefined && top > maxPageSize) {
+          throw new Error(
+            `Query parameter 'top' asks for ${top} rows; this deployment's maximum page size is ${maxPageSize}. `
+            + `The query was not run. Ask for at most ${maxPageSize} rows and page with offset.`,
+          );
+        }
+        const skip = typeof params?.$skip === 'number' ? params.$skip : 0;
+        return { data: store.slice(skip, skip + top), total: store.length };
       }),
       findOne: vi.fn(),
       create: vi.fn(),
@@ -374,12 +387,21 @@ describe('ObjectGantt.rowCeiling-7210', () => {
         ),
       );
 
-      // The fetch asked for one probe row past the ceiling — that is what makes
-      // the cut a fact about the rows in hand rather than a guess.
-      expect(calls.length).toBeGreaterThan(0);
-      for (const params of calls) {
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
-      }
+      // The first read came back full, so the set was walked from the top
+      // under a unique order. The walk read one probe row past the ceiling —
+      // that is what makes the cut a fact about the rows in hand rather than a
+      // guess — and asked no single read for more than one step (a hosted
+      // maximum page size refuses a `$top` of 10,001).
+      const wanted = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top;
+      expect(calls[0].$top).toBe(GANTT_FETCH_STEP);
+      const walk = calls.slice(1);
+      const tops = walk.map((params) => params.$top);
+      expect(tops.reduce((sum, top) => sum + top, 0)).toBe(wanted);
+      for (const top of tops) expect(top).toBeLessThanOrEqual(GANTT_FETCH_STEP);
+      expect(walk.map((params) => params.$skip ?? 0)).toEqual(
+        tops.map((_, i) => tops.slice(0, i).reduce((sum, top) => sum + top, 0)),
+      );
+      for (const params of walk) expect(params.$orderby).toEqual({ id: 'asc' });
 
       // ⭐ The half the ruling cares about: the truncation is NOT silent.
       const note = await screen.findByRole('note');
@@ -410,9 +432,58 @@ describe('ObjectGantt.rowCeiling-7210', () => {
       );
       expect(calls.length).toBeGreaterThan(0);
       for (const params of calls) {
-        expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
       }
       expect(screen.queryByRole('note')).toBeNull();
+    });
+
+    /**
+     * objectstack — the hosted refusal. A host with a maximum page size (the
+     * hosted plane sets `OS_DATA_MAX_PAGE_SIZE` to 5,000) refuses a `$top`
+     * over it before running the query, so a single read of the ceiling plus
+     * its probe row (10,001) put the refusal in place of the chart, on an
+     * EMPTY object as on a full one.
+     *
+     * REVERSE VERIFICATION: sending `...nonGridRowCeilingQuery(GANTT_ROW_CEILING)`
+     * as one read again turns all three of these red at the drawn count, with
+     * the refusal on screen.
+     */
+    describe('a host with a maximum page size of 5,000', () => {
+      const HOSTED_MAX_PAGE_SIZE = 5000;
+
+      it('draws an empty object instead of the refusal', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(0, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('0'),
+        );
+        expect(screen.queryByText(/maximum page size/)).toBeNull();
+        expect(calls).toHaveLength(1);
+      });
+
+      it('draws a set larger than one host page, every row', async () => {
+        const rows = HOSTED_MAX_PAGE_SIZE + 1234;
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(rows, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(String(rows)),
+        );
+        expect(screen.queryByRole('note')).toBeNull();
+        for (const params of calls) expect(params.$top).toBeLessThanOrEqual(HOSTED_MAX_PAGE_SIZE);
+      });
+
+      it('past the gantt ceiling: draws the ceiling and still says so', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(TOTAL_ROWS, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
+            String(GANTT_ROW_CEILING),
+          ),
+        );
+        const note = await screen.findByRole('note');
+        expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
+        expect(note.textContent).toContain(String(TOTAL_ROWS));
+      });
     });
 
     /**
@@ -432,7 +503,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
           expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('4999'),
         );
         for (const params of calls) {
-          expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+          expect(params.$top).toBe(GANTT_FETCH_STEP);
         }
         expect(screen.queryByRole('note')).toBeNull();
         unmount();
@@ -641,10 +712,11 @@ describe('ObjectGantt.hostDataProp-7210', () => {
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
 
       for (const params of calls) {
-        // Not `pagination.pageSize` (2), and not absent either: the platform
-        // ceiling, one probe row wide so the cut is detectable.
+        // Not `pagination.pageSize` (2), and not absent either: the walk's
+        // first step toward the platform ceiling. Five rows answer it short,
+        // so it is the only read.
         expect(params.$top).not.toBe(2);
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
         expect(params.$skip).toBeUndefined();
       }
     });
@@ -1379,7 +1451,11 @@ describe('ObjectGantt.ruleArrayFilter-10767', () => {
  *
  *   1. the field's own option `color` for the record's value;
  *   2. else the value when it already IS a colour literal (#hex / rgb / hsl);
- *   3. else the existing semantic-token derivation — never a raw value.
+ *   3. else nothing: `color` stays undefined and `GanttView` paints its
+ *      default bar colour — never a raw value, and never a colour derived
+ *      from the value or from the record's status (objectstack#36882,
+ *      option A, which retired the semantic-token rung and the status
+ *      fallback).
  *
  * The assertions read the `tasks` prop `ObjectGantt` hands `GanttView` rather
  * than the painted bar: that prop IS the colour contract between the two
@@ -1589,32 +1665,75 @@ describe('ObjectGantt.colorFieldLadder-7243', () => {
       expect(await colorsFor('accent')).toEqual(['#123456']);
     });
 
-    it('rung 3: a value with no option colour derives a colour, never the raw value', async () => {
+    it('no rung 3: a value with no option colour leaves the default bar, never a derived colour or the raw value', async () => {
       const rows = [{ ...ROWS[0], status: 'in_progress' }];
       const schemaless = {
         ...OBJECT_SCHEMA,
         fields: { ...OBJECT_SCHEMA.fields, status: { name: 'status', type: 'text' } },
       };
       const tasks = await tasksFor({ colorField: 'status' }, rows, schemaless);
-      // `in_progress` is a SEMANTIC_COLOR_MAP key -> blue -> that palette's hex.
-      expect(tasks[0].color).toBe('#3b82f6');
-      expect(tasks[0].color).not.toBe('in_progress');
+      expect(tasks[0].color).toBeUndefined();
     });
 
-    it('rung 3: a palette token resolves to that palette colour, not a raw CSS name', async () => {
+    it('no rung 3: a palette-name value is no colour literal, so the bar takes the default colour', async () => {
       const rows = [{ ...ROWS[0], accent: 'red' }];
-      expect(await colorsFor('accent', rows)).toEqual(['#ef4444']);
+      expect(await colorsFor('accent', rows)).toEqual([undefined]);
     });
 
-    it('an empty colorField value still falls back to the record status story', async () => {
+    it('no status fallback: an empty colorField value leaves the default bar whatever the record status', async () => {
       const rows = [{ ...ROWS[0], accent: '' }];
-      // `status: 'open'` -> SEMANTIC_COLOR_MAP blue.
-      expect(await colorsFor('accent', rows)).toEqual(['#3b82f6']);
+      // The record carries `status: 'open'`; it no longer colours the bar.
+      expect(await colorsFor('accent', rows)).toEqual([undefined]);
+    });
+
+    it('rung 1, a declared palette family: the bar paints that family palette hex, not the CSS named colour', async () => {
+      // objectstack#36882: `color: 'blue'` on an option is the badge's blue
+      // (#3b82f6), never the browser's `blue` (#0000ff).
+      const familySchema = {
+        ...OBJECT_SCHEMA,
+        fields: {
+          ...OBJECT_SCHEMA.fields,
+          status: {
+            name: 'status',
+            type: 'select',
+            options: [
+              { value: 'open', label: 'Open', color: 'blue' },
+              { value: 'done', label: 'Done', color: 'green' },
+            ],
+          },
+        },
+      };
+      const rows = [ROWS[0], { ...ROWS[0], id: '2', status: 'done' }];
+      const tasks = await tasksFor({ colorField: 'status' }, rows, familySchema);
+      expect(tasks.map((t) => t.color)).toEqual(['#3b82f6', '#22c55e']);
     });
 
     it('borderColorField takes rung 1 too — the alert stroke honours option colours', async () => {
       const tasks = await tasksFor({ borderColorField: 'status' });
       expect(tasks[0].borderColor).toBe('#7c3aed');
+    });
+
+    it('borderColorField, a declared palette family: the stroke paints that family palette hex, as the bar fills', async () => {
+      // objectstack#36882 S4: `color: 'blue'` on an option strokes #3b82f6,
+      // never the CSS named colour `blue` (#0000ff).
+      const familySchema = {
+        ...OBJECT_SCHEMA,
+        fields: {
+          ...OBJECT_SCHEMA.fields,
+          status: {
+            name: 'status',
+            type: 'select',
+            options: [
+              { value: 'open', label: 'Open', color: 'blue' },
+              { value: 'done', label: 'Done', color: 'green' },
+            ],
+          },
+        },
+      };
+      const rows = [ROWS[0], { ...ROWS[0], id: '2', status: 'done' }];
+      const tasks = await tasksFor({ colorField: 'status', borderColorField: 'status' }, rows, familySchema);
+      expect(tasks.map((t) => t.borderColor)).toEqual(['#3b82f6', '#22c55e']);
+      expect(tasks.map((t) => t.borderColor)).toEqual(tasks.map((t) => t.color));
     });
   });
 });
@@ -2281,5 +2400,141 @@ describe('ObjectGantt.refusedRead-35317', () => {
     const view = await screen.findByTestId('gantt-view');
     expect(view.getAttribute('data-task-count')).toBe('1');
     expect(screen.queryByTestId('gantt-no-access')).toBeNull();
+  });
+});
+
+// ── ObjectGantt.handLock-37448 ──────────────────────────────────────────────────
+
+/**
+ * objectstack#37448 — every in-chart write is an edit by hand, so the field
+ * hand lock (`@object-ui/core`'s one verdict: `readonly`, `uiReadonly`, and the
+ * conditional `readonlyWhen` / `uiReadonlyWhen`) holds on the Gantt.
+ *
+ * What is pinned: the STATIC half narrows the interaction switches the chart
+ * is handed (a move needs both dates, a resize either, the progress handle its
+ * field, the link UI the dependencies field); the CONDITIONAL half refuses, on
+ * the write, a drag, an in-place edit and a drawn link that change a field
+ * locked over THAT record, with the read-only reason toasted — and an in-place
+ * edit that only echoes a locked value is sent without it.
+ */
+describe('ObjectGantt.handLock-37448', () => {
+  const captured: { props: Record<string, any> } = { props: {} };
+  beforeEach(() => {
+    captured.props = {};
+    standIns.ganttView = (props: any) => {
+      captured.props = props;
+      return <div data-testid="gantt-view" data-task-count={String(props.tasks.length)} />;
+    };
+    vi.mocked(toast.error).mockClear();
+  });
+
+  const DONE = "record.status == 'done'";
+  const fieldsWith = (locks: Record<string, Record<string, unknown>>) => ({
+    fields: {
+      name: { type: 'text' },
+      status: { type: 'text' },
+      start_date: { type: 'date', ...locks.start_date },
+      end_date: { type: 'date', ...locks.end_date },
+      progress: { type: 'number', ...locks.progress },
+      deps: { type: 'text', ...locks.deps },
+    },
+  });
+
+  const ROWS = [
+    { id: 't1', name: 'Open task', status: 'open', start_date: '2026-01-05', end_date: '2026-01-09', progress: 40, deps: '' },
+    { id: 't2', name: 'Done task', status: 'done', start_date: '2026-01-12', end_date: '2026-01-16', progress: 100, deps: '' },
+  ];
+
+  const SCHEMA: any = {
+    type: 'object-gantt',
+    objectName: 'project_task',
+    gantt: {
+      titleField: 'name',
+      startDateField: 'start_date',
+      endDateField: 'end_date',
+      progressField: 'progress',
+      dependenciesField: 'deps',
+    },
+  };
+
+  function adapter(locks: Record<string, Record<string, unknown>>) {
+    return {
+      find: vi.fn(async () => ({ data: ROWS.map((r) => ({ ...r })), total: ROWS.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => fieldsWith(locks)),
+    } as unknown as DataSource & { update: ReturnType<typeof vi.fn> };
+  }
+
+  async function mount(locks: Record<string, Record<string, unknown>>) {
+    const ds = adapter(locks);
+    render(<ObjectGantt schema={SCHEMA} dataSource={ds} />);
+    await waitFor(() => expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('2'));
+    const task = (id: string) => (captured.props.tasks as any[]).find((t) => t.id === id);
+    return { ds, task };
+  }
+
+  it('the static half narrows the interaction switches the chart is handed', async () => {
+    await mount({ progress: { uiReadonly: true } });
+    expect(captured.props.interactions).toEqual({ progress: false });
+    cleanup();
+    await mount({ start_date: { uiReadonly: true }, deps: { readonly: true } });
+    expect(captured.props.interactions).toEqual({ move: false, link: false });
+    cleanup();
+    await mount({ start_date: { uiReadonly: true }, end_date: { uiReadonly: true } });
+    expect(captured.props.interactions).toEqual({ move: false, resize: false });
+  });
+
+  it('CONTROL: no lock hands the authored switches through untouched', async () => {
+    await mount({});
+    expect(captured.props.interactions).toBeUndefined();
+  });
+
+  it('a bar drag over a record whose date is locked by hand writes nothing and says why', async () => {
+    const { ds, task } = await mount({ start_date: { uiReadonlyWhen: DONE } });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t2'), { start: new Date(2026, 0, 13), end: new Date(2026, 0, 17) });
+    });
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith('Save failed — the change was rolled back', { description: 'This field is read-only.' });
+    // CONTROL: the open record takes the same drag.
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { start: new Date(2026, 0, 6), end: new Date(2026, 0, 10) });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][1]).toBe('t1');
+    expect(Object.keys(ds.update.mock.calls[0][2]).sort()).toEqual(['end_date', 'start_date']);
+  });
+
+  it('an in-place edit that only echoes a locked value is sent without it; one that changes it is refused', async () => {
+    const { ds, task } = await mount({ progress: { uiReadonly: true } });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { title: 'Renamed', progress: 40 });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][2]).toEqual({ name: 'Renamed' });
+    await act(async () => {
+      await captured.props.onTaskUpdate(task('t1'), { title: 'Renamed again', progress: 55 });
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('a drawn link into a record whose dependencies field is locked by hand writes nothing', async () => {
+    const { ds, task } = await mount({ deps: { uiReadonlyWhen: DONE } });
+    await act(async () => {
+      await captured.props.onDependencyCreate(task('t1'), task('t2'), 'fs');
+    });
+    expect(ds.update).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    // CONTROL: the open record takes the link.
+    await act(async () => {
+      await captured.props.onDependencyCreate(task('t2'), task('t1'), 'fs');
+    });
+    expect(ds.update).toHaveBeenCalledTimes(1);
+    expect(ds.update.mock.calls[0][1]).toBe('t1');
+    expect(ds.update.mock.calls[0][2]).toHaveProperty('deps');
   });
 });

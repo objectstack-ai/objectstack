@@ -186,6 +186,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // and the walk reads every dataset where it sits, the package bodies
   // included, across the whole artifact.
   'judgeSeedRecordValues',
+  // Seed RECORDS the seed load drops: one its object's own validation rule
+  // refuses, judged by the write path's evaluator (`evaluateValidationRules`,
+  // @objectstack/objectql) one rule at a time, and a keyed record with a blank
+  // key field, in the seed loader's own sentence. Not a registry rule: the
+  // verdict is the runtime's evaluator, which `@objectstack/lint` cannot import
+  // (objectql depends on lint), so only a door that may import the runtime can
+  // inject it; and the walk reads every dataset where it sits, the package
+  // bodies included. Both doors refuse at the same point, after the seed values.
+  'judgeSeedRowRefusals',
   // [ADR-0146 D2, #28410, #28643] The override write gate: an item bearing a
   // name a package in its dependency closure ships, or an `overrides`
   // declaration the gate does not admit, judged by the publish door's own
@@ -216,6 +225,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // (#28727), so the row moved here — deleted there rather than reworded, for
   // the reason the `runPerPackageAuthoringRules` row above gives.
   'findExtensionFieldSuffixRefusals',
+  // [ADR-0146 D10] An extended object's whole arrangement is the paired
+  // `.custom` package's: `fieldGroups` or `relatedLists` on an
+  // `objectExtensions` entry of any other package, judged by the save and
+  // install doors' own `judgeExtensionArrangement`. Not a registry rule, for
+  // the reason the row above gives: the verdict turns on the id of the
+  // package the extension is declared in, which the union stack a registry
+  // rule is handed does not carry. Both doors make the call, beside the
+  // `__c` reservation's.
+  'findExtensionArrangementRefusals',
   // [#29051] An undeclared cycle in a flow's top-level graph (ADR-0044),
   // judged by the automation engine's own registration judge
   // (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), which the
@@ -365,6 +383,15 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   // `test/rls-policy-authoring-admission.test.ts`.
   'The engine judge handed to the authoring-rule registry as an input — the rule that reads it is the gate':
     ['stackFilterJudge'],
+  // The seed record walk's inputs and its count. `evaluateValidationRules` is
+  // handed to `judgeSeedRowRefusals` (SHARED_NON_REGISTRY_GATES above) as the
+  // judge, and `resolveTenantFieldName` as the tenancy predicate the seed
+  // loader stamps an object's organization column by; neither command calls
+  // either. `datasetsOf` lists the datasets the walk reads, where each sits;
+  // `seedRowPairsNotJudged` totals the pairs the walk left to the load, for a
+  // dim note that refuses nothing.
+  'The seed record walk\'s injected evaluator and tenancy predicate, its dataset list and its not-judged count — the walk that reads them is the gate':
+    ['evaluateValidationRules', 'resolveTenantFieldName', 'datasetsOf', 'seedRowPairsNotJudged'],
   // `os validate --target` only (`utils/restriction-profile.ts`): the first
   // reads and parses the target's restriction profile — the input
   // `judgeRestrictionProfile` (VALIDATE_ONLY_GATES above) judges against — and
@@ -521,6 +548,7 @@ const NOT_A_GATE: Readonly<Record<string, readonly string[]>> = {
   'Not ours — a Node builtin, a global, an oclif base or a third-party namespace': [
     'dirname',
     'String',
+    'Set',
     'path',
     'fs',
     'chalk',

@@ -79,3 +79,32 @@ export interface RowPatch {
   base: unknown;
   row: Record<string, unknown>;
 }
+
+const NO_RECORDS: ReadonlySet<string> = new Set();
+
+/**
+ * objectstack#35689 — `rows` with every saved row in place of the row the
+ * grid read (while that read is the one held), as the grid's figures read
+ * them: the footer total, and the groups a grid buckets in the browser with
+ * their counts and subtotals. A record in `waiting` keeps the row it was read
+ * as: its save moved it to another group, and it stays where it is, counted
+ * and summed there, until the reader leaves its row. The same array when no
+ * saved row applies.
+ */
+export function rowsAsSaved(
+  rows: any[],
+  patches: ReadonlyMap<string, RowPatch>,
+  waiting: ReadonlySet<string> = NO_RECORDS,
+): any[] {
+  if (patches.size === 0) return rows;
+  let changed = false;
+  const next = rows.map((row) => {
+    const id = row?._id ?? row?.id;
+    if (id === undefined || id === null || waiting.has(String(id))) return row;
+    const patch = patches.get(String(id));
+    if (!patch || patch.base !== row) return row;
+    changed = true;
+    return patch.row;
+  });
+  return changed ? next : rows;
+}

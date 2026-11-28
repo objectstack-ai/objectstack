@@ -145,11 +145,26 @@
  * own build door passes its own `authoring` at its own `handleHttpRequest`
  * call, and the option is one object, so the two registries are never merged
  * and their names never meet.
+ *
+ * ## The in-process entry
+ *
+ * [#37944] A host's own AI assistant that runs in the server process (an
+ * in-app ask turn) calls the same five tools through
+ * `createInProcessAuthoringRegistry` (`../in-process-authoring.ts`, exported by
+ * the package). It is built by this module's {@link buildOpenAuthoringRegistry}
+ * over a request the dispatcher placed, so the read gates, the writer and the
+ * verdicts are these; there is no token, so its admission is the human half
+ * alone, and its saves state `surface: 'copilot'`.
  */
 
 import { createRequire } from 'node:module';
 import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
-import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectstack/metadata-core';
+import {
+    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+    authoredKnowledgeSourceRefusal,
+    metaWriteCapabilityVerdict,
+    walledCatalogWriteVerdict,
+} from '@objectstack/metadata-core';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
@@ -163,11 +178,12 @@ import {
 import { MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
 import { SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import type { ErrorCode, ListDraftsResponse, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
+import type { ErrorCode, ListDraftsResponse, MetadataAuthoringSurface, MetadataProtocol, RuntimeAuthoringIssue } from '@objectstack/spec/api';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
+import { FLOW_RUNTIME_STATE_KEY, flowRuntimeStateOf, studioChangesReviewLink, studioItemReviewLink } from '@objectstack/types';
 
 /** The read tools' names, in the order the registry lists them. */
 export const OPEN_AUTHORING_READ_TOOL_NAMES = ['list_metadata_items', 'get_metadata_item', 'list_drafts'] as const;
@@ -193,6 +209,17 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 })();
 
 /**
+ * The SemVer example the door's agent-facing text shows: this server's own
+ * `@objectstack/spec` version, so an agent that copies the example declares the
+ * version the verdict below accepts. A literal example ages into another major
+ * and teaches a value the door refuses. Without a readable version the text
+ * names the form instead of inventing a number.
+ */
+function specVersionExample(server = SERVER_SPEC_VERSION): string {
+    return server ? `e.g. ${server}` : 'MAJOR.MINOR.PATCH';
+}
+
+/**
  * [#34774] The save's judgement of the client's declared spec version (#34659
  * ruling D4 = A), before anything is written: another major is refused with the
  * install line (`refusal`), another minor is saved with an `advisory`, and none
@@ -202,7 +229,7 @@ const SERVER_SPEC_VERSION: string | undefined = (() => {
 function clientSpecVersionVerdict(declared: unknown, server = SERVER_SPEC_VERSION): { refusal?: string; advisory?: string } {
     if (declared === undefined) return {};
     if (typeof declared !== 'string' || !SEMVER_2_0_0_VERSION_PATTERN.test(declared)) {
-        return { refusal: '`clientSpecVersion` is the `@objectstack/spec` version you built against, in SemVer form (e.g. 18.6.0).' };
+        return { refusal: `\`clientSpecVersion\` is the \`@objectstack/spec\` version you built against, in SemVer form (${specVersionExample(server)}).` };
     }
     if (!server) return { advisory: `This server could not read its own @objectstack/spec version, so ${declared} was not compared.` };
     const [clientMajor, clientMinor] = declared.split('.').map(Number);
@@ -277,7 +304,11 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
         description:
             'Read one metadata item\'s full definition. Without `state`, a pending draft is read in place of '
             + 'the published version and the answer says `draft: true`. `state: "draft"` reads the pending '
-            + 'draft only and is refused when there is none; `state: "active"` reads the published version.',
+            + 'draft only and is refused when there is none; `state: "active"` reads the published version. '
+            + 'A read with `state` answers that version\'s `version`, the token `save_metadata_draft` takes as '
+            + '`ifMatch`; a read without `state` answers none. '
+            + 'A flow\'s answer also carries `runtimeState.enabled`: `false` means the flow is switched off and '
+            + 'does not run, whatever its `status` reads.',
         parameters: {
             type: 'object',
             properties: {
@@ -339,12 +370,13 @@ const WRITE_TOOLS: readonly AIToolDefinition[] = Object.freeze([
                 ifMatch: {
                     type: 'string',
                     minLength: 1,
-                    description: 'Optional: the `version` a read or a save answered. The save is refused if the draft changed since.',
+                    description: 'Optional: the `version` a read or a save answered. The save is refused if the item changed since: '
+                        + 'the pending draft, or the published item while it has no draft yet. The refusal names the current version.',
                 },
                 clientSpecVersion: {
                     type: 'string',
                     minLength: 1,
-                    description: 'Recommended: the `@objectstack/spec` version you built the item against (SemVer, e.g. 18.6.0). '
+                    description: `Recommended: the \`@objectstack/spec\` version you built the item against (SemVer, ${specVersionExample()}). `
                         + 'This server\'s version is the `Authoring contract` line of its instructions. Another major is '
                         + 'refused before anything is saved, naming the version to install; another minor is saved and '
                         + 'advised. The saved item is still validated either way.',
@@ -402,6 +434,13 @@ export interface OpenAuthoringWriter {
     userTextLocales: string[];
     /** The walled refusal for a write of `type` (`walledCatalogWriteVerdict`). */
     writeVerdict(type: string): Promise<{ allowed: true } | { allowed: false; code: ErrorCode; message: string; status: number }>;
+    /**
+     * [ADR-0161 K4, guard two] The refusal of a `knowledge_source` save whose
+     * author may not themselves search what it would index
+     * (`authoredKnowledgeSourceRefusal`, judged for the admitted human), or
+     * `undefined` when the save may go on. Every other type answers `undefined`.
+     */
+    itemSaveRefusal(type: string, item: unknown): Promise<{ code: ErrorCode; message: string; status: number } | undefined>;
 }
 
 /**
@@ -415,9 +454,12 @@ export type OpenAuthoringReadGateSources = (protocol: OpenAuthoringProtocol) => 
  * The per-call context the MCP runtime stamps on every authoring call
  * (`McpAuthoringToolContext` in `@objectstack/mcp`), named structurally as
  * this package names every MCP shape: it takes no dependency on that package.
+ * `in_process` is the context `createInProcessAuthoringRegistry` stamps on its
+ * own calls (`../in-process-authoring.ts`); the registry reads only
+ * `principal.userId`.
  */
 export interface OpenAuthoringCallContext {
-    door: 'mcp';
+    door: 'mcp' | 'in_process';
     principal: { userId: string };
     environmentId?: string;
 }
@@ -471,15 +513,9 @@ export async function resolveOpenAuthoringInjection(
     const organizationId = typeof ec?.tenantId === 'string' && ec.tenantId.length > 0 ? (ec.tenantId as string) : undefined;
     const clientId = typeof ec?.performedBy?.clientId === 'string' ? (ec.performedBy.clientId as string) : undefined;
 
-    const reader = await resolveHumanReader(deps, context, userId, organizationId);
+    const { registry } = await buildOpenAuthoringRegistry(deps, context, { userId, organizationId, clientId, surface: 'mcp' });
     return {
-        registry: createOpenAuthoringRegistry({
-            admitted: reader !== undefined,
-            userId,
-            getProtocol: async () => (await deps.resolveService(context, 'protocol', context.environmentId)) as OpenAuthoringProtocol | undefined,
-            ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId) } : {}),
-            logger: deps.logger,
-        }),
+        registry,
         principal: {
             userId,
             ...(organizationId ? { organizationId } : {}),
@@ -491,7 +527,60 @@ export async function resolveOpenAuthoringInjection(
 }
 
 /**
- * The human the token was issued to, as the `/meta` read gates read a caller,
+ * The authoring surface a registry's draft saves state
+ * (`MetadataAuthoringSurfaceSchema`): `mcp` for the MCP door, `copilot` for
+ * the in-process entry, the published value for an AI assistant's tool
+ * writing on a person's behalf, which only an in-process caller may state.
+ */
+export type OpenAuthoringSurface = Extract<MetadataAuthoringSurface, 'mcp' | 'copilot'>;
+
+/**
+ * The one assembly both entries call, over a request already placed in its
+ * environment: the human admitted by {@link resolveHumanReader}, then the
+ * registry over that verdict, with the read gates and the writer built for
+ * that human. The MCP door ({@link resolveOpenAuthoringInjection}) passes its
+ * `/mcp` request and `surface: 'mcp'`; the in-process entry
+ * (`../in-process-authoring.ts`) passes the request the dispatcher's own
+ * placement step placed for it and `surface: 'copilot'`. So both read the same
+ * services, the same way, and one implementation answers both.
+ */
+export async function buildOpenAuthoringRegistry(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    principal: {
+        userId: string;
+        organizationId: string | undefined;
+        /** The OAuth client an MCP token was issued to; an in-process caller has none. */
+        clientId: string | undefined;
+        surface: OpenAuthoringSurface;
+    },
+): Promise<{ registry: OpenAuthoringRegistry; admitted: boolean }> {
+    const { userId, organizationId, clientId, surface } = principal;
+    const reader = await resolveHumanReader(deps, context, userId, organizationId, surface);
+    const admitted = reader !== undefined;
+    return {
+        admitted,
+        registry: createOpenAuthoringRegistry({
+            admitted,
+            userId,
+            getProtocol: async () => (await deps.resolveService(context, 'protocol', context.environmentId)) as OpenAuthoringProtocol | undefined,
+            getAutomation: async () => {
+                try {
+                    return await deps.resolveService(context, 'automation', context.environmentId);
+                } catch {
+                    return undefined;
+                }
+            },
+            ...(reader ? { readGate: openReadGateSources(deps, context, reader), writer: openWriter(deps, context, clientId, reader) } : {}),
+            logger: deps.logger,
+            surface,
+        }),
+    };
+}
+
+/**
+ * The human the token was issued to (in process: the signed-in person), as
+ * the `/meta` read gates read a caller,
  * when they hold `manage_metadata` in the organization the token's consent
  * bound; `undefined` when they do not, or when the grant resolution cannot be
  * read (no data engine, or a read that throws): a capability nobody could read
@@ -508,6 +597,7 @@ async function resolveHumanReader(
     context: HttpProtocolContext,
     userId: string,
     organizationId: string | undefined,
+    surface: OpenAuthoringSurface,
 ): Promise<MetaReadGateCaller | undefined> {
     try {
         const ql = (await deps.getObjectQL(context, context.environmentId))
@@ -532,7 +622,9 @@ async function resolveHumanReader(
         // A functional degradation (the authoring tools are not listed, and
         // nothing claims to have persisted), so `warn`.
         (deps.logger ?? console).warn?.(
-            '[MCP] The authoring tools are not served on this request: the user\'s metadata permission could not be read.',
+            surface === 'mcp'
+                ? '[MCP] The authoring tools are not served on this request: the user\'s metadata permission could not be read.'
+                : '[authoring] The in-process authoring tools are not served: the user\'s metadata permission could not be read.',
             { error: error instanceof Error ? error.message : String(error) },
         );
         return undefined;
@@ -545,8 +637,17 @@ async function resolveHumanReader(
  * transport reads; a posture that cannot be read refuses the write `503`,
  * never a permit. The caller's posture rung is the request envelope's, as the
  * `/meta` doors and the MCP `import_object` tool read it.
+ *
+ * [ADR-0161 K4, guard two] `itemSaveRefusal` judges a `knowledge_source` save
+ * for the admitted HUMAN (`reader`, the caller `resolveHumanReader` admitted):
+ * their grants, never the request envelope's.
  */
-function openWriter(deps: DomainHandlerDeps, context: HttpProtocolContext, clientId: string | undefined): OpenAuthoringWriter {
+function openWriter(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    clientId: string | undefined,
+    reader: MetaReadGateCaller,
+): OpenAuthoringWriter {
     const ec: any = context.executionContext;
     return {
         ...(clientId ? { clientId } : {}),
@@ -565,6 +666,28 @@ function openWriter(deps: DomainHandlerDeps, context: HttpProtocolContext, clien
             }
             const walled = walledCatalogWriteVerdict({ type, tenancyPosture, isSystem: ec?.isSystem === true, callerPosture: ec?.posture });
             return walled.allowed ? { allowed: true } : { allowed: false, code: PERMISSION_DENIED, message: walled.message, status: 403 };
+        },
+        async itemSaveRefusal(type, item) {
+            const refused = await authoredKnowledgeSourceRefusal({
+                type,
+                item,
+                // The human the door admitted: their grants, never the envelope's.
+                executionContext: reader,
+                // The classified lookup (`resolveServiceOrLoud`): an absent
+                // service answers `undefined`, a registered one that cannot be
+                // resolved rejects and the predicate answers `503`.
+                resolveKnowledgeService: () => deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+            });
+            if (!refused) return undefined;
+            return {
+                // A 403 is spelled in this door's vocabulary; any other verdict
+                // keeps its own ADR-0112 code, so a `400 VALIDATION_ERROR` (a
+                // source that names no adapter where none can hold it,
+                // ADR-0161 K4) arrives as one, as on the REST door.
+                code: refused.status === 403 ? PERMISSION_DENIED : (refused.code as ErrorCode),
+                message: refused.message,
+                status: refused.status,
+            };
         },
     };
 }
@@ -618,13 +741,27 @@ export function createOpenAuthoringRegistry(opts: {
     admitted: boolean;
     userId: string;
     getProtocol: () => Promise<OpenAuthoringProtocol | undefined>;
+    /**
+     * [#36856] The automation service, whose reading says whether a flow runs
+     * now (`flowRuntimeStateOf`); without it a flow's answer carries no
+     * `runtimeState`, which reads as unknown.
+     */
+    getAutomation?: () => Promise<unknown>;
     /** The `/meta` read gates' ports; without them every read is refused. */
     readGate?: OpenAuthoringReadGateSources;
     /** The write tools' inputs; without them every write is refused. */
     writer?: OpenAuthoringWriter;
     logger?: { warn?: (...args: unknown[]) => void };
+    /**
+     * The surface every draft save states: `mcp` (the default, the MCP door)
+     * or `copilot` (the in-process entry). It also picks the sentence a caller
+     * the verdict did not admit is refused with, and the warnings' prefix.
+     */
+    surface?: OpenAuthoringSurface;
 }): OpenAuthoringRegistry {
-    const { admitted, userId, getProtocol, readGate, writer } = opts;
+    const { admitted, userId, getProtocol, getAutomation, readGate, writer } = opts;
+    const surface: OpenAuthoringSurface = opts.surface ?? 'mcp';
+    const logPrefix = surface === 'mcp' ? '[MCP]' : '[authoring]';
     return {
         getAll: () => (admitted ? [...READ_TOOLS, ...WRITE_TOOLS] : []),
         async execute(toolCall, context) {
@@ -643,7 +780,9 @@ export function createOpenAuthoringRegistry(opts: {
             if (!admitted || context?.principal?.userId !== userId) {
                 return refuse(
                     PERMISSION_DENIED,
-                    'The authoring tools need the `metadata:write` scope on your connection and the `manage_metadata` capability on your own account.',
+                    surface === 'mcp'
+                        ? 'The authoring tools need the `metadata:write` scope on your connection and the `manage_metadata` capability on your own account.'
+                        : 'The authoring tools need the `manage_metadata` capability on your own account.',
                     403,
                 );
             }
@@ -730,11 +869,20 @@ export function createOpenAuthoringRegistry(opts: {
                         }
                         const item = verdict.document;
                         const draft = state === 'draft' || (item as { _draft?: unknown })._draft === true;
+                        // [#36856] A flow's switch is not in its definition: an admin
+                        // who switched it off left `status: 'active'` on the item. The
+                        // engine's reading rides beside the item, ahead of it, so a
+                        // reply cut short still says it; read only after the gate
+                        // admitted the item, so it tells nothing about one withheld.
+                        const runtimeState = type === 'flow' && getAutomation
+                            ? flowRuntimeStateOf(await getAutomation(), read.name ?? name)
+                            : undefined;
                         return answer({
                             type: read.type ?? type,
                             name: read.name ?? name,
                             draft,
                             ...(read.version !== undefined ? { version: read.version } : {}),
+                            ...(runtimeState ? { [FLOW_RUNTIME_STATE_KEY]: runtimeState } : {}),
                             item,
                         });
                     }
@@ -796,6 +944,9 @@ export function createOpenAuthoringRegistry(opts: {
                         if (typeWriteRefused) return refuse(typeWriteRefused.code, typeWriteRefused.message, typeWriteRefused.status);
                         const walled = await writer.writeVerdict(type);
                         if (!walled.allowed) return refuse(walled.code, walled.message, walled.status);
+                        // [ADR-0161 K4, guard two] Source admission at save, for the human.
+                        const itemRefused = await writer.itemSaveRefusal(type, item);
+                        if (itemRefused) return refuse(itemRefused.code, itemRefused.message, itemRefused.status);
                         // Built field by field: `item` is data, never a channel, so no
                         // `force`, `mode` or `writeFace` rides in through it.
                         const saved = await protocol.saveMetaItem({
@@ -804,7 +955,7 @@ export function createOpenAuthoringRegistry(opts: {
                             item,
                             packageId: pkg,
                             mode: 'draft',
-                            surface: 'mcp',
+                            surface,
                             ...(writer.clientId ? { client: { id: writer.clientId } } : {}),
                             // The face of a door with no `force` and a structured issues channel.
                             writeFace: 'meta-dispatch',
@@ -946,7 +1097,7 @@ export function createOpenAuthoringRegistry(opts: {
                 if (typeof code === 'string' && code.length > 0 && typeof status === 'number' && status < 500) {
                     return { code, message: error instanceof Error ? error.message : String(error), status };
                 }
-                (opts.logger ?? console).warn?.(`[MCP] ${toolCall.toolName}: the publish verdict could not be read`, {
+                (opts.logger ?? console).warn?.(`${logPrefix} ${toolCall.toolName}: the publish verdict could not be read`, {
                     error: error instanceof Error ? error.message : String(error),
                 });
                 return { code: INTERNAL_ERROR, message: 'The publish verdict could not be read.', status: 500 };
@@ -968,7 +1119,7 @@ export function createOpenAuthoringRegistry(opts: {
                     const issues = (error as { issues?: unknown } | null)?.issues;
                     return refuse(code as ErrorCode, error instanceof Error ? error.message : String(error), status, Array.isArray(issues) ? issues : undefined);
                 }
-                (opts.logger ?? console).warn?.(`[MCP] ${toolCall.toolName} failed`, {
+                (opts.logger ?? console).warn?.(`${logPrefix} ${toolCall.toolName} failed`, {
                     error: error instanceof Error ? error.message : String(error),
                 });
                 return refuse(
@@ -1284,14 +1435,13 @@ function verdictOf(judgement: OpenAuthoringDraftJudgement): {
 
 /**
  * Where a person reviews the draft, as Console routes: the package's Changes
- * drawer (`?changes=review` on its Interfaces pillar, `studioChangesLink.ts`)
+ * drawer (`?changes=review` on its Studio home, the Data pillar, `studioChangesLink.ts`)
  * and the item's draft review on Studio's metadata area (`?review=1`).
  */
 function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
-    const pkg = encodeURIComponent(packageId);
     return {
-        changes: `/studio/${pkg}/interfaces?changes=review`,
-        item: `/studio/${pkg}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
+        changes: studioChangesReviewLink(packageId),
+        item: studioItemReviewLink(packageId, type, name),
         note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
     };
 }

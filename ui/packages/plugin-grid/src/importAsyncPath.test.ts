@@ -100,6 +100,22 @@ describe('jobResultToImportResult', () => {
     expect(r.errors).toEqual([{ row: 5, field: 'amount', message: 'not a number', code: 'COERCE' }]);
   });
 
+  it('[objectstack#36794] carries a reference_out_of_scope cell\'s scope onto the error, so the completion screen can name it', () => {
+    const scope = [{ field: 'project', value: 'Gemini' }];
+    const r = jobResultToImportResult({
+      ...base,
+      results: [{
+        row: 2, ok: false, action: 'failed', field: 'task', code: 'reference_out_of_scope',
+        error: 'Task: no record matches "Design review" (Project = "Gemini")',
+        errors: [{ field: 'task', code: 'reference_out_of_scope', message: 'Task: no record matches "Design review" (Project = "Gemini")', scope }],
+      }],
+    });
+    expect(r.errors).toEqual([{
+      row: 2, field: 'task', code: 'reference_out_of_scope',
+      message: 'Task: no record matches "Design review" (Project = "Gemini")', scope,
+    }]);
+  });
+
   it('carries the resultsTruncated flag through when the server capped the report', () => {
     const r = jobResultToImportResult({ ...base, resultsTruncated: true, results: [] });
     expect(r.resultsTruncated).toBe(true);

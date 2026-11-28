@@ -95,7 +95,6 @@ function renderGrid(dataSource: any) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'name', label: '作业对象', editable: false },
       { field: 'manager', label: '管理责任人', type: 'lookup' },
@@ -124,26 +123,23 @@ describe('ObjectGrid — lookup inline edit survives clicking another row', () =
       return tds[tds.length - 1] as HTMLElement;
     };
 
-    // Enter edit mode on row1's manager cell.
+    // Select row1's manager cell and open its editor (select-first,
+    // objectstack#35827): the lookup's editor is its in-cell candidate list
+    // (objectstack#35688 S3).
     fireEvent.click(managerCellOf(rows()[0]));
+    fireEvent.doubleClick(managerCellOf(rows()[0]));
 
-    // The lookup trigger button should appear inside the cell; open the popover.
-    const trigger = await waitFor(() => {
-      const btn = managerCellOf(rows()[0]).querySelector('button');
-      expect(btn).toBeTruthy();
-      return btn as HTMLButtonElement;
-    });
-    fireEvent.click(trigger);
-
-    // Pick "Dev Admin" from the popover options (fetched from `users`).
+    // Pick "Dev Admin" from the candidates (fetched from `users`); the pick
+    // is the commit, and the commit is the save.
     const option = await waitFor(() => {
-      const el = screen.getByText('Dev Admin');
+      const el = within(managerCellOf(rows()[0])).getByText('Dev Admin');
       expect(el).toBeInTheDocument();
       return el;
     });
     fireEvent.click(option);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
 
-    // The staged value shows in row1's manager cell.
+    // The picked value shows in row1's manager cell.
     await waitFor(() => {
       expect(within(managerCellOf(rows()[0])).getByText('Dev Admin')).toBeInTheDocument();
     });

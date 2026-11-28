@@ -5,6 +5,7 @@ import {
   isWriteOptedIn,
   isSystemWritable,
   isObjectInlineEditable,
+  isObjectExportOffered,
   normalizeUserAction,
   userActionPredicates,
   type UserActionsOverride,
@@ -231,6 +232,47 @@ describe('isObjectInlineEditable — effective API operations (#3546)', () => {
 
   it('empty effective set → not inline-editable (deny-all)', () => {
     expect(isObjectInlineEditable({ managedBy: 'platform' }, [])).toBe(false);
+  });
+});
+
+describe('isObjectExportOffered — the one export verdict (objectstack#35619)', () => {
+  it('an object that does not author exportCsv offers export in every bucket', () => {
+    for (const managedBy of MANAGED_BY_BUCKETS) {
+      expect(isObjectExportOffered({ managedBy }), managedBy).toBe(true);
+    }
+    expect(isObjectExportOffered(null)).toBe(true);
+    expect(isObjectExportOffered(undefined)).toBe(true);
+  });
+
+  it('exportCsv false closes it, in every bucket; exportCsv true keeps it open', () => {
+    for (const managedBy of MANAGED_BY_BUCKETS) {
+      expect(isObjectExportOffered({ managedBy, userActions: { exportCsv: false } }), managedBy).toBe(false);
+      expect(isObjectExportOffered({ managedBy, userActions: { exportCsv: true } }), managedBy).toBe(true);
+    }
+  });
+
+  it('a closing userActions on another verb leaves it open', () => {
+    expect(isObjectExportOffered({ managedBy: 'platform', userActions: { edit: false, delete: false, create: false } })).toBe(true);
+  });
+
+  it('an effective set without `export` closes it; one with `export` keeps the bit as authored', () => {
+    expect(isObjectExportOffered({ managedBy: 'platform' }, ['get', 'list'])).toBe(false);
+    expect(isObjectExportOffered({ managedBy: 'platform' }, [])).toBe(false);
+    expect(isObjectExportOffered({ managedBy: 'platform' }, ['list', 'export'])).toBe(true);
+    // The set never re-opens what the object closed.
+    expect(isObjectExportOffered({ managedBy: 'platform', userActions: { exportCsv: false } }, ['list', 'export'])).toBe(false);
+  });
+
+  it('is the resolved exportCsv bit, for every bucket, authored value and effective set', () => {
+    const sets: Array<readonly string[] | undefined> = [undefined, [], ['list'], ['list', 'export']];
+    for (const managedBy of MANAGED_BY_BUCKETS) {
+      for (const exportCsv of [undefined, true, false]) {
+        const obj = exportCsv === undefined ? { managedBy } : { managedBy, userActions: { exportCsv } };
+        for (const ops of sets) {
+          expect(isObjectExportOffered(obj, ops)).toBe(resolveEffectiveCrudAffordances(obj, ops).exportCsv);
+        }
+      }
+    }
   });
 });
 

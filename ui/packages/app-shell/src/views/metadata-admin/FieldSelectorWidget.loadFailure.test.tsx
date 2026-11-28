@@ -6,11 +6,13 @@
  *
  * ## The defect, and why it had two mouths
  *
- * `FieldSelectorWidget` is the one loader in this family that does not go
- * through `MetadataClient`: a raw `fetch` to `/api/v1/objects/:name/fields`,
- * its own component-local `fields` / `loading` state, no `WidgetContext`. That
- * is why objectui#5170 fixed the three `ResourceEditPage` pickers and left this
+ * `FieldSelectorWidget` is the one loader in this family that does not read a
+ * `WidgetContext` catalog: it asks for the field catalog of the object a
+ * SIBLING form value names, with its own component-local load state. That is
+ * why objectui#5170 fixed the three `ResourceEditPage` pickers and left this
  * one, and why the `catalogErrors` channel PR #5226 added never reached it.
+ * It reads the object document the server mounts (`GET /api/v1/meta/object/:name`)
+ * through the console's `MetadataClient` — pinned by the last `describe` here.
  *
  * It could reach a false "no fields" two different ways:
  *
@@ -58,16 +60,22 @@
  * arm by its disabled input, the completed arms by the combobox they render.
  */
 
+// The field picker's module graph reaches two dynamic imports (`celAuthoring.ts`);
+// their first load is paid at collection, never inside a clocked case (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { TokenStorage } from '@object-ui/auth';
 import { WIDGETS } from './widgets';
 import { t } from './i18n';
 
 const FieldSelector = WIDGETS['field-selector'];
 
 const OBJECT = 'showcase_account';
-const FIELDS_URL = `/api/v1/objects/${OBJECT}/fields`;
+/** The served object read: the meta item route, draft-overlaid. */
+const OBJECT_URL = `/api/v1/meta/object/${OBJECT}?preview=draft`;
 
 /** Shown while the catalog request is genuinely in flight. */
 const LOADING_FIELDS = t('engine.form.loadingFields', 'en-US');
@@ -82,12 +90,17 @@ const FAILURE_TESTID = 'field-selector-load-failed';
  */
 const ADD_FIELDS = t('engine.form.addFields', 'en-US');
 
-function okResponse(body: unknown): Response {
-  return { ok: true, status: 200, json: async () => body } as unknown as Response;
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/** The served answer of `GET /meta/object/:name`: the item envelope around the object document. */
+function objectResponse(fields: Record<string, { type: string; label?: string }>): Response {
+  return json(200, { type: 'object', name: OBJECT, item: { name: OBJECT, fields } });
 }
 
 function jsonErrorResponse(status: number, body: unknown): Response {
-  return { ok: false, status, json: async () => body } as unknown as Response;
+  return json(status, body);
 }
 
 /** A promise the test resolves by hand, so the loading arm is observable. */
@@ -119,6 +132,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  TokenStorage.clear();
 });
 
 describe('field-selector — a failed field fetch is not an empty field list (objectui#5227)', () => {
@@ -146,7 +160,7 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     // …and the loading flag cleared.
     expect(screen.queryByDisplayValue(LOADING_FIELDS)).not.toBeInTheDocument();
 
-    expect(fetchMock).toHaveBeenCalledWith(FIELDS_URL);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([OBJECT_URL]);
   });
 
   it('mouth 2: a NON-OK response with a parseable JSON body is a fault, not an empty catalog', async () => {
@@ -170,26 +184,22 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
   });
 
   it('mouth 2: a NON-OK response with no usable message still fails with its status', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      // A non-JSON body — the parse throws, and that must not be mistaken for
-      // a refusal that said nothing to report.
-      json: async () => {
-        throw new SyntaxError('Unexpected token < in JSON');
-      },
-    } as unknown as Response);
+    // A non-JSON body — the parse throws, and that must not be mistaken for
+    // a refusal that said nothing to report.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('<html>Internal Server Error</html>', { status: 500, statusText: 'Internal Server Error' }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     renderWidget();
 
     await waitFor(() => expect(screen.getByTestId(FAILURE_TESTID)).toBeInTheDocument());
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-    expect(screen.getByTestId(`${FAILURE_TESTID}-cause`)).toHaveTextContent('HTTP 500');
+    expect(screen.getByTestId(`${FAILURE_TESTID}-cause`)).toHaveTextContent('500');
   });
 
   it('a genuinely EMPTY successful load still renders the picker, and no failure block', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okResponse({ fields: [] }));
+    const fetchMock = vi.fn().mockResolvedValue(objectResponse({}));
     vi.stubGlobal('fetch', fetchMock);
 
     renderWidget();
@@ -207,7 +217,7 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
 
   it('a POPULATED successful load renders an enabled picker', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      okResponse({ fields: [{ name: 'name', label: 'Name', type: 'text' }] }),
+      objectResponse({ name: { type: 'text', label: 'Name' } }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -229,7 +239,7 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.queryByTestId(FAILURE_TESTID)).not.toBeInTheDocument();
 
-    gate.resolve(okResponse({ fields: [{ name: 'name', label: 'Name', type: 'text' }] }));
+    gate.resolve(objectResponse({ name: { type: 'text', label: 'Name' } }));
 
     await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
     expect(screen.queryByDisplayValue(LOADING_FIELDS)).not.toBeInTheDocument();
@@ -277,5 +287,115 @@ describe('field-selector — a failed field fetch is not an empty field list (ob
     // …and still editable.
     screen.getByRole('button', { name: '×' }).click();
     expect(onChange).toHaveBeenCalledWith([]);
+  });
+});
+
+/**
+ * objectstack#37225 — the catalog read went out cookie-only, so a session held
+ * by its bearer token alone was answered `401` and the picker showed a failure
+ * for every object. Against a server that refuses any request without the
+ * bearer, the read carries it; with no token stored (a cookie session) it goes
+ * out without one, as before. The console's `MetadataClient` transport is what
+ * carries it now (`metadataClientFactory.ts`).
+ */
+describe('field-selector — the catalog read under a bearer-only session (objectstack#37225)', () => {
+  const TOKEN = 'stored-session-token';
+  const sent: Array<{ authorization: string | null }> = [];
+  const bearerOnlyServer = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const authorization = new Headers(init?.headers).get('Authorization');
+    sent.push({ authorization });
+    return authorization === `Bearer ${TOKEN}`
+      ? objectResponse({ name: { type: 'text', label: 'Name' } })
+      : jsonErrorResponse(401, { error: { message: 'Authentication is required to access this endpoint.' } });
+  });
+
+  afterEach(() => {
+    sent.length = 0;
+    bearerOnlyServer.mockClear();
+  });
+
+  it('loads the catalog, sending the stored bearer', async () => {
+    TokenStorage.set(TOKEN);
+    vi.stubGlobal('fetch', bearerOnlyServer);
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    expect(screen.queryByTestId(FAILURE_TESTID)).not.toBeInTheDocument();
+    expect(bearerOnlyServer.mock.calls.map(([url]) => url)).toEqual([OBJECT_URL]);
+    expect(sent).toEqual([{ authorization: `Bearer ${TOKEN}` }]);
+  });
+
+  it('CONTROL: with no token stored the read goes out without one, and is refused as before', async () => {
+    vi.stubGlobal('fetch', bearerOnlyServer);
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByTestId(FAILURE_TESTID)).toBeInTheDocument());
+    expect(sent).toEqual([{ authorization: null }]);
+  });
+});
+
+/**
+ * The catalog is read off a route the server mounts. It used to be read from
+ * `/api/v1/objects/:name/fields`, which no server registers, so every load
+ * failed: the object document at `GET /api/v1/meta/:type/:name` (the REST
+ * route ledger's `meta.getItem` row) is the one route that serves an object's
+ * fields, and `useObjectFields` reads the same one.
+ */
+describe('field-selector — the catalog is read from the served object document', () => {
+  it('asks GET /api/v1/meta/object/:name, and never the unmounted fields path', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method ?? 'GET').toBe('GET');
+      return objectResponse({ name: { type: 'text', label: 'Name' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([OBJECT_URL]);
+    expect(urls.some((u) => u.includes('/fields'))).toBe(false);
+  });
+
+  it('names the object the sibling form value binds, encoded into the path', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(objectResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWidget({ formData: { objectName: 'a/b' } });
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeInTheDocument());
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/v1/meta/object/a%2Fb?preview=draft']);
+  });
+
+  it("reads the document's fields — record shape — into the picker's options", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        objectResponse({ amount: { type: 'currency', label: 'Amount' }, stage: { type: 'select' } }),
+      ),
+    );
+
+    // With a stored value: the chip draws the catalog's label
+    // and type for it, which only a read of the served document can supply.
+    renderWidget({ value: ['amount'] });
+
+    await waitFor(() => expect(screen.getByRole('combobox')).toBeEnabled());
+    expect(screen.getByText('Amount')).toBeInTheDocument();
+    expect(screen.getByText('currency')).toBeInTheDocument();
+  });
+
+  it('a 404 (no such object) is a failure naming the missing object, not an empty catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json(404, { error: { message: 'not found' } })));
+
+    renderWidget();
+
+    await waitFor(() => expect(screen.getByTestId(FAILURE_TESTID)).toBeInTheDocument());
+    expect(screen.getByTestId(`${FAILURE_TESTID}-cause`)).toHaveTextContent(
+      t('engine.form.objectNotFound', 'en-US'),
+    );
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText(ADD_FIELDS)).not.toBeInTheDocument();
   });
 });

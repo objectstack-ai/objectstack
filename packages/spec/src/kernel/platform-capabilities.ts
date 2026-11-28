@@ -74,6 +74,18 @@ export const PLATFORM_CAPABILITY_TOKENS: readonly string[] = Object.freeze([
   'approvals',
   'settings',
   'webhooks',
+  // Record context (ADR-0160 D5): the `record-context` service, which serves
+  // `get_record_context` over MCP from the app's `aiContexts` packs.
+  // Requested, never always-on: whether an app exposes a read tool is the
+  // app's own declaration, not a side effect of shipping packs.
+  'record-context',
+  // Knowledge (ADR-0161): the `knowledge` service and one vector store, chosen
+  // by the platform database — pgvector on PostgreSQL, otherwise a libSQL file
+  // of its own. Requested, never always-on: the token mounts it, and so does a
+  // `knowledge_source` item in the stack (K8 item 12; the provider row's
+  // `mountedBy`). Without either, no knowledge service, no store and no
+  // Knowledge settings page.
+  'knowledge',
   // Enterprise / cloud-runtime capabilities (no open-edition provider:
   // `hierarchy-security` ships in @objectstack/security-enterprise via
   // `plugins[]`; `ai-seat` / `governance` / `audit-compliance` /
@@ -153,6 +165,14 @@ export interface PlatformCapabilityProvider {
    * preflight / boot error so the message carries its own context.
    */
   readonly note?: string;
+  /**
+   * The stack collection whose items mount this capability as its token
+   * does: a stack holding one item of it is served as if it listed the token
+   * under `requires`. Set only where the provider is the items' one reader,
+   * so an item with no provider would be inert (ADR-0078). Today
+   * `knowledge`, by `knowledgeSources` (ADR-0161 K8, item 12).
+   */
+  readonly mountedBy?: { readonly collection: string };
 }
 
 /**
@@ -227,6 +247,13 @@ export const PLATFORM_CAPABILITY_PROVIDERS: Readonly<Record<string, PlatformCapa
     approvals: { package: '@objectstack/plugin-approvals', edition: 'open' },
     settings: { package: '@objectstack/service-settings', edition: 'open' },
     webhooks: { package: '@objectstack/plugin-webhooks', edition: 'open' },
+    'record-context': { package: '@objectstack/service-record-context', edition: 'open' },
+    // [ADR-0161 K8 item 12] A `knowledge_source` item mounts it too.
+    knowledge: {
+      package: '@objectstack/service-knowledge',
+      edition: 'open',
+      mountedBy: { collection: 'knowledgeSources' },
+    },
     // ── Enterprise / cloud-runtime capabilities ────────────────────────────
     'hierarchy-security': {
       package: '@objectstack/security-enterprise',

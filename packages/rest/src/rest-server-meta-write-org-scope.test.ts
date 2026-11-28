@@ -27,6 +27,9 @@ import * as metadataCore from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/objectql';
+
 const META = '/api/v1/meta';
 const ORG = 'org_alpha';
 
@@ -114,8 +117,9 @@ const requestFrom = (fn: any) => fn.mock.calls[0][0];
 
 // [#21124] `manage_platform_settings` too: these suites iterate every registered type, and a
 // `datasource` write is admitted only with it (`metaTypeWriteRefusal`, the type-level write admission).
-const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'], tenantId: ORG };
-const AUTHORIZED_NO_ORG = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings'] };
+// [ADR-0161 K4] `manage_knowledge_sources` for the same reason: a `knowledge_source` write asks it.
+const AUTHORIZED = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings', 'manage_knowledge_sources'], tenantId: ORG };
+const AUTHORIZED_NO_ORG = { userId: 'u1', systemPermissions: ['manage_metadata', 'manage_platform_settings', 'manage_knowledge_sources'] };
 
 /** Drive one write door with the given type + execution context. */
 async function writeWith(type: string, execCtx: any) {

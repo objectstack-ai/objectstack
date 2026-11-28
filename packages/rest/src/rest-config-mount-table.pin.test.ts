@@ -294,7 +294,13 @@ const CASES: Array<{ path: string; removes: string[] }> = [
             `PUT ${META}/:type/:name`,
         ],
     },
-    { path: 'api.enableDiscovery', removes: ['GET /api/v1', 'GET /api/v1/discovery'] },
+    // [#34774] The restriction profile `os validate --target` reads is a
+    // discovery route: the switch off, the CLI falls back as for any server
+    // that does not serve it.
+    {
+        path: 'api.enableDiscovery',
+        removes: ['GET /api/v1', 'GET /api/v1/discovery', 'GET /api/v1/discovery/restriction-profile'],
+    },
     // [#25104] One route since the `/docs` viewer page was retired; the
     // switch still gates the document.
     { path: 'api.enableOpenApi', removes: ['GET /api/v1/openapi.json'] },

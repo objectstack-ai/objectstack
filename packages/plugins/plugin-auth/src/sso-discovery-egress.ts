@@ -106,6 +106,20 @@ export function isSsoDiscoveryEgressPath(endpointPath: string | undefined): bool
 }
 
 /**
+ * Whether the built auth instance mounts the vendor's `sso` plugin, the one
+ * thing that serves the endpoints {@link isSsoDiscoveryEgressPath} names. Read
+ * off the composition that answers the request (its plugin list), never off
+ * the configuration re-read at request time, which can disagree with the lazy
+ * build. A plugin list that cannot be read answers `true`: a composition this
+ * cannot see into is judged as one that mounts SSO, so the scope opens.
+ */
+export function mountsSsoEndpoints(auth: unknown): boolean {
+  const plugins = (auth as { options?: { plugins?: unknown } } | null | undefined)?.options?.plugins;
+  if (!Array.isArray(plugins)) return true;
+  return plugins.some((plugin) => (plugin as { id?: unknown } | null)?.id === 'sso');
+}
+
+/**
  * The guard SSO discovery sends through: the platform's outbound-request
  * guard with a policy that refuses every address that is not public and
  * opens none. `resolve` replaces name resolution (tests); `logger` receives

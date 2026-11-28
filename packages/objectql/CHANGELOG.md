@@ -1,5 +1,1309 @@
 # @objectstack/objectql
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/metadata-protocol@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 0296d97: feat(plugin-audit): the audit log is sealed by default, and sealed rows expire by whole checkpoints under a signed expiry amendment
+  
+  Clause-②: yes (narrowing) — narrowed: because `sys_audit_log` now declares `lifecycle.seal` on every deployment, `os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies` with `--apply` refuse on SQLite or Turso without `--sealer-stopped`, and on Postgres or MySQL take the audit seal lock and refuse when a sealer pass still holds it after ten minutes, where 18.6.0 ran them unlocked on a deployment that sealed nothing; `os audit verify` exits 1 on a row in a window at or before the newest window a trusted `window` checkpoint names that no checkpoint holds (`late`, unsealed), where it read the window unsealed and exited 0; `os audit verify` refuses with `archive_not_connected` and exits 2 wherever the `archive` datasource is declared and not connected on its own boot, where 18.6.0 printed that nothing is sealed and exited 0; `verifyAuditLedger` throws for `sys_audit_log` when the `archive` datasource it archives to is not connected and no `archive` is passed; and on an object whose packaged metadata declares `lifecycle.seal` and no `archive`, a `lifecycle` settings override of `retention.maxAge` or `ttl.expireAfter` below the declared window, global or for one organization, is rejected and reported at `error`, and the declared window applies, where 18.6.0 applied it. An object created at runtime is outside the override arm and outside signed expiry: it keeps the 18.6.0 row-cutoff retention sweep, and a settings override applies to it; the `os audit verify` arms hold for it as for any sealed object. This breaks the bound changeset `35c9a30` (#33675) set, "No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change": this release is the one that opts every deployment in. Widened: `@objectstack/objectql` `LifecycleService.registerExpiryPrefix` and the types `LifecycleExpiryPrefix`, `LifecycleExpiryPrefixRequest` (with its `tenants` windows and `tenantColumn`), `LifecycleExpiryPrefixRun`, the predicate `takesSignedExpiry` with its type `SignedExpiryRegistryLike`, and three optional owner reads on `LifecycleEngineLike.registry`; a sweep entry's `policy` gains `'expiry'` and `skipped[].reason` gains `seal-expiry-pending` and `seal-delete-unsupported`.
+  Metadata-protocol: semantic — on an object whose packaged metadata declares `lifecycle.seal`, the authored `retention.maxAge`, `ttl.expireAfter` and `archive.keep` no longer delete a row at its row cutoff: rows leave by whole checkpoints under a signed expiry amendment, counted to the start of a UTC day, at most 10,000 a sweep, and not at all while no sealer runs; an object created at runtime keeps its row cutoff
+  Skills-docs: follow-up owed — this claim's second PR (amendment 7193137455) rewrites `skills/objectstack-data/rules/lifecycle.md`, which still says the sweeper deletes sealed rows
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answers are whether an os migrate audit-* --apply run may proceed while a sealer could be sealing sys_audit_log, how os audit verify reads a lagging chain, and when a sealed row may be deleted. A declaration keeps its meaning as a lower bound, so no author's declaration needs rewriting. The one-line fix for each is in the body. -->
+  
+  **BREAKING** for operators and library callers, because the audit log is now sealed on every deployment:
+  
+  - **`os migrate audit-* --apply` on SQLite or Turso** stops before writing and names the flag. Fix: stop every server that seals the database, then run it again with `--sealer-stopped`.
+  - **The same run on Postgres or MySQL** waits up to ten minutes for a sealer pass in flight, then refuses having changed nothing. Fix: run it again once that pass has finished.
+  - **`os audit verify` exits 1** on a row it reads `late` and unsealed in a window another chain of the object already sealed. Fix: none is owed by the command; read the rows the report names (a chain a fault left behind), and run it again after the sealer's next pass.
+  - **`os audit verify` exits 2** (`archive_not_connected`) where the `archive` datasource is declared and the command's boot does not connect it. Fix: declare the datasource with `autoConnect: true`, or make it reachable from where the command runs.
+  - **`verifyAuditLedger`** (`@objectstack/plugin-audit`) throws for `sys_audit_log` when its `archive` datasource is not connected. Fix: pass `archive`, for example `archive: () => 'none'` where the deployment has no archive datasource.
+  - **On a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override cannot shorten the declared window.** An override below it is rejected at every sweep, reported at `error` (`floorViolations` on the sweep report), and the declared window applies. On an object that archives, an override still sets when rows move to the archive. Fix: remove the override or raise it to at least the declared window; to keep rows for less time, shorten the window the object declares.
+  
+  Every dry run is unchanged. A deployment's own objects that do not declare `lifecycle.seal` keep the row-cutoff retention they had.
+  
+  ADR-0154 D8 and D10 (#31908, slice P4c, the last one).
+  
+  - **`sys_audit_log` is sealed.** Its lifecycle declares `seal: { valueFields: ['old_value', 'new_value', 'metadata'] }`, so every deployment whose `AuditPlugin` has a crypto provider (`os serve` hands it one) signs each hour's audit rows into a per-organization checkpoint, and `os audit verify` checks them. The three value columns enter each checkpoint as salted commitments; every other column enters in clear.
+  - **Sealed rows leave only by whole checkpoints.** Signed expiry covers objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the 18.6.0 row-cutoff retention sweep, its rows then reading as missing. Extending signed expiry to runtime-created objects is a separate card. The LifecycleService no longer deletes a row of a sealed object whose lifecycle is declared in packaged metadata by a row cutoff (`retention.maxAge`, `ttl.expireAfter`, or the archive's `keep` prune). It hands each policy to the sealed expiry the audit sealer registers (`LifecycleService.registerExpiryPrefix`, `@objectstack/objectql`). Per chain, the sealer takes the consecutive checkpoints from the chain's first remaining one whose windows ended before the cutoff (aligned down to a UTC day, so once its backlog is drained a chain gains at most one expiry amendment a day), each admitted under a trusted signing key, at most 10,000 rows a sweep. It signs and stores the chain's `expiry` amendment first. The sweep then deletes exactly those rows, by id, from the hot store and the archive, and only after them the checkpoints and their seeds. A sweep stopped part way resumes under the stored amendment and signs no second one. A run a reap guard vetoes in part is not completed and is retried. The verifier reads an expired row as `expired` while its checkpoint stands, and after it is gone honours the range as before (D8).
+  - **`os migrate audit-* --apply` on SQLite or Turso now needs `--sealer-stopped` for the audit log.** The rule 18.6.0 set for a sealed object now holds on every deployment, since `sys_audit_log` is one: stop every server that seals the database, then run with the flag. That includes the `os migrate audit-side-copies --apply` an upgrade from 18.4.0 or earlier runs. Postgres and MySQL take the audit seal lock, and a dry run is unchanged.
+  - **No sealer, no deletion.** While no sealed expiry is registered (an `AuditPlugin` with no crypto provider, a one-shot boot), a sealed object's rows past their policy are kept, the archive copy still runs, the sweep reports `seal-expiry-pending`, and the lifecycle service says so once at `warn`; such a host keeps `sys_audit_log` past `archive.keep`, and its sealer reports the missing provider hourly at `error`. An archive store with no `bulkDelete` is never planned (`seal-delete-unsupported`), so no amendment is signed over rows it could not delete. A chain whose first remaining checkpoint does not follow its last expiry (a checkpoint removed outside the platform), or whose next checkpoint does not verify under a trusted key, is not expired past that point, and the sealer says so. An expiry acts only on the chain's own checkpoints and amendments, linked in order; a stopped expiry is resumed only over checkpoints that also each verify under a trusted key and run on to the amendment's last sequence and digest; otherwise nothing in its range is deleted, and the sealer says so. The verifier holds an expiry it honours to the same. An expiry deletes rows for good: a deleted row cannot be restored from the ledger.
+  - **On a sealed object with no `archive`, a retention override cannot shorten the declared window.** `AuditPlugin` registers a retention floor (the mechanism the job queue uses for its idempotency window) for every object whose packaged metadata declares `lifecycle.seal` and no `archive`, at its declared `retention.maxAge` and `ttl.expireAfter`, refreshed before every sealer pass so it follows the declaration. An override, global or for one organization, may lengthen the window; one below it is rejected and the declared window applies. `archive.keep` takes no override. A lifecycle service that takes a sealed expiry but no retention floors is given no expiry, so its sealed rows are kept, and the plugin says so at `error`.
+  - **A tenant-scoped retention override applies to its organization's chain where it is set on the chain column.** Tenant windows are set on the object's `organization_id` column, so this holds on an object chained by it (`seal.chainField: 'organization_id'`). The lifecycle service hands each tenant's window, through the same floors, to the sealed expiry (`LifecycleExpiryPrefixRequest.tenants`), with the column the windows are set on (`LifecycleExpiryPrefixRequest.tenantColumn`). Where that is the object's chain column, an organization's chain expires under its own window and its amendment signs that value. Every other chain expires under the longest window configured: the chain of rows about no organization, and every chain of an object whose windows are set on another column than its chain column, which may hold rows of several organizations. On such an object a shorter tenant window has no effect on its sealed rows: they are kept to the longest. No row expires under a window shorter than one set for it.
+  - **A fully expired chain continues.** Its next checkpoint chains onto the expiry: sequence after the expiry's last, linked to its `last_removed_digest`.
+  - **`os audit verify` stays loud for a chain a fault left behind** (seat ruling 6885452378, ADR-0154 D3 as amended): a window that starts at or before the newest window a trusted `window` checkpoint names is sealed, so a row there that no checkpoint holds reads `late` and unsealed, and the check fails.
+  - **The verify harness hands its crypto provider to `AuditPlugin`.** `bootStack` gives an `AuditPlugin` it mounts (an `extraPlugins` entry, a stack `plugins` entry, or the provider `requires: ['audit']` constructs) the same `harnessCryptoProvider()` instance that settings and the engine get, never a bare `LocalCryptoProvider`; an instance composed with its own provider keeps it.
+  - The `lifecycle.seal` description no longer says the retention sweeper deletes sealed rows.
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+
+### Patch Changes
+
+- 8071f35: fix(automation): a record-change flow's run history and its notification deliveries land again when the triggering write runs in a unit of work
+  
+  Clause-②: yes (widening) — `ObjectQL` is exported from the `@objectstack/objectql` entry, and it gains two public methods, `runOutsideOpenUnits(body)` and `runAfterOpenUnitsCommit(body)`; `@objectstack/core` gains the root export `wakeAfterOpenUnitsCommit(engine, wake)`; the `@objectstack/service-automation` interface `SuspendedRunStoreEngine` gains the matching optional member `runOutsideOpenUnits`, so an engine that does not supply it still satisfies the interface. No existing signature or accepted input narrows. `DispatchLoop`'s change is to the async context its ticks run in, and the dispatchers' change is to when a wake is sent, not to any API. The level stays `patch` because nothing a metadata author can write changes (`Metadata-protocol: none`).
+  Metadata-protocol: none
+  
+  On 19.0.0-next.0 a record-change flow fired by a write whose object carries a metadata `before*` hook, or a blocking `after*` hook that can abort, finished inside the unit of work the write door opens for that write. Two pieces of work the run starts and does not await then ran on that unit's transaction after it had committed, and the database answered "Transaction query already complete":
+  
+  - the run's terminal history row (`sys_automation_run`) never landed, so the run was missing from the Runs surfaces and from every read of its history, with an `error` line naming the persist;
+  - a `notify` node's outbox wake started the notification dispatcher's tick in the same unit, so the tick's delivery updates failed, and with them the audit rows (`sys_activity`) those updates write.
+  
+  Both now run outside the unit:
+  
+  - `ObjectQL.runOutsideOpenUnits(body)` is new: it runs work its caller starts and does not await outside every unit of work open at the call, the same exit an `async: true` hook's run takes. Its calls run on their own connection, and a rollback of the unit open at the call does not undo them.
+  - The durable run-history store writes a finished run's row through it.
+  - `DispatchLoop` (the notification, HTTP-delivery, database-queue and audit-seal loops) runs every tick in the async context it was constructed in, never in the context of the caller of `start()`, `wake()` or `wakeAt()`.
+  - A wake for a row the open unit just wrote is sent at that unit's commit, and not at all when it rolls back: `ObjectQL.runAfterOpenUnitsCommit(body)` is new, and the notification and HTTP outboxes' wake and the database queue's `publish` and `replay` wake go through it (`wakeAfterOpenUnitsCommit` in `@objectstack/core`). A tick woken inside the unit runs outside it, and on a pooled driver (Postgres, MySQL) it could not see the row yet, so the row would have waited for a later, backed-off tick. A unit opened by `ScopedContext`'s `beginTransaction` trio holds the wake back while an engine call carrying its handle runs; a wake made outside such a call, by code that holds the trio handle only explicitly, goes at once, and on a pooled driver waits one backed-off tick.
+  - A loop's home is the context it is constructed in, so a loop is constructed at boot; `DbQueueAdapter`'s first `subscribe()` under `autoStart` starts it too and belongs at boot.
+  
+  What a reader sees change: a run's history row is written beside the run, not inside the triggering write's unit, so it is not rolled back with that write, and it can land a moment after the write has returned. Read it the way you read any history row written by a run that is not awaited: wait for it to land rather than reading it once straight after the write.
+- e69fa46: refactor(objectql): the engine's own sort door judges a computed field type by the spec's predicate, as the Data API's door does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ObjectQL.find` and `ObjectQL.findOne` refuse an order by a field whose type is computed on read (`400 INVALID_SORT`), for callers that reach the engine directly, such as hooks and flows. The engine decided "computed on read" from a `formula` literal of its own. The Data API's sort door and the sortability projection served on `GET /meta/object/:name` decide it from `@objectstack/spec/data`'s `isVirtualSearchField`. The engine door now reads that predicate too.
+  
+  Nothing changes for a caller: the spec's set holds `formula` and nothing else, so every sort is accepted or refused as before, with the same code, status and message. What changes is what happens when a computed type is added to the spec's `SEARCH_VIRTUAL_TYPES`: an in-process `find` is refused together with the Data API, instead of sending the order to a driver that has no column for it and returning the rows unsorted.
+  
+  What to do: nothing.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [031a19d]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [f7f9345]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/metadata-protocol@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
+## 19.0.0-next.0
+
+### Minor Changes
+
+- cc03bdc: fix(objectql): an `object_extension` whose record-mode amount names a sibling `currencyField` the served object does not hold is refused at the save, not at every write
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-data/rules/field-types.md` already says a record-mode amount's code lives in the `text` field `currencyField` names, declaring `valueDomain: 'iso_4217_currency'`, with no carve-out for an extension; the refusal now makes that true for an extension's amount, and its text carries the prescription
+  
+  <!-- adr-0087: registered record-currency-sibling-extension-judged-as-served -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. An object body whose record-mode amount names a one-segment `currencyField` it does not declare, or a field holding no ISO 4217 code, is refused `422 INVALID_METADATA` at parse. An extension's amount cannot be judged there, because its pointer may name a field only the owner declares, and the record-currency follow door judged an extension only on the two-segment `MASTER_DETAIL.CODE` path. So `PUT /api/v1/meta/object_extension/showcase_invoice` adding `fee: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'zz_missing' } }` answered 200 and was served, and every later write of `fee` was refused `ERR_CURRENCY_CODE_REQUIRED`, prescribing a write into `zz_missing`, which does not exist.
+  
+  - **The verdict.** The follow door (`SchemaRegistry.objectRegistrationRefusal` with `againstRegistry`, and the end of an install, upgrade or reload on a running server) now judges a one-segment pointer against the object AS SERVED: its base, every enabled extension, and the incoming body. A pointer naming no other field, or a field that is not a `text` field declaring `valueDomain: 'iso_4217_currency'`, is refused `422 INVALID_METADATA` (`RecordCurrencyFollowRefusedError`), naming the amount, the pointer and the object's code-field candidates; nothing is stored.
+  - **Admitted as before.** A pointer naming a code field the owner declares, the same extension adds, or another enabled extension adds.
+  - **The owner's end.** An owner re-registering without the code field an extension's amount names is refused, naming the package that adds the amount.
+  - **Runs and single saves.** An install, upgrade or reload that leaves such a pointer as it found it is not refused over it. A published single save and the batch writers judge with the slot left empty: re-publishing an unchanged extension whose pointer a cold boot admitted is refused, and so is a published save of the owner while an extension's amount names no code field. Correct that extension's pointer (or uninstall it), then save the owner again unchanged.
+  - **Not asked.** The cold boot: packages installed before this release keep loading.
+  
+  One-line fix: point the amount's `currencyField` at the extended object's ISO 4217 code field (the refusal lists the candidates), or add one in the same extension and name it.
+- d5ece3e: fix(objectql): an update whose every caller-supplied field is dropped (read-only, or locked by `readonlyWhen`) is a no-op, so the record no longer shows a last-modified edit that changed nothing and `afterUpdate` automation no longer fires for it
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  An update could send only fields the engine refuses to store: a `readonly` field, or one a TRUE `readonlyWhen` locks for that record. The engine dropped them, reported them in `droppedFields`, and then still wrote the row: `updated_at` and `updated_by` were stamped, and every `afterUpdate` hook ran, so "on update" flows and triggers treated it as a real edit.
+  
+  Now such an update writes nothing, on a single-record update and on a `multi: true` predicate update alike:
+  
+  - no driver write, so `updated_at` / `updated_by` keep their stored values;
+  - `afterUpdate` does not run, no roll-up recomputes and no record-changed event is published;
+  - a single-record update answers the current record, and a predicate update answers `0` rows written;
+  - the dropped fields are still reported exactly as before (`onFieldsDropped`, and the REST `droppedFields` answer).
+  
+  `beforeUpdate` still runs, as it must before the engine can know what is left. When at least one field survives (a caller field, or a field a `beforeUpdate` hook wrote), the update takes the unchanged path. An update whose fields are all kept but equal to the stored values is unchanged. `strictReadonlyWrites` still refuses a dropped field before anything is written.
+  
+  What to check in an app: an `afterUpdate` hook or record-change trigger that relied on firing for an update made only of read-only or locked fields no longer runs for it. Send a writable field in that update if the automation must run.
+- 0739dee: fix(objectql)!: a field that is `required` and hidden by its own `visibleWhen` is required only when shown, so one admin setting no longer locks every record outside the condition
+  
+  Clause-②: yes (narrowing + widening of the required write contract) — widened: an insert or update whose record a `required` field's own `visibleWhen` cleanly hides no longer needs that field, and an explicit null onto a row already shown and empty is accepted. Narrowed: a write that moves a record INTO the condition while that field is empty is refused; 18.5.0 accepted it.
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is when the engine enforces required on a field that also declares visibleWhen. The one-line fix for a refused write is in the body: fill the field in the same write that moves the record into the condition. -->
+  
+  **BREAKING** for flows, bulk updates, imports and API PATCHes that move existing records into a `required` field's `visibleWhen` condition without filling the field. Such a write is now refused with `required` naming the field (on a bulk update, one such row refuses the batch). Fill the field in the same write. A field with `required` and no `visibleWhen` is unchanged.
+  
+  **What changed (ADR-0113 D1 and D5, amended).** A field that declares `required: true` and its own `visibleWhen` used to be enforced on every save. In Studio an administrator can add one in a few clicks, and from then on every record that fails the condition refused every write, even an edit of an unrelated field, naming a field nobody could see. The engine now judges such a field from its visibility on the write:
+  
+  - the predicate evaluates cleanly to anything but TRUE on the record (the stored row with the write over it), so FALSE, or `null` such as an unset boolean: the field is not required for that write, so a record outside the condition can be created and edited, and the form's clear-on-hide `null` is accepted;
+  - the predicate is true: the field is required by the same non-regression rule `requiredWhen` uses, against the prior record, which the engine now reads on update for objects with such a field;
+  - the predicate cannot be evaluated: it counts as shown, the field stays required exactly as before, and the server logs a warning naming the field and the fault.
+  
+  The predicate is evaluated with the acting user bound as `current_user`, so a role-gated field is judged per writer; a system write with no user counts as shown. A `formula` field it reads is computed over the record first, as a read of that record computes it. A formula that faults for a reason a read shares (an empty operand) is judged on the `null` a read serves; a formula whose read value the write path cannot know (it reads through a reference, calls `label()`, calls `can` on a write that picks no permission-gated option and so resolves no permission map, reads `current_user` on a system write with no user, or reads such a formula at any depth) counts as shown; the system-write case is logged as `no-acting-user`, as the direct `current_user` spelling is. Only the field's own `visibleWhen` is read: a field group's `visibleWhen` and form-view predicates are not.
+  
+  The refusal for such a field now comes from the rule pass rather than the record walk. A single-fault write gets the same `required` code and sentence; a write with several faults may name fewer of them in one `400`, or answer a dangling reference first, and a `beforeUpdate` hook now runs before the refusal and may fill the field.
+  
+  **A formula-driven `visibleWhen` on the form.** The form computes the object's formula fields over the record being edited before it judges the field rules (the form-side recompute in `@object-ui/core`, `@object-ui/components` and `@object-ui/console`), so it shows such a field where the server requires it. A formula the form cannot compute (it reads through a reference, calls `label()` or `can()`, reads `os`, or reads the user when nobody is signed in) leaves the field shown and required, and the server decides on save.
+  
+  **`@objectstack/lint`.** Three new warnings at `objectstack validate` and the object save door, on a `required` field with a `visibleWhen`: the predicate reads through a reference field (the server cannot evaluate it, so the field stays required everywhere); the predicate reads a `formula` field (with the counts-as-shown consequence when a formula it reads, at any depth, reads through a reference, calls `label()`, or calls `can`, which a write computes only when it picks a permission-gated option); and `storage.notNull: true` beside the pair (the column still refuses the null on a record outside the condition).
+  
+  **`@object-ui/app-shell`.** Studio's field inspector shows the reference-read and formula-read warnings under the Visible-when editor of a required field.
+  
+  **`@objectstack/spec`.** The `required` and `visibleWhen` descriptions on `FieldSchema` say how the two combine.
+- 6ffa816: feat(security): an unmanaged install copies an app's capabilities, renamed with the copy
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An app that gates an action on its own capability can now install as an unmanaged copy (`installModes: ['unmanaged']`). Before, `capability` was code-only (`allowRuntimeCreate: false`), so the validator refused the mode for any app that declared one, and the install door had no channel to write the copy's capabilities.
+  
+  - **`capability` is runtime-creatable.** Its `DEFAULT_METADATA_TYPE_REGISTRY` entry is now `allowRuntimeCreate: true`, and overlays stay closed (`supportsOverlay: false`, `allowEnvironmentOverlay: false`). A body is judged by `CapabilityDeclarationSchema`, as before.
+  - **The save door refuses two names.**
+    - A platform capability's name (`manage_users`, `setup.access`, every name in `PLATFORM_CAPABILITIES`) answers `422 NAMESPACE_CONFLICT`. An environment item under that name would shadow the platform's definition, because the registry answers its bare slot first.
+    - A name an installed package's capability holds answers `422 NAMESPACE_CONFLICT`, naming the holder. A capability holds one name per deployment, the same rule permission sets and positions follow.
+  - **The environment catalog holds capabilities.** `ENVIRONMENT_HELD_SECURITY_CATALOG_TYPES` is `['position', 'permission', 'capability']`. A package that ships a capability name the environment already authored is refused at boot, as a position or permission-set name is. `os migrate security-catalog-overlays`, the remedy that refusal names, lists and deletes such a capability row too (`capability` and `capabilities` spellings).
+  - **An unmanaged copy renames its capabilities.** When the copy takes a new namespace, a capability whose name starts with the source namespace (`<ns>.` or `<ns>_`) is renamed into the copy's namespace. Every reference is rewritten with it: a permission set's `systemPermissions` (list or per-operation map), an object's or action's `requiredPermissions`, and a quoted `current_user.hasCapability('<name>')` in a predicate. There the object-name rename never touches a name the package declares, so a capability named after a renamed object has one name in the copy; a token the package does not declare follows a renamed object as before. An unprefixed capability keeps its name. A renamed capability that collides with another package's capability refuses the install, naming both. Install again under another namespace.
+  - **Duplicating a package refuses a shared gate.** `duplicatePackage` keeps its source installed, so a capability it cannot rename (no source prefix, or a copy name the package already declares) is refused, and so is every copied item that grants, requires or tests for it, each at its own name in `failed[]`.
+  - **The `everyone` anchor excuses only a declaration that carries a package.** The check that refuses a high-privilege permission set bound to `everyone` excuses the tokens an app declared itself. It now counts only declarations bound to a package (`_packageId`), as ADR-0090 D5 rules: an app's shipped capabilities, an unmanaged copy's, and one saved into a writable package. A capability saved with no package excuses nothing. What bounds a saved declaration is the two refusals above: a platform capability is never excused, and a name a package declares cannot be declared again. A name nobody declares can be declared once, by a `manage_metadata` holder, inside a writable package.
+  - **The gate is unchanged.** It still matches capability names. The copy's action is gated on the copy's capability: a holder of the copy's permission set passes, and a holder of only the source's set does not.
+- e75a528: feat(spec)!: two entries under one identity in one package are refused when a composition or a package body assembles them, as a single stack already refused them
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill teaches splitting one package's entries for one identity across sub-stacks or package bodies; `skills/objectstack-data/SKILL.md` teaches one `objectExtensions` entry per extension, and the refusal names both entries and prescribes the merge
+  
+  <!-- adr-0087: registered stack-package-duplicate-entry-refused-at-every-door -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`. `defineStack` refuses two entries under one identity in one stack for the collections the runtime registers one entry per identity (`objects`, `datasources`, `pages`, …, `queues`, `assignmentRules`, `apps`, `objectExtensions`), but two sub-stacks of ONE package that each declared one such entry composed with both, and a hand-built `packages[i]` body carrying two was accepted. `os validate`, `os build` and the boot all passed, and the boot then kept one entry. For `objectExtensions` that meant only the last entry's fields registered: a field the earlier entry declared was missing, and reads and writes naming it answered `INVALID_FIELD`.
+  
+  - **Refused now, in the cross-reference envelope (`STACK_CROSS_REFERENCE_INVALID`, 422), with the single-stack wording.** `composeStacks`, for the package it registers under its own `manifest.id`: every input of a flat composition, and under `manifest: 'preserve'` the inputs without a manifest and any other top-level entry no package body claims (the boot's residual). Each finding names the input every entry came from: `Object extension of 'crm_line' is declared twice in \`objectExtensions\`: stack #1 objectExtensions[0] and stack #2 objectExtensions[0]. …`. Every `packages[i]` body, of `defineStack({ packages })` (`stack.packages[1].manifest.objectExtensions[0]`) and of a composition that carries or assembles bodies. The refusal carries the inputs' conversion record like the other composition refusals. Two inputs declaring one app name now answer this refusal first, where they answered `STACK_SINGLE_APP_VIOLATION`.
+  - **Unchanged.** A single stack's refusal, byte for byte. Two packages reusing one name (ADR-0048 §3.4): under `manifest: 'preserve'`, as two package bodies, or as a nested multi-package artifact's flattened copies of its bodies, each body is judged on its own. The same built sub-stack passed to a composition twice, except its `hooks`: a hook reached twice is refused, because a built artifact binds each copy. Two same-name objects across inputs stay the `objectConflict` strategy's to refuse or fold.
+  - **Installed packages keep loading (`@objectstack/objectql`).** A package body built before this release that carries two or more `objectExtensions` entries for one object registers as before (only the last entry's fields), and its registration now logs one error per (package, object) naming the object, the package and the entries, and telling the author to merge them and rebuild. Entries for one object that are all equal by value lose nothing and log nothing. Re-registering a package still replaces that package's previous extension of the object.
+  
+  One-line fix: merge the entries into one (for `objectExtensions`, one entry per target object carrying every field), or rename one of them.
+- e114324: feat(units): a number field declares its unit with `unitConfig`, and the engine checks every unit code it stores
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 R1, the membership card (#35489).
+  
+  **`unitConfig` on a field** (`@objectstack/spec`, `UnitConfigSchema`):
+  
+  - `{ unitMode: 'fixed', unit: 'KGM' }` on a `number`: the quantity is always in one standard UN/ECE Recommendation 20 unit, checked at parse against the standard unit table (exact uppercase; `C62` and `EA` are answered with the piece, `H87`).
+  - `{ unitMode: 'record', unitField: 'uom', unitDimension?: 'mass' }` on a `number`: each record names its unit by code in the sibling `text` field `unitField` names. The object refuses a pointer into nothing, into a non-`text` field, through a parent (`PARENT_FIELD.UNIT_FIELD` is reserved: a child cannot follow its parent's unit yet), or into a field carrying its own marker, and two quantities sharing one unit field with different `unitDimension` values.
+  - `{ unitMode: 'code', unitDimension?: 'count' }` on a `text`: a field holding a unit code with no quantity beside it, such as a material's base unit (Open item 8, ruled A). It is a unit marker, not a value domain, and is refused beside a `valueDomain`.
+  - `unitMode` is required and has no default. The key is refused on every other field type (`currency`, `formula`, `summary` included). A quantity stays a bare number, and needs no `scale`.
+  
+  **The write check** (`@objectstack/objectql`): at every insert, by-id update, predicate update and `validate()` preview, a unit code the row stores must be a standard code or one of the organization's own non-retired units (`sys_unit`), in exact uppercase and of the declared `unitDimension`, and a quantity may not stand beside a blank code. The row image is judged whenever the write touches the quantity or its unit field (Open item 9). Refusals, each 400, registered in the error-code ledger: `ERR_UNIT_CODE_REQUIRED`, `ERR_UNIT_CODE_UNKNOWN`, `ERR_UNIT_CODE_RETIRED`, `ERR_UNIT_DIMENSION_MISMATCH`. A row resting on a code that is no longer a member stays editable in its other fields; a quantity edit beside it is refused until the row moves to a member unit.
+  
+  **A unit is retired, never deleted**: the engine refuses a delete of a `sys_unit` row for every caller, a system writer and an automation run included, by id and batched (405 `ERR_UNIT_DELETE_REFUSED`), and `organization_admin` names `sys_unit` explicitly with no delete (`@objectstack/plugin-security`).
+  
+  `@objectstack/metadata-core` and `@objectstack/driver-sql` classify the new field key (field-level security keeps it; the DDL does not read it). `@objectstack/platform-objects`: the `sys_unit` docblock names its readers.
+- f44758b: feat(units): `os migrate unit-codes` converts stored unit text into unit codes, from the operator's mapping
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  ADR-0158 U7 R1, the backfill door (#35492). It is the twin of `os migrate record-currency-codes`.
+  
+  **What it is for.** A field declared a unit code field after its rows were stored still holds free text such as `kg`, `公斤` or `lbs`. Since #35489 the engine checks each unit code it writes, so editing a quantity beside such a value is refused until the row holds a code. This door converts those rows in one run.
+  
+  **`backfillUnitCodes`** (`@objectstack/objectql`, also exported: `formatUnitCodeBackfillReport`, `unitCodeBackfillComplete`, `unitCodeMappingOf` and the report types):
+  
+  - **Which field.** `field` names the unit code field: the `text` field a quantity's `unitConfig.unitField` names, or a standalone `unitConfig: { unitMode: 'code' }` field. If you name the quantity, the refusal is `INVALID_FIELD` and names the field to use.
+  - **The mapping.** It is the operator's, never derived. It maps stored text, exactly as written, to a unit code. Matching is exact: `kg ` and `KG` need their own entries.
+  - **Targets are judged before any row is read**, as the write would judge them. A target that is not a standard UN/ECE Recommendation 20 code or one of the organization's own units, a retired unit, or a unit of another dimension than the field's `unitDimension` is refused `INVALID_FIELD` / 400 on the field. With no organization named, organization codes are judged in each organization the run would write them in, still before any write.
+  - **Rows already holding a unit code are never rewritten**, so the run is idempotent: a second apply run writes nothing. That includes a unit the organization retired and a code of another dimension. Both are codes, not free text, and rewriting them from a mapping would change what the stored quantity means. Neither is a code the field admits: beside a quantity, the write check refuses each at the row's next quantity edit; a standalone unit field has no quantity, so the next write of the field must carry another code. So they are listed as `retired` and `other-dimension` and counted apart (`skippedRetired`, `skippedOtherDimension`), never as a code the field admits.
+  - **A blank unit beside a quantity** is written only from an explicit `""` entry; without one it is counted (`blankBesideQuantity`) and named in the report. A blank unit with no quantity is left alone.
+  - **Complete.** `unitCodeBackfillComplete` answers true only when every row holds a unit code the field admits: no unmatched value, no blank beside a quantity, no retired unit, no code of another dimension, no failed or unexamined row. The report prints its ✓ line only then.
+  - **Dry run by default.** It lists each distinct stored value with its row count and what the mapping does with it, and writes nothing. With no mapping, the listing shows which spellings to map.
+  - **Unmatched values.** An apply run that meets a value with no mapping entry is refused `VALIDATION_ERROR` / 400 on `mapping` before any write. The refusal names each value with its row count, and carries them as `unmatched`.
+  - **Scope.** Scope is `organizationId` or `allOrganizations`, as on the currency backfill. An unscoped run over the rows of several organizations is refused with each organization's counts.
+  - **Writes.** Each row is written through `engine.update` as a system write, so the unit check judges every converted code.
+  
+  **`os migrate unit-codes --object O --field F [--map-file mapping.json] [--org ID | --all-organizations] [--apply] [--yes]`** (`@objectstack/cli`):
+  
+  - It has the precedent's confirmation and exit behaviour: `--apply` asks first, and exits 1 under `--json` or with no terminal unless `--yes` is given.
+  - A mapping file that is not JSON, or a mapping the engine refuses as malformed, is refused before the occupancy probe, the prompt and the boot.
+  - Any refusal exits 1. Under `--json` it carries the code, the HTTP status, and `unmatched` or `organizations` where those apply.
+  - It closes with a ✓ only when `unitCodeBackfillComplete` holds. A run that leaves a blank beside a quantity, a retired unit or a code of another dimension closes with a warning naming what is left.
+  
+  **`POST /api/v1/meta/_migrate-unit-codes`** (`@objectstack/rest`) is the tenant-admin twin of `_migrate-record-currency-codes`.
+  
+  - Its body is `{ object, field, mapping?, apply? }`, and any other key is refused 400.
+  - It sits behind `metadata.endpoints.maintenance` and requires `setup.write`. It converts the caller's current organization only, and is a preview unless `apply: true`.
+  - The report is the `data` of the shared envelope. A refusal over unmatched values answers 400 with `error.details.unmatched`.
+  
+  **The unit refusals name the door** (`@objectstack/objectql`). The `ERR_UNIT_CODE_REQUIRED` and `ERR_UNIT_CODE_UNKNOWN` refusals of a quantity written beside a stored value the write did not supply now end with the remedy: the `os migrate unit-codes` command for that object and field, or the REST door. The refusal of a blank names the `""` entry. A refusal of a code the caller wrote carries no remedy.
+  
+  **A metadata save that makes a stored field a unit code field is a destructive change** (`@objectstack/metadata-protocol`, `@objectstack/spec`). The detector judges the declaration and reads no row. Two findings sit beside `currency_mode_to_record` on the 409 `DESTRUCTIVE_CHANGE`, and `force: true` lifts them:
+  
+  - `unit_code_field_declared`, on the code field: a stored field that is a unit code field after the save and was not one before. Any declaration can do it: a quantity, new or stored, whose `unitField` names the field; a `unitField` re-pointed at it; or its own `unitMode: 'code'`. A field that already was a unit code field raises nothing.
+  - `unit_mode_to_record`, on the quantity: a stored quantity switched to `unitMode: 'record'`, whatever its `unitField`'s history (a unit code field already, or a field new in the same save). It names the blank units beside the quantity and the `""` entry that writes them. It is not raised when the same save raises `unit_code_field_declared` on that `unitField`, since that finding names the quantity, its blanks and the `""` entry, so each debt is reported once.
+  
+  Each names the conversion run for that object and code field, CLI and REST.
+- cedc094: fix(objectql)!: a composition's top-level `objectExtensions` entry that no package body carries is registered and served; composition refuses two such jobs of one name, and residual extensions that would share one package's slot
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no skill teaches placing `objectExtensions` or `jobs` in a manifest-less input of a `'preserve'` composition; the refusal names both entries and prescribes the fix
+  
+  <!-- adr-0087: registered stack-residual-extension-registered-and-jobs-judged -->
+  
+  **BREAKING** accept-set narrowing, shipped as `minor`, beside a runtime fix.
+  
+  - **Fixed (`@objectstack/objectql`, `@objectstack/metadata`).** A composed artifact that carries `packages[]` keeps the entries no package body claims at its top level, and the boot registers that residual under the artifact's `manifest.id` (ADR-0130 D4). Under `composeStacks(stacks, { manifest: 'preserve' })` that is an input with no `manifest`; under `'first'`, `'last'` or an index it is also the own top-level entries of an input that is itself a multi-package artifact. Its `objectExtensions` entries were registered by no door: the target object was served without their fields (`INVALID_FIELD` on a write naming one) and nothing was logged, through `os serve` and through `os build`'s artifact alike. The residual rule (`unclaimedTopLevel`) now lists such an entry (type `object_extension`) when no package body carries an entry equal to it, and the engine registers it as an `extend` contribution under `manifest.id`, as a body's entry registers. An entry whose field names a picklist no package body declares is not registered and is named at boot, like a residual object.
+  - **Refused now, at composition (`STACK_CROSS_REFERENCE_INVALID`, 422), under every manifest strategy once the result carries `packages[]`.** Two residual jobs of one name: the boot's job binder schedules neither (`NOT SCHEDULED` at `error`). A residual `objectExtensions` entry for an object that the body carrying `manifest.id` also extends with other fields: one extension of an object registers per package, so only the last one's fields would be served; the finding names that body's entry first, then the residual's: `Object extension of 'crm_line' is declared twice in \`objectExtensions\`: 'com.example.billing' (stack #2) objectExtensions[0] and stack #1 objectExtensions[0]. …`. Two residual `objectExtensions` entries for one object, also when another package body extends that object: a residual entry is now told from a body's flattened copy by value, not by target, so the two are one package's pair (they used to count as that body's copies and compose).
+  - **Not refused (known gap).** A residual job that shares its name with a package body's job, with other content, still composes: it is read as that body's copy, and the boot holds two enabled jobs of the name and schedules neither.
+  - **Wording.** The `jobs` finding at every door now says what the runtime does with the pair: `The runtime keys jobs by name: the metadata keeps only the last of these entries, and the job scheduler refuses a name two enabled jobs share, so when both are enabled neither runs.`
+  - **Unchanged.** One residual extension for an object another package extends composes, and both register. A residual entry equal to a body's entry is that body's copy. Package-claimed extensions and a single residual job compose and boot as before.
+  - **Installed artifacts.** A residual extension sharing its package's slot registers, the last one served, with one `error` line per object naming the entries. A residual extension now passes the registry's `extend` door as a package body's entry does, so one that door refuses (reachable only through `strict: false` or a hand-built artifact) now fails a boot that used to load and drop it.
+  
+  One-line fix: declare each job name once; move a top-level extension into the package that owns it, or merge it into that package's own entry for the object.
+- d33bf5a: feat(spec): an object extension says where the fields, groups and child lists it brings go (`place`), and a child list another package brings is no longer hidden by the parent's `relatedLists`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  An `objectExtensions` entry can now place what it brings on the object it extends:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'account',
+    fields: { tax_id: { type: 'text', label: 'Tax ID' } },
+    place: [
+      { field: 'tax_id', group: 'basic', after: 'industry' },
+      { group: { key: 'tax', label: 'Tax' }, after: 'basic' },
+      { list: 'contract', after: 'opportunity', label: 'Contracts', columns: ['name', 'amount'] },
+    ],
+  }],
+  ```
+  
+  - **No `place`: nothing moves.** Fields still arrive after the object's own, and an extension that writes no `place` serves exactly what it served before.
+  - **One merge, every reader.** The registry fold applies the placements once, after every contributor's fields are merged, so the record page, the forms and Studio show one arrangement. Uninstalling or disabling the package takes its items off and leaves the object's own order as it was.
+  - **Placement arranges what the parent declares.** A list placement applies when the extended object declares `relatedLists`; a group or field placement when it declares `fieldGroups`. On a parent that declares neither, its automatic arrangement stays and nothing is dropped: the list shows in the automatic tab order, and its entry's `label` / `columns` are not applied either (write `relatedListTitle` / `relatedListColumns` on your child object's lookup field to title it on every parent); the field shows among the fields, its `after` / `before` not applied. The boot log names each placement that did not apply, with the object and the package. It is the main channel: `os validate` names it too (`extension-placement-not-applied`, warning) only when the extended object is in the same stack.
+  - **Anchors and order.** `after` or `before`, not both; neither means the end. An anchor may be an item another placement brings, whatever order the two are written or registered in. An anchor nobody has puts the item at the end of its group, of the groups, or of the tabs (before a trailing approvals / activity-stream run), and `os validate` warns (`extension-placement-anchor-missing`). A list placement's `columns` are fields of the child, checked by `os validate` as a `relatedLists` entry's are (`related-list-column-unknown`). Several packages at one anchor follow ascending `priority`, then package name, so every build gives the same order. When the object itself already names the list or lists the field, its own position wins.
+  - **An extension places only its own items.** A field outside its own `fields`, a field the extended object declares (also one the extension redeclares to relabel it), a group key the extended object already declares, or a list (placed as a tab or by a group's `relatedList`) that is not a child object of its package pointing at the extended object is refused at parse or at `defineStack`, and skipped by the merge with a warning naming whose item it is, whichever door registered the extension. The extension keys `fieldGroups` and `relatedLists` are refused with a prescription naming `place`.
+  - **Shipped behaviour change (flips #35897's hiding):** a child list another package brings is no longer hidden by the parent's declared `relatedLists`. Placed, it sits where its package puts it; unplaced, it shows at the end of the tabs. "Another package" means the child and the parent both belong to a package and the two differ; a child of the parent's own package, or one no package owns, is still hidden until an entry names it. This narrows the #35897 note "A child list another package adds is hidden too until the parent names it … letting a package place its own list is a later change": that change is this one.
+  - **Studio** (object settings, Record page tabs) shows such a list read-only among the unlisted rows with a "from <package>" badge, and the preview draws it where the record page does.
+  
+  What to check in an app: on an object that declares `relatedLists`, every installed package's child lists of it now show, at the end of the tabs unless placed; name one in the parent's `relatedLists` to put it elsewhere, or set `relatedList: false` on that package's FK to hide it. Nothing in HotCRM changes meaning today: no module writes `place`, and no object declares `relatedLists`. Most HotCRM objects already declare `fieldGroups`, so a field or group placement there applies as soon as a module writes one; a list placement waits until the parent declares its `relatedLists` (follow-up #35902). ADR-0087 semantic entry `object-extension-place-and-cross-package-lists`; ADR-0146 D10 and ADR-0085 notes.
+- 70d07fd: feat: an object arranges its actions per scope (`actionLayout`: pinned buttons and the 「More」 order), and the design mode sets it
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #36630
+  
+  A page header draws at most three of its actions as buttons and puts the rest in its 「More」 menu. An object now arranges them itself with the new optional key `actionLayout` on `ObjectSchema` and `ObjectExtensionSchema`: `{ list?: Arm, record?: Arm }`, where `Arm = { pinned: string[], more?: string[] }`. `pinned` names the buttons in the order drawn, at most three (`[]` pins none); `more` orders the 「More」 menu; an action the scope places that neither part names goes to the end of 「More」 in its default order. A pinned action that is hidden leaves its button out, and no other action takes its place.
+  
+  - `list` arranges the actions placed at `list_toolbar` and the list page's built-ins `$import` and `$export`. A built-in is only ever pinned: one named in `more` is refused with its reason, since not pinned the list page draws it in its own Import / Export menu.
+  - `record` arranges the actions placed at `record_header` or `record_more`. It is a scope, not a page: the record page header, the side preview and a phone's bottom action bar all read it. A `page:header` that authors its own `actions` list keeps that list.
+  - An arm left out (or the key left out) draws that scope exactly as before.
+  
+  What each package gains:
+  
+  - `@objectstack/spec`: the key and its shape refusals at every door (more than three pinned, a name given twice in one part or in both, a malformed name, a built-in the scope does not have, a built-in in `more`, since a built-in is only ever pinned), each with its reason. New exports `OBJECT_ACTION_LAYOUT_PINNED_LIMIT`, `OBJECT_ACTION_LAYOUT_SCOPES`, `OBJECT_ACTION_LAYOUT_BUILTINS` and the types `ObjectActionLayoutScope`, `ObjectActionLayout`, `ObjectActionLayoutArm`. The object form offers it under Advanced, one JSON row per arm.
+  - `@objectstack/objectql`: `actionLayout` joins `fieldGroups` and `relatedLists` as a key only the base's paired `.custom` package writes on an `object_extension` (ADR-0146 D10). It is applied last, after every other layer, arm by arm: each arm it writes replaces the served arm for that scope whole, and an arm it leaves out stays. A manifest's `objectExtensions` entry now carries the key to the fold.
+  - `@objectstack/metadata-protocol`: the one judge refuses `actionLayout` from any other package, naming the action's own `locations` and `order` as the way to place an action the package brings. Each door says it its own way: publish, restore and draft promotion of an `object_extension` answer `VALIDATION_ERROR` / 400; marketplace install refuses the package body with `VALIDATION_ERROR` / 422; `os validate` and `os build` exit non-zero and print the row; the registry fold skips the key and leaves a note.
+  - `@objectstack/lint`: `validateObjectActionLayout` (`object-action-layout-unknown`, `object-action-layout-not-placed`, at `error`) refuses in `os validate`, `os build` and `os lint` a name, in either part, that is no action of the object or is not placed in the scope its arm arranges.
+  - `@object-ui/types`: `arrangedHeaderActions(actions, arm, scope)`, the one reader both record headers and the list header apply, and `readActionLayoutArm`.
+  - The console: both record headers (the default page's and an authored `page:header` with `placedActions: true`) and the list header draw the arrangement. In the design mode, 「Header buttons」 at the end of the page header lists the scope's actions under 「Pinned to header」 and 「Other」 (the 「More」 menu), each dragged into order; a dot moves an action between them, a fourth pin is refused with a toast, the header shows the change at once, and 「Save」 writes only the arms that changed: into the object's own package when it is writable, else into the installed object's customization package as an `object_extension`, through the one writer of an installed object's arrangement (`saveObjectExtensionArrangement`, whose patch type now takes the object-shaped `actionLayout`), which refuses a customization package the server does not list writable. A name the scope no longer offers is listed in the panel as left out. A name the header cannot draw is refused at save with its reason. New `@object-ui/i18n` keys under `designMode.pins`.
+- 45ef94e: feat(spec): a base's paired `.custom` package declares an installed object's whole field-group and tab arrangement (`fieldGroups`, `relatedLists` on its object extension)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  The record page is arranged in three layers. The package that owns an object declares its `fieldGroups` and `relatedLists`; a package that extends it places what it brings with `place`; and now the environment, in the base's paired `.custom` package, may declare the whole arrangement over both:
+  
+  ```ts
+  objectExtensions: [{
+    extend: 'crm_lead',
+    fields: { region__c: { type: 'text', label: 'Region' } },
+    // The whole field arrangement: the two groups swapped, `status` moved.
+    fieldGroups: [
+      { key: 'contact', label: 'Contact', fields: ['email', 'phone', 'status'] },
+      { key: 'basic', label: 'Basics', fields: ['name', 'company', 'region__c'] },
+    ],
+    // The whole tab list: events before tasks, the notes tab hidden.
+    relatedLists: ['crm_event', 'crm_task', { list: 'crm_note', hidden: true }],
+  }],
+  ```
+  
+  - **Two new keys on an object extension, written only by a `.custom` package.** `fieldGroups` takes the shape an object's `fieldGroups` takes and may list any field the object has, whoever declares it; a group's `relatedList` may place any body table. `relatedLists` takes an object's entry shape (a bare name, the three built-in tab names, or `{ list, label?, columns? }`) plus `hidden`.
+  - **Each key replaces, whole.** The registry applies it last: the owner's arrangement, then every extension's `place`, then the `.custom` key in place of the result. Nothing is merged entry by entry. A key the extension does not write keeps the owner's arrangement with the placements, so writing only `relatedLists` leaves the field groups as they were.
+  - **A field the arrangement does not list is not dropped.** It shows after the last group, whichever group its owner or another extension had put it in. A group that lists `fields` shows exactly its list.
+  - **A tab the arrangement does not name still shows, after the listed ones.** This is the reverse of an object's own `relatedLists`, where leaving a list out hides it. Hiding is written: `{ list: 'crm_note', hidden: true }` hides that list's tab, whichever package brings it. `hidden` is accepted only here; an object's own `relatedLists` refuses it and says where it belongs. A list the owner hides by leaving it out of its own `relatedLists` stays hidden until the arrangement names it. The built-in tabs keep their own rules and are not hidden here.
+  - **A package that is not a `.custom` package writing either key is refused**, once at each door: saving or publishing the extension, `os validate` and `os build`, and installing the package (`VALIDATION_ERROR`; 400 at save and publish, 422 at install). Each refusal names the key, the object and the package and prescribes `place`. An extension that reaches the registry past those doors is not applied, and the boot log says so. Within one extension, a `place` entry beside the arrangement key that would replace it is refused at parse.
+  - **Only the object's own pair is served.** The pair is the `.custom` package of the App the object belongs to: for an object a module of an App owns, the App's pair. A `.custom` package an earlier version created for the module itself is still read while it is installed; where both write a key, the App's pair is served. The choice is by role, never by load order. What any other `.custom` package writes under these keys is not refused at the doors; the registry does not apply it, alone or beside the pair, and the boot log names the package and the object.
+  - **One merge, every reader.** The record page, the forms, the preview and Studio read the served object, so they show one arrangement. Removing a key, or uninstalling or disabling the `.custom` package, serves the owner's arrangement with the placements again.
+  - **Served reads say what the reader cannot derive.** Where a `.custom` package writes `relatedLists`, the served object carries the read decoration `_relatedListsArrangement` (`{ packageId, hidden, unlisted }`): the lists the environment hides, and whether an unlisted list shows. The record page's tab reader and the default page synthesis read it; with no decoration served they answer exactly as before. A reader's own tab order (kept per user) is still laid over this list, and a tab the environment hides is not offered to them.
+  - **A group the arrangement brings is a translation anchor.** `os validate`'s translation-reference rule reads an extension's `fieldGroups` too, so a bundle's `_sections` key for a group the `.custom` arrangement declares is not reported as naming nothing.
+  - **`hidden` on a field is not a display property a `fieldPatches` entry may set.** A hidden field is also left out of the search index and out of a form's required check, so the display whitelist is not widened. To keep a vendor field off the record page and the forms, list it in a group whose `visibleWhen` is false. That is presentation only, not access control: the field stays readable and writable through the API. Do not use it for a `required` field that has no default: the create form no longer shows the field while the save still requires it, so the form cannot be submitted.
+  
+  What to check in an app: nothing changes until a `.custom` package writes one of the two keys. A package other than a `.custom` one that wrote `fieldGroups` or `relatedLists` on an extension was refused at parse. It is now refused by the save, publish, install, `os validate` and `os build` doors, with the same prescription. Where none of those doors judges it (for example a code-defined stack that boots without `os validate` or `os build`, or a stack that names no package id), the key is not applied and the boot log names it, where the parse refused it before.
+- f66340a: feat: a record-page tab title an object's `relatedLists` entry declares can be translated
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An object-form `relatedLists` entry (`{ list, label, columns }`) titles its tab and table on the parent's record page, and its `label` wins over the child lookup field's `relatedListTitle`. The field's title had a translation key; the entry's did not, so a declared tab title showed its authored text in every locale.
+  
+  A translation bundle now carries it on the parent object, keyed by the entry's literal `list` (a dotted `object.field` is one key):
+  
+  ```ts
+  objects: {
+    account: {
+      _relatedLists: {
+        contact: { label: '联系人' },
+        'event.related_to': { label: '会议' },
+      },
+    },
+  }
+  ```
+  
+  - `@objectstack/spec`: `ObjectTranslationDataSchema._relatedLists` (a closed leaf with one key, `label`; the un-prefixed `relatedLists` is named as a rename onto `_relatedLists`). `translateObject` overlays it onto the served parent object's entries, so `GET /meta/object` serves the translated title and the console's record page shows it with no change of its own. Only an entry that authors a `label` is translated: an entry without one, a bare name and a built-in tab keep their current title (the child field's `relatedListTitle`, else the child object's plural label). A title a tenant changed keeps its text, as every other translated slot does.
+  - `@objectstack/lint`: `os i18n extract` scaffolds the key for every labelled entry and the coverage gate counts it; `os validate` reports a `_relatedLists` key that names no labelled entry of that object as `translation-target-unknown`. A labelled entry an object extension brings (a list placement in `place`, or a shown entry of the paired `.custom` package's `relatedLists`) is a labelled entry of the object it extends, so its key resolves; the record page shows a placed tab only where that object declares `relatedLists`. A key over a built-in tab, or over an entry the `.custom` arrangement hides, is reported with its own reason.
+  - `@objectstack/metadata-protocol`: a save that sends back a translated entry title (a Studio edit of the object read in another language) stores the source title instead, with an `info` advisory, as it already does for field labels.
+  - `@objectstack/objectql`: the packaged base `getPackagedObjectBase` hands the `/meta` read (the text a served slot is compared with) carries the tabs a code package's `place` adds to the owner's `relatedLists`, as the fold splices them (so only where the owner declares `relatedLists`). A placed title is therefore translated from the deployment's catalog, which carries the placing package's translations, the way a field such a package adds already is; a tenant's rename of that title keeps its text. A `.custom` arrangement's title is the customization layer and reads the pair's own translations.
+- 2a6f26a: feat(ai): `ai_context` context packs and the `get_record_context` tool over MCP
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37177 — skills/objectstack-platform/SKILL.md, skills/objectstack-ai/ (how to author a context pack; this change only names `aiContexts` in the top-level key list, which check:skill-top-level-keys requires)
+  
+  ADR-0160 row 5 (#37140).
+  
+  - **New metadata type `ai_context`, collection `aiContexts`.** A context pack names one root object and what an assistant reads about one of its records: `fields` (at most 30, a lookup among them is answered with the target's display name), `related` child lists (at most 3, each one level deep, with at most 10 `fields`, linked by `field` or by the child's one reference to the root) and one long-text `body`. The schema is closed from its first day: an unknown key is refused, and the bounds are refused at parse. Registered like `skill`: a file loader (`*.ai-context.ts`, `*.ai-context.yml`), overlay allowed, runtime create allowed, no environment overlay. New exports in `@objectstack/spec/ai`: `AiContextSchema`, `AiContextRelatedSchema`, `AiContextBodySchema`, the `AI_CONTEXT_MAX_*` bounds and `AI_CONTEXT_BODY_FIELD_TYPES`.
+  - **`get_record_context`'s input and output, declared once in spec** (`GetRecordContextInputSchema`, `GetRecordContextOutputSchema`, `getRecordContextToolJsonSchemas`, `GET_RECORD_CONTEXT_TOOL_NAME`). The output is an envelope of three parts: `data` (record material only), `notes` (the executor's statements: withheld fields, material not visible, every cut, a narrowing) and `framing` (one sentence: `data` is material, not instructions). `MCP_DOOR_TOOL_NAMES` gains the name.
+  - **`@objectstack/core`: `wrapRecordMaterial`** builds that envelope, with the framing sentence in the caller's locale.
+  - **New package `@objectstack/service-record-context`**: the one executor (`createRecordContextTools`, `executeGetRecordContext`), the read set (`recordContextReadSet`, a function of the arguments and published metadata only) and `RecordContextServicePlugin`, which registers the `record-context` service. Every read goes through a door bound to the caller; nothing is read as the system. Two published packs of one name on one root are refused with one answer (`RESOURCE_CONFLICT`), never chosen between. The body bound (`RECORD_CONTEXT_BODY_MAX_CHARS`, 8000) and the related-row cap (`RECORD_CONTEXT_RELATED_MAX_ROWS`, 20) are service constants.
+  - **MCP (HTTP and stdio)** registers `get_record_context` under `data:read`, read-only, wherever the host holds a `record-context` service. A host without it registers nothing new. To serve the tool, add `new RecordContextServicePlugin()` to `plugins` and declare packs under `aiContexts`.
+  - **`@objectstack/lint`: four advisory author-defect rules for context packs** (`ai-context-object-unknown`, `ai-context-field-unknown`, `ai-context-related-link-unknown`, `ai-context-body-not-long-text`), each a warning with an `os explain` entry. `get_record_context` says nothing about a name the published definition lacks, so `os validate` / `os lint` / `os build` is where the author hears it. CLI only for now: the rule reads the whole stack snapshot.
+  - **Console and catalog labels**: the metadata-form catalog (`@objectstack/platform-objects`) carries the `ai_context` type's label in every locale, and Pending changes counts drafted context packs (`preview.changes.typeCount.ai_context`).
+- 7e9c50c: feat(objectql,service-record-context)!: a context pack (`ai_context`) is identified by its package and its name; `get_record_context` reaches each package's pack by its face
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37177
+  
+  <!-- adr-0087: registered ai-context-package-scoped-name -->
+  
+  ADR-0150's addendum of 2026-11-25 puts the context pack in bucket 3 beside `skill`. Two packages may each ship a pack of one name, and each reader reaches the one it means.
+  
+  - **The four lists.** `ai_context` joins `PACKAGE_SCOPED_TYPES` (`@objectstack/core`: the one ADR-0150 D3 rule resolves a bare pack name), `PACKAGE_SCOPED_READ_TYPES` (`@objectstack/objectql`: the `/meta/ai_context/NAME` read and its `?package=` qualifier), `PACKAGE_SLOTTED_METADATA_TYPES` (`@objectstack/spec/api`: the metadata service keeps one copy per `(package, name)`, and uninstalling one package drops its pack and keeps another package's pack of the name) and `NAMESPACE_UNIQUE_TYPES` (`@objectstack/objectql`: D2's refusal of a second holder inside one namespace).
+  - **`get_record_context` picks a pack by package and name.** The candidates are still the packs rooted on `objectName`. `context` is read the way a skill prompt's name is read. A face (`NS-NAME` for a package's pack, `deriveAiFaceName`) answers its one pack. A bare name resolves as for a caller with no package: the environment's own pack, else the one package that holds the name, else `409 RESOURCE_CONFLICT` naming each candidate by its face. With `context` omitted on an object with several packs, the answer (`400 VALIDATION_ERROR`) lists each pack by its face with its label, in English and in Simplified Chinese; a pack without a label would be listed by its face alone. The tool's description tells the model to name a package's pack as `NAMESPACE-NAME`.
+  - **New door member.** `RecordContextDoor.packageNamespace(packageId)` (optional) gives a package's manifest namespace. A door without it spells every pack by its bare name, as an environment pack is spelt. Both MCP doors implement it from the `objectql` registry's package record (`@objectstack/runtime`'s `/mcp` route and `@objectstack/mcp`'s stdio bridge), so on either transport two packages' packs of one name are each reached by their face.
+  - **New exports** (`@objectstack/service-record-context`): `contextPackCandidates`, and the types `ContextPackCandidate`, `ContextPackCandidateName`, `PackageNamespaceOf`. `selectContextPack` now takes the candidates `contextPackCandidates` returns, not the parsed packs. Its `several` outcome carries `packs` (each `{ face, label }`) in place of `names`, and its `duplicate` outcome carries `candidates`. `recordContextReadSet` returns the selected pack's face as `pack`. For an environment pack, and on a door without `packageNamespace`, the face is the pack's name, so these answers are unchanged there.
+  
+  **BREAKING (narrowing), each counted on `objectstack-ai/objectstack` at `d7f299c0` and `objectstack-ai/hotcrm` at `9b735103`:**
+  
+  - A second package of one namespace that ships a pack name another package of that namespace already holds is refused at install (`422 NAMESPACE_CONFLICT`, naming every holder) and by `os validate`. First-party packages refused: 0. The one declarer, `examples/app-showcase`, ships two packs with different names in one package. hotcrm declares none.
+  - `GET /api/v1/meta/ai_context/NAME` with no package, for a name two packages hold, answers `409 RESOURCE_CONFLICT` naming both. Before, it served the first match. Read each pack with `?package=ID`. First-party reads refused: 0.
+  - A package-less pack row under a name a package ships is that package's customization and is not served. The rule is read by type and name, whatever object the row is rooted on. This was already true and this change does not alter it. What changes is which item such a row is compared against: the one holder's. First-party rows affected: 0.
+  
+  Fix for an upgrading author: give a pack a name no other package of the same namespace uses, and read a shared name by its package. A model names the pack it means by its face, as the refusals list it.
+
+### Patch Changes
+
+- 8236d9b: feat(service-automation)!: a sync-in pull marks the rows the source deleted, and an incremental source states how it learns of a delete
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none (no skills/ page names `deletePolicy`, `deletedField` or `_sync_deleted_at`; the guide that teaches them is `content/docs/automation/jobs.mdx`, updated here)
+  
+  <!-- adr-0087: registered incremental-source-delete-policy-stated -->
+  
+  ADR-0153 D3, delete marking (#32062, slice 6).
+  
+  - **A pull marks a row the source deleted, and never deletes it.** Under `deletePolicy: 'mark'`, the reading when the key is absent, a pull stamps the platform column `_sync_deleted_at` on a row of a `synced` object that the source deleted, and clears it when a later pull reads the row again. `deletePolicy: 'ignore'` leaves every row as it is. Two detections:
+    - `deletedField`, on any pull that declares it: a read record whose value in that source field is truthy has its copy marked; every other read record's copy is cleared.
+    - Absence, on a full pull whose read was complete: every row of the mapping (`_sync_source`) the run did not read is marked. A `datasourceSource` with `full: true` is complete when its windows read to their end and no source row in the job's organization has a NULL watermark; it marks only rows whose copied watermark is at or above `watermark.start`. A `connectorSource` without a `watermark` is complete only under `paging: { style: 'none' }` (one response is the whole set); with no `paging`, or a paging style the pull does not follow yet, it marks nothing by absence. A refused or interrupted pull marks nothing by absence; a row the import runner refused was read, so it is not marked. A record whose `upsertKey` value is blank names no row, so one such record makes the run mark nothing by absence (`unjudged, rows refused`). A row pulled before the provenance columns existed carries no `_sync_source`, so it is no mapping's row: if the source has since deleted it, no pull marks it.
+    - Two mappings on one target: each marks and clears only the rows whose `_sync_source` is its own; a second mapping is not refused.
+  - **`sys_sync_run` records it.** New columns: `marked_deleted_count`, `deletes` (`judged`, `by deletedField`, `ignored`, or `unjudged, …` with the reason: `null watermark`, `no paging declared`, `pages not followed`, `rows refused`) and `skipped_null_watermark` (a datasource source's rows with a NULL watermark, counted under the organization predicate; through a plugin driver's row cap a count above the cap is recorded as the cap plus one). The end-of-pull log line says what the run marked and cleared. `job_run_id`'s and `trigger`'s descriptions now say when each is empty.
+  - **BREAKING: an incremental source states how it learns of a delete.** A `connectorSource` with a `watermark`, or a `datasourceSource` without `full: true`, never sees an absent row, so under `deletePolicy` absent or `'mark'` with no `deletedField` it is refused at parse (`MappingSchema`, so `defineStack` and `os validate`) and again when the pull runs (`400 VALIDATION_ERROR`, reason `delete_policy_unhonourable`). Fix: name the source's soft-delete field (`deletedField: 'is_deleted'`), or write `deletePolicy: 'ignore'`, which is what every pull did before this release. New export: `incrementalSourceDeleteRefusal` (`@objectstack/spec/data`), the rule both doors ask.
+  - **BREAKING: a `synced` target that withholds the provenance columns** (`systemFields: false`) is refused under `deletePolicy` absent or `'mark'` (`400 mapping_target_refused`): no row of it can carry the mark. Fix: let the platform add its columns, or write `deletePolicy: 'ignore'`. This arm is judged only when the pull runs: `os validate` and `defineStack` do not catch it, so a stack that validates green can still fail every scheduled pull. Migration entry `incremental-source-delete-policy-stated` names both arms.
+  - A datasource source's `deletedField` must name a field of the source object (`400 source_binding_invalid` otherwise). `deletedField` is read by truthiness: the text `'false'` or `'0'` marks the row, and on a connector source a field the records do not carry reads as falsy on every record and marks nothing.
+  - A stored `deletePolicy` outside `'mark'` / `'ignore'` (which the parse refuses) is refused by the pull too (`delete_policy_unhonourable`) instead of being read as `'mark'`.
+  - The liveness rows for `deletePolicy` and `deletedField` on both sources are `live`, and `os validate` no longer warns that nothing reads them. `paging` stays `planned`: the connector paging loop is a later change.
+  - A connector pull whose target definition cannot be read now says whether the object is not registered or the metadata read failed.
+  - A connector pull keeps the job run id and trigger only when the run record can hold them: a trigger other than `schedule` or `manual`, or a run id longer than 255 characters, is left out instead of failing the run record's open.
+  - `JobHandlerContext` (`@objectstack/runtime`) declares `trigger` and `runId`: the handler run form spreads the job service's context into the handler's, so every `handler` job already receives `trigger`, and `runId` under the database job adapter. The jobs guide lists both.
+- 1d28405: feat(objectql)!: every row a sync-in pull writes records where it came from, and nothing else may write those columns
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none (no skills/ page names the `_sync_` columns or the synced bucket's injected columns)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is added, removed, renamed or re-shaped, and every metadata document that parsed before parses the same. What changes is the registered shape of a `managedBy: 'synced'` object (five platform columns and one index the platform adds) and the answer a data write gets when it names a `_sync_` column: no authored value has to be rewritten, so there is nothing for a migration to prescribe and no tombstone. -->
+  
+  ADR-0153 D4, the provenance half (#32062, slice 5).
+  
+  - **Five `_sync_` columns on every `managedBy: 'synced'` object.** `resolveInjectedSystemColumns` (`@objectstack/spec/data`) now plans `_sync_source`, `_sync_external_id`, `_sync_pulled_at`, `_sync_run_id` and `_sync_deleted_at` on that bucket only (`plan.sync`), and the registry injects them as hidden, read-only system columns, with an index on (`organization_id`, `_sync_source`, `_sync_external_id`) placed after the tenant index. New exports: `SYNC_PROVENANCE_COLUMNS`, `SYNC_PROVENANCE_PREFIX`, `SyncProvenanceColumn`, `SYNC_PROVENANCE_FIELD_DEFS`. A synced object that declares `systemFields: false` gets none of them.
+  - **Both pulls stamp them.** A connector pull and a datasource pull write `_sync_source` (the mapping), `_sync_external_id` (the row's `upsertKey` value as text; a key of several fields is a JSON array of the values in `upsertKey` order, such as `["10","A-1"]`), `_sync_pulled_at` and `_sync_run_id` (the `sys_sync_run` row; not written when no run ledger is composed) on every row. `_sync_deleted_at` exists but stays empty until delete marking (D3) lands. A mapping whose `fieldMapping` targets a `_sync_` column is refused with `400 mapping_target_refused` when it runs (it was refused before as an unknown target). A connector pull whose target object's definition cannot be read is now refused the same way before it calls the connector, instead of writing rows it cannot stamp; the datasource pull already refused it.
+  - **BREAKING: a `_sync_` column in any other write is refused.** The engine refuses an insert or update naming a `_sync_` key with `400 ERR_SYNC_PROVENANCE_WRITE_REFUSED`, before middleware, defaults and hooks run, whatever the caller's context, `isSystem` included. A `_sync_` key a `beforeInsert` or `beforeUpdate` hook assigns, changes or removes is refused the same way before the driver is called, on any write, the pull's own included, so the pull's stamps are stored exactly as it wrote them. Only the pull's own write is admitted (`markSyncPullWrite`, exported from `@objectstack/objectql` with `SYNC_PULL_WRITE`, `SyncProvenanceWriteRefusedError` and `SYNC_PROVENANCE_WRITE_REFUSED_CODE`). The mark is consumed by that write, so a hook or flow it triggers writes as any other system caller and is refused the same way. Fix: leave the `_sync_` columns out of the write and out of your hooks; the next pull of the mapping stamps them.
+  - Load-time diagnostics leave the injected `_sync_` columns out when they judge a served synced object, so it is not flagged for the reserved prefix; an author field under a `_sync_` name is still refused.
+- ef39b2c: fix(objectql, plugin-audit): a database session lock whose connection stalls no longer hangs the audit sealer, `os migrate audit-* --apply` or a migrator's release
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A held database session lock (the audit seal lock, and the schema-migration lock) used to wait for its connection with no limit when it checked or let go of the lock. A connection stalled half-open, with no reply and no reset, never fails a statement, so the liveness probe (`select 1`), the unlock statement and the close of the raw connection could each wait for good. That hung a sealer pass checking its lock before a checkpoint, the `finish()` of an `os migrate audit-* --apply` run, and a migrator's release.
+  
+  Each of the three steps now gives up after 10 seconds (`DATABASE_SESSION_LOCK_ANSWER_MS`). A live session answers each one in milliseconds and waits exactly as before.
+  
+  - A probe the session does not answer in time reads as a lost lock. The session is not probed again, and the release sends it no unlock: it closes the connection, which releases the lock.
+  - An `--apply` run whose lock's session stopped answering reports the lock lost, as for a session that ended: it prints the line at error, names `os audit verify` and exits non-zero. The line now reads `(its database session ended, or stopped answering)`.
+  - A sealer pass whose lock's session stops answering reports that the audit seal lock lapsed and writes no checkpoint. The next pass tries again.
+  - The schema-migration lock runs the same statements. A release on a session that has stopped answering returns after the bound instead of hanging the migration or the boot. The lock then stays with the database session until that connection dies, as it would if the process had been killed.
+  
+  Nothing an author writes, no exported signature and no statement changes.
+- 93fa4f9: fix(i18n)!: a refusal names fields, options and objects in the declared `sourceLocale` as authored
+  
+  Clause-②: yes (narrowing) — `ValidationMessageContext.labelTranslation` is a new optional member (a widening), and `ValidationMessageContext.translate` no longer translates the labels a refusal names (a narrowing): a direct caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` that passes `messages: { locale, objectName, translate }` now gets the declared labels until it also passes `labelTranslation`.
+  Metadata-protocol: none
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md, evals
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/objectql/src/validation/record-validator.ts#ValidationMessageContext) the narrowed behaviour belongs to an input member of a runtime TypeScript interface, the messages option of the published validators; no packages/spec schema, registered node type, stored row or ADR-0087 conversion surface names it, and no key, value or default a metadata author can write changes, so there is nothing for objectstack migrate meta to rewrite -->
+  
+  **BREAKING** for a TypeScript caller of `validateRecord`, `validateInsertValues` or `evaluateValidationRules` (`@objectstack/objectql`) that passes its own `messages`. Engine writes are not affected: the engine builds `labelTranslation` itself from the i18n service.
+  
+  The labels a write refusal names are now resolved the way `GET /meta` serves them: `translateObject` over the deployment's translations, with the request's locale, the declared fallback chain and the authored language (`i18n.sourceLocale`, else `defaultLocale`). They are no longer looked up through `II18nService.t()`. Before this, an app authored in English that defaults its users to Chinese (`sourceLocale: 'en'`, `defaultLocale: 'zh-CN'`) answered an `en` request with the Chinese row in its validation, duplicate-record, delete-restricted and restore refusals, and in the security layer's master-detail and field-write `userMessage`. `/meta` answered the same request with the English label.
+  
+  This covers a field label, a choice option label (field entry, then the shared picklist's), an object label, the master object named by the master-detail write gate and the fields named by the field-write gate. Message templates and authored rule messages still go through `t()`.
+  
+  What follows from it:
+  
+  - In the declared `sourceLocale`, a refusal names labels exactly as declared. In every other locale it follows the same chain `/meta` does.
+  - The labels come from `getLocales()` and `getTranslations()`. An i18n double that implements only `t()` no longer translates labels and leaves the declared ones in place, as `/meta` already did.
+  - On the in-memory i18n fallback (`@objectstack/core`), which reports no `getFallbackLocale()`, a request in a locale with no bundle now gets the declared label, as `/meta` does. Before, it got the default locale's row.
+  - A platform-injected system field (`owner_id`, `created_at`, …) that keeps its English default label is named by the built-in translation of that label, as `/meta` names it.
+  - The security layer's labels now negotiate the request locale the way `/meta` does, so a `zh-TW` request reads the `zh-CN` rows, in step with its `zh-CN` sentence.
+  
+  ## What a direct validator caller sees
+  
+  | `messages` passed to `validateRecord` / `validateInsertValues` / `evaluateValidationRules` | was | now |
+  |:---|:---|:---|
+  | `{ locale, objectName, translate }` | field, option and object labels translated through `translate` | declared labels in every locale; `translate` renders message templates only |
+  | `{ locale, objectName, translate, labelTranslation }` | not a member of the type | labels translated through `labelTranslation`, the way `GET /meta` serves them |
+  
+  What to do on upgrade: add `labelTranslation: () => ({ bundle, options })` to the `messages` you pass, where `bundle` is a `TranslationBundle` keyed by locale and `options` is a `ResolveOptions` (both from `@objectstack/spec/system`). The pair is typed `ValidationLabelTranslation`, now exported as a type from `@objectstack/objectql` and `@objectstack/objectql/core`. Nothing else changes: the call compiles as before, and no verdict, code or status moves.
+- 9fea316: fix(objectql): a roll-up `count`/`sum` that arrives with a restart now says at boot that its stored rows hold NULL, and names `os migrate summary-nulls`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A roll-up `summary` field added by an install in a running process is computed on the rows already stored. One that arrives with a restart (a code-defined app's new version that boots with the field, a marketplace install loaded at the next boot, a ledger entry rehydrated at boot) is not: the boot treats every roll-up it serves as already computed, so those rows kept reading NULL until one of their child rows was written, with nothing in the log.
+  
+  At `kernel:bootstrapped` the ObjectQL plugin now reads the first 100 rows of each object that owns a `count` or `sum` roll-up (one read per such object, `id` and the roll-up columns only) and, when a sampled row holds NULL there, logs one warning naming each roll-up, how many sampled rows hold NULL, and the commands that fill them: `os migrate summary-nulls --object <object>` (dry run), then the same with `--apply`. A `min`/`max`/`avg` roll-up is not named: NULL there is its reading of "no child rows". The boot writes nothing and never fails over this check.
+- e6e5224: fix(objectql): the engine's aggregate door answers a `sum` / `avg` / `min` / `max` over a `formula` with the stored-field remedy, not "count the rows"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `engine.aggregate` already refused a value-reading aggregation over a `formula` field with `INVALID_FIELD` / 400 before any driver ran, but its route told the author to "aggregate a field of one of those types, or count the rows with count" — and a count substituted for a total is a plausible wrong number. The route for that pair is now the spec's one prescription, `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`@objectstack/spec/data`, judged by `virtualFieldAggregateRemedy`): make it a field of its return type with the same `expression` (computed and stored on write) and aggregate that. It still comes right after "The query was NOT run.", inside the 500 characters the REST door keeps.
+  
+  Which pairs are refused does not change, nor does any other pair's wording: a refused `sum` over a `text`, `select` or JSON-stored field keeps its accepted-types route.
+- 94a2d8b: fix(objectql)!: a predicate update judges each matched row against the parent summaries the rows judged before it move, as consecutive by-id updates do
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the summary value a rule reads while one predicate update is judged: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a predicate update (`update(object, patch, { where, multi: true })`, a flow `update_record` step with `multi: true`) of a child object whose validation rule reads a roll-up `summary` of a parent one hop through a reference (`record.inv.primaries > 0`), or whose field-level `requiredWhen` reads one on `parent` (`parent.line_count >= 3`), or that reads a `formula` or stored computed field of the parent calculated from one (`record.project.remaining`, `remaining = budget - spent`). A bulk create and a bulk update already equal one-by-one writes for a rule reading the summary itself; this extends that to the update that selects its rows by a filter, calculated parent fields included.
+  
+  - FROM: the matched rows' related parents and master-detail headers were read once, and every row judged the summary as it stood before the update: "one primary line per invoice" (`record.is_primary == true && record.inv.primaries > 0`) refused the second of two lines made primary one by one, and admitted both made primary by one predicate update.
+  - TO: each matched row judges the summary as the rows judged before it leave it, for `count`, `sum`, `min`, `max` and `avg`, a row moving to another parent included: the base is read in the database (every child as stored for `count` / `sum` / `avg`, the children outside the matched set for `min` / `max`, one grouped aggregate per summary a rule reads) and the matched rows are folded in memory. A parent field calculated from a folded summary is computed again over the parent with the folded value. The update is refused with `VALIDATION_FAILED` and writes nothing, as it does for any refused row. Only an object with such a rule, on an update matching more than one row, reads the base (and, when a calculated field reads a folded summary, the parents' stored rows once).
+  - The answer moves both ways. Mostly it narrows: main admitted a row that one-by-one refuses, and it is refused now. It also admits a row main refused when the rows judged before it move the summary toward admitting it, as one by one does. For example, with `parent.line_count >= 3` requiring a field, a row leaving that parent lowers the count the later rows read.
+  
+  **Not moved.** A rule that reads no summary, a predicate update matching one row, a by-id update, hooks and flow steps (they read the value from before the update), and a rule of the parent itself (it judges the summary once, after the write). Three cases keep reading the stored value, as before, and each one covers that summary for EVERY parent the update reads it for, not only the parent that caused it:
+  - a summary whose `filter` reads through another reference, as a dotted path (`{ 'account.kind': 'x' }`) or in the nested form (`{ account: { status: 'x' } }`), or that the in-memory filter walker refuses;
+  - a summary meeting a value that is not a number, in any matched row or in any parent's base;
+  - a `min` / `max` when any one parent holds more than 5,000 matched rows.
+  
+  The fix for a caller: update the rows the rule refuses on their own, or narrow the filter so the update matches the rows the rule admits.
+- 4db08d5: fix(audit): a search the server widens never names a column the caller may not query (#34700)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — no skill or docs page teaches this search set.
+  
+  - The server-chosen search set of an object now leaves out every column the object's own query guard would refuse this caller, as it already leaves out a field the caller may not query (#25672). A column the caller names in `searchFields` is not left out: the guard judges it as before.
+  - `registerMiddleware(fn, { object, withholdSearchFields })`: a guard middleware names those columns in its own registration (`EngineMiddlewareOptions.withholdSearchFields`, asked for the reads the middleware runs on). plugin-audit's guards on `sys_audit_log` and `sys_activity` declare one, answered by the guard's own rule.
+- d17adf5: fix(objectql)!: a multi-row insert judges a rule reading a parent field calculated from a roll-up as one-by-one inserts judge it
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export of the package entry changes shape. What moves is the value a rule reads for a parent formula or stored computed field while one multi-row insert is judged, and the value a predicate update's rule reads for a roll-up its patch cannot move: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a multi-row insert (`insert(object, rows)`, an import batch, `insertMany`) of a child object whose validation rule, or field-level `requiredWhen` on `parent`, reads a `formula` or stored computed field of the parent calculated from a roll-up `summary` (`record.bud.remaining`, `remaining = budget - total`).
+  
+  - FROM: the batch moved the parent roll-up itself by the rows admitted before each row, but a parent field calculated from it kept its stored value: "a line may not exceed the remaining budget" (`record.amount > record.bud.remaining`) refused the third line of 40 against a budget of 100 written one by one, and admitted all three written in one call.
+  - TO: the field is computed again over the moved roll-ups, as a predicate update already computes it, carrying the parent's stored image from row to row as each one-by-one recompute stores it. The batch is refused with `VALIDATION_FAILED` and writes nothing, as for any refused row; the insert preview (`validate` with `mode: 'insert'`) answers the same row invalid, and judges a master-detail header column the caller is not served as empty at every row. Only a batch with a rule reading that parent pays one read of its parent rows.
+  - The answer moves both ways. Mostly it narrows: a row main admitted against the stored calculated value is refused when the rows before it move that value over the rule's line. It also admits a row main refused when the rows before it move the value back under the line, as one by one does.
+  - A calculated field that also reads a roll-up the insert does not move (an `avg`, a filter through a reference, or one left stored from the row where it meets a value that is not a number) is computed over the moved and the stored values as they stand.
+  
+  The insert accumulation also leaves out a roll-up whose `filter` reads a related record in the nested form (`{ account: { status: 'x' } }`), as it already left out the dotted form and as the predicate update leaves out both.
+  
+  A predicate update (`multi: true`) whose patch writes no foreign key, source field or field the filter reads (as a key, or as a `{ $field }` comparand or `addDays` offset) of a roll-up its rules read no longer aggregates a base for it: its rules read the stored value, as the by-id update does, with no aggregate read. So the 34465 note's "one grouped aggregate per summary a rule reads" and its three stored-value cases hold for the roll-ups the patch can move; one it cannot move is neither aggregated nor folded. Each roll-up a predicate update leaves unfolded now logs one debug line naming the object, parent, field and reason (`filter`, `not_a_number`, `exclusion_budget`).
+  
+  The fix for a caller: insert the rows the rule refuses on their own, or split the batch so each part fits the rule.
+- bf69cb4: fix(objectql): `aggregate` refuses a dotted `groupBy` entry with `INVALID_FIELD` / 400, before any driver runs
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  `groupBy` groups by the columns of the aggregated object itself. The REST query door already refused a dotted entry such as `purchase_order.name` at ingress, but a caller that reaches `engine.aggregate` past that door — the MCP `aggregate_records` tool, a flow, a hook — handed the dotted name to the driver as a qualified column. On SQLite a path of one or two hops came back as the driver's missing-column refusal (advising a schema sync that cannot help), and three or four hops (`purchase_order.requisition.requester.department.name`) came back `500 DATABASE_ERROR`; an engine that aggregates in memory put every row into one null group.
+  
+  `engine.aggregate` now refuses any dotted `groupBy` entry that is not itself a field of the object, in either form (`'a.b'` or `{ field: 'a.b' }`, a date bucket included), with `INVALID_FIELD` / 400 at its position (`groupBy.N` or `groupBy.N.field`), naming the path and the depth `groupBy` serves (0 hops, the object's own columns by their bare names). No statement reaches the database. The refused set has three shapes: a path through a relation field (`purchase_order.requisition.requester.department.name`), a sub-path into a stored value (`address.city` on a JSON field), and the object's own name used as a qualifier (`po_line.amount`). For a relation path the refusal counts the hops and says to group by the relation field itself (one group per related record) or to aggregate the related object; for a multi-value relation it says to aggregate the related object; for the other two shapes it says to name the field without a qualifier, or to store the part in a field of its own.
+  
+  **BREAKING**: a dotted `groupBy` entry that reaches `engine.aggregate` past the REST query door (the MCP `aggregate_records` tool, a flow, a hook) is now refused `INVALID_FIELD` / 400 before any statement runs, for all three shapes. What they answered before: a relation path, on SQLite, the driver's missing-column refusal (one or two hops) or `500 DATABASE_ERROR` (three or four), and on an engine that aggregates in memory one null group under 200; a JSON sub-path, on SQLite, the driver's own `INVALID_FIELD` / 400 after the statement ran, and in memory groups by the nested value; the object's own name as a qualifier, on SQLite, an answer under 200 grouped by the bare column. A caller that relied on either of the last two now gets a 400 and must drop the qualifier or store the part in a field of its own. It ships `patch` because no metadata an author writes changes (`Metadata-protocol: none`): the refused input is a runtime query that the REST query door already refused in the same three shapes, and the fix for a caller that hits it is in the refusal.
+  
+  **Unchanged.** A `groupBy` naming the relation field itself (`purchase_order`), every other `groupBy` entry, an alias that contains a dot, and the REST door's own refusal of a dotted entry. A genuine database fault still answers `DATABASE_ERROR` / 500.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is that engine.aggregate refuses a dotted groupBy entry (a relation path, a JSON sub-path, the object's own name as a qualifier), which the REST query door already refused. There is nothing for a migration to rewrite and no tombstone; the one-line fix for a refused query is in the refusal: group by the relation field itself, aggregate the related object, or drop the qualifier. -->
+- a6cf988: fix(objectql)!: an action body's write inside `ctx.api.transaction` keeps its audit and activity rows beside a `telemetry` datasource, and a write it makes to an object on another datasource is refused
+  
+  Clause-②: yes (narrowing) — narrowed: inside a transaction opened by `ScopedContext`'s discrete `beginTransaction` / `commitTransaction` / `rollbackTransaction` trio (the sandbox's `ctx.api.transaction`), an `insert` / `update` / `delete` of a business object that resolves to a datasource other than the transaction's is now refused with `CrossDatasourceTransactionWriteError` (`ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`, answered `400` at the action door) before anything runs; it used to run on the transaction's connection, the wrong one. The same write inside `transaction(cb)` was already refused.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is whether a write under a trio-opened transaction handle may reach a driver that does not own that handle. The one-line fix for a refused write is in the body: keep every object written inside one ctx.api.transaction on one datasource, or split the work into one transaction per datasource. -->
+  
+  **BREAKING** for an action, hook or job body whose `ctx.api.transaction` writes an object bound to a datasource other than the default one (an object `datasource:` binding or a `datasourceMapping` rule). That write is now refused, naming both datasources, and the body's transaction rolls back. Before, it ran on the default datasource's connection: on SQLite it failed with `no such table`, and on Postgres the failed statement turned the whole transaction's COMMIT into a rollback while the action answered success. The fix: keep every object written inside one `ctx.api.transaction` on one datasource, or split the work into one transaction per datasource and reconcile them yourself. A deployment with one datasource sees no change.
+  
+  **The compliance rows.** On every deployment with a `telemetry` datasource — each `os dev` boot (the sibling SQLite file) and `os serve` with `OS_TELEMETRY_DB` — an action body's write inside `ctx.api.transaction` committed but lost its `sys_audit_log` and `sys_activity` rows: plugin-audit's ledger insert was handed the default datasource's transaction handle while routed to `telemetry`, and ran on the connection that has no such table. The API answered `200` and one `Audit write FAILED on sys_audit_log` line was the only trace. The rows now land, written on the `telemetry` datasource's own connection outside the body's transaction, exactly as they already were inside `transaction(cb)` (ADR-0119, amended 2026-08-06): a body transaction that rolls back keeps its ledger rows, the decided direction of error for an append-only ledger. The workaround `OS_TELEMETRY_DB=0` is no longer needed.
+  
+  The trio records which driver owns each handle it opens, keyed by the handle and dropped at commit or rollback, and the same-origin gate reads that record for a handle the engine's ambient transaction store does not hold. An `async: true` hook's run, detached from the units open at its dispatch, is not judged against that record: its writes run outside any transaction, as they do under `transaction(cb)`. A handle the engine never opened, passed in as `execCtx.transaction`, is still unattributed and unjudged (ADR-0119's declared limit, narrowed by the 2026-11-18 note). No `IDataDriver` change.
+- b7d2474: feat(spec, objectql): a `summary` over a plain `dynamic` currency amount may declare `currencyMode: 'dynamic'`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — skills/objectstack-data/evals/objects-fields-relationships.json (eval 20's expected output still says `dynamic` is admitted only on a roll-up of a home amount; no SKILL.md teaches a summary's currency, and content/docs/data-modeling/currency.mdx is updated here)
+  
+  A `summary` (`sum`, `min`, `max`, `avg`) that totals a child `currency` field in `dynamic` mode (no `currencyConfig`, or `currencyMode: 'dynamic'`) may now declare `currencyConfig: { currencyMode: 'dynamic' }`, with no `defaultCurrency`. A `dynamic` amount is in the tenant default currency, `localization.currency`, by definition, so its total is too, and the Console's roll-up faces draw it in that currency, as they already draw a roll-up of a stored home amount. Before, `defineStack` (`os validate`, the build) and a save or publish through the metadata API refused it with "… is not a stored home amount, so its rows are not known to be in the home currency", so a total of tenant-currency amounts (a timesheet's cost over its time entries' cost) rendered as a bare number beside currency cells.
+  
+  Levels follow the metadata protocol: `@objectstack/spec` takes `minor` for the newly accepted declaration and the new export; `@objectstack/objectql` takes `patch` (its door reads the spec predicate, no protocol of its own moves).
+  
+  Both doors read one new predicate, `isTenantCurrencyAmount` (`@objectstack/spec/data`): a stored `currency` field in `dynamic` mode, of which a stored home amount is one. Unchanged:
+  
+  - A summary that declares no `currencyConfig` still has no currency: nothing is inferred.
+  - `dynamic` over a record-mode child amount is refused as before, prescribing its stored home amount (or `currencyMode: 'record'` when the amounts follow this record through the roll-up's master_detail); over a `fixed` child amount it is refused prescribing that code; over a plain `number`, a `formula` or another `summary` it is refused.
+  
+  The refusal's wording moves with the admitted set: its head now reads "`currencyMode: 'dynamic'` on a summary is admitted only for a roll-up of an amount in the organization's home currency: a child `currency` field in `dynamic` mode (an absent `currencyMode` is `dynamic`), a stored home amount included, …", a child that is not a `currency` field is named by its type ("is a 'number' field, not a `currency` field in `dynamic` mode"), and the prescription lists the child's amounts in the home currency instead of its home amounts alone. The object door's list of admitted roll-up currencies says the same.
+- 50f85e9: feat(spec): a formula field can return `percent`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  A ratio formula (budget used, gross margin) can now declare `returnType: 'percent'` and read and display as a `percent` field does, instead of a bare decimal beside the stored percentages.
+  
+  - **The value.** A `percent` formula result is read exactly as a `percent` field reads its stored value: a fraction (`0.25` shows `25%`, so the expression divides and does not multiply by 100), unless the formula declares a `max` above 1, then percentage points (`percentScaleOf`).
+  - **Its places.** `scale` counts the decimal places of the displayed percentage, as on a `percent` field (absent: 0). The engine rounds a fraction result to `scale + 2` places and a whole percentage to `scale`, so `scale: 1` keeps 0.417 (41.7%) instead of rounding it to 0.4.
+  - **An existing `percent` field computed from its `expression` rounds the same way.** The engine shares one rounding step for computed values, so a stored `percent` field that computes from an `expression` now keeps `scale + 2` places for a fraction (and `scale` for a whole percentage). Before, its computed fraction was rounded to `scale` itself: at `scale: 1`, 0.417 was stored as 0.4 and read 40.0%; it is now stored 0.417 and reads 41.7%. The change applies to the next computed write; rows written earlier are not rewritten.
+  - **Its face.** `percentDisplay` applies to a `percent` formula too (bar or plain). The formula renderer formats the result with the percent formatter, and the field and object forms offer `percent` as a return type. Editing the expression in the Studio field inspector keeps a declared `percent` (or `currency`) unless the new expression proves text, a boolean or a date.
+  - **Declared, never inferred.** No CEL type proves a quotient is a percentage, so authoring keeps a declared `percent` where it would otherwise stamp `number`. Readers that switch on `returnType` (display-name eligibility, filter operator and comparand typing) treat `percent` as a number.
+  
+  The enum only gains a member: every formula that parsed before parses the same, and nothing stored needs migrating.
+- 4b1eb0e: fix(plugin-audit): the platform's own audit and activity rows are no longer judged as an automation's insert
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The audit writer records every audited write with a `sys_audit_log` row and its `sys_activity` mirror. It wrote both through the `sudo()` of the hook api it is handed, and `sudo()` spreads the audited write's context. When that write was made by app-authored automation, the elevation kept the automation's provenance: an action body's or a system hook's app-automation elevation mark, or a flow run's `flowRunId`. plugin-security therefore read the platform's own ledger rows as the automation inserting into an append-only object. Today that logged the "Deprecated: inserting into 'sys_audit_log'" (and `'sys_activity'`) warning on the first such write. Once the announced refusal of those inserts ships, it would have refused the rows and lost the audit trail of every action-body, system-hook and flow write.
+  
+  - The audit writer now writes both rows through the platform's own system api. `platformSystemApi(api)` is a new export of `@objectstack/objectql` and `@objectstack/objectql/core`. It derives from a hook's api the same elevated context `sudo()` gives, minus the app-automation mark and minus `flowRunId`. Every other key is kept, so the rows stay in the write's transaction, organization and attribution. On an app-authored hook's api it sheds nothing: there it returns what that api's `sudo()` returns, the mark and `flowRunId` kept.
+  - `withoutAppAutomationElevation(context)` is a new export of `@objectstack/core`. It returns the context without the mark.
+  - What an automation writes itself is unchanged. An action body's or a hook's insert into `sys_activity` or `sys_audit_log`, through its `ctx.api` or its `ctx.api.sudo()`, still carries the mark and still logs the deprecation. `sudo()` itself is unchanged too: it never sheds the mark.
+- c480f33: fix(objectql): the loser of a concurrent update answers 409 CONCURRENT_UPDATE on any update that opens its own unit of work
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two members of a queue claiming the same parked record at the same moment get one success and one `409 CONCURRENT_UPDATE`, as ADR-0142 D4 says, on every object. On a single-connection store such as SQLite, the loser got `404 RECORD_NOT_FOUND` (private sharing) or `403 PERMISSION_DENIED` (public read) instead whenever the update opened its own unit of work. An update does that in two cases, and the wrong answer has a different history in each:
+  
+  - The object carries a metadata `beforeUpdate` hook. This case opens the unit since 18.6.0, so the loser answered 409 in 18.5.0 and 404 / 403 in 18.6.0. It answers 409 again.
+  - The object carries a blocking (`onError: abort`, the default) or conditioned metadata `afterUpdate` hook. This case already opened the unit in 18.5.0, so the loser answered 404 / 403 in 18.5.0 and 18.6.0. It now answers 409.
+  
+  The stored owner was always right; only the loser's answer was wrong.
+  
+  The cause: the unit exists so that a refusal later in the write rolls back what the write's hooks wrote through `ctx.api`, the row included. That unit opened around the whole update, the authorization middleware included. On SQLite the second writer then waited for the first one's commit before its authorization gate read the record, and by then the record belonged to someone else. The unit now opens around the engine body only: the middleware runs before it, as it does for an update that opens no unit, and the hooks, the row write and the `after*` chain still run inside it and still roll back together.
+  
+  What a middleware does after `next()` on such an update now runs after the commit, as it does on an object with no metadata update hook. For the `beforeUpdate` case that is how 18.5.0 behaved. For the `afterUpdate` case it is not a return to an earlier release: from 18.0.0, when that unit first shipped, through 18.6.0 that code ran inside the unit.
+  
+  Nothing to change in an app.
+- 65b67be: feat(mcp): `aggregate_records` orders, cuts and counts its groups in the database
+  
+  Clause-②: yes (widening: `orderBy` and `limit` arguments on `aggregate_records`)
+  Metadata-protocol: none
+  
+  A ranking question ("the top five customers by revenue") over more groups than the tool's row cap used to come back as every group, or the first page of them, in no stated order, and the client ranked what it happened to get. `aggregate_records` now takes `orderBy` — a list of `{ field, order }` naming an aggregation alias or a group key (its alias when it has one) — and `limit` (at most the row cap). The database orders the groups, cuts them, and counts how many groups it formed before the cut, in one statement; the result carries the groups, `totalGroups` (the key the tool already answers, now the database's count of the groups before the cut), and `truncated: true` when more groups existed than came back.
+  
+  - An order key that names no column of the aggregated row is refused `INVALID_SORT` / 400, naming the columns the query projects.
+  - Only a driver that runs the cut in its own SQL statement serves it: `driver-sql` (every dialect it speaks; the window `count(*) over ()` needs MySQL 8 or later), the WASM SQLite driver, and the Turso driver's local and replica faces. Every other driver (the in-memory driver, MongoDB, OData, Turso's remote face), an aggregate the engine computes in memory (a date bucket, a reference timezone or a measure filter the driver does not run), and an aggregate with `having` are refused `INVALID_QUERY` / 400 before anything is read. Groups are never ordered or cut in the application.
+  - On an order key without a `rank`, a NULL ranks last in either direction, except a `sum` or a count with no value, which ranks as the `0` it is served as. Group keys the order does not name, and a group key it names only by a `rank`, break ties, ascending, NULL last, so two runs of one call answer the same groups in the same order.
+  - An order key may carry a `rank`, a list of the column's values: the statement ranks each listed value by its position and every other value (a NULL among them) on one rank past them, before the cut, so the unlisted values come after the listed ones ascending and before them descending; among themselves they follow the column's own ascending order, NULL last. It is the tool's own, never an `aggregate_records` argument.
+  - A `limit` with no `orderBy` keeps the declared option order the uncut answer already follows: groups keyed by a leading select or radio field come back in the order the field declares its options, a value no option declares last, and the database takes that order before the cut, so the cut keeps the first declared groups. An `orderBy` the caller sends overrides it.
+  - The cut answer carries what the uncut one does: a fixed-currency amount's currency in `currencies`, and `KEY__label` beside each lookup or master-detail group key, the record's name read with the caller's own permissions.
+  - An amount whose records each carry their own currency is ranked by its bare numbers across currencies: the tool description says to rank it inside one currency by filtering `where` on its currency code field.
+  - Without `orderBy` and `limit` the tool answers as before.
+  
+  `@objectstack/objectql` exports `AGGREGATE_ORDER_CUT`, the engine-internal read option of `aggregate` that carries the request (a symbol, so no wire request can set it), with the `AggregateOrderCutRequest`, `AggregateOrderKey` and `AggregateOrderCutOutcome` types. `McpDataBridge` gains the optional member `aggregateGroups`; a bridge without it refuses `orderBy` / `limit` with `NOT_IMPLEMENTED` / 501 and keeps serving the rest of the tool. Nothing that was accepted before is refused.
+- 1caee8c: feat(mcp): "each X with its latest Y" in one `query_records` call — `latestPer`
+  
+  Clause-②: yes (widening): a new read form on the published MCP tool surface. Judged from the card content; the build confirms it
+  Metadata-protocol: none
+  
+  `query_records` takes `latestPer: { by, orderBy }`: one row per group, the group's first row in the given order. `by` names 1 to 3 fields, `orderBy` 1 to 3 keys (`asc` / `desc`); a tie goes to the record id in the direction of the last key, and an empty order value ranks last. "Each account with its latest deal" is `{ objectName: 'crm_opportunity', latestPer: { by: ['account'], orderBy: [{ field: 'close_date', order: 'desc' }] } }`.
+  
+  - The row is chosen among the rows the caller may read and the `where` admits: a group whose newest row is hidden from the caller answers its newest readable row, never the hidden one and never nothing. The organization wall holds inside the choice. Field masking still applies to the returned rows.
+  - A partition or order field the caller may not read is refused as it is in `orderBy`; a computed, JSON or multi-value field, or a dotted path, is refused as a partition or order field.
+  - `limit` counts groups, capped at the tool's `maxLimit` like any list. The answer is `{ object, records, hasMore }` and never a `total`; when more groups exist than came back it carries `truncated: true`.
+  - Served by the SQL driver (Postgres, MySQL, SQLite) and by `driver-sqlite-wasm` and the Turso driver on a local or embedded-replica database: the driver compiles a `ROW_NUMBER()` window over the read's own scoped selection. Every other driver (in-memory, Turso's remote connection, MongoDB), an object with an `afterFind` hook and an object with object-scoped read middleware refuse with `INVALID_QUERY` / 400 before anything is read. The Turso driver's remote face refuses the directive itself too.
+  - New exports: `LATEST_PER`, `LATEST_PER_MAX_KEYS` and the `LatestPerRequest` / `LatestPerOrder` / `LatestPerOutcome` types from `@objectstack/objectql`; `LATEST_PER_DIRECTIVE`, `latestPerDirectiveOf` and the `LatestPerDirective` / `LatestPerDirectiveOrder` types from `@objectstack/driver-sql`; `McpLatestPer` from `@objectstack/mcp`. The request rides an in-process read option, never a wire or query key; `@objectstack/spec` is unchanged.
+  
+  Without `latestPer`, `query_records` and every read are unchanged.
+- 5cd2b54: fix(objectql): a trio transaction handle that committed or rolled back reads as closed, as a closed `transaction()` unit handle does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ScopedContext`'s discrete `beginTransaction` / `commitTransaction` / `rollbackTransaction` trio (the sandbox runner's `ctx.api.transaction`) now marks its handle closed when it commits or rolls it back, instead of only dropping the handle's owner record. The engine's closed-handle check answers `true` for it, so work that still carries the handle afterwards runs outside any transaction, on its own connection, exactly as late work carrying a closed `transaction()` unit handle already did. Before, such a handle read as an unattributed one: a late write routed to another datasource was handed the dead foreign handle, and a late write on the same datasource was handed the finished handle. `openTransactionKind` answers `'none'` for a closed trio handle, where it answered `'separate'`. A driver that hands out the same handle object on a later `beginTransaction` gets it back open.
+- 43639a6: fix(objectql): insert and delete open their own unit of work around the engine body, as update does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An insert or delete opens its own unit of work when the object carries a metadata `before*` hook on that verb, or a blocking (`onError: abort`, the default) or conditioned metadata `after*` hook. The unit exists so that a refusal later in the write rolls back what the write's hooks wrote through `ctx.api`, the row included. Update moves that unit around the engine body only in this same release; insert and delete opened it around the whole write, the middleware chain included. All three verbs now follow one rule: the middleware chain, the authorization gate included, runs before the unit opens, and the hooks, the row write and the `after*` chain run inside it and still roll back together.
+  
+  What changes for an insert or delete on such an object:
+  
+  - On a single-connection store such as SQLite, a writer whose authorization gate or middleware is still running no longer holds the store's only connection, so other writers are no longer queued behind it.
+  - What a middleware does after `next()` now runs after the commit, as it already does for an update and for an insert or delete on an object with no such hook. A middleware that throws after `next()` no longer rolls the row back on a hooked object; it never did on any other object.
+  
+  This patch does not address the answer the loser of two concurrent deletes of one row gets.
+  
+  Nothing to change in an app.
+- c321914: fix(objectql,service-analytics): `query_dataset`'s ObjectQL face orders and cuts a top-N in the database instead of reading every group
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  A top-N (`order` with a `limit`, optionally an `offset`) on the analytics ObjectQL face — date-bucketed queries, `$field` filters, drivers without raw SQL — used to read every group and cut in memory. On a driver that compiles the engine's order-and-cut (the SQL driver family: `driver-sql`, the WASM SQLite driver, Turso's local and replica faces) the face now hands the engine its order and `offset + limit`, the database orders, cuts and counts in one statement, and only the cut rows are read. `totalGroups` stays the count of every group, taken from that statement.
+  
+  Visible change: a text-ordered top-N on such a driver now returns the database's choice of groups — its collation, NULL last in both directions — the same as the native SQL face and `aggregate_records`, instead of the in-memory comparator's (`localeCompare`, `''` read as empty).
+  
+  Where the engine cannot serve the cut — the in-memory driver, MongoDB, OData, Turso's remote face, a date bucket or reference timezone the driver does not compile, a measure filter it does not evaluate — the face reads every group and cuts in memory as before, and no refusal reaches the caller. A select or lookup dimension ordered by its display label is still cut in memory, by label.
+  
+  `@objectstack/objectql`: an `AGGREGATE_ORDER_CUT` request may set `declinable: true`; where the cut cannot be served the engine then reads nothing, answers `[]`, leaves `outcome` unset and records the reason on the request's new `declined` slot instead of refusing `INVALID_QUERY` / 400. Without the flag nothing changes: `aggregate_records` keeps its refusal, and `AggregateOrderCutOutcome` is unchanged.
+- 37f7814: fix(objectql)!: a by-id delete whose driver removes nothing after the row was read answers RECORD_NOT_FOUND and runs no after-delete work
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer an engine caller gets from a by-id delete that loses a race for its row: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of the engine's by-id delete (`engine.delete(object, { where: { id } })`, a hook's `ctx.api`, an action handler, a flow `delete_record` step) whose row is removed by another writer after this delete read it and before its own driver call. This happens when two deletes of one row run at once on a store whose writers do not queue behind each other: for example PostgreSQL for any object, and SQLite for an object with no metadata `beforeDelete` hook and no blocking metadata `afterDelete` hook. On SQLite such a hook makes the second delete wait for the first, and the second then finds no row when it reads it.
+  
+  - FROM: the loser's driver answered `false` (it removed nothing), and the engine still ran every after-delete step for it: the `afterDelete` hooks, the parent roll-up summary recompute and the `data.record.deleted` realtime event. The loser's answer was `false`. On SQLite, with such a metadata hook the loser waited for the winner and answered `RECORD_NOT_FOUND`, so the answer depended on the hook binding.
+  - TO: the loser answers `RECORD_NOT_FOUND` (404), the error a by-id delete already gives for an id that names no row, and none of those steps runs for it. The winner's delete is unchanged and runs each step once. A recycle-bin entry the loser wrote is still withdrawn, as before. When the loser's delete runs in a transaction (its object is referenced by a cascading relation), the cascade it walked rolls back with it.
+  - The same answer applies when the row is removed by the delete's own `beforeDelete` hook (a hook that deletes the row it is asked about through `ctx.api`): that delete answered `false` and now answers `RECORD_NOT_FOUND`.
+  - A child delete that a parent's cascade issued is the exception: when its driver answers `false`, the dependent the cascade was sent to remove is already gone, so that child delete still answers `false`, runs none of the after-delete steps, and the cascade goes on; the parent's delete completes, as it did before. A child that was already gone when its own delete read it still stops the cascade with `RECORD_NOT_FOUND`, unchanged.
+  
+  The REST and batch delete routes, and the own-row delete route, already answered 404 for this case; their code and status do not change. On the own-row delete route the loser's `RECORD_NOT_FOUND` is now raised by the engine, so its `userMessage` is built from the route's system context, which carries no locale, where the route used to build it from the caller's.
+  
+  The fix for a caller: treat `RECORD_NOT_FOUND` from a by-id delete as "the row is already gone", as for any id that names no row. The error this change adds always names the row the caller addressed, since a cascade's child delete no longer raises it; a cascade can still stop on a dependent with `RECORD_NOT_FOUND`, as before; the addressed row is then kept. A caller that tested the answer for `false` reads the error's `code` instead.
+- df81f4c: feat: working calendars in Setup — `sys_work_calendar` and `sys_work_calendar_exception` (ADR-0157, part two of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Not released alone; pair #35641/#35642. The first half, #35641 (the calendar service and its arithmetic), is merged; this half ships in the same release as it, with the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Two platform objects** (`@objectstack/platform-objects`). `sys_work_calendar` holds a calendar's `code` (unique per organization, snake_case), `name`, required IANA `timezone`, `is_default` (one per organization), the required `maintained_from` .. `maintained_through` span its holidays are entered for, and one period column per weekday (`monday_periods` … `sunday_periods`, `HH:mm-HH:mm` periods separated by commas, blank for a day off). `sys_work_calendar_exception` holds dated overrides: `calendar`, `date`, `kind` (`off`, no periods; `on`, that date's full periods), `periods` and `note`, one row per calendar and date. Both are organization data an administrator keeps, audited, like `sys_exchange_rate`; a package may seed rows under the existing seed contract and name a calendar by code. Their names join the platform object name list (`@objectstack/spec`).
+  - **Setup.** Two entries under Exchange Rates: Working Calendars (with a Needs Maintenance list of every calendar whose maintained span ends within 60 days) and Calendar Exceptions, whose list page imports a year of holidays from a file; the `calendar` column names a calendar by its code or name. Labels and help text ship in all eleven locales.
+  - **Time zone on create** (`@object-ui/plugin-form`, ADR-0157 D7). A create form opens a required time-zone field that declares no default (`valueDomain: 'iana_time_zone'`) on the organization's time zone, as it opens a record-currency field on the organization's currency; the user can change it. A create that leaves the calendar's `timezone` out takes the same zone on the server. An optional time-zone field, where blank means "take the parent's", is not prefilled.
+  - **Refusal wording** (`@objectstack/objectql`). The refusal of a create that marks a calendar the default in another organization no longer assumes the writer is working in an organization.
+  - **A calendar stays in its organization** (`@objectstack/objectql`). An update that changes the organization of a calendar or of an exception date is refused with `400 VALIDATION_FAILED` on `organization_id` (`invalid_value`), before any read and for every writer, system writes included. To have a calendar in another organization, create it there. An edit that leaves `organization_id` out or repeats the stored one is judged as before; a predicate update is judged row by row, and one matched row whose organization would change refuses it.
+  - **An exception date names a calendar of its own organization** (`@objectstack/objectql`). On a create, and on an update that carries `calendar`, the calendar is read by id in the exception's organization; when it is not there, the write is refused with `400 VALIDATION_FAILED` on `calendar` (`invalid_value`). A calendar of another organization and an id that names no calendar get the same refusal, word for word. The import door is judged the same way, row by row.
+  - **Organization ownership** (`@objectstack/cli`). Both objects are organization-owned; an exception reaches its organization through its calendar.
+- ed906d5: feat: the working-calendar service, its arithmetic and its refusal codes (ADR-0157, part one of two)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Not released alone; pair #35641/#35642. This ships in the same release as #35642 (the calendar objects and Setup pages, the second half of this change), the working-day formula functions (#35356) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **The arithmetic** (`@objectstack/formula`). `isWorkingTime`, `addWorkingDays`, `workingDaysBetween` and `addWorkingHours` compute over a resolved calendar and its dated exceptions, as pure functions a formula can call synchronously, beside `parseWorkPeriods` (`HH:mm-HH:mm` periods; a period that crosses midnight is refused, `24:00` is a legal end), `buildWorkCalendar` (a frozen calendar) and the three error classes. A computation that needs a date outside the calendar's maintained span is refused rather than read from the weekly pattern.
+  - **The types, constants and time-zone rule** (`@objectstack/spec`). `WorkCalendar` and the column and code constants are in `@objectstack/spec/data`; the service contract is `IWorkCalendarService` in `@objectstack/spec/contracts`. `zonedWallClockToUtcMs`, `wallClockToUtcMs` and `WallClockParts` move to `@objectstack/spec/data` from `@objectstack/core`, unchanged; `@objectstack/core` re-exports all three, so no import changes.
+  - **Three error codes** in the ADR-0112 ledger: `ERR_WORK_CALENDAR_UNRESOLVED` (no calendar by that code, no organization default, two defaults, or no organization named outside the `single` posture), `ERR_WORK_CALENDAR_NOT_MAINTAINED` and `ERR_WORK_CALENDAR_INVALID`, each a 400.
+  - **The calendar service** (`@objectstack/objectql`, registered as `work-calendar`). `resolve({ organizationId, calendar })` takes the named code, else the organization default, else refuses; it never falls back to wall-clock time. It reads in the organization the caller names, elevated, and caches until a calendar or exception row is written. Outside the `single` tenancy posture, a computation that names no organization is refused before any read. Until the calendar objects are registered it refuses every resolution.
+  - **The write door** (`@objectstack/objectql`). Once the calendar objects exist, a calendar or exception write is refused `400 VALIDATION_FAILED` when a period crosses midnight, is malformed or overlaps another, an `off` row carries periods or an `on` row carries none, `maintained_through` is before `maintained_from`, a second calendar is marked the default, or a calendar created in an organization other than the one being worked in is marked the default (create it there, or set the default by an update); a calendar created without `timezone` takes the organization's Localization time zone. The hooks take the organization from the session.
+- 3d6dea2: feat(formula): `addWorkingDays()`, `workingDaysBetween()` and `addWorkingHours()` count with the organization's working calendar (ADR-0157 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added — a formula field's or a stored field's `expression` may now call `addWorkingDays(...)`, `workingDaysBetween(...)` and `addWorkingHours(...)`
+  Skills-docs: updated here — skills/objectstack-formula/SKILL.md teaches the three functions and eval 8 of skills/objectstack-project/evals/project-process.json exercises them (the card's order names both)
+  
+  Not released alone: it ships in the same release as the working calendar service and objects (#35355) and the approval escalation's working-time clock (#35357), ADR-0157 D4.
+  
+  - **Three formula functions** (`@objectstack/formula`). `addWorkingDays(day, n[, code])` answers the calendar day `n` working days after `day` (before it, for a negative `n`); `day` itself never counts and `0` answers `day`. `workingDaysBetween(start, end[, code])` counts the working days after `start` up to and including `end`, negative when `end` is earlier, and is the inverse of `addWorkingDays`. `addWorkingHours(start, hours[, code])` answers the instant `hours` of working time after `start`, counted as elapsed time in the calendar's time zone (D11); a start outside working time begins at the next working period. All three step over the calendar's weekends and holidays and onto its make-up working days. Without `code` a call counts with the organization's default calendar; `code` names a calendar and is written as a quoted literal. They join the advertised standard library (`CEL_STDLIB_FUNCTIONS`).
+  - **Where they count** (`@objectstack/objectql`). A `formula` field and a stored field's `expression` count with the record's own organization's calendars, which the engine loads through the calendar service before it evaluates them: only the calendars the expressions name, once per organization per read, from the service's cache. A formula field counts again on its next read after a calendar edit; a stored due time keeps the value of its last write.
+  - **When the calendar cannot answer** (D8). With no default calendar in the organization, a code the organization has no calendar for, or a count that reaches past the span the calendar is maintained for, the formula reads `null` and the server logs one line naming the object, the field and the reason. A stored field's `expression` stores blank and the write goes through; the blank stays until that record's next write, and a write made while the calendar refuses blanks a value that was valid before. Nothing counts on the weekly pattern or the wall clock instead.
+  - **No calendar arithmetic as a filter.** A query filter, a sharing rule's condition and every filter compiled from CEL refuse the three functions with a message that prescribes the stored due-time field (D6).
+  - **Build refusals** (`@objectstack/lint`). `os build` / `os validate` refuse the three functions at every expression site but a formula field's and a stored field's `expression` (validation rules, visibility, action conditions, flow conditions and values, sharing rules, a field's expression `defaultValue` and a seed value), and refuse a calendar code that is not a quoted literal, with a branch between literal calls as the way to pick a calendar per record.
+  - **Forms** (`@object-ui/core`). A form does not compute a formula that calls one of the three: its calendar is loaded for the server's read, never handed to the form, so the field is unservable there as on the server's write-path check.
+  - **Teaching** (`@objectstack/skills`). objectstack-formula documents the three functions; the platform catalog moves working-day formulas from Planned into what the platform ships; the project-process eval for business-hours SLAs now expects the functions.
+- 6d0089c: fix(objectql,approvals,audit): an authored rule message, an approval's object label and an activity summary's labels read as `/meta` serves them in a declared `i18n.sourceLocale`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In a deployment whose `i18n.sourceLocale` differs from its `i18n.defaultLocale` (an app authored in English that defaults its users to Chinese, say), three readers still looked metadata text up through `II18nService.t()`, which falls back to the `defaultLocale` row when the reader's locale holds no entry. An `en` reader was shown the Chinese text where `GET /meta` and every other refusal label showed the English one as authored:
+  
+  - objectql: the author-written message of a validation rule (`objects.<object>._validations.<rule>.message`) in a `400 VALIDATION_FAILED` refusal;
+  - plugin-approvals: the object label on the approvals inbox, the request page, the generic data door's request rows and the approval refusals that name an object;
+  - plugin-audit: the object, field and select-option labels inside an activity summary composed in the reader's language.
+  
+  Each now resolves through `translateObject` (`@objectstack/spec/system`) over every locale the i18n service holds, with the resolve options the metadata route builds: the reader's locale, the declared fallback chain and the authored language (the declared `sourceLocale`, else `defaultLocale`). A reader in the authored language reads the text as written; every other reader reads the same row as before. `t()` keeps carrying the catalog sentences.
+  
+  An i18n service that cannot hand its translations over (no `getLocales()` / `getTranslations()`) no longer has these labels and rule messages translated through `t()`: the authored text stands. Every service the platform ships implements both.
+- 4890cd0: fix(objectql): `platformSystemApi` on the api `ObjectRepository.execute` hands the action it dispatches keeps the `'action'` mark
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ctx.api.object(o).execute(name)` dispatches the named action with an api over a context it marks `'action'`. That api carried neither the app-authored flag nor the action door's origin flag, so `platformSystemApi(ctx.api)` in the dispatched handler took the mark off, and its writes to `sys_member`, `sys_user_position`, `sys_user_permission_set` and `sys_invitation` passed as a platform writer's, against the documented refusal for action handlers.
+  
+  - The api `execute` hands the dispatched action now carries its own origin flag, kept by every api derived from it (`sudo()`, `withRunAs(...)`, a transaction's context, the api `platformSystemApi` and the user-grants seeds return). On it, `platformSystemApi(api)` returns what `api.sudo()` returns: the `'action'` mark and any `flowRunId` kept. Writes to the four identity-assignment objects through it are refused `PERMISSION_DENIED` (403), whichever api dispatched the action, and its inserts are owner-stamped with the invoking user.
+  - The flag is not the app-authored flag: the dispatched handler's `delete(…, { permanent: true })` still runs.
+  - The api the audit writer holds (a hook registered in code) is unchanged: `platformSystemApi` still takes the mark off there.
+  - This is the path the action-door fix in this release did not reach. No new export, and no published signature changes.
+- c59ee99: feat(units): a raw total over a `record`-mode quantity is refused unless it groups by the quantity's unit field
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ADR-0158 U7 R1, mirroring ADR-0144 D6 and its record-currency doors. A `number` field declaring `unitConfig: { unitMode: 'record', unitField }` holds a bare quantity whose unit is each row's code in `unitField`. Before this change, `sum` over a row of 10 KGM and a row of 10 LBR answered `20`, and a `summary` roll-up over such child rows stored `20`.
+  
+  - **The engine aggregate** (`@objectstack/objectql`, `ObjectQL.aggregate`): `sum`, `avg`, `min` or `max` over such a quantity is refused `INVALID_FIELD` / 400 before any driver is asked, unless the query's `groupBy` includes the quantity's `unitField`. The message names the quantity, its unit field and the grouping to add.
+  - **A `summary` roll-up** (`@objectstack/objectql`, object registration): a `summary` that rolls up `sum`, `avg`, `min` or `max` of such a child quantity is refused `INVALID_METADATA` / 422, whichever object registers second. In R1 every such roll-up is refused: a child quantity cannot follow its parent's unit yet. Roll up with `function: 'count'`, or total the quantity with an aggregate grouped by its unit field.
+  - **Analytics** (`@objectstack/service-analytics`): a dataset or cube measure of type `sum`, `avg`, `min` or `max` over such a quantity is refused `INVALID_FIELD` / 400 unless the query has a dimension over the unit field, on every cube path (declared, inferred, augmented), every `totals` grouping and the draft preview.
+  - **The widening.** `AnalyticsServiceConfig.sourceFieldMeta` may answer one more optional key, `unitField`: a `number` field's `unitConfig.unitField`, under `unitMode: 'record'` only. `AnalyticsServicePlugin` relays it for a `number` under `unitMode: 'record'` and for nothing else. A host that does not answer it gets no record-unit judgment from the cube door; the engine aggregate door still refuses the same query on the ObjectQL strategy.
+  
+  Not judged: `count` and `count_distinct`, a `fixed`-mode quantity, and a `number` field with no `unitConfig`. No new error code.
+- 50d6da8: fix(objectql): a package registered again stops serving an object extension its new manifest no longer declares
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  When a package was registered again without uninstalling it first (an `os dev` artifact reload, or an upgrade or re-install through the marketplace install-local door) and its new manifest no longer carried an `objectExtensions` entry for an object the previous registration extended, the old extension stayed registered. Its fields, validations and indexes kept being served on that object until the process restarted. A package's previous extension of an object was replaced only when the new manifest named that same object again.
+  
+  A re-registered package body now withdraws each extension its previous body registered for an object the new body no longer extends, through the same per-object withdrawal the `object_extension` item delete uses. The object then serves exactly the extensions the package's current manifest declares. Another package's extension of the same object is untouched, and so is an extension registered under the package id outside a body (the `object_extension` item door's layer). A refusal later in the same registration run puts the withdrawn extension back with the rest of the installed version.
+  
+  Stored data is not touched: the column the dropped field used keeps its values, and schema sync drops no column. The field is simply no longer served. The install-local dry run already listed the dropped field under `plan.fields.removed`; that answer is unchanged.
+- 7dd1a2f: fix(objectql): a system-context delete of a record with no organization now keeps it in the recycle bin instead of failing on `sys_recycle_bin.organization_id`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A delete made under `{ isSystem: true }` (the context flows, hooks and admin tooling use) of a record that names no organization, such as a record of a `tenancy: { enabled: false }` object, wrote its recycle-bin entry with no organization. On a SQL store, where the bin's tenant column is NOT NULL, the delete failed with `NOT NULL constraint failed: sys_recycle_bin.organization_id` and the record stayed. On the memory store the delete succeeded but left an entry no organization owned.
+  
+  The entry now takes the organization any system-context insert takes (ADR-0131 D9): the record's own, else the context's, else the organization the engine derives. Under the `single` posture that is the Default Organization, so the record lands in the bin and can be restored. Under a walled posture (`isolated`, `group`), where no owner can be derived, the delete is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` before the record is removed, as a system insert is. A caller that deletes there passes the organization on the context (`{ isSystem: true, tenantId: '...' }`).
+- d7c257e: feat: the engine's seam for the fixed-read leaf, and the driver declaration for it (ADR-0155, step 2 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  No visible change on its own: nothing on main writes a fixed-read leaf yet (the sharing plugin starts writing `SharedRecordIds` at ADR-0155's last step), and no driver declares one (the SQL drivers and the memory driver declare it on the steps that compile it).
+  
+  - **The driver declaration** (`@objectstack/spec`). `DriverCapabilities.fixedReadLeaves` lists the fixed-read leaves a driver's filter compiler evaluates exactly, by name, e.g. `['SharedRecordIds']`; absence means none. The names are `FIXED_READ_LEAF_NAMES`, and `fixedReadLeafNameOf(leaf)` maps a leaf to its name. It stays separate from `readableIdsLeaf`: a `ReadableIds` leaf is not a fixed-read leaf, and a driver that evaluates both declares both. Both descriptions now say so.
+  - **The seam** (`@objectstack/objectql`). The engine's comparand door admits a branded `SharedRecordIds` leaf as a `$in` comparand, and the engine hands it to the driver by reference only when it sits on `id` of the object it names (directly, or inside a composed `ReadableIds` scope over that object), on a read verb in its read form or in a predicate update's `where` in its write form, for the context's user or its delegator (a system context is exempt), outside both classes ADR-0155 D4 recognises (the object on another datasource than `sys_record_share`; a middleware or a `beforeFind` / `afterFind` hook registered for `sys_record_share` by name), and to a driver whose `fixedReadLeaves` names it. Anything else is refused before any driver is asked, `INTERNAL_ERROR` / 500, logged at `error` once per evaluator. An unbranded copy is still refused at the door as a non-list comparand, `INVALID_FILTER` / 400.
+  - **The refusal** (`@objectstack/core`). `fixedReadLeafRefusal`, `refuseFixedReadLeafOnce` and `describeFixedReadLeaf` are the one envelope every evaluator answers a fixed-read leaf it will not run with; `logRefusalOnce` is the once-per-instance log it shares with the `ReadableIds` refusal.
+  - **Filter tokens** (`@objectstack/core`). `resolveFilterTokens` returns a fixed-read leaf by reference, as it does a `ReadableIds` leaf, so a read scope that carries a placeholder beside the leaf keeps the leaf's brand.
+- 17ed9e7: fix(objectql): deleting an organization also deletes its units of measure, the one exemption from the `sys_unit` delete refusal
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An organization that had ever created a unit of measure could not be deleted: the delete was refused with 409 `DELETE_RESTRICTED` naming `sys_unit`, and the units could not be removed first, because the engine refuses every delete of a unit (405 `ERR_UNIT_DELETE_REFUSED`). Now the organization delete's own cascade removes that organization's `sys_unit` rows, retired ones included, through the engine's delete path, after the delete has been admitted, so no unit row is left naming a deleted organization. `organizationOwnedRowCounts` (the question plugin-auth's organization delete asks first) and the engine's own refusal no longer count units as records the organization still owns.
+  
+  **Declared behaviour change.** A delete door widens, in one place only. A delete of an organization that holds units and no other record now succeeds and removes the units; before, it was refused. An organization that owns any other record is still refused, and none of its units is removed. Every other delete of a unit is still refused with 405 `ERR_UNIT_DELETE_REFUSED`, by id and batched, for a user, a system writer and an automation run, including a delete issued by a hook while the organization's delete is running: the exemption is recognised from the engine's own cascade, never from anything a caller passes. Retire a unit (`retired: true`) to stop its use, as before.
+- 0a3dd40: feat: analytics compiles the `SharedRecordIds` fixed-read leaf, the access explainer resolves it at the record, and OData refuses it (ADR-0155, step 5 of 6)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  No visible change on its own: nothing on main writes a `SharedRecordIds` leaf yet. The sharing plugin starts writing it at ADR-0155's last step.
+  
+  - **Analytics, the native SQL path** (`@objectstack/service-analytics`). A read scope carrying `{ id: { $in: SharedRecordIds.read(object, user) } }` compiles to one subquery in the list's own position, `id IN (SELECT "record_id" FROM "sys_record_share" WHERE "object_name" = ? AND "recipient_type" = ? AND "recipient_id" = ? AND "record_id" IS NOT NULL AND "record_id" <> '')`, with every value bound and no tenant scope on the subquery (ADR-0155 ① ruled A). The native strategy takes such a scope only when the host answers `AnalyticsServiceConfig.fixedReadLeafClassOf` with `null` for each leaf (outside both classes ADR-0155 D4 recognises: the object on another datasource than `sys_record_share`, or a middleware or `beforeFind` / `afterFind` hook registered for `sys_record_share` by name) and the dialect is SQLite, PostgreSQL, MySQL or SQL Server. Otherwise it declines, and the ObjectQL engine path answers. A host that wires no answer keeps today's behaviour: the native path declines every scope that carries the leaf. This change ships the hook unwired: `AnalyticsServicePlugin` passes no answer, so the native path declines a scope carrying the leaf and the engine path answers, until #35946 wires it.
+  - **Analytics, the ObjectQL path.** The read-scope merges (`withReadScope`, the related-object scope, the label read) admit a placed read-form leaf and hand it to the engine by reference. The dry-run SQL echo prints the subquery. A leaf in any other position, under `$nin`, on another object or in its write form is refused, `INTERNAL_ERROR` / 500, logged at `error` once per service logger.
+  - **Analytics, the query's `where`.** A leaf reaches analytics only in the read scope. A leaf anywhere in a query's `where`, in either spelling, is now refused before either strategy runs, with `INTERNAL_ERROR` / 500. The message names the leaf and its table, not the recipient. Before this release `{ id: { $in: leaf } }` there answered `INVALID_FILTER` / 400, with a message that printed the recipient. A bare `{ id: leaf }`, or an array-form `=`, was read as a relation condition on `id`. No request can spell the leaf, so only in-process code could reach this.
+  - **The access explainer** (`@objectstack/plugin-security`). `ISecurityService.explain` resolves each leaf in the sharing read filter at the record it judges, with one read of `sys_record_share` under the leaf's own predicate, keyed by the record ids (one read for a whole batch). The sharing layer's `rowFilter` then has the two shapes it has today: `{ id: { $in: [recordId] } }` in the share arm for a caller with a grant on the record, and the share arm left out for a caller without one. The published `rowFilter` never carries the leaf. A leaf it cannot resolve is refused, `INTERNAL_ERROR` / 500, logged at `error` once. That includes a leaf anywhere but `{ id: { $in: leaf } }` in the object's own filter, such as one inside a relation condition or a composed `ReadableIds` scope, as the engine and the analytics compiler refuse it.
+  - **OData** (`@objectstack/driver-odata`). `find` and `count` refuse a `where` carrying the leaf before any request is sent, `INTERNAL_ERROR` / 500. An OData `$filter` has no form of the subquery, and the driver declares no `fixedReadLeaves`. Before this release a direct `find` left the leaf's predicate out of the `$filter` it sent. The engine already refused the leaf before calling this driver.
+  - **The array form** (`@objectstack/spec`). `parseFilterAST` now refuses a leaf in the array form with `INTERNAL_ERROR` / 500 wherever it answered `INVALID_FILTER` / 400: as an `in` / `nin` comparand, as a member of an `in` / `nin` list, or as the comparand of a scalar operator (`!=`, `>` and the rest). The old messages printed the leaf's inputs, the recipient among them. The new message names the leaf and its table only. An unbranded copy that crossed JSON is still `INVALID_FILTER` / 400. An array-form `=` is passed on by reference and refused by the engine, as before.
+  - **New exports** (`@objectstack/objectql`). `fixedReadLeafClassOfEngine(engine, leaf)` answers which ADR-0155 D4 class, if any, keeps the engine from handing a leaf to a driver. `driverEvaluatesFixedReadLeaf` answers whether a driver declares the leaf. Neither reads or writes anything.
+- a7292a5: fix(units): a `unitField` re-pointed at a new field raises its blank-unit debt; the unit-code backfill names unused mapping entries and says what a capped walk did not judge
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A metadata save that re-points a stored `record`-mode quantity's `unitConfig.unitField` at a field that held no stored unit before the save (new in it, or unstored before it) is now answered 409 `DESTRUCTIVE_CHANGE` with `unit_mode_to_record` on the quantity: every stored row then holds its quantity beside a blank unit, and is refused at its next quantity edit until it holds a unit code. The finding names the `""` mapping entry of `os migrate unit-codes` that writes those blanks, reads no row, and is lifted by `force: true`. A re-point onto a stored text field still raises `unit_code_field_declared` alone, and a re-point onto a field that already was a unit code field still raises nothing.
+  - `os migrate unit-codes` and `POST /api/v1/meta/_migrate-unit-codes`: a mapping entry whose key the rows store as a unit code, which is never rewritten, and that no row used is now named, as `unusedEntry` on that value in the report and as a line of the printed report.
+  - When the walk stops at `maxRecords`, the printed report now says that the rows past the cap were not judged, so any of them may hold a value with no mapping entry, and that an apply run wrote the rows examined only, as the record-currency backfill's report does; an unscoped run also says its organization check saw only the rows examined. An apply run over such a walk still writes the rows it examined, as before.
+- e72f2aa: feat: the analytics plugin asks the engine which share-grant scopes its native SQL path may compile (ADR-0155 D4)
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  - **New optional contract member** (`@objectstack/spec`). `IObjectQLEngine.fixedReadLeafClassOf(leaf)` answers which of ADR-0155 D4's two classes a `SharedRecordIds` leaf falls in on an engine: `'other-datasource'` (the leaf's object is bound to another datasource than `sys_record_share`) or `'registration-by-name'` (a middleware or a `beforeFind` / `afterFind` hook is registered for `sys_record_share` by name), with what names it. It answers `null` when neither class applies, and throws `TypeError` on a value that is not a fixed-read leaf. The answer type is the new `EngineFixedReadLeafClass`. The member is optional, and because "neither" is `null`, `engine.fixedReadLeafClassOf?.(leaf)` is a caller's whole answer: a class, `null`, or `undefined` from an engine without the member, which cannot say.
+  - **The engine implements it** (`@objectstack/objectql`). `ObjectQL.fixedReadLeafClassOf` returns the seam's own recognition, `fixedReadLeafClassOfEngine(engine, leaf)`, with "neither" spelled `null`. It reads only datasource bindings, middlewares and hooks. It calls no driver and logs nothing.
+  - **The analytics plugin wires it** (`@objectstack/service-analytics`). `AnalyticsServicePlugin` now fills `AnalyticsServiceConfig.fixedReadLeafClassOf` from the `"data"` engine on each call. When the engine answers `null` (neither class), the native SQL path compiles a read scope that carries the leaf. When the engine names a class, throws, answers anything but `null`, or has no such member, the query goes to the ObjectQL engine path, as before. An engine without the member is reported once at `warn`. Neither class is restated in analytics.
+  
+  Nothing a metadata author writes changes. On a host that runs `ObjectQLPlugin`'s engine as `"data"`, a sharing-scoped analytics query outside both classes keeps the native SQL path once the producer starts writing the leaf (ADR-0155 step 6).
+- b7fe94a: docs(objectql): the fixed-read leaf seam's docblocks name plugin-sharing as the leaf's producer, in the present tense (ADR-0155 step 6)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Comment-only. The seam's docblocks no longer say the producer, its boot check and its up-front answer (R2) are still to land, or that nothing writes the leaf: plugin-sharing writes it and reads `driverEvaluatesFixedReadLeaf` for R2. No export or runtime behaviour changes.
+- 756df0a: fix(objectql): a script action's first call no longer stalls when a write inside its transaction triggers a flow
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A script action body that wrote inside `ctx.api.transaction(...)` could stall on a server running SQLite (the `os dev` default) until the sandbox's 30-second wall clock, answer `500 INTERNAL_ERROR`, and roll its writes back, while an identical retry succeeded. It happened when a write in the transaction fired a record-triggered flow (for example through a roll-up `summary` update of the parent): the flow's run setup read the organization's localization settings through the engine without the transaction's handle, and that read waited for SQLite's single connection, which the open transaction held. The retry found the read cached.
+  
+  Every operation made through a transaction opened by the sandbox's `ctx.api.transaction` now publishes that transaction to the reads and writes it issues internally, as `engine.transaction(...)` already did (ADR-0034): such a read runs on the transaction's connection, and a nested `transaction()` joins it. Work an operation starts and does not await, and work detached from the unit (an `async` hook), still runs outside it.
+- 4101f1f: fix(objectql): a state machine judges every write from the stored state, a clear included
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is that the engine judges a write clearing a state_machine field against the machine's transitions. A state meant to be clearable lists the empty value among its targets; that is the one-line fix, and it is in the refusal's from/to pair. -->
+  
+  A `state_machine` validation judges an update from the record's stored state, and clearing the state field — writing `null` or `''` — is now a transition like any other: a transition to the empty value. So no sequence of writes leaves a state the machine would refuse to leave in one write.
+  
+  **BREAKING**: on an update, clearing the state field of a record whose stored state has a key in `transitions` is refused unless that state lists `''` among its targets. The refusal is the existing transition refusal — `VALIDATION_FAILED` / 400 with field code `invalid_transition` and `constraint: { from, to: '' }` — on every write path (by id, multi-row, REST, MCP), for every caller, elevated ones included. To keep a state clearable, add `''` to its targets, e.g. `paused: ['open', '']`. It ships `patch` because no metadata an author writes changes (`Metadata-protocol: none`): every existing declaration parses and means what its `transitions` say; the write that now meets the declared graph is a runtime write.
+  
+  **Unchanged.** A write that does not touch the state field, an unchanged value, a declared transition, a stored state with no key in `transitions` (still lenient), inserts and their `initialStates` check, and seed and historical-import writes (still exempt).
+- 695b9db: fix(plugin-security)!: an app-authored elevation's reads and writes are judged by its caller's organization wall
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. What moves is the answer a data operation gets when it runs under an action body's, a system hook's or a system flow's elevation, and three schema descriptions that state it: no stored row, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  The rule: elevation lifts a caller's business rules, never the organization wall. An action body, a hook that runs as system (`runAs: 'system'`, a system context it inherits, its `ctx.api.sudo()`) and a flow that runs as system have their reads and writes judged by the organization wall of the caller they run for (ADR-0095 D1, ADR-0123 D1/D2), under every tenancy posture and on every object, a federated one included.
+  
+  **BREAKING** for an action body, a system hook or a system flow run for a signed-in caller.
+  
+  - FROM: the elevation, not the caller's organization wall, decided what such a context reached of a tenant-scoped object.
+  - TO: the caller's own organization wall decides it:
+    - with no active organization under `isolated`, an empty membership set under `group`, or no membership at all under `single`: its reads of a tenant-scoped object resolve to nothing (zero rows, no error); its delete and purge are answered by that read rule (a predicate delete matches nothing, a by-id delete answers `404 RECORD_NOT_FOUND`); and its other writes (insert, update, transfer, and the recycle bin's restore) are refused with `403 PERMISSION_DENIED`, naming the missing active organization or membership;
+    - under `group`, a member reads and writes the union of the organizations they hold a membership in, with or without an active organization;
+    - on a federated object it reads only rows of the caller's organization scope, and a by-id write of a row outside it answers `404 RECORD_NOT_FOUND`, as a row that is not there;
+    - an insert with no active organization on a walled tenant object is refused with `403 PERMISSION_DENIED`;
+    - for every caller, an active organization included: a write whose own data names an organization outside the caller's wall, and an update whose own data empties a row's organization, are refused with `403 PERMISSION_DENIED`;
+    - the check of the row a by-id write names is read inside the transaction the write carries, so a row the body's own transaction wrote is the caller's to write again in it;
+    - a system flow started by a record change, and every system run whose own user is its caller, carries that user's membership set and posture rung from run setup: under `group` it reads the union of the user's memberships, with or without an active organization. The set and rung are those of run setup: a membership the user gains or loses while the run waits is read by the next run. A decided segment, a run that began for no caller and a child run of either carry neither: a decided segment's caller's facts are resolved for it again.
+  
+  **Not moved.** A caller with an active organization keeps exactly that organization's reach. Objects outside tenancy, objects with no organization column, and a platform operator crossing the wall on an object whose posture permits it are answered as the caller's own requests answer them. System work that runs for no caller (a scheduled run, a platform plugin's own system context, the seeders) is unchanged, and so is a system flow that began for no caller after an approval decision: the decider is its attribution user, not its caller. A run that a write of such a segment starts begins for no caller too, and carries neither the writer's membership set nor its posture rung; its trigger user stays the writer, so an approval's submitter exclusion, who may read the run's state, and the run's history answer as before. A run that a write of a decided segment of a run that began for a caller starts begins for the decider, as before. A system flow that began for a caller is judged by that caller after a decision, not by the decider.
+  
+  The fix for a caller: select an active organization before running the action, or start the run from a session that has one. A body that must place a row in another organization does so as a member of that organization, through its own request. The `runAs` descriptions of flows and hooks and the `body` description of actions now state this limit beside the other two.
+  
+  Also in this change:
+  - `@objectstack/core` exports `RUN_CALLER`, `markRunCaller` and `runCallerOf`: the server-constructed mark a flow run's data context carries wherever the run's own user is not its caller (a decided segment, a run recorded as begun for no caller in every segment, and a child run of either), naming the user its run began for, or that it began for none.
+  - `@objectstack/service-automation`: a `runAs: 'system'` run's data context carries the run user's membership set (`accessible_org_ids`) and posture rung, seeded once at run setup; it carries no grants. A run context may record `beganForNoCaller: true`. A run whose own user is not its caller is seeded with neither, and its data context carries neither.
+  - `@objectstack/objectql`: the hook session of a write made under that mark, for a run that began for no caller, carries it; `@objectstack/trigger-record-change` records that the run such a write fires began for no caller, and keeps the writer as its trigger user.
+- d280de9: docs: stale prose on summary currency, the temporal-comparand door and analytics filters now says what the code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  No accepted value, key or answer moves. Two refusal messages change their words:
+  
+  - A `currencyMode: 'dynamic'` summary over a child `currency` field that is neither `dynamic` nor a well-formed `record` / `fixed` (a stored `fixed` field with no `defaultCurrency`, or a `currencyMode` outside the three) is still refused, and the refusal now names what the child lacks: "is a 'currency' field in `fixed` mode with no `defaultCurrency` code (the currency it is fixed to is missing)", or "is a 'currency' field whose `currencyMode` 'X' is none of `dynamic`, `fixed` and `record`". Before, it said only "is a 'currency' field, not a `currency` field in `dynamic` mode".
+  - The temporal-comparand door's refusal of a comparand no temporal rule reads (`'not-a-date'`, the preset name `'last_30_days'`) now ends "As written it would reach the driver and be compared as text: it may select every row, none or the wrong ones (or raise a database error), an answer indistinguishable from a real one." Before, it said the comparison would "compare false for EVERY row", which was wrong for `$lt` and others that selected every row, for a partial day such as `'2026-06'` that selected a subset, and on PostgreSQL, which raised a database error. Its `having` twin says the same of the groups it would keep, where it said "no group or every group, a 200".
+  
+  The upgrade-guide entry `summary-dynamic-currency-rollup-home-amount-judged-as-served` now states the admitted set as both doors enforce it: a `dynamic` summary may roll up any child `currency` field in `dynamic` mode, a stored home amount included. Source comments and published docblocks that said every `{placeholder}` is stepped around by the temporal door now state the per-kind rule: a date macro is stepped around and judged by its year once resolved, a period key and a context token are judged as written, and an unknown or record-context token is left to the resolver.
+- Updated dependencies [8236d9b]
+- Updated dependencies [1d28405]
+- Updated dependencies [b02484e]
+- Updated dependencies [c6558d0]
+- Updated dependencies [7a3f86c]
+- Updated dependencies [9abc732]
+- Updated dependencies [52a2398]
+- Updated dependencies [22af9e6]
+- Updated dependencies [1c05546]
+- Updated dependencies [42b4d09]
+- Updated dependencies [4ffe9d3]
+- Updated dependencies [b38e133]
+- Updated dependencies [f796089]
+- Updated dependencies [8f49499]
+- Updated dependencies [8b550f8]
+- Updated dependencies [c809deb]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [b68f9ae]
+- Updated dependencies [2e9e1ac]
+- Updated dependencies [8e46424]
+- Updated dependencies [2d33205]
+- Updated dependencies [f4dbcc2]
+- Updated dependencies [9c29d73]
+- Updated dependencies [35c6331]
+- Updated dependencies [de395b4]
+- Updated dependencies [fe3ebc8]
+- Updated dependencies [0739dee]
+- Updated dependencies [89364b4]
+- Updated dependencies [dfc6bbf]
+- Updated dependencies [97b9d1e]
+- Updated dependencies [0f29688]
+- Updated dependencies [5ecf937]
+- Updated dependencies [2df9691]
+- Updated dependencies [f19e6c6]
+- Updated dependencies [feb9b79]
+- Updated dependencies [b7d2474]
+- Updated dependencies [50f85e9]
+- Updated dependencies [4b1eb0e]
+- Updated dependencies [c0716ed]
+- Updated dependencies [7bd5d28]
+- Updated dependencies [8856afc]
+- Updated dependencies [9062756]
+- Updated dependencies [1caee8c]
+- Updated dependencies [cdb327f]
+- Updated dependencies [6ffa816]
+- Updated dependencies [09ba0c7]
+- Updated dependencies [b863d2b]
+- Updated dependencies [ee40658]
+- Updated dependencies [e75a528]
+- Updated dependencies [5dd856f]
+- Updated dependencies [5dd856f]
+- Updated dependencies [8925d5b]
+- Updated dependencies [78fd762]
+- Updated dependencies [a35187e]
+- Updated dependencies [07b1754]
+- Updated dependencies [61722e9]
+- Updated dependencies [8384d18]
+- Updated dependencies [f6902e9]
+- Updated dependencies [df81f4c]
+- Updated dependencies [ed906d5]
+- Updated dependencies [3d6dea2]
+- Updated dependencies [e6fa510]
+- Updated dependencies [99ece3c]
+- Updated dependencies [3cfa5bc]
+- Updated dependencies [bfd1049]
+- Updated dependencies [2495486]
+- Updated dependencies [16a96ac]
+- Updated dependencies [f4de1de]
+- Updated dependencies [819c067]
+- Updated dependencies [53c9575]
+- Updated dependencies [7411f9b]
+- Updated dependencies [e114324]
+- Updated dependencies [f71d488]
+- Updated dependencies [f44758b]
+- Updated dependencies [f7b172f]
+- Updated dependencies [a0b01fa]
+- Updated dependencies [5d2ce34]
+- Updated dependencies [fd06b11]
+- Updated dependencies [59392ed]
+- Updated dependencies [fcbebf2]
+- Updated dependencies [986a0f2]
+- Updated dependencies [c99156e]
+- Updated dependencies [c8e9bec]
+- Updated dependencies [c6b07c2]
+- Updated dependencies [7ee7a61]
+- Updated dependencies [9b6db73]
+- Updated dependencies [7c122ff]
+- Updated dependencies [f98f18c]
+- Updated dependencies [401eb44]
+- Updated dependencies [29f1280]
+- Updated dependencies [eb7ad70]
+- Updated dependencies [de25d58]
+- Updated dependencies [fe19096]
+- Updated dependencies [4fb7169]
+- Updated dependencies [d953558]
+- Updated dependencies [af566c2]
+- Updated dependencies [cedc094]
+- Updated dependencies [886ba45]
+- Updated dependencies [bb1c55d]
+- Updated dependencies [d7c257e]
+- Updated dependencies [40e22f1]
+- Updated dependencies [fa30414]
+- Updated dependencies [5dbcc02]
+- Updated dependencies [bc9ace2]
+- Updated dependencies [d6be99d]
+- Updated dependencies [0a1b69c]
+- Updated dependencies [2e07e61]
+- Updated dependencies [643fe3b]
+- Updated dependencies [0a3dd40]
+- Updated dependencies [a7292a5]
+- Updated dependencies [6b51822]
+- Updated dependencies [f3c9d42]
+- Updated dependencies [8df7bf2]
+- Updated dependencies [170ca48]
+- Updated dependencies [d33bf5a]
+- Updated dependencies [236c804]
+- Updated dependencies [c261a7c]
+- Updated dependencies [f548bdc]
+- Updated dependencies [e72f2aa]
+- Updated dependencies [f2a990b]
+- Updated dependencies [a23164e]
+- Updated dependencies [8c5a81e]
+- Updated dependencies [6db1dc2]
+- Updated dependencies [78437e2]
+- Updated dependencies [ed4d322]
+- Updated dependencies [0628e08]
+- Updated dependencies [b7fe94a]
+- Updated dependencies [0b2118f]
+- Updated dependencies [81eae2b]
+- Updated dependencies [ede9b91]
+- Updated dependencies [ad65d82]
+- Updated dependencies [cb5a975]
+- Updated dependencies [92e0475]
+- Updated dependencies [d12ac84]
+- Updated dependencies [ad92dfd]
+- Updated dependencies [bb89b2d]
+- Updated dependencies [8da2b7e]
+- Updated dependencies [ec545de]
+- Updated dependencies [7c9b22b]
+- Updated dependencies [9742142]
+- Updated dependencies [f3a8a13]
+- Updated dependencies [543585d]
+- Updated dependencies [70194ff]
+- Updated dependencies [0002eaf]
+- Updated dependencies [0002eaf]
+- Updated dependencies [7a5ae65]
+- Updated dependencies [70d07fd]
+- Updated dependencies [73f2cf4]
+- Updated dependencies [60e79ed]
+- Updated dependencies [595844b]
+- Updated dependencies [28588d0]
+- Updated dependencies [3b58921]
+- Updated dependencies [c45dd80]
+- Updated dependencies [48c5484]
+- Updated dependencies [cb2d6aa]
+- Updated dependencies [d463c46]
+- Updated dependencies [7501d0c]
+- Updated dependencies [45ef94e]
+- Updated dependencies [573a376]
+- Updated dependencies [cbc06ff]
+- Updated dependencies [8f141a2]
+- Updated dependencies [d24e4ab]
+- Updated dependencies [f66340a]
+- Updated dependencies [fed637c]
+- Updated dependencies [7a7ab47]
+- Updated dependencies [08f4bad]
+- Updated dependencies [70f454a]
+- Updated dependencies [8644ce7]
+- Updated dependencies [8aecf6d]
+- Updated dependencies [8ddadc1]
+- Updated dependencies [a03bc4e]
+- Updated dependencies [021524c]
+- Updated dependencies [129e637]
+- Updated dependencies [13f5466]
+- Updated dependencies [ff6f976]
+- Updated dependencies [00aa574]
+- Updated dependencies [d95d34f]
+- Updated dependencies [76eea0f]
+- Updated dependencies [84b1e0c]
+- Updated dependencies [151e812]
+- Updated dependencies [6210a08]
+- Updated dependencies [81c1ae9]
+- Updated dependencies [51b67f1]
+- Updated dependencies [66452df]
+- Updated dependencies [4f9a3f8]
+- Updated dependencies [1cda7ea]
+- Updated dependencies [9c57bd2]
+- Updated dependencies [5078f2f]
+- Updated dependencies [01967c3]
+- Updated dependencies [5078f2f]
+- Updated dependencies [8b1841f]
+- Updated dependencies [012f0a1]
+- Updated dependencies [227e952]
+- Updated dependencies [422df61]
+- Updated dependencies [06c1f54]
+- Updated dependencies [489d9fe]
+- Updated dependencies [c349576]
+- Updated dependencies [c063734]
+- Updated dependencies [0439a04]
+- Updated dependencies [5bf7242]
+- Updated dependencies [f92d271]
+- Updated dependencies [3d4f423]
+- Updated dependencies [d7f299c]
+- Updated dependencies [f9fda2a]
+- Updated dependencies [91138ec]
+- Updated dependencies [9981f27]
+- Updated dependencies [3801775]
+- Updated dependencies [40570d6]
+- Updated dependencies [8e1e15b]
+- Updated dependencies [2a6f26a]
+- Updated dependencies [b7dee0e]
+- Updated dependencies [68250f6]
+- Updated dependencies [fd462c5]
+- Updated dependencies [d15e439]
+- Updated dependencies [6831e04]
+- Updated dependencies [efaafe3]
+- Updated dependencies [875ae40]
+- Updated dependencies [da50177]
+- Updated dependencies [7e9c50c]
+- Updated dependencies [5cf9941]
+- Updated dependencies [204356a]
+- Updated dependencies [59571b2]
+- Updated dependencies [c94191d]
+- Updated dependencies [ebac615]
+- Updated dependencies [98b17fe]
+- Updated dependencies [8d60333]
+- Updated dependencies [db46566]
+- Updated dependencies [66452df]
+- Updated dependencies [2776e88]
+- Updated dependencies [083e040]
+- Updated dependencies [66c854d]
+- Updated dependencies [372ce7c]
+- Updated dependencies [c059e60]
+- Updated dependencies [97f3420]
+- Updated dependencies [df8a1b8]
+- Updated dependencies [75925e1]
+- Updated dependencies [7d50dc8]
+- Updated dependencies [595e9cb]
+- Updated dependencies [20d025f]
+- Updated dependencies [64b278e]
+- Updated dependencies [695b9db]
+- Updated dependencies [ecd4b2b]
+- Updated dependencies [d280de9]
+- Updated dependencies [f9dd033]
+- Updated dependencies [6296909]
+- Updated dependencies [660e7cd]
+  - @objectstack/spec@19.0.0-next.0
+  - @objectstack/metadata-protocol@19.0.0-next.0
+  - @objectstack/types@19.0.0-next.0
+  - @objectstack/metadata@19.0.0-next.0
+  - @objectstack/formula@19.0.0-next.0
+  - @objectstack/core@19.0.0-next.0
+  - @objectstack/metadata-core@19.0.0-next.0
+
 ## 18.6.0
 
 ### Minor Changes
@@ -92,9 +1396,9 @@
   - **A `before*` write meant to survive a refusal now rolls back.** There is no per-hook opt-out: `onError: 'log'` decides only whether the hook's own throw refuses the write, not whether its writes survive a refusal elsewhere. The one exception is an append-only ledger on another datasource (an object whose `lifecycle.class` is `audit`, `telemetry` or `event`), which is written outside the unit and survives the rollback, as in any unit. **Fix, if you relied on it:** record the attempt from an `after*` hook with `async: true` (it runs only after a commit), or record it where the write is made.
   - **Inside the new unit, the rules of any unit apply,** so writes that were accepted are now refused on objects carrying such a hook:
     - A `before*` hook whose body writes a business row to an object on another datasource has that write refused with `CrossDatasourceTransactionWriteError`, and the outer write is refused with it. **Fix:** keep the objects the hook writes on the default datasource.
-    - A MongoDB default store needs a replica set for this unit, as it does for `transaction()` and for the `after*` unit already (read in the driver's code: it always opens a session transaction; not measured on a standalone server). **Fix:** run MongoDB as a replica set.
+    - A MongoDB default store needs a replica set for this unit, as it does for `transaction()` and for the `after*` unit already. Measured on a MongoDB 8.0 standalone server: every write on such an object is refused, the hook's own `ctx.api` write first, even when nothing in the write fails ("This MongoDB deployment does not support retryable writes"; adding `retryWrites=false` to the connection string does not change the answer). **Fix:** run MongoDB as a replica set.
     - A `ctx.api.transaction(...)` a `before*` hook opens joins the door's unit instead of committing on its own, and an `async: true` `after*` hook on the same write starts after the unit commits.
-    - On PostgreSQL a statement that fails at the database aborts the whole unit (`25P02`, "current transaction is aborted"), and the unit takes no savepoint around a hook's `ctx.api` write. So a `before*` hook whose `ctx.api` statement fails there (a constraint, a type error) now refuses the outer write even when the hook body catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs it; that write was stored before. Read in the driver's code, not measured on PostgreSQL; the measurement is carried on #34563. **Fix:** check the condition before the hook writes, or make that write from an `after*` hook with `async: true`.
+    - On PostgreSQL and on a MongoDB replica set a statement that fails at the database aborts the whole unit, and the unit takes no savepoint around a hook's `ctx.api` write. So a `before*` hook whose `ctx.api` statement fails there (a constraint, a type error) now refuses the outer write even when the hook body catches the error, `onError: 'log'` swallows it, or its `retryPolicy` re-runs it (the retry is refused too); that write was stored before. Measured on PostgreSQL 16 and a MongoDB 8.0 replica set with a unique-constraint failure (#34563): the outer write is refused with the database's own error, `25P02` ("current transaction is aborted") on PostgreSQL and code `251` ("Transaction … has been aborted") on MongoDB, and neither the row nor the hook's writes are stored. On SQLite the same hooks let the write through. **Fix:** check the condition before the hook writes, or make that write from an `after*` hook with `async: true`.
   - **Unchanged:** a write already inside a unit (a caller's `transaction()`, an atomic batch or cascade) joins it, and that unit's owner still decides. No unit is opened for a hook registered in code with `registerHook` (the platform's own audit stamps among them), a write with `skipAutomations`, an object whose datasource is not the default one, or a default driver with no transactions (ADR-0119 D1, such as a libSQL remote transport). On those a `before*` hook's writes stay stored after a refusal, as the refusal's message says.
   - **Cost:** one transaction per write on objects that carry such a hook. On SQLite the write lock is held through the whole `before*` chain, including awaited work inside the hooks. Objects without such a hook pay one map lookup.
 - a2bb7d5: feat(objectql): a bulk update recomputes its parents' roll-up summaries once, at the end of the batch

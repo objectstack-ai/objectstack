@@ -15,7 +15,7 @@
  * here; that stays with the route handlers.
  */
 
-import { validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
+import { ACTION_PARAM_BUILTIN_KEYS, validateActionParams, resolveI18nLabel, type ActionSession, type I18nLabel, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
@@ -23,7 +23,7 @@ import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objects
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
-import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
+import { standardErrorCodeForHttpStatus, type MetadataProtocol, type ValidateDataIssue } from '@objectstack/spec/api';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -44,7 +44,7 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // takes to find its nested-relation conditions and each one's target — the data
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
-import { relationConditionSites } from '@objectstack/core';
+import { registryObjectPackageDisabled, relationConditionSites } from '@objectstack/core';
 // [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
 // the doors that serve forward targets (the dispatcher, the REST face, the
 // identity mount). One module in `@objectstack/rest`, which all three reach.
@@ -56,7 +56,7 @@ import { markAppAutomationElevation } from '@objectstack/core';
 // Managing API keys is a signed-in-session act: the one rule this door's
 // per-object gate asks beside the exposure decision, shared with `RestServer`.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
-import type { UserMessageCaller } from '@objectstack/core';
+import { operationUserMessage, type UserMessageCaller } from '@objectstack/core';
 import {
     PackageScopedNameRefusedError,
     packageScopedHolderSource,
@@ -92,7 +92,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // A pure factory — no service resolution — so importing it costs the fallback
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
-import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
+import { objectPackageDisabledError, recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
@@ -202,6 +202,17 @@ export function systemObjectActionExposureError(_deps: ActionExecutionDeps, acti
         `Action '${action?.name ?? 'unknown'}' is on a system object ('${objectName}') and is not exposed via MCP — ` +
         `a system object's action is reachable here only when its author declares \`ai: { exposed: true, description: … }\` on it`
     );
+}
+
+/**
+ * Is `key` one leading underscore away from a built-in action param
+ * (`ACTION_PARAM_BUILTIN_KEYS`) without being one: `selectedIds`, `__selectedIds`,
+ * `_recordId`, `_objectName`? The same one-byte distance the contract's rejection message
+ * names the built-in at (`validateActionParams`).
+ */
+function isBuiltinParamNearMiss(key: string): boolean {
+    if (ACTION_PARAM_BUILTIN_KEYS.includes(key)) return false;
+    return ACTION_PARAM_BUILTIN_KEYS.includes(`_${key}`) || ACTION_PARAM_BUILTIN_KEYS.includes(key.replace(/^_/, ''));
 }
 
 /**
@@ -332,10 +343,40 @@ const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATIO
  * `callData` must not give two answers depending on whether the deployment
  * registered the protocol slot (the #5138 rule this file already keeps).
  *
- * `callData` skips it for a system context on the one decision that skips the
- * addressed gate: these flags govern API exposure, not the engine's own reads. A schema
- * that cannot be resolved finds no condition (the filtered object) or serves
- * (a target), the gate's own fail-open.
+ * [#35526] A target whose owning package is DISABLED is refused first, with
+ * the data plane's own `404 OBJECT_PACKAGE_DISABLED` (the target as `object`,
+ * the condition's position as `param`), whatever it declares: the protocol's
+ * relation-condition check refuses the same condition so (#35427), and the
+ * engine would otherwise read the disabled object to lower it, answering a
+ * count of 1 for a stored value and 0 for any other. The question is the
+ * engine registry's `isObjectPackageDisabled`, the one the data plane asks,
+ * read through {@link registryObjectPackageDisabled}; the refusal is the
+ * protocol's one constructor, `objectPackageDisabledError`. ⛔ Never a second
+ * copy of either. A registry that cannot answer disables nothing, as on the
+ * data route.
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only. The engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up
+ * to `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn, so each site's own condition is
+ * walked against its target's field map and every target on the way is asked
+ * both questions, disabled package first, at its full position
+ * (`where.c_ref.b_ref`). The protocol's twin walk for an engine without an
+ * evaluate gate (`refuseUnservedRelationTargetsIn`) descends the same way, in
+ * the same order. A site the engine would refuse for depth is still asked:
+ * a refusal for a hop it would not serve costs nothing it served.
+ *
+ * WHO is asked what: the disabled-package question is asked for EVERY caller,
+ * a system context included (#35526 ruling, 「系统身份也一律拒绝」: the protocol's
+ * data plane refuses every caller, and `ctx.api` never passes `callData`).
+ * The exposure question is skipped for a system context (`exposureGated`
+ * false), on the one decision that skips the addressed gate: these flags
+ * govern API exposure, not the engine's own reads. The package predicate is
+ * the one {@link callData} read from the engine for the addressed object
+ * ({@link packageDisabledPredicate}), so the arm's own engine (a raw driver
+ * on the MCP multi-env query fallback, which carries no registry) never
+ * decides it. A schema that cannot be resolved finds no condition (the
+ * filtered object) or serves (a target), the gate's own fail-open.
  */
 async function refuseUnservedRelationTargets(
     deps: ActionExecutionDeps,
@@ -343,16 +384,60 @@ async function refuseUnservedRelationTargets(
     engine: unknown,
     object: string,
     where: unknown,
-    scopeId?: string,
+    scopeId: string | undefined,
+    asked: { isObjectPackageDisabled: (objectName: string) => boolean; exposureGated: boolean },
 ): Promise<void> {
+    const walk = async (schema: unknown, condition: unknown, prefix: string, depth: number): Promise<void> => {
+        if (condition == null || typeof condition !== 'object' || depth > RELATION_CONDITION_WALK_DEPTH) return;
+        const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
+        for (const site of relationConditionSites(fields, condition)) {
+            const param = `${prefix}.${site.field}`;
+            if (asked.isObjectPackageDisabled(site.target)) {
+                throw Object.assign(objectPackageDisabledError(site.target), { param });
+            }
+            const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
+            if (asked.exposureGated) {
+                const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
+                if (!gate.allowed) throw unservedRelationTargetError(site.target, param, gate);
+            }
+            await walk(target, site.condition, param, depth + 1);
+        }
+    };
     if (where == null || typeof where !== 'object') return;
-    const schema = await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId);
-    const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
-    for (const site of relationConditionSites(fields, where)) {
-        const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
-        const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
-        if (!gate.allowed) throw unservedRelationTargetError(site.target, `where.${site.field}`, gate);
+    await walk(await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId), where, 'where', 0);
+}
+
+/**
+ * [#36393] A backstop against a self-referential in-process `where`, never the
+ * hop limit: the engine's own `RELATION_CONDITION_MAX_HOPS` decides what it
+ * lowers, and this walk asks at least every hop it serves. The protocol's twin
+ * walk and the engine's evaluate gate stop at the same depth.
+ */
+const RELATION_CONDITION_WALK_DEPTH = 8;
+
+/**
+ * [#36393] The engine registry's `isObjectPackageDisabled`, read once per
+ * {@link callData} call through {@link registryObjectPackageDisabled}, the one
+ * reading the data plane asks before it refuses an object `404
+ * OBJECT_PACKAGE_DISABLED`. The engine is the one this door aggregates on
+ * (`getObjectQL`, then the `objectql` slot), never the raw driver an MCP
+ * multi-env caller threads through. An engine that cannot be resolved, or a
+ * registry without the member, disables nothing, as on the data route.
+ */
+async function packageDisabledPredicate(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    scopeId?: string,
+): Promise<(objectName: string) => boolean> {
+    let engine = await resolveEngineQuietly(deps, requestContext, scopeId);
+    if (engine == null) {
+        try {
+            engine = (await deps.resolveService(requestContext, 'objectql', scopeId)) ?? undefined;
+        } catch {
+            engine = undefined;
+        }
     }
+    return registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry);
 }
 
 /**
@@ -631,9 +716,19 @@ export async function callData(deps: ActionExecutionDeps,
 ): Promise<any> {
     // The object-level API exposure gate ({@link refuseUnexposedDataAction}).
     // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
-    // condition's target, asked below on the two arms that hand the engine a
-    // caller's `where` ({@link refuseUnservedRelationTargets}).
+    // condition's target's EXPOSURE question, asked below on the two arms that
+    // hand the engine a caller's `where` ({@link refuseUnservedRelationTargets});
+    // [#36393] its disabled-package question is asked of every caller.
     const exposureGated = !executionContext?.isSystem;
+    // [#36393] The disabled-package question, asked of EVERY caller (a system
+    // context included, the #35526 ruling) before any exposure verdict: of the
+    // addressed object here, and of every nested-relation condition's target
+    // below. Read from the engine's registry, so a host with no protocol
+    // service, whose by-name read below cannot refuse, refuses too.
+    const isObjectPackageDisabled = await packageDisabledPredicate(deps, requestContext, scopeId);
+    if (typeof params?.object === 'string' && isObjectPackageDisabled(params.object)) {
+        throw objectPackageDisabledError(params.object);
+    }
     // [#25120] `'refuse'`: a disabled package's object is refused here, on
     // every arm, the `aggregate` arm that never reaches the protocol included.
     await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext, 'refuse');
@@ -933,9 +1028,7 @@ export async function callData(deps: ActionExecutionDeps,
             // [#22823] …and each nested-relation condition's TARGET, before the
             // engine reads it — the protocol path asks the same of the same
             // sites (`refuseUnservedRelationTarget`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // …and the `internal: true` evaluate refusal for every caller, as
             // the protocol path asks it inside `findData` — the engine's one
             // definition (see the `aggregate` arm). A raw driver on the MCP
@@ -972,9 +1065,7 @@ export async function callData(deps: ActionExecutionDeps,
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // The `internal: true` evaluate refusal — a filter (`where`, an
             // aggregation's own `filter`), a group key or an aggregation operand
             // on such a field — asked of the ENGINE's one definition
@@ -1269,6 +1360,9 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
     // forwards it in-process to its declared `target` (see
     // {@link forwardApiAction}). An off-origin one stays browser-only.
     if (type === 'api') return isSameOriginApiTarget(action?.target);
+    // `url`, `modal`, `form` and `ask_ai` (ADR-0160 D7 — it focuses the
+    // console's assistant on a record and is never an AI tool) have no server
+    // dispatch.
     return false;
 }
 
@@ -2065,25 +2159,30 @@ export async function resolveInProcessRequest(
  * operator's: an environment's own kernel on a multi-kernel host owns no
  * socket, and the host's kernel, which registers `kernel-resolver`, is the one
  * whose door forwards for it.
+ *
+ * [#37273] The sentence is the operation-message catalog's
+ * (`action_forward_unavailable`, `_host` at the host door), in `caller`'s
+ * language: the request's `locale` (the dispatcher resolves it from the top
+ * `Accept-Language` tag), then its `workspaceLocale`, then `en`, the ladder
+ * every other refusal of this door reads. The console shows a refused
+ * action's wire `message` to whoever clicked it, so a print action clicked
+ * in a Chinese console while its forward is unavailable answered English
+ * before. Only the language moves: the English is byte-identical, the status
+ * stays `503`, and no `userMessage` is added. The action's name and its
+ * target are identifiers and stay as written.
  */
-export function apiActionForwardUnavailableError(action: any, door?: 'rest' | 'mcp' | 'host'): string {
-    const opening =
-        `Action '${action?.name ?? 'unknown'}' is a same-origin \`type: 'api'\` action whose \`target\` ` +
-        `(${typeof action?.target === 'string' ? `'${action.target}'` : 'endpoint'}) this door forwards to in-process, `;
-    if (door === 'host') {
-        return (
-            opening +
-            `but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). ` +
-            `Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that ` +
-            `registers \`kernel-resolver\`, with the call's \`environmentId\` (an environment's own kernel owns no ` +
-            `socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not ` +
-            `dispatched around the door.`
-        );
-    }
-    return (
-        opening +
-        `but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). ` +
-        `Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.`
+export function apiActionForwardUnavailableError(
+    action: any,
+    door?: 'rest' | 'mcp' | 'host',
+    caller?: UserMessageCaller | null,
+): string {
+    const target = typeof action?.target === 'string'
+        ? `'${action.target}'`
+        : operationUserMessage('action_forward_target_unnamed', caller);
+    return operationUserMessage(
+        door === 'host' ? 'action_forward_unavailable_host' : 'action_forward_unavailable',
+        caller,
+        { action: action?.name ?? 'unknown', target },
     );
 }
 
@@ -2406,6 +2505,16 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
             `forward to it. Only a same-origin \`target\` (a path starting with \`/\`) is dispatched through ` +
             `this door. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
             `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
+        );
+    }
+    if (type === 'ask_ai') {
+        // ADR-0160 D7: `ask_ai` names nothing and runs nothing server-side —
+        // the console focuses its in-app assistant on the record. The generic
+        // sentence below ("the renderer opens its `target`") would describe a
+        // key this type refuses at parse.
+        return (
+            `Action '${name}'${on} is \`type: 'ask_ai'\` — a client-side action with no server dispatch. ` +
+            `The console opens its in-app assistant focused on the record; there is nothing for the server to run.`
         );
     }
     return (
@@ -3252,6 +3361,36 @@ export async function resolveActionConfirmationService(
 }
 
 /**
+ * [#34325] What the door that asked knows about its caller's client, passed
+ * beside the hand-off and never on it (the host's service is not told).
+ * Structurally `McpActionCallDoorFacts` (`@objectstack/mcp`), which this
+ * package does not depend on.
+ */
+export interface ActionConfirmationDoor {
+    /**
+     * The door would ask a client that advertised `elicitation` (it read the
+     * client's `initialize` and can carry a request to it), and this call's
+     * client did not advertise it. Absent: nothing is known, or the door asks
+     * no client.
+     */
+    elicitsCapableClients?: boolean;
+}
+
+/**
+ * [#34325] The `no_confirmation_service` refusal's routes. On every door: a
+ * person performs it in the app, and the caller makes no such change through
+ * another tool. Before it, only for a door that would ask a client that
+ * supports confirmation: that client (step 3 of the amended contract).
+ */
+const NO_SERVICE_IN_APP_ROUTE = 'a person performs it in the app: do not make the same change with another tool.';
+function noServiceRoutes(door: ActionConfirmationDoor): string {
+    return door.elicitsCapableClients === true
+        ? 'A client that supports confirmation (MCP elicitation) is asked in place on this server: use one to '
+            + `confirm it here. Otherwise ${NO_SERVICE_IN_APP_ROUTE}`
+        : `${NO_SERVICE_IN_APP_ROUTE.charAt(0).toUpperCase()}${NO_SERVICE_IN_APP_ROUTE.slice(1)}`;
+}
+
+/**
  * [#33690] Hand a declared-gated call off to the person it runs as (step 2 of
  * the amended contract), or refuse it when the host has no service to hand it
  * to (step 3). Runs nothing either way.
@@ -3264,9 +3403,17 @@ export async function resolveActionConfirmationService(
  *   approver with every gate re-checked, a rejection, a lapse — is the
  *   host's (`IActionConfirmationService`).
  * - None: `428 ACTION_CONFIRMATION_REQUIRED`, `details.reason:
- *   'no_confirmation_service'`. The message names the one route that works on
- *   this server — performing the action in the app — and no retry: no request
- *   this caller can send runs the action here.
+ *   'no_confirmation_service'`. The message names the routes that work for
+ *   the door that asked, and no retry of this call: no request this caller
+ *   sends from this client runs the action here. [#34325] On every door a
+ *   person performs it in the app, and the caller is told not to make the
+ *   same change through another tool (an agent that read only "in the app"
+ *   completed it with a raw record update). Where `door.elicitsCapableClients`
+ *   says the door would have asked a client that supports confirmation (the
+ *   stdio door, for a client that advertised no `elicitation`), the message
+ *   also names that route (step 3 of the amended contract). Without it (the
+ *   Streamable HTTP door, which asks no client, or a caller that says
+ *   nothing about its door) that sentence would be false and is left out.
  *
  * A service that answers no `pendingId` is a broken host, never a hand-off
  * that happened: thrown, so the caller is not told a person was asked.
@@ -3277,6 +3424,7 @@ export async function handOffActionConfirmation(
     envId: string | undefined,
     handOff: ActionConfirmationHandOff,
     ec: any,
+    door: ActionConfirmationDoor = {},
 ): Promise<{ pending: ActionConfirmationPending } | { refused: ActionConfirmationRefusal }> {
     const on = confirmationSubjectOn(handOff.objectName);
     const declared = `Action '${handOff.actionName}'${on} declares ai.requiresConfirmation: true, so a person confirms it`;
@@ -3286,7 +3434,7 @@ export async function handOffActionConfirmation(
             refused: confirmationRefusalOf(
                 handOff.actionName, handOff.objectName,
                 `${declared} — nothing was run. This server has no pending-confirmation service to ask them through, `
-                    + `and a confirmation sent on the request does not count. Perform the action in the app instead.`,
+                    + `and a confirmation sent on the request does not count. ${noServiceRoutes(door)}`,
                 'no_confirmation_service',
             ),
         };
@@ -3442,7 +3590,11 @@ export async function refuseDeniedSubjectBeforeHandOff(
     deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: any,
-    wiring: { objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string },
+    wiring: {
+        objectName: string; recordId: string | undefined; subject: ActionSubjectRecordLoad; ec: any; envId?: string;
+        /** The caller-scope read of the call's selection, when it was read ({@link loadActionSelectionRecords}). */
+        selection?: ActionSelectionLoad;
+    },
 ): Promise<void> {
     const { objectName, recordId, subject, ec, envId } = wiring;
     if (isDeclarativeUpdateAction(action)) {
@@ -3451,6 +3603,7 @@ export async function refuseDeniedSubjectBeforeHandOff(
         return;
     }
     refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject, ec);
+    refuseUndeliveredActionSelection(objectName, wiring.selection, ec);
 }
 
 export function summarizeAction(
@@ -3468,7 +3621,7 @@ export function summarizeAction(
         (Array.isArray(action?.locations) &&
         action.locations.some(
             (l: string) =>
-                l === 'list_item' || l === 'record_header' || l === 'record_more' || l === 'record_related',
+                l === 'record' || l === 'record_page' || l === 'record_row' || l === 'record_related',
         ));
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
@@ -3778,9 +3931,19 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     where: { objectName?: string; actionName?: string },
 ): string | null {
     const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
-    if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
-    const resolved = resolveDeclaredActionParams(deps, action, obj);
-    const issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    let issues: ReturnType<typeof validateActionParams>;
+    if (!declaresParams && !isDeclarativeUpdateAction(action)) {
+        // A param-less handler action keeps the ADR-0104 D2 pass-through for
+        // its custom keys, except a near-miss spelling of a built-in
+        // (`selectedIds` for `_selectedIds`), refused in the contract's own
+        // words: a selection is carried only under the key the door reads.
+        const nearMisses = Object.keys(bag).filter(isBuiltinParamNearMiss);
+        if (nearMisses.length === 0) return null;
+        issues = validateActionParams([], Object.fromEntries(nearMisses.map((key) => [key, bag[key]])));
+    } else {
+        const resolved = resolveDeclaredActionParams(deps, action, obj);
+        issues = validateActionParams(resolved, paramBagUnderContract(action, resolved, bag));
+    }
     if (issues.length === 0) return null;
     const summary = issues.map((i) => i.message).join('; ');
     if (!laxActionParams()) {
@@ -4676,6 +4839,165 @@ function recordIdListOrRefuse(key: string, value: unknown): string[] {
     throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
 }
 
+/** The built-in params key a record-less call carries its selection under. */
+export const ACTION_SELECTION_PARAM = '_selectedIds';
+
+/**
+ * The most record ids one call's selection may name: the console's own
+ * select-all-matching cap (`BULK_SELECT_ALL_MATCHING_CAP`, `@object-ui/plugin-grid`).
+ */
+export const ACTION_SELECTION_CAP = 5000;
+
+/** How many ids of a selection are read at once. */
+const ACTION_SELECTION_READ_WINDOW = 16;
+
+/**
+ * What {@link loadActionSelectionRecords} answers: whether the caller's own
+ * scope delivered EVERY id of the selection, and the first one it did not.
+ */
+export interface ActionSelectionLoad {
+    selectionLoadDenied: boolean;
+    /** The first id the caller's scope did not deliver, named in the refusal. */
+    undelivered?: string;
+}
+
+/**
+ * Does this call carry a selection the door must read before it runs? A call
+ * that writes as the caller, or whose target authorizes the caller itself,
+ * builds nothing elevated on the ids and is not read here:
+ *
+ *  - the declarative update, which writes the caller's own edit;
+ *  - a `type: 'api'` action, forwarded with the caller's own credentials;
+ *  - the system principal, which reads every row anyway.
+ *
+ * Every other arm (a script body, a flow) is.
+ */
+export function actionSelectionIsRead(action: any, ec: any): boolean {
+    if (ec?.isSystem === true) return false;
+    if (isDeclarativeUpdateAction(action)) return false;
+    return (typeof action?.type === 'string' ? action.type : 'script') !== 'api';
+}
+
+/**
+ * The record ids a call's `params._selectedIds` names, or the `400` its shape
+ * earns: a list of non-empty ids (strings or numbers), at most
+ * {@link ACTION_SELECTION_CAP} of them. `undefined` when the call carries none (absent, `null` or `''`, as
+ * for `recordId`). A call addressed to no object (an object-less action key)
+ * names no object its ids could be read from, and is refused for carrying one.
+ */
+export function actionSelectionIdsOrRefuse(objectName: string, params: Record<string, unknown>): string[] | undefined {
+    const value = params[ACTION_SELECTION_PARAM];
+    if (value === undefined || value === null || value === '') return undefined;
+    const ids = recordIdListOrRefuse(ACTION_SELECTION_PARAM, value);
+    if (ids.some((id) => id.trim() === '')) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` must name each record by a non-empty id.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
+    if (ids.length > ACTION_SELECTION_CAP) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names ${ids.length} records; one call may name at most ${ACTION_SELECTION_CAP}.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'max_items', message }]);
+    }
+    if (ids.length > 0 && isObjectLessActionKey(objectName)) {
+        const message = `The record key \`${ACTION_SELECTION_PARAM}\` names records, so the action must be called on their object.`;
+        throw validationFailure(message, [{ field: ACTION_SELECTION_PARAM, code: 'invalid_value', message }]);
+    }
+    return ids;
+}
+
+/**
+ * Is the declaration a call resolved to bound to no object? Judged on the
+ * DECLARATION, never on the object the call was routed under: an object-less
+ * declaration is reachable under any object's name, and is no more bound to
+ * that object for it.
+ *
+ * `ownerKey` is the owner key of the row the resolution picked
+ * ({@link RouteActionDeclaration.ownerKey}), and when given it alone decides:
+ * an addressed resolution may pick one holder's object-less action under an
+ * object that declares another holder's action of the same name. Without it,
+ * an action the routed object declares in its own `actions` is that object's
+ * (by reference or by name: the bare rungs resolve the object's own first),
+ * and any other declaration is bound to its own owner key
+ * ({@link standaloneActionOwnerKey}).
+ */
+export function isObjectLessActionDeclaration(action: any, routedObject: any, ownerKey?: string): boolean {
+    if (ownerKey !== undefined) return isObjectLessActionKey(ownerKey);
+    const declaredByRouted = Array.isArray(routedObject?.actions)
+        && routedObject.actions.some((a: any) => a === action || (a && a.name === action?.name));
+    return !declaredByRouted && isObjectLessActionKey(standaloneActionOwnerKey(action));
+}
+
+/**
+ * An action not bound to an object accepts no record: the record key a call
+ * to one carries — its `recordId`, or a selection in `params._selectedIds` —
+ * is answered with the located `400` failure this returns, on every door and
+ * for every caller, whatever object the call was routed under, before any
+ * record is read or any body runs. `undefined` when the call may go on: the
+ * action is bound to an object, or the call carries neither key (absent,
+ * `null` and `''` carry none, as for `recordId`).
+ */
+export function objectLessActionRecordKeyFailure(
+    action: any,
+    routedObject: any,
+    actionName: string,
+    recordId: unknown,
+    params: Record<string, unknown>,
+    /** The owner key of the row the resolution picked ({@link RouteActionDeclaration.ownerKey}). */
+    ownerKey?: string,
+): { field: string; code: 'invalid_value'; message: string } | undefined {
+    if (!isObjectLessActionDeclaration(action, routedObject, ownerKey)) return undefined;
+    const carries = (value: unknown) => value !== undefined && value !== null && value !== '';
+    const field = carries(recordId) ? 'recordId' : carries(params[ACTION_SELECTION_PARAM]) ? ACTION_SELECTION_PARAM : undefined;
+    if (field === undefined) return undefined;
+    const name = typeof action?.name === 'string' && action.name ? action.name : actionName;
+    const message = `Action '${name}' is not bound to an object, so it accepts no record: `
+        + `the record key \`${field}\` must be left out. To act on records, call an action declared on their object.`;
+    return { field, code: 'invalid_value', message };
+}
+
+/**
+ * Read a selection IN THE CALLER'S OWN SCOPE, with the per-record door's own
+ * read: every distinct id through {@link loadActionSubjectRecord} and
+ * `readRecord` (the door's caller-scope `get` of one row of `objectName`), a
+ * few at a time. So an id is delivered here exactly when the per-record door
+ * would deliver it as its subject: a selection is never refused where each of
+ * its rows would be read one by one, and never admitted where one would not.
+ *
+ * One id the read does not deliver denies the whole selection — ⛔ ids are
+ * never dropped. A hidden row, an id that names nothing and a read the caller
+ * is refused are one answer here, as they are at the per-record door; the
+ * verdict names the first such id in the order the call sent them.
+ */
+export async function loadActionSelectionRecords(
+    objectName: string,
+    ids: readonly string[],
+    readRecord: (recordId: string) => Promise<unknown>,
+): Promise<ActionSelectionLoad> {
+    const distinct = [...new Set(ids)];
+    for (let i = 0; i < distinct.length; i += ACTION_SELECTION_READ_WINDOW) {
+        const window = distinct.slice(i, i + ACTION_SELECTION_READ_WINDOW);
+        const loads = await Promise.all(window.map((recordId) =>
+            loadActionSubjectRecord(objectName, recordId, () => readRecord(recordId))));
+        const missing = window.find((_, at) => loads[at].recordLoadDenied);
+        if (missing !== undefined) return { selectionLoadDenied: true, undelivered: missing };
+    }
+    return { selectionLoadDenied: false };
+}
+
+/**
+ * The selection's verdict, consumed: a selection the caller's scope did not
+ * deliver whole is refused with the per-record door's own
+ * `404 RECORD_NOT_FOUND`, before anything that builds an elevated context.
+ * `undefined` (the call was not read) refuses nothing.
+ */
+export function refuseUndeliveredActionSelection(
+    objectName: string,
+    selection: ActionSelectionLoad | undefined,
+    caller?: UserMessageCaller | null,
+): void {
+    if (!selection?.selectionLoadDenied) return;
+    throw recordNotFoundError(objectName, selection.undelivered ?? '', caller);
+}
+
 /**
  * [#15079] The prior/next value pair a successful declarative update hands back
  * when the action declares `undoable: true` — the anchor that key never had.
@@ -4713,6 +5035,26 @@ export interface DeclarativeUpdateResult {
     record: Record<string, unknown>;
     /** Present only when the action declares `undoable: true`. */
     undo?: DeclarativeUpdateUndo;
+    /**
+     * [#37867] The advisory validation-rule hits (`severity: 'warning' | 'info'`)
+     * of THIS write, exactly as the data-plane update answered them — the
+     * element is `ValidateDataIssue`, the data door's own `warnings` vocabulary.
+     * Present only when the write raised one: the same rule on the same write
+     * answers the same warnings whichever door the person used.
+     */
+    warnings?: ValidateDataIssue[];
+}
+
+/**
+ * [#37867] The `warnings` a data-plane write answer carries, or `undefined`
+ * when it carries none. The protocol's `updateData` sets the member only when
+ * the write raised an advisory rule hit, so an empty or absent member answers
+ * the same: no warnings. Only the protocol arm of `callData` produces it; the
+ * ObjectQL fallback arm answers none, and this reads none from it.
+ */
+function writeAnswerWarnings(written: unknown): ValidateDataIssue[] | undefined {
+    const warnings = (written as { warnings?: unknown } | null | undefined)?.warnings;
+    return Array.isArray(warnings) && warnings.length > 0 ? (warnings as ValidateDataIssue[]) : undefined;
 }
 
 /**
@@ -4966,12 +5308,19 @@ export async function executeDeclarativeUpdateAction(
         };
     }
 
+    // [#37867] The write's advisory rule hits ride the answer. A warning rule
+    // lets the save through and tells the person; the data door answers it as
+    // `warnings`, and a button that performs the same write owes the same
+    // answer, or the warning holds only for people who edit the form.
+    const warnings = writeAnswerWarnings(written);
+
     const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
         object: objectName,
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
+        ...(warnings ? { warnings } : {}),
     };
     if (stale) throw withEarnedAnswer(stale, { ...result });
     return result;
@@ -5040,9 +5389,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
          * handed off; see {@link elicitActionConfirmation}.
          */
         elicitConfirmation?: ActionConfirmationElicitor;
+        /**
+         * [#34325] Set by the MCP door, without an elicitor, when it would ask
+         * a client that supports confirmation and this call's client does not
+         * ({@link ActionConfirmationDoor}): a `no_confirmation_service`
+         * refusal then names that route.
+         */
+        elicitsCapableClients?: boolean;
     },
 ): Promise<any> {
-    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation } = wiring;
+    const { driver, envId, ec, getMeta, readObjects, readActions, callData, elicitConfirmation, elicitsCapableClients } = wiring;
     const meta: any = await getMeta();
     const params = input?.params && typeof input.params === 'object' ? input.params : {};
     const recordId = typeof input?.recordId === 'string' && input.recordId.length > 0 ? input.recordId : undefined;
@@ -5116,7 +5472,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         door: 'mcp',
         objectName,
         actionName: name,
-        declaration: { action, obj, ...(packageId !== undefined ? { packageId } : {}) },
+        declaration: {
+            action, obj, ...(packageId !== undefined ? { packageId } : {}),
+            // The row the name resolved to: its own owner key, kept when the
+            // call's object replaces the subject above.
+            ...(resolved ? { ownerKey: resolved.objectName } : {}),
+        },
         // [ADR-0106 D1] This door's answer for a name nothing declares, where
         // it is not the shared undeclared `404`: an action the caller is not
         // shown is answered with it.
@@ -5133,6 +5494,7 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             door: 'mcp',
             ...(namespace !== undefined ? { namespace } : {}),
             ...(elicitConfirmation ? { elicitConfirmation } : {}),
+            ...(elicitsCapableClients === true ? { elicitsCapableClients: true } : {}),
         },
         ql: engine,
         wiring: {
@@ -6453,6 +6815,23 @@ export interface RouteActionDeclaration {
      * dispatch runs is that package's (`executeRegisteredAction`).
      */
     packageId?: string;
+    /**
+     * The owner key of the declaration the resolution picked: the object it
+     * is declared on, or {@link GLOBAL_ACTION_OBJECT_KEY} for an object-less
+     * one ({@link isObjectLessActionDeclaration} reads it). Set with
+     * `action`; absent when no declaration was picked.
+     */
+    ownerKey?: string;
+}
+
+/**
+ * A resolution's answer with its declaration's owner key: the key the
+ * resolution already named, else the declaration's own standalone owner key
+ * ({@link standaloneActionOwnerKey}), for an arm that answers a standalone item.
+ */
+function withDeclarationOwnerKey(declaration: RouteActionDeclaration): RouteActionDeclaration {
+    if (declaration.action === undefined || declaration.action === null || declaration.ownerKey !== undefined) return declaration;
+    return { ...declaration, ownerKey: standaloneActionOwnerKey(declaration.action) };
 }
 
 /**
@@ -6599,7 +6978,7 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     try {
         const store = environmentStoredActionNames(await deps.getObjectQL(requestContext, envId).catch(() => null));
         const picked = pickActionHolder(hits, actionName, false, await packagelessOriginOf(hits, store));
-        return { action: picked.action, obj };
+        return { action: picked.action, obj, ownerKey: picked.objectName };
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
         return degraded(err);
@@ -6653,6 +7032,14 @@ function listingNotServed(err: unknown): boolean {
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
+    args: Parameters<typeof resolveRouteActionDeclarationOnRungs>[2],
+): Promise<RouteActionDeclaration> {
+    return withDeclarationOwnerKey(await resolveRouteActionDeclarationOnRungs(deps, requestContext, args));
+}
+
+/** {@link resolveRouteActionDeclaration}'s rungs, before the owner key is stamped on a standalone answer. */
+async function resolveRouteActionDeclarationOnRungs(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     args: {
         ql: any; objectName: string; actionName: string; envId?: string;
         /**
@@ -6697,7 +7084,7 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     const embedded = Array.isArray(obj?.actions)
         ? obj.actions.find((a: any) => a?.name === actionName)
         : undefined;
-    if (embedded) return { action: embedded, obj };
+    if (embedded) return { action: embedded, obj, ownerKey: objectName };
 
     const ownsRoute = (action: any): boolean => {
         const owner = standaloneActionObjectName(deps, action);
@@ -7190,7 +7577,7 @@ async function environmentItemAtOwnAddress(
  */
 export async function readMergedItems(
     protocol: Pick<MetadataProtocol, 'getMetaItems'> | undefined | null,
-    type: 'skill' | 'object' | 'action' | 'dataset',
+    type: 'skill' | 'object' | 'action' | 'dataset' | 'ai_context',
 ): Promise<unknown[] | undefined> {
     if (!protocol || typeof protocol.getMetaItems !== 'function') return undefined;
     const answer = await protocol.getMetaItems({ type });
@@ -7255,6 +7642,9 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             action: resolved.action,
             obj: obj ?? resolved.obj,
             ...(resolved.packageId !== undefined ? { packageId: resolved.packageId } : {}),
+            // The row the address picked: its own owner key, never the routed
+            // object's, which may declare another holder's action of the name.
+            ownerKey: resolved.objectName,
         };
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
@@ -7264,7 +7654,7 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             const own = 'environment' in qualifier
                 ? await environmentItemAtOwnAddress({ ql, objectName, actionName, obj })
                 : undefined;
-            if (own !== undefined) return own;
+            if (own !== undefined) return withDeclarationOwnerKey(own);
             throw err;
         }
         return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };

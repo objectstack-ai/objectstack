@@ -64,6 +64,8 @@ function renderGrid(opts: {
   columns: unknown[];
   objectExtra?: Record<string, unknown>;
   rowAdornment?: (row: any) => React.ReactNode;
+  hostCells?: Record<string, (value: any, row: any) => React.ReactNode>;
+  rowTint?: (row: any) => string | null | undefined;
   width?: number;
 }) {
   const dataSource = {
@@ -84,6 +86,8 @@ function renderGrid(opts: {
           schema={schema}
           dataSource={dataSource}
           {...(opts.rowAdornment ? { rowAdornment: opts.rowAdornment } : {})}
+          {...(opts.hostCells ? { hostCells: opts.hostCells } : {})}
+          {...(opts.rowTint ? { rowTint: opts.rowTint } : {})}
         />
       </SchemaRendererProvider>
     </ActionProvider>,
@@ -131,5 +135,45 @@ describe('ObjectGrid rowAdornment (objectui#13330)', () => {
     const cell = await cellOf('Plant A check');
     expect(cell).toHaveTextContent(/^Plant A check$/);
     expect(document.querySelector('[data-testid="grid-row-adornment"]')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36897 — `hostCells` (a host draws a column's cells, by field)
+ * and `rowTint` (a host tints a row by a palette name), for a host whose rows
+ * are not records of an object (the console's metadata list).
+ */
+describe('ObjectGrid hostCells and rowTint (objectstack#36897)', () => {
+  const rowOf = async (text: string) => (await cellOf(text)).closest('tr') as HTMLElement;
+
+  it('a column whose field the host draws shows the host node; the other columns keep their own cells', async () => {
+    renderGrid({
+      columns: [{ field: 'name' }, { field: 'notes' }],
+      hostCells: { notes: (value, row) => <span data-testid={`host-${row.id}`}>{`[${String(value)}]`}</span> },
+    });
+    const host = await screen.findByTestId('host-r1');
+    expect(host).toHaveTextContent('[Boiler room]');
+    expect(host.closest('td')).toHaveTextContent(/^\[Boiler room\]$/);
+    expect(screen.getByTestId('host-r2')).toHaveTextContent('[Loading dock]');
+    // The name column is the grid's own cell, unchanged.
+    expect(await cellOf('Plant A check')).toHaveTextContent(/^Plant A check$/);
+  });
+
+  it('a row the host tints carries the palette tint; a null answer and a name outside the palette tint nothing', async () => {
+    renderGrid({
+      columns: [{ field: 'name' }, { field: 'notes' }],
+      rowTint: (row) => (row.id === 'r1' ? 'red' : 'bg-red-500'),
+    });
+    const tinted = await rowOf('Plant A check');
+    expect(tinted.className).toContain('[--os-row-tint:var(--color-red-100)]');
+    const plain = await rowOf('Plant B check');
+    expect(plain.className).not.toContain('--color-red-100');
+    expect(plain.className).not.toContain('bg-red-500');
+  });
+
+  it('CONTROL: without either prop every cell is the grid\'s own and no row is tinted', async () => {
+    renderGrid({ columns: [{ field: 'name' }, { field: 'notes' }] });
+    expect(await cellOf('Boiler room')).toHaveTextContent(/^Boiler room$/);
+    expect((await rowOf('Plant A check')).className).not.toContain('--os-row-tint:var(');
   });
 });

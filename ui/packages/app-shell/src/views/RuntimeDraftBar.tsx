@@ -18,7 +18,7 @@ import { Loader2, Send, Undo2 } from 'lucide-react';
 import {
   publishRuntimeMetadata,
   discardRuntimeDraft,
-  readRuntimeDraft,
+  readRuntimeDraftForPublish,
   type RuntimeArtifactType,
 } from './runtime-metadata-persistence.js';
 import { useMetadataLocale, t, tFormat } from './metadata-admin/i18n.js';
@@ -64,6 +64,30 @@ export interface RuntimeDraftBarProps {
    * dependence on the fire-and-forget write's timing.
    */
   savedSignal?: number;
+  /**
+   * objectstack#36350 — the version the host's own save returned (its
+   * receipt's `version`), given with each {@link savedSignal} bump. The bar's
+   * Publish after that save is pinned to it (`draftVersion`): the draft the
+   * bar now shows is the one that save wrote, so a draft another writer
+   * changed since is refused instead of published on their behalf. Absent (a
+   * host that does not know it), the Publish after the save goes unpinned.
+   */
+  savedDraftVersion?: string;
+  /**
+   * objectstack#37648 — monotonic counter the host bumps when it replaced its
+   * buffer with a fresh read of the stored item (a refused save resolved with
+   * "reload" in the draft-conflict dialog), with {@link reloadedDraftVersion}
+   * and {@link reloadedHasDraft} from THAT read. The draft the bar now shows
+   * is the one that read found, so its Publish is pinned to that read's
+   * version, not to the draft the bar read before the reload (which the
+   * reload exists because it moved). ⛔ Never a re-read of the bar's own: it
+   * would pin whatever draft is pending by then, which the host never showed.
+   */
+  reloadedSignal?: number;
+  /** The draft version the host's reload read (absent: that read named none, and the Publish goes unpinned). */
+  reloadedDraftVersion?: string;
+  /** Whether the host's reload read found a pending draft. */
+  reloadedHasDraft?: boolean;
 }
 
 /**
@@ -90,6 +114,10 @@ export function RuntimeDraftBar({
   onResume,
   onAfterChange,
   savedSignal,
+  savedDraftVersion,
+  reloadedSignal,
+  reloadedDraftVersion,
+  reloadedHasDraft,
 }: RuntimeDraftBarProps) {
   const locale = useMetadataLocale();
   const refusalTitles = useRefusalTitles();
@@ -98,6 +126,8 @@ export function RuntimeDraftBar({
   // Track the `name` we've already resumed so reopening the same item doesn't
   // clobber in-flight edits with the stored draft on every effect run.
   const resumedRef = useRef<string | null>(null);
+  /** objectstack#36350 — the version of the draft this bar last read and shows. */
+  const shownDraftVersionRef = useRef<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     if (!name || !metadataClient) {
@@ -106,11 +136,15 @@ export function RuntimeDraftBar({
     }
     let body: Record<string, unknown> | null;
     try {
-      body = await readRuntimeDraft<Record<string, unknown>>(type, name, {
+      const shown = await readRuntimeDraftForPublish<Record<string, unknown>>(type, name, {
         metadataClient,
       });
+      body = shown.body;
+      // objectstack#36350 — the draft this bar shows; its Publish is pinned to it.
+      shownDraftVersionRef.current = shown.draftVersion;
     } catch {
       // A failed draft read must not break the editor — treat as "no draft".
+      shownDraftVersionRef.current = undefined;
       setHasDraft(false);
       return;
     }
@@ -139,14 +173,37 @@ export function RuntimeDraftBar({
   useEffect(() => {
     if (savedSignal === lastSavedSignal.current) return;
     lastSavedSignal.current = savedSignal;
-    if (savedSignal) setHasDraft(true);
-  }, [savedSignal]);
+    if (savedSignal) {
+      // The host's own save moved the draft past the one this bar read: the
+      // draft it shows now is that save's, pinned by that save's receipt. ⛔
+      // Never a re-read here: after another writer's write it would pin THEIR
+      // draft, which this bar never showed.
+      shownDraftVersionRef.current = savedDraftVersion;
+      setHasDraft(true);
+    }
+  }, [savedSignal, savedDraftVersion]);
+
+  // objectstack#37648 — the host re-read the stored item into its buffer (a
+  // conflict resolved with "reload"): the draft shown is the one that read
+  // found, and the Publish is pinned to it. Skip the initial mount.
+  const lastReloadedSignal = useRef(reloadedSignal);
+  useEffect(() => {
+    if (reloadedSignal === lastReloadedSignal.current) return;
+    lastReloadedSignal.current = reloadedSignal;
+    if (reloadedSignal) {
+      shownDraftVersionRef.current = reloadedDraftVersion;
+      setHasDraft(reloadedHasDraft === true);
+    }
+  }, [reloadedSignal, reloadedDraftVersion, reloadedHasDraft]);
 
   const handlePublish = useCallback(async () => {
     if (!name) return;
     setBusy(true);
     try {
-      await publishRuntimeMetadata(type, name, { metadataClient, dataSource, objectName });
+      // objectstack#36350 — pinned to the draft this bar showed: a draft
+      // another writer changed since is refused `409 METADATA_CONFLICT`, said
+      // by the toast below, and nothing is published.
+      await publishRuntimeMetadata(type, name, { metadataClient, dataSource, objectName }, shownDraftVersionRef.current);
       setHasDraft(false);
       onAfterChange?.();
     } catch (err) {

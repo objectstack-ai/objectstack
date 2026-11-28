@@ -92,6 +92,7 @@ function refusal(namespace: string, fields: Refused[]) {
     ok: false,
     status: 400,
     statusText: 'Bad Request',
+    headers: new Headers(),
     json: async () => ({
       success: false,
       error: {
@@ -112,6 +113,7 @@ function serve(payload: unknown) {
     ok: true,
     status: 200,
     statusText: 'OK',
+    headers: new Headers(),
     json: async () => ({ success: true, data: payload }),
   } as unknown as Response);
 }
@@ -292,6 +294,7 @@ describe('a refusal with no field errors keeps its message (objectui#13146)', ()
       ok: false,
       status: 500,
       statusText: 'Internal Server Error',
+      headers: new Headers(),
       json: async () => ({
         success: false,
         error: { code: 'INTERNAL_ERROR', message: 'Failed to write namespace' },

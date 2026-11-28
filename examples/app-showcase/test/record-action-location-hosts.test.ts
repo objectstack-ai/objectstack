@@ -10,13 +10,14 @@ import { Task } from '../src/data/objects/task.object.js';
  * Fixture gate: the showcase hosts the three record action locations for
  * `showcase_task` (objectstack#22030).
  *
- * `records-forms.action-location-matrix` reads actions at `record_header`,
- * `record_more` and `record_related` on `showcase_task`. A location needs a
+ * `records-forms.action-location-matrix` reads actions at `record_page`
+ * (inline and folded into the ⋯, `component: 'action:menu'`) and
+ * `record_related` on `showcase_task`. A location needs a
  * surface on a page the console actually renders, and the showcase had none:
  *
  *  - Task Detail is `kind: 'full'`. Such a page renders exactly the nodes it
  *    declares, and it declared no `page:header`, so there was no title bar for
- *    `record_header` actions and no ⋯ overflow for `record_more` ones.
+ *    `record_page` actions and no ⋯ overflow for folded ones.
  *  - Project Detail authors its own tab strip with a `record:line_items` grid
  *    (a `kind: 'full'` page; until #27053 a slotted page's `tabs` slot). An
  *    authored strip replaces the synthesized one, so the synthesized Tasks
@@ -34,7 +35,7 @@ type AnyComponent = {
   [k: string]: unknown;
 };
 type AnyPage = Record<string, unknown> & { name?: unknown; type?: unknown; object?: unknown };
-type AnyAction = { name?: unknown; type?: unknown; objectName?: unknown; locations?: unknown };
+type AnyAction = { name?: unknown; type?: unknown; objectName?: unknown; locations?: unknown; component?: unknown };
 
 /** Every component on a page — regions and slots alike, tab panels and children included. */
 function allComponents(page: AnyPage): AnyComponent[] {
@@ -75,6 +76,11 @@ const taskActions = ((stack.actions ?? []) as AnyAction[]).filter((a) => a.objec
 const locationsOf = (a: AnyAction): string[] =>
   Array.isArray(a.locations) ? (a.locations as string[]) : [];
 const declares = (location: string) => (a: AnyAction): boolean => locationsOf(a).includes(location);
+/** `declares`, plus `record` covering `record_page` and `record_row` (objectstack#36495, `actionRendersAt`). */
+const places = (location: string) => (a: AnyAction): boolean =>
+  declares(location)(a) || ((location === 'record_page' || location === 'record_row') && declares('record')(a));
+/** Folded into the record header's ⋯ (`component: 'action:menu'`, formerly `record_more`). */
+const folded = (a: AnyAction): boolean => a.component === 'action:menu';
 const actionNamed = (name: string): AnyAction | undefined => taskActions.find((a) => a.name === name);
 
 describe('showcase_task record action locations have a stock host (#22030)', () => {
@@ -86,7 +92,7 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
     expect(projectPage?.name).toBe('showcase_project_detail');
   });
 
-  describe('record_header / record_more — the Task Detail title bar', () => {
+  describe('record / record_page — the Task Detail title bar', () => {
     const headers = taskPage ? allComponents(taskPage).filter((c) => c.type === 'page:header') : [];
     const ids = (headers[0]?.properties?.actions ?? []) as unknown[];
 
@@ -102,11 +108,17 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(result.data?.actions).toEqual(ids);
     });
 
-    it('lists the task\'s whole record_header / record_more set — what the synthesized header carries', () => {
+    it('lists the task\'s whole record / record_page set — what the synthesized header carries — less the actions its section bar draws', () => {
       expect(ids.every((id) => typeof id === 'string')).toBe(true);
       expect(new Set(ids).size, 'no id is listed twice').toBe(ids.length);
+      // An action placed at record_section AND a folded record_page is drawn
+      // on this page by the quick-actions bar; the folded `record_page` is its
+      // place on the standard page a phone or the drawer draws
+      // (objectstack#36150), so the authored header leaves it out (see the
+      // record_section block below).
       const headerSet = taskActions
-        .filter((a) => declares('record_header')(a) || declares('record_more')(a))
+        .filter(places('record_page'))
+        .filter((a) => !declares('record_section')(a))
         .map((a) => a.name as string);
       expect([...ids].sort()).toEqual([...headerSet].sort());
     });
@@ -114,10 +126,10 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
     it('hosts at least one action at each location, and a url and an api action under the ⋯ overflow', () => {
       const listed = ids.map((id) => actionNamed(id as string)).filter((a): a is AnyAction => !!a);
       expect(listed).toHaveLength(ids.length);
-      expect(listed.filter(declares('record_header')).length).toBeGreaterThan(0);
-      // The overflow takes every action declaring record_more WITHOUT
-      // record_header, whatever the inline budget.
-      const overflowOnly = listed.filter((a) => declares('record_more')(a) && !declares('record_header')(a));
+      expect(listed.filter((a) => places('record_page')(a) && !folded(a)).length).toBeGreaterThan(0);
+      // The overflow takes every record_page action folded with
+      // `component: 'action:menu'`, whatever the inline budget.
+      const overflowOnly = listed.filter((a) => places('record_page')(a) && folded(a));
       expect(overflowOnly.map((a) => a.type)).toEqual(expect.arrayContaining(['url', 'api']));
     });
   });
@@ -138,7 +150,7 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(fk?.reference).toBe('showcase_project');
     });
 
-    it('authors no `actions`, so its rows carry the host\'s list_item + record_related actions', () => {
+    it('authors no `actions`, so its rows carry the host\'s record_row + record_related actions', () => {
       expect(relatedLists).toHaveLength(1);
       expect(props).not.toHaveProperty('actions');
       expect(taskActions.filter(declares('record_related')).length).toBeGreaterThan(0);
@@ -183,19 +195,29 @@ describe('showcase_task record action locations have a stock host (#22030)', () 
       expect(names.length).toBeGreaterThan(0);
       expect(headerIds.length).toBeGreaterThan(0);
       expect(names.filter((n) => headerIds.includes(n))).toEqual([]);
-      // And by declaration: no task action is placed both in the header's
-      // locations and in the bar's, so a synthesized page cannot double it either.
-      const doubled = taskActions
+      // By declaration: no task action is placed both in the bar's location and
+      // INLINE in a header, so neither page draws one twice in view.
+      const inlineToo = taskActions
         .filter(declares('record_section'))
-        .filter((a) => declares('record_header')(a) || declares('record_more')(a))
+        .filter((a) => places('record_page')(a) && !folded(a))
         .map((a) => a.name);
-      expect(doubled).toEqual([]);
+      expect(inlineToo).toEqual([]);
+    });
+
+    it('reaches every record_section action on the standard page too, under the ⋯ overflow (objectstack#36150)', () => {
+      // A phone and the side drawer draw the standard page, which has no
+      // section bar: an action the bar hosts is found there through its
+      // folded `record_page` location, which the synthesized header reads.
+      const sectionSet = taskActions.filter(declares('record_section'));
+      expect(sectionSet.length).toBeGreaterThan(0);
+      expect(sectionSet.filter((a) => !(places('record_page')(a) && folded(a))).map((a) => a.name)).toEqual([]);
     });
   });
 
   it('every record location keeps a stock host for a task action', () => {
-    for (const location of ['record_header', 'record_more', 'record_related', 'record_section']) {
-      expect(taskActions.filter(declares(location)).length, location).toBeGreaterThan(0);
+    for (const location of ['record_page', 'record_related', 'record_section']) {
+      expect(taskActions.filter(places(location)).length, location).toBeGreaterThan(0);
     }
+    expect(taskActions.filter((a) => places('record_page')(a) && folded(a)).length, 'record_page folded').toBeGreaterThan(0);
   });
 });

@@ -71,7 +71,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] 所以:先做完**全部**源码编辑 → `pnpm --filter <pkg...> build` →
       `preview_stop` + `preview_start`。不要每修一处就编辑→构建→重启一遍。
 - [ ] ⚠️ **消融的 mutate 腿与 restore 腿都要重建 —— 但那条规则不是 dogfood 专属**:
-      判据、preflight 与两次实测住在 `.claude/agents/os-dev.md`;⛔ 这里不留第二份拷贝。
+      判据、preflight 与两次实测住 `pm-dispatch/references/dev-ablation.md`;⛔ 不另留副本。
 - [ ] `dist/` 已 gitignore —— 安全;永不提交构建产物。
 - [ ] **`/_console` UI 是 *Console 构建*,与框架包的 `dist` 是两回事。** 它由
       仓库根目录的 `pnpm console:build` 从 `ui/apps/console` 构建,拷进 `packages/console/dist`。

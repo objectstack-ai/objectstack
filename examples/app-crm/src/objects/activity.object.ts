@@ -13,11 +13,25 @@ export const Activity = ObjectSchema.create({
   label: 'Activity',
   pluralLabel: 'Activities',
   icon: 'calendar-check',
+  color: 'pink',
   description: 'A logged interaction (call, email, meeting, or task) related to a CRM record.',
   // The record's most important fields: the hover card, list columns and
   // the record picker read them. The stage is not here: the record header
   // already shows it as the status tag beside the name.
   highlightFields: ['type', 'due_date', 'contact', 'account'],
+
+  // [ADR-0085 §5] The record's sections: the create and edit forms, the
+  // drawer and the record page lay an activity out by these groups, each
+  // listing its members in display order.
+  fieldGroups: [
+    {
+      key: 'activity_details',
+      label: 'Activity Details',
+      fields: ['subject', 'type', 'status', 'due_date', 'duration_minutes'],
+    },
+    { key: 'related_records', label: 'Related Records', fields: ['contact', 'account', 'opportunity'] },
+    { key: 'notes', label: 'Notes', fields: ['description', 'outcome'] },
+  ],
 
   fields: {
     subject: Field.text({

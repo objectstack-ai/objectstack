@@ -65,7 +65,7 @@ export class WindowFunctionsFacet {
     await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query.where);
     const builder = this.getBuilder(object, options);
     // ROWS, so this is the read-side wall itself — not a consistency tidy-up
     // (#6792). This door returned every tenant's rows to a caller that passed

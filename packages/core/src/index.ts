@@ -63,6 +63,9 @@ export * from './organization-locale.js';
 // the dataset tools (`@objectstack/service-analytics`) and the MCP record
 // tools (`@objectstack/mcp`), which cannot import each other.
 export * from './sentence-locale.js';
+// [ADR-0160 D3] The one envelope a record-material tool answer is built in
+// (`get_record_context`, `@objectstack/service-record-context`).
+export * from './record-material-envelope.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
@@ -236,6 +239,11 @@ export * from './utils/operation-user-message.js';
 // and the engine's in-process verbs refuse a name the registry does not
 // resolve with it (one name space for both doors).
 export * from './utils/object-not-found.js';
+
+// The one `OBJECT_PACKAGE_DISABLED` envelope: the data door, the by-name
+// `/meta` reads and the Change Owner doors refuse an object of a disabled
+// package with it. `@objectstack/metadata-protocol` re-exports it.
+export * from './utils/object-package-disabled.js';
 
 // [#22777] The one walk that finds a filter's nested-relation conditions and
 // their target objects: the data door (`@objectstack/metadata-protocol`) and

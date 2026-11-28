@@ -533,6 +533,8 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
       case 'drop_column_default':
         await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
         return true;
+      case 'set_column_default':
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   if (this.isMysql) {
@@ -561,15 +563,49 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
         await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
         return true;
       case 'drop_column_default':
-        // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-        // MySQL accepts without restating the type, so it cannot lose a
-        // varchar length the way MODIFY can.
-        await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        // `ALTER … ALTER COLUMN …` — the one form MySQL accepts without
+        // restating the type, so it cannot lose a varchar length the way
+        // MODIFY can. [#36596] On a NULLABLE column it is `SET DEFAULT NULL`,
+        // never `DROP DEFAULT`: MySQL 8's DROP DEFAULT leaves the column with
+        // no default at all, and a strict-mode insert that omits it is then
+        // refused ("Field … doesn't have a default value", ER 1364) where
+        // Postgres and SQLite store NULL. Measured on 8.0.46. A NOT NULL
+        // column keeps DROP DEFAULT: NULL is not a default it can take.
+        if (ci?.nullable === true) {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT NULL', [table, column]);
+        } else {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        }
         return true;
+      case 'set_column_default':
+        // `ALTER … ALTER COLUMN … SET DEFAULT` — the same MODIFY-free form.
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
   return false;
+}
+
+/**
+ * [#36245] The in-place arm of `set_column_default` on Postgres and MySQL:
+ * `ALTER TABLE … ALTER COLUMN … SET DEFAULT <literal>`, the literal being the
+ * field's declared `defaultValue` read now, from the metadata the driver was
+ * given, and inlined as the client escapes it (DDL takes no bind parameters).
+ * Answers `false` (skipped) when the declaration no longer carries a literal
+ * the column could hold — the entry was planned against a different one —
+ * rather than guess at a value.
+ */
+async function setDeclaredColumnDefault(
+  this: Pick<SchemaSyncHost, 'knex' | 'managedObjectFields'>,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const dv = this.managedObjectFields.get(table)?.[column]?.defaultValue;
+  if (typeof dv !== 'string' && typeof dv !== 'number' && typeof dv !== 'boolean') return false;
+  if (isRuntimeDefaultToken(dv)) return false;
+  const literal = this.knex.raw('?', [dv]).toQuery();
+  await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${literal}`, [table, column]);
+  return true;
 }
 
 /**
@@ -699,6 +735,9 @@ export async function rebuildSqliteTablePatched(this: Pick<SchemaSyncHost, 'appl
     else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
     else if (e.op.type === 'drop_column') drop.add(e.op.column);
     else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
+    // [#36245] Nothing to collect: the rebuild re-emits every column's DEFAULT
+    // from the declaration (below), which IS the restated default.
+    else if (e.op.type === 'set_column_default') { /* honoured by the rebuild itself */ }
     // Everything else is IGNORED here and must be reported as such (#11722):
     // widen/narrow varchar (SQLite ignores declared length — nothing to do),
     // `manual_column_type_change` (no reconciler arm on ANY dialect, by
@@ -1504,7 +1543,7 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 /**
  * [#32590] Is this drift entry a column change the publish of the declaration
  * applies? Every `safe` column entry — the class that cannot lose data or fail
- * on existing rows (a wider varchar, a dropped runtime-token DEFAULT, a `date`
+ * on existing rows (a wider varchar, a dropped or restated column DEFAULT, a `date`
  * column widened to the declared `datetime`) — and the one `needs_confirm`
  * entry whose declaration says so in words: a NOT NULL column whose field
  * declares `storage: { notNull: false }`. That entry stays `needs_confirm` for
@@ -1515,7 +1554,17 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 function isPublishedColumnChange(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
   if (isIndexDriftOp(d.op)) return false;
   if (d.category === 'safe') return true;
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+  return isDeclaredRelaxPair(d, fields);
+}
+
+/**
+ * [#32590 / #36596] The `needs_confirm` entries a declared `storage: { notNull:
+ * false }` makes deliberate: the relax of the NOT NULL column, and the drop of
+ * a stale literal DEFAULT the differ pairs with that relax (never proposed
+ * without it). Applying the relax alone would keep storing the old default.
+ */
+function isDeclaredRelaxPair(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
+  return (d.op.type === 'relax_not_null' || d.op.type === 'drop_column_default') && d.category === 'needs_confirm'
     && fields?.[d.op.column]?.storage?.notNull === false;
 }
 
@@ -1549,8 +1598,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
  * installing package's own declaration says so for.
  */
 function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
-    && columns.has(d.op.column) && fields?.[d.op.column]?.storage?.notNull === false;
+  return isDeclaredRelaxPair(d, fields) && columns.has(d.op.column ?? '');
 }
 
 /** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */
@@ -2763,32 +2811,145 @@ export function nowColumnDefault(this: Pick<SchemaSyncHost, 'isMysql' | 'isPostg
     if (type === 'datetime' && this.isMysql) return this.knex.fn.now(MYSQL_DATETIME_PRECISION);
     return this.knex.fn.now();
   }
+  return this.knex.raw(sqliteNowColumnDefaultSql(type));
+}
+
+/**
+ * [#37345] The SQLite `NOW()` column DEFAULT for a column of `type`, as SQL
+ * text: the SQLite branch of {@link nowColumnDefault}, which wraps it in
+ * `knex.raw`, and the one the Turso REMOTE face renders through
+ * {@link sqliteDeclaredColumnDefaultSql}. One string per type, so the two
+ * faces of that driver cannot write different `NOW()` defaults.
+ */
+export function sqliteNowColumnDefaultSql(type: string): string {
   switch (type) {
-    case 'date': return this.knex.raw("(strftime('%Y-%m-%d', 'now'))");
+    case 'date': return "(strftime('%Y-%m-%d', 'now'))";
     // The CASE trims a zero-millisecond `.000` so a defaulted row is
     // byte-canonical ({@link canonicalTimeOfDay}) — `%f` alone would store
     // `'01:55:08.000'` once in a thousand inserts, and that row would then
     // miss an equality filter against the canonical `'01:55:08'`. SQLite
     // fixes `'now'` per statement, so the three calls cannot straddle a
     // millisecond boundary.
-    case 'time': return this.knex.raw(
+    case 'time': return (
       "(case when strftime('%H:%M:%f', 'now') like '%.000' " +
-      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)",
+      "then strftime('%H:%M:%S', 'now') else strftime('%H:%M:%f', 'now') end)"
     );
     // datetime (and any non-temporal field that opts into NOW()): canonical instant.
-    default:     return this.knex.raw("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))");
+    default:     return "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
   }
 }
 
-/** The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract. */
-export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string): void {
+/** [#37345] The field types `createColumn` builds through knex's `table.boolean`, whose DEFAULT knex spells `'1'` / `'0'`. */
+const KNEX_BOOLEAN_COLUMN_TYPES: ReadonlySet<string> = new Set(['boolean', 'toggle']);
+
+/**
+ * [#37345] The column DEFAULT {@link applyDeclaredColumnDefault} gives this
+ * field's column on SQLite, as the SQL text that follows `DEFAULT` — or
+ * `null` when it gives none. The Turso REMOTE face, which writes its DDL as
+ * text rather than through knex, renders a declared field's DEFAULT with this,
+ * so a remote table and a local one carry the same `dflt_value` for the same
+ * declaration and the shared drift differ reads them alike.
+ *
+ * Which fields get one is not decided here: {@link emitsDeclaredColumnDefault}
+ * (a literal or `NOW()`, never another runtime token, never an object) and the
+ * multi-value short-circuit `createColumn` takes before it reaches the
+ * emitter (a JSON column, no scalar DEFAULT) — the same two questions, asked
+ * in the same order. A `NOW()` default is {@link sqliteNowColumnDefaultSql},
+ * the string the local face's {@link nowColumnDefault} wraps.
+ *
+ * The literal is the one place this mirrors knex rather than sharing a
+ * function with it: the local face hands the value to `col.defaultTo`, and
+ * knex's SQLite column compiler renders it — `'1'` / `'0'` on a boolean
+ * column (the string `'false'` reading false), otherwise the value's
+ * `toString()` single-quoted with an embedded quote doubled (so a number is
+ * the quoted `'5'`). `turso-remote-default-parity.test.ts` holds the two
+ * faces to one `dflt_value` for each kind of default, so a knex upgrade that
+ * renders differently goes red there instead of forking the faces.
+ */
+export function sqliteDeclaredColumnDefaultSql(field: any): string | null {
+  if (!emitsDeclaredColumnDefault(field)) return null;
+  const type = String(field?.type || 'string');
+  if (isMultiValuedColumn(type, field)) return null;
+  const dv = field.defaultValue;
+  if (isNowDefaultValue(dv)) return sqliteNowColumnDefaultSql(type);
+  if (KNEX_BOOLEAN_COLUMN_TYPES.has(type)) return `'${dv === 'false' ? 0 : dv ? 1 : 0}'`;
+  return `'${String(dv).replace(/'/g, "''")}'`;
+}
+
+/**
+ * [#37258] Whether {@link applyDeclaredColumnDefault} gives this field's column
+ * a physical DEFAULT — asked by `createColumn` on `ALTER TABLE … ADD COLUMN`
+ * to a table that already holds rows, where a `storage.notNull` column is
+ * accepted by the database only if the existing rows can take that DEFAULT.
+ * The one statement of the rule, so the emitter and that question cannot
+ * answer differently.
+ */
+export function emitsDeclaredColumnDefault(field: any): boolean {
   const dv = field?.defaultValue;
-  if (dv === undefined || dv === null) return;
-  if (isNowDefaultValue(dv)) {
-    col.defaultTo(this.nowColumnDefault(type));
-    return;
-  }
-  if (isRuntimeDefaultToken(dv)) return;
-  if (typeof dv === 'object') return;
-  col.defaultTo(dv as any);
+  if (dv === undefined || dv === null) return false;
+  if (isNowDefaultValue(dv)) return true;
+  return !isRuntimeDefaultToken(dv) && typeof dv !== 'object';
+}
+
+/**
+ * [#37413] Whether this field's SQLite column DEFAULT is the `NOW()`
+ * expression ({@link sqliteNowColumnDefaultSql}) — the DEFAULT SQLite refuses
+ * on `ALTER TABLE … ADD COLUMN` to a table that holds a row (`Cannot add a
+ * column with non-constant default`). Both faces of the SQLite schema sync ask
+ * it: the local `createColumn` and the Turso remote face's
+ * `columnDeclarationSQL`. On such an `ADD COLUMN` the column is added nullable
+ * with no DEFAULT, the existing rows are filled by
+ * {@link sqliteNowBackfillSql}, and the drift differ reports what is still
+ * owed (`set_column_default`, and `tighten_not_null` under `storage.notNull`)
+ * for the schema-drift ceremony — never a table rebuild inside the sync.
+ */
+export function declaresSqliteNowColumnDefault(field: any): boolean {
+  if (String(field?.type || 'string') === 'formula') return false;
+  return isNowDefaultValue(field?.defaultValue) && sqliteDeclaredColumnDefaultSql(field) !== null;
+}
+
+/**
+ * [#37413] A SQLite identifier, double-quoted with an embedded `"` doubled —
+ * the one spelling {@link sqliteNowBackfillSql} and the Turso remote face's
+ * hand-written DDL both write.
+ */
+export function quoteSqliteIdentifier(name: string): string {
+  return `"${String(name).replace(/"/g, '""')}"`;
+}
+
+/**
+ * [#37413] The one statement that fills the existing rows of a populated SQLite
+ * table in the columns an `ADD COLUMN` just added without their `NOW()` DEFAULT
+ * ({@link declaresSqliteNowColumnDefault}): each column takes the expression
+ * the DEFAULT would have given ({@link sqliteNowColumnDefaultSql}). SQLite
+ * fixes `'now'` once per statement, so every row takes the same instant — the
+ * instant of the sync. Only a NULL is filled (`COALESCE`, and the `WHERE` names
+ * the rows holding one), so a value a writer stored in the column is never
+ * overwritten. Both faces send it in the same transaction as the `ADD COLUMN`.
+ * `null` when no such column was added.
+ */
+export function sqliteNowBackfillSql(table: string, added: ReadonlyArray<readonly [string, any]>): string | null {
+  const columns = added.filter(([, field]) => declaresSqliteNowColumnDefault(field));
+  if (columns.length === 0) return null;
+  const sets = columns.map(([name, field]) => {
+    const col = quoteSqliteIdentifier(name);
+    return `${col} = COALESCE(${col}, ${sqliteNowColumnDefaultSql(String(field?.type || 'string'))})`;
+  });
+  const holdsNull = columns.map(([name]) => `${quoteSqliteIdentifier(name)} IS NULL`);
+  return `UPDATE ${quoteSqliteIdentifier(table)} SET ${sets.join(', ')} WHERE ${holdsNull.join(' OR ')}`;
+}
+
+/**
+ * The body of `SqlDriver#applyDeclaredColumnDefault`; the method's docblock there is its contract.
+ *
+ * [#37320] `expressionForm`: the literal is emitted parenthesised, `DEFAULT
+ * ('d')` — the only DEFAULT a MySQL TEXT column takes (MySQL 8.0.13+ /
+ * MariaDB 10.2+). `createColumn` asks for it on exactly that column, which it
+ * builds through `specificType` so knex does not strip the clause.
+ */
+export function applyDeclaredColumnDefault(this: Pick<SchemaSyncHost, 'knex' | 'nowColumnDefault'>, col: Knex.ColumnBuilder, field: any, type: string, expressionForm: boolean = false): void {
+  if (!emitsDeclaredColumnDefault(field)) return;
+  const dv = field.defaultValue;
+  if (isNowDefaultValue(dv)) col.defaultTo(this.nowColumnDefault(type));
+  else col.defaultTo(expressionForm ? this.knex.raw('(?)', [dv]) : (dv as any));
 }

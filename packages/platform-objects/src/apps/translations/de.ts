@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { deObjects } from './de.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Deutsch (de) — Setup App Translations
  */
 export const de: TranslationData = {
   objects: deObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('de'),
   apps: {
     account: {
       label: 'Konto',
@@ -40,7 +43,7 @@ export const de: TranslationData = {
         group_overview: { label: 'Übersicht' },
         group_apps: { label: 'Apps' },
         nav_marketplace_browse: { label: 'Marketplace durchsuchen' },
-        nav_marketplace_installed: { label: 'Installierte Apps' },
+        nav_packages: { label: 'Pakete' },
         nav_cloud_connection: { label: 'Cloud-Verbindung' },
         group_people_org: { label: 'Personen und Organisation' },
         group_access_control: { label: 'Zugriffssteuerung' },
@@ -77,6 +80,7 @@ export const de: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'SCIM-Anmeldedaten' },
         nav_api_keys: { label: 'API-Schlüssel' },
+        nav_access_directory: { label: 'Positionen und Berechtigungen' },
 
         // Genehmigungseingang = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -97,6 +101,7 @@ export const de: TranslationData = {
         nav_settings_localization: { label: 'Lokalisierung' },
         nav_exchange_rates: { label: 'Wechselkurse' },
         nav_units_of_measure: { label: 'Maßeinheiten' },
+        nav_standard_unit_settings: { label: 'Standardeinheiten-Einstellungen' },
         nav_work_calendars: { label: 'Arbeitskalender' },
         nav_work_calendar_exceptions: { label: 'Kalenderausnahmen' },
         nav_settings_company: { label: 'Unternehmen' },
@@ -110,6 +115,7 @@ export const de: TranslationData = {
         nav_settings_knowledge: { label: 'Wissen' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
         nav_recycle_bin: { label: 'Papierkorb' },
+        nav_public_forms: { label: 'Öffentliche Formulare' },
         nav_notification_preferences: { label: 'Benachrichtigungseinstellungen' },
         nav_notification_templates: { label: 'Benachrichtigungsvorlagen' },
 
@@ -133,7 +139,7 @@ export const de: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Metadaten-Werkbank für Entwickler, Analysten und Implementierer',
       navigation: {
         group_overview: { label: 'Übersicht' },

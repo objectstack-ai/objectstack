@@ -1,7 +1,7 @@
 ---
 title: services.sharing — the record share API
 navTitle: services.sharing
-description: Check and manage record-level sharing with services.sharing — read filters, canEdit and canDelete checks, and granting or revoking record shares.
+description: Check and manage record-level sharing with services.sharing — read filters, the tri-state checkEdit and checkDelete verdicts and their canEdit and canDelete projections, the optional set form, and granting or revoking record shares.
 ---
 
 - **Stability:** `stable`
@@ -12,8 +12,12 @@ description: Check and manage record-level sharing with services.sharing — rea
 
 ```ts
 services.sharing.buildReadFilter(object: string, context: ExecutionContext): Promise<unknown | null>
+services.sharing.checkEdit(object: string, recordId: string, context: ExecutionContext): Promise<SharingWriteVerdict>
+services.sharing.checkDelete(object: string, recordId: string, context: ExecutionContext): Promise<SharingWriteVerdict>
 services.sharing.canEdit(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
 services.sharing.canDelete(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
+services.sharing.checkEditMany?(object: string, recordIds: readonly string[], context: ExecutionContext): Promise<SharingWriteVerdict[]>
+services.sharing.checkDeleteMany?(object: string, recordIds: readonly string[], context: ExecutionContext): Promise<SharingWriteVerdict[]>
 services.sharing.canManageShares(object: string, recordId: string, context: ExecutionContext): Promise<boolean>
 services.sharing.grant(input: GrantShareInput, context: ExecutionContext): Promise<RecordShare>
 services.sharing.revoke(shareId: string, context: ExecutionContext, scope?: { object: string; recordId: string }): Promise<void>
@@ -25,6 +29,42 @@ Every method above **adjudicates access**, so each takes the complete
 (#6523, applying the #6206 ruling). The six-field `SharingExecutionContext`
 these signatures used to name was retired in #7218; pass the whole context you
 were handed, unchanged.
+
+## The write verdicts: tri-state, two-state and set form
+
+Each write gate has a primary **tri-state** form, `checkEdit` (update) and
+`checkDelete` (delete), which answers a `SharingWriteVerdict`:
+
+- `allow` — a positive basis to permit: ownership (widened by write DEPTH), the
+  `modifyAllRecords` super-user bypass or a system context, and, for `checkEdit`
+  only, an `edit`-level share or a record sitting in a queue the caller belongs to.
+- `abstain` — record sharing does not enforce on this row at all: a `public`
+  object, an object with no owner field, a bypass-listed platform internal, or an
+  object with no resolvable schema. The decision belongs to whatever else guards
+  the row. `checkDelete` abstains on exactly the rows `checkEdit` abstains on.
+- `deny` — refused: a sharing-enforced row where the caller has none of the
+  bases above, a principal-less context, or a lookup that failed. A failure is
+  always `deny`, never `abstain`.
+
+`canEdit` / `canDelete` are the **two-state projection** of those verdicts:
+`true` for anything that is not `deny`, so `abstain` and `allow` both read as
+`true`. That is right for a caller that only adds this gate to what already
+guards the row, and wrong for one that would let the answer override another
+authority's floor: such a caller must read `checkEdit` / `checkDelete`, so that
+"sharing has no opinion" is never taken as permission.
+
+`checkEditMany` / `checkDeleteMany` are the optional **set form** of the
+tri-state verdicts: `answer[i]` is the verdict `checkEdit` / `checkDelete`
+answers for `recordIds[i]` under the same context, with the same bases and the
+same verb boundary, and the answer is exactly as long as `recordIds`. Only the
+cost differs: the number of store reads grows with the number of chunks, not the
+number of records. The bundled `SharingService` (`@objectstack/plugin-sharing`)
+implements both, reading 1,000 ids per chunk. They are optional: a caller
+feature-detects them (`typeof sharing.checkEditMany === 'function'`) and, where
+a service does not implement them, asks `checkEdit` / `checkDelete` once per
+record, with the same answers. The platform's predicate update and delete do
+exactly that. A chunk whose lookup fails answers `deny` for each of its records.
+A custom `ISharingService` that does not add the set form keeps working.
 
 ## Management authority (ADR-0111)
 
@@ -54,7 +94,9 @@ mask AND-ed with object CRUD, not a fourth `access_level`.
 ## Returns
 
 - `buildReadFilter`: `null` means unrestricted read; otherwise returns an engine filter
-- `canEdit` / `canDelete` / `canManageShares`: boolean decisions (they return `false` rather than throwing)
+- `checkEdit` / `checkDelete`: a `SharingWriteVerdict` (`'allow' | 'abstain' | 'deny'`); a failed lookup answers `deny` rather than throwing
+- `checkEditMany` / `checkDeleteMany` (optional): one `SharingWriteVerdict` per id, in the order of `recordIds`
+- `canEdit` / `canDelete` / `canManageShares`: boolean decisions (they return `false` rather than throwing); `canEdit` / `canDelete` are `true` for every verdict that is not `deny`
 - `grant`/`listShares`: normalized `RecordShare` rows
 
 ## Typical Errors
@@ -64,7 +106,7 @@ mask AND-ed with object CRUD, not a fourth `access_level`.
 - `PERMISSION_DENIED` (403) — the caller does not hold `canManageShares` on the record (ADR-0111 D1). On the sharing-**rule** surface (`ISharingRuleService`, declared in the same canonical source — `listRules` / `getRule` / `defineRule` / `deleteRule` / `evaluateRule`) the same code carries a second condition: the caller holds `manage_sharing` but their session resolves **no active organization**, and an org-scoped capability with no organization has no tenant whose rules it authorizes. System contexts and platform operators (`manage_platform_settings`, or the `platform_admin` position) are unaffected — see [Rule administration](/docs/permissions/sharing-rules).
 - `NOT_FOUND` (404) — the record is missing **or not visible to the caller** (indistinguishable by design), or a `revoke` share id does not exist / does not belong to the `scope` record.
 - `CONFLICT` (409) — `revoke` on a rule-materialised share (`source != 'manual'`); the next rule reconciliation would silently re-grant it. Deactivate or edit the sharing rule instead.
-- `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult for the recipient (a public sharing model, unless the recipient is an `external` member of the record's organization, whose owner-only floor does consult it; no `owner_id` field; a bypass object, `controlled_by_parent`, or a **federated** object whose `owner_id` is the platform's injected anchor rather than a real remote column — the platform provisions no storage for a federated object, so the gates read that column off a table that has not got it and can never admit). On the sharing-**rule** surface, `defineRule` (and a `sys_sharing_rule` write through the `/data` door) answers the same code when the rule's object is one no gate consults for any recipient: the rule is refused at save instead of saved to share nothing.
+- `SHARING_NOT_ENABLED` (422) — `grant` on an object the sharing gates never consult for the recipient (a public sharing model, unless the recipient is an `external` member of the record's organization, whose owner-only floor does consult it; no `owner_id` field; a bypass object, `controlled_by_parent`, or a **federated** object whose `owner_id` is the platform's injected anchor rather than a real remote column — the platform provisions no storage for a federated object, so the gates read that column off a table that has not got it and can never admit; or an object whose share grants cannot count where it is stored — it sits on another datasource than `sys_record_share`, even a SQL one, or on a driver that does not evaluate the share-grant subquery, today MongoDB, in-memory and OData (ADR-0155 R2); to share its records, store it on the datasource of `sys_record_share`, on a driver that evaluates share grants, as the SQL drivers do). On the sharing-**rule** surface, `defineRule` (and a `sys_sharing_rule` write through the `/data` door) answers the same code when the rule's object is one no gate consults for any recipient: the rule is refused at save instead of saved to share nothing.
 
 ## Enforcement is automatic — do not re-check it in a hook
 

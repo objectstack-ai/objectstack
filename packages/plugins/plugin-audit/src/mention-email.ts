@@ -58,6 +58,13 @@
  *    a notification payload is kept at rest.
  *  - plain text: a mail client turns the bare URL into a link, and a text body
  *    has no markup for a comment's text to break.
+ *
+ * ## The reply notice uses the same two emits (#36074)
+ *
+ * A reply in a comment thread notifies the thread's starter and its earlier
+ * repliers (`audit-writers.ts`) under {@link REPLY_TOPIC}: the same inbox
+ * notice and the same e-mail, the same templates' shape and the same
+ * 10-minute window, keyed under the reply topic ({@link replyEmailDedupKey}).
  */
 
 /** The mention topic both emits name. */
@@ -74,8 +81,31 @@ export const MENTION_EMAIL_WINDOW_MS = 10 * 60_000;
  * `nowMs` is the emit's clock reading.
  */
 export function mentionEmailDedupKey(organizationId: string | null | undefined, userId: string, nowMs: number): string {
+  return commentEmailDedupKey(MENTION_TOPIC, organizationId, userId, nowMs);
+}
+
+/**
+ * [#36074] The reply notice's topic: someone replied in a comment thread the
+ * recipient started or replied in (`audit-writers.ts`, `writeCommentReplyNotices`).
+ * Its own topic, not `collab.mention`: a preference row names it apart, and
+ * its e-mail window is its own (below), so a mention e-mail is never held back
+ * by a reply e-mail or the other way round.
+ */
+export const REPLY_TOPIC = 'collab.reply';
+
+/**
+ * [#36074] The reply e-mail's dedup key: one per (organization, person, window
+ * bucket), the mention e-mail's window and shape under the reply topic. Within
+ * one window a person receives at most one mention e-mail AND at most one
+ * reply e-mail.
+ */
+export function replyEmailDedupKey(organizationId: string | null | undefined, userId: string, nowMs: number): string {
+  return commentEmailDedupKey(REPLY_TOPIC, organizationId, userId, nowMs);
+}
+
+function commentEmailDedupKey(topic: string, organizationId: string | null | undefined, userId: string, nowMs: number): string {
   const bucket = Math.floor(nowMs / MENTION_EMAIL_WINDOW_MS);
-  return `${MENTION_TOPIC}.email:${organizationId ?? '-'}:${userId}:${bucket}`;
+  return `${topic}.email:${organizationId ?? '-'}:${userId}:${bucket}`;
 }
 
 /**
@@ -110,14 +140,27 @@ export interface MentionBuiltinTemplate {
   readonly format?: 'markdown' | 'html' | 'text' | 'mjml';
 }
 
+/** One plain-text e-mail per catalog locale under `topic`: the title, the preview, the line that opens the record. */
+function commentEmailTemplates(topic: string): readonly MentionBuiltinTemplate[] {
+  return Object.freeze(
+    Object.entries(MENTION_EMAIL_LINK_LINES).map(([locale, line]) => ({
+      topic,
+      channel: MENTION_EMAIL_CHANNEL,
+      locale,
+      subject: '{{title}}',
+      body: `{{body}}\n\n${line}`,
+      format: 'text' as const,
+    })),
+  );
+}
+
 /** The mention e-mail templates: one per catalog locale. */
-export const MENTION_EMAIL_TEMPLATES: readonly MentionBuiltinTemplate[] = Object.freeze(
-  Object.entries(MENTION_EMAIL_LINK_LINES).map(([locale, line]) => ({
-    topic: MENTION_TOPIC,
-    channel: MENTION_EMAIL_CHANNEL,
-    locale,
-    subject: '{{title}}',
-    body: `{{body}}\n\n${line}`,
-    format: 'text' as const,
-  })),
-);
+export const MENTION_EMAIL_TEMPLATES: readonly MentionBuiltinTemplate[] = commentEmailTemplates(MENTION_TOPIC);
+
+/**
+ * [#36074] The reply e-mail templates: the mention e-mail's shape under the
+ * reply topic. The link member keeps the name `mentionUrl`, so one template
+ * shape serves both topics and an organization's own template for either
+ * reads the same members.
+ */
+export const REPLY_EMAIL_TEMPLATES: readonly MentionBuiltinTemplate[] = commentEmailTemplates(REPLY_TOPIC);

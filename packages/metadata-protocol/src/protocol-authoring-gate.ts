@@ -51,6 +51,7 @@ import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from 
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
+import { withoutPlatformOrigin } from '@objectstack/metadata';
 import { noPendingDraftError } from './protocol-authoring-refusals.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
@@ -100,6 +101,13 @@ export interface AuthoringGateHost {
     unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     unknownPicklistBindingSaveRefusal: ObjectStackProtocolImplementation['unknownPicklistBindingSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
+    /**
+     * [ADR-0159 card ② items 5 and 7] The save door's two `form`-type
+     * refusals ({@link formTypeWriteRefusal}: the package-less list over a
+     * form, and the public address clash), asked of a restored body against
+     * the binding it is restored into.
+     */
+    formRestoreRefusal: (type: string, item: unknown, name: string, binding: string | null) => Promise<Error | undefined>;
     /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
     sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
 }
@@ -114,7 +122,7 @@ export function restoredBodyDerivation(
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyWriter`; the method's docblock there is its contract. */
 export function restoredBodyWriter(
-    this: Pick<AuthoringGateHost, 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
+    this: Pick<AuthoringGateHost, 'formRestoreRefusal' | 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
     type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
     const derive = this.restoredBodyDerivation(type);
     return async (historyBody) => {
@@ -128,8 +136,19 @@ export function restoredBodyWriter(
         // [#28574] An `object_extension` version against its address, on the same binding.
         const extensionRefusal = this.objectExtensionItemRefusal(type, historyBody, name, binding);
         if (extensionRefusal) throw extensionRefusal;
+        // [ADR-0159 card ② items 5 and 7] …and the save door's two `form`-type
+        // refusals: a package-less view whose restored body would store a list
+        // at the name a read-only package authors as a `form`
+        // (`VALIDATION_ERROR`, 400), and a `form` version that would be left
+        // open on a public address another form holds (`FORM_ADDRESS_TAKEN`,
+        // 409). A rollback or a revert restoring either is refused with the
+        // save door's sentence before anything is written.
+        const formRefusal = await this.formRestoreRefusal(type, historyBody, name, binding);
+        if (formRefusal) throw formRefusal;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
-        return derive ? derive(historyBody) : historyBody;
+        // [#37013] A restore is never the platform's registration: the body is
+        // written without the platform's mark, read where the store reads it.
+        return withoutPlatformOrigin(derive ? derive(historyBody) : historyBody);
     };
 }
 

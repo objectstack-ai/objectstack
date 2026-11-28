@@ -101,6 +101,7 @@ import { runStackExpressionPasses } from './validate-expressions.js';
 import { validateListViewMode } from './validate-list-view-mode.js';
 import { validateFunctionalCompleteness } from './validate-functional-completeness.js';
 import { validateManagedApiMethods } from './validate-managed-api-methods.js';
+import { validateTransferCascades } from './validate-transfer-cascades.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
@@ -121,18 +122,25 @@ import { validateJsxPages } from './validate-jsx-pages.js';
 import { validateReactPages } from './validate-react-pages.js';
 import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
+import { validateBookAudienceClaims } from './validate-book-audience-claims.js';
 import {
   validateFlowApiTriggerSecret,
+  validateFlowSubflowTargets,
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle, validateTitleFormatRetired } from './validate-record-title.js';
+import { validateRecordPageHeader } from './validate-record-page-header.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
+import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
+import { validateFormConsumers, validateFormPublicAddresses } from './validate-form-items.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
+import { validateAiContext } from './validate-ai-context.js';
+import { validateKnowledgeSource } from './validate-knowledge-source.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -149,9 +157,12 @@ import {
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
 import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
+import { validateActionBodyCapabilities } from './validate-action-body-capabilities.js';
+import { validateSeedRecordKeys } from './validate-seed-record-keys.js';
 import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateObjectActionLayout } from './validate-object-action-layout.js';
 import { validateActionObjectBinding } from './validate-action-object-binding.js';
 import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
 import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
@@ -173,9 +184,13 @@ import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
-  lintSummaryRollups,
   lintInlineEditBulk,
+  lintFieldReferenceShapes,
+  lintOptionColors,
+  summaryRollupFindings,
+  type OptionColorPicklist,
 } from './data-model-rules.js';
+import { objectExtensionsByTarget, objectsAsServed } from './object-graph.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { UserTextParams } from './finding-user-text.js';
@@ -991,6 +1006,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['object'],
     run: (stack) => validateManagedApiMethods(stack),
   },
+  // [ruling 7000907189 point 4 · ADR-0049] A `transferBehavior: 'cascade'`
+  // the Change Owner action can never offer: the parent does not offer Change
+  // Owner, an extension's field cascades onto an object that cannot take a
+  // cascade (the `ObjectSchema` refinement judges only the object's own
+  // fields), or the child's declared exposure does not serve `update`. The
+  // runtime re-judges each relationship and offers none of these, silently;
+  // this puts the same verdicts, from the same spec predicates, where the
+  // author is. Gating for the `validateManagedApiMethods` reason above: the
+  // verdict is decidable from the stack, and the declaration is a key nothing
+  // honours.
+  {
+    name: 'validateTransferCascades',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-transfer-cascades.ts',
+    surfaces: CLI_ONLY,
+    // The crossing is follow-up #37397. The number lives in this comment, not in the string below: a
+    // string literal under packages/ carries no tracker number (`pnpm check:doc-authoring`).
+    surfaceReason:
+      'Not yet crossed, pending a measurement: at the runtime publish gate the snapshot\'s objects are the '
+      + 'registry\'s served definitions, which carry the injected system columns (owner_id among them) as '
+      + 'declared fields, and the Change Owner eligibility predicate this rule reads judges a declared '
+      + 'owner_id (its readonly flag, and on an external object whether it is declared at all). Judging '
+      + 'served definitions with it is unmeasured, and a false 422 on the only door a Studio or MCP author '
+      + 'has is worse than the gap. Crossing owes that measurement, or reading the served objects back to '
+      + 'their authored shape as lintDuplicateFieldLabels does at the object_extension door, and its own '
+      + 'rollout decision; never a bare `runtimeTypes` edit.',
+    run: (stack) => validateTransferCascades(stack),
+  },
   // A view container in `views: []` that registers zero views: nothing appears
   // in the Console, and the schema step cannot tell it from an intentionally
   // empty one. The FLAT-list-view arm no longer needs this tier — `ViewSchema`
@@ -1383,6 +1428,16 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // tier 1 («the parsers load NEVER») from a standing fact into a red. The
     // measurement that named their bridge named `validateStackExpressions`, a
     // CEL-only rule, for exactly this reason.
+    // [#35143] `action` joins anyway, and the reason above still holds: since
+    // #9313 a write dispatches only the MEMBERS that declare its type, and the
+    // four body-writes members keep the frozen `flow` default, so an `action`
+    // write reaches `validateObjectReferences` alone (an action's `objectName`,
+    // the Seeds and actions family's binding line) and no parser loads —
+    // `runtime-lazy-deps.test.ts` gates an action write carrying a body to prove
+    // it. `seed` stays out: the save door already refuses a seed over an object
+    // nothing resolves (#34864), with the draft and publish-promotion carve-outs
+    // a snapshot of served objects cannot see. `hook` stays out: no member
+    // judges a hook write.
     // [#30023] `page` joins, NARROW by the same mechanism: a page write reaches
     // exactly `validateSortableFields`, the one member that declares `page`,
     // so a stored page sort naming a field the list door refuses
@@ -1390,7 +1445,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // does not have, as `page-field-unknown`) is refused at publish rather
     // than at its first fetch. Every other member keeps its declaration.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page'],
+    runtimeTypes: ['flow', 'view', 'object', 'dataset', 'report', 'page', 'action'],
     run: (stack, ctx) => validateReferenceIntegrity(stack, ctx),
   },
   // ADR-0078 / #5068 — the SDUI component-props gate. `PageComponent.properties`
@@ -1588,6 +1643,22 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'severity change on a published rule id and belongs in its own PR, not riding a wiring change.',
     run: (stack) => validateCapabilityReferences(stack),
   },
+  // ADR-0046 §6.7 — a gated book claims its pages by name. `include: '*'` on a
+  // book with a `{ permissionSet }` / `{ systemPermission }` audience also
+  // claims every doc bound to no package (in every package scope) and hides it
+  // from every reader outside the audience. Decidable from the book alone, so it
+  // gates, and it judges the written book at the runtime door too: a Studio,
+  // REST `/meta` or MCP author of a book is the same author.
+  {
+    name: 'validateBookAudienceClaims',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-book-audience-claims.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['book'],
+    run: (stack) => validateBookAudienceClaims(stack),
+  },
   // A flow that LOOKS armed and never launches — silently. Reads the pre-parse
   // tier so an author sees what they wrote.
   //
@@ -1656,6 +1727,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
   // with this id instead of being stored for the engine to refuse at
   // registration.
+  // #35143 — a `subflow` / `map` node calling a flow this stack does not
+  // define. CLI only: the runtime gate's flow snapshot holds just the written
+  // flow, so every call to another stored flow would read as unknown there.
+  // Advisory, with the sibling unknown-object hedge: another installed package
+  // may ship the called flow.
+  {
+    name: 'validateFlowSubflowTargets',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFlowSubflowTargets(stack),
+  },
   {
     name: 'validateFlowApiTriggerSecret',
     tier: 'gating',
@@ -1729,6 +1815,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
   },
+  // A full record page's hand-written header whose title or action order
+  // differs from what the standard page (the phone, the drawer, the preview)
+  // draws for the same record: the record's name field, and the actions sorted
+  // by their own `order` / `variant`. Advisory: the page renders as written,
+  // and a static read sees neither visibility nor the actions other packages
+  // attach (`validate-record-page-header.ts` lists what it cannot see).
+  //
+  // Runtime publish gate: a `page` write's snapshot carries `objects` as
+  // context, which is every input but the stack-level `actions` collection;
+  // a header naming an action the snapshot does not show on its object is
+  // not judged, so a partial snapshot can only make the rule quieter, never
+  // invent a finding. Both findings ride back on the 2xx `advisories`.
+  {
+    name: 'validateRecordPageHeader',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-record-page-header.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validateRecordPageHeader(stack),
+  },
   // [#15922] A declared field that nothing in the stack reads or displays —
   // the field-level remainder of #4698's "declared but never read" class,
   // landed here under the hotcrm#1543 ruling. Object-aware (the same name on
@@ -1800,6 +1908,55 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
   },
+  // #36425 — an internal create / edit form view the app still declares: the
+  // Console's create and edit surfaces no longer load one (they lay out by the
+  // object's field groups), so it installs, runs and steers nothing. Advisory,
+  // once per form. `normalized`: it reads only the authored `views[]` shapes,
+  // so `os lint`, which never parses, runs it too.
+  {
+    name: 'validateInternalFormViews',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-internal-form-views.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory-tier retirement notice for the app author at the check tools (`os lint`, `os validate`, ' +
+      '`os build`): an internal form view still installs and runs, inert, so the runtime door has nothing ' +
+      'to refuse, and the Studio no longer offers internal form views to save.',
+    run: (stack) => validateInternalFormViews(stack),
+  },
+  // [ADR-0159 ruled question 3 = A] An authored `form` left open on a public
+  // address another form of the stack holds (authored or projected out of an
+  // old `view` shape). Gating. The runtime half is the save door's own
+  // `FORM_ADDRESS_TAKEN` refusal, judged over the effective `form` read, which
+  // a per-write snapshot does not carry.
+  {
+    name: 'validateFormPublicAddresses',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-form-items.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'The runtime door judges the same clash over the effective `form` read (`formAddressClashRefusal`, ' +
+      '`409 FORM_ADDRESS_TAKEN`): a per-write snapshot carries no other form, so the gate would judge nothing.',
+    run: (stack) => validateFormPublicAddresses(stack),
+  },
+  // [ADR-0159 D1] An authored `form` no link and no action reaches: the
+  // successor of `form-view-internal-not-loaded` for `form` items. Advisory.
+  {
+    name: 'validateFormConsumers',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-form-items.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory for the app author at the check tools: a form nothing reaches still installs and runs, so the ' +
+      'runtime door has nothing to refuse.',
+    run: (stack) => validateFormConsumers(stack),
+  },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
   // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)
   // is refused: no visitor can upload a file, so the field can never be
@@ -1855,6 +2012,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
+  // [#36366] An object's action layout (`actionLayout`, and an object
+  // extension's) naming no action of the object, or one not placed in the
+  // scope its arm arranges: the name draws nothing. Gating, because the
+  // author's arrangement is lost without a word otherwise. CLI only: the runtime
+  // snapshot carries no stack `actions`, so an action bound by `objectName`
+  // would read as unknown there; the design mode's Save checks the names
+  // against the served object before it writes.
+  {
+    name: 'validateObjectActionLayout',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-object-action-layout.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectActionLayout(stack),
+  },
   // A standalone action that declares a location but no `objectName` binds to
   // no object, so the button it declares never renders (every location is an
   // object's surface). The handler still runs: an object-less action answers
@@ -1886,6 +2060,73 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
   },
+  // [ADR-0160 D1] Context packs that name an object or field the stack does not
+  // define, a related list with no link to the root, or a body that is not
+  // long text. Advisory: the tool reads what resolves and states nothing about
+  // the rest, so the author hears it here.
+  //
+  // [ADR-0160 D1] "Reported at save and by `os validate`": on the runtime
+  // publish door for `ai_context`, the door a Studio / REST `/meta` / MCP
+  // author of a pack has. The rule reads `aiContexts` and `objects` and no
+  // other collection; `objects` is the context every per-write snapshot
+  // carries, and the written pack is the sole member of its own collection.
+  // Under a stated package scope that `objects` is the write's closure, not
+  // every installed object, so the scope is passed through and an object
+  // outside it is worded for the closure with `closureDependencyRemedy`, as
+  // every save-door rule judging an object name under a scope does. The
+  // findings ride the 2xx `advisories`; with no scope they carry the rule ids
+  // and messages `os validate` prints. The save is never refused for them, as
+  // for every advisory rule on this door.
+  {
+    name: 'validateAiContext',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-ai-context.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['ai_context'],
+    run: (stack, ctx) => validateAiContext(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+  },
+  // [ADR-0161 K4, row 4] Knowledge sources whose object or a listed field the
+  // stack does not have, whose object the API does not serve for `search`, or
+  // that index a system object which does not opt into AI reads (the gates of
+  // the knowledge service's admission that need no principal), and a listed
+  // credential-class or `internal` field, which the index never carries.
+  //
+  // GATING, and on the runtime publish door for `knowledge_source`: ADR-0161
+  // K4 says an item "is refused when the object or a named field does not
+  // exist" and that "a packaged item meets the gates that need no principal in
+  // `os validate` and at publish". That is the departure from the
+  // `validateAiContext` row above, which only advises at publish because a
+  // context pack still reads what resolves; a source that fails one of these
+  // has nothing to index (a missing object), indexes no text for a member (a
+  // missing field), or is never searched for a caller the service judges (a
+  // gated object). The rule reads `knowledgeSources`, `objects` (and the
+  // stack's own extensions), `manifest.dependencies` and no other collection;
+  // `objects` is the context every per-write snapshot carries, and the
+  // written source is the sole member of its own collection. Under a stated
+  // package scope that `objects` is the write's closure, so the scope is
+  // passed through and an object outside it is worded for the closure with
+  // `closureDependencyRemedy`. With no scope `objects` is the whole
+  // collection the host serves (`wholeCollection`), so an unresolved object
+  // is an error there too; only the CLI, where a manifest dependency the
+  // artifact does not carry may define it, hedges it as a warning (the
+  // `flow-trigger-unknown-object` split). An `error` refuses the publish
+  // (422), the `warning`s ride the 2xx `advisories`.
+  {
+    name: 'validateKnowledgeSource',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-knowledge-source.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['knowledge_source'],
+    run: (stack, ctx) =>
+      validateKnowledgeSource(stack, {
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+        wholeCollection: ctx.runtimeWriteType !== undefined && !ctx.packageScope,
+      }),
+  },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and
   // `replace` at parse (ruling 6942780880), so no stack this rule could flag
@@ -1903,6 +2144,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
+  },
+  // [#35143] A seed record key, or a seed `columns` key, that names no column
+  // of the dataset's object (`seed-record-unknown-field`). The seed load writes
+  // each record through the engine's insert, whose declared-field door refuses
+  // the key, so the record is dropped at boot while the build read as passed.
+  // `defineSeed` refuses it when it runs; a plain `data[]` entry and a `seed`
+  // saved at the runtime door were judged by nothing before the load. GATING
+  // on all three commands and on the runtime `seed` door. The columns are the
+  // object's fields as served — the stack's own extensions folded in on the
+  // CLI; at the door the deployment's served objects (`context.objects`) — plus
+  // the system columns injected on that object. A dataset whose object the
+  // snapshot does not hold is not judged here.
+  {
+    name: 'validateSeedRecordKeys',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-seed-record-keys.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['seed'],
+    run: (stack, ctx) => validateSeedRecordKeys(stack, objectsAsServed(stack, ctx.storedObjectExtensions ?? []).objects),
   },
   // An active state machine with no (or an empty) `initialStates`: a record
   // can be born in any state. Gating: the declaration works against its author
@@ -2459,15 +2721,125 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/data-model-rules.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object'],
-    run: (stack) =>
-      lintSummaryRollups(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+    // [#35143] The relation arm (`rollup/child-without-parent-reference`)
+    // asks whether the child has a foreign key back to the parent, and an
+    // object extension may add it, so it reads the child's fields as served:
+    // on the CLI the stack's own extensions folded in; at the `object` door
+    // the registry's served objects arriving as `context.objects`, pending
+    // `object_extension` drafts included (`storedObjectExtensions` is stated
+    // on `object_extension` writes only, so it is empty here). The aggregand
+    // arms keep reading the declared child field.
+    run: (stack, ctx) => {
+      const served = new Map<string, { name: string; def: unknown }[]>();
+      for (const obj of objectsAsServed(stack, ctx.storedObjectExtensions ?? []).objects) {
+        if (typeof obj.name !== 'string' || served.has(obj.name)) continue;
+        const fields = Array.isArray(obj.fields)
+          ? (obj.fields as AnyRec[]).filter((f) => typeof f?.name === 'string').map((f) => ({ name: f.name as string, def: f }))
+          : Object.entries((obj.fields ?? {}) as AnyRec).map(([name, def]) => ({ name, def }));
+        served.set(obj.name, fields);
+      }
+      return summaryRollupFindings(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        (child) => served.get(child),
+      ).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
         path: f.path,
         message: f.message,
         hint: f.fix ?? '',
-      })),
+      }));
+    },
+  },
+  // [#35143] Two field shapes that parse and publish and then do not do what
+  // the key or the name says (`lintFieldReferenceShapes`): `reference` on a
+  // type that reads none (error — the engine links nothing, and the record
+  // page's inline editor turns the field into a record picker that writes a
+  // record id into it), and a `lookup` / `master_detail` named like a count or
+  // a total (warning — a relationship stores one record's id, never a number).
+  // GATING on all three commands; on the runtime publish gate's `object` and
+  // `object_extension` writes, where the written entry's own fields are the
+  // whole input, so nothing the snapshot lacks can make it fire. The
+  // differential charges a write only with a finding it creates.
+  {
+    name: 'lintFieldReferenceShapes',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack) => {
+      const extensions = [...objectExtensionsByTarget(stack).entries()].flatMap(([target, list]) =>
+        list.map((ext) => ({ target, path: ext.path, fields: ext.fields })),
+      );
+      return lintFieldReferenceShapes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [], extensions).map(
+        (f) => ({
+          severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+          rule: f.rule,
+          where: f.where,
+          path: f.path,
+          message: f.message,
+          hint: f.fix ?? '',
+        }),
+      );
+    },
+  },
+  // A select option `color` the option badge renders neutral
+  // (`field/option-color-renders-neutral`): since the ruling on
+  // objectstack#36882 (option A) an option is coloured only by its declared
+  // colour, and a declared colour outside the nine palette families and the
+  // `#rgb` / `#rrggbb` hex paints the same neutral grey as no colour at all.
+  // ADVISORY: `SelectOption.color` stays a free string (charts and gantt hand
+  // it to the browser as a CSS colour), so nothing is refused.
+  //
+  // On the runtime publish gate's `object` and `object_extension` writes,
+  // where the written entry's own options are the whole input, so the
+  // differential charges a write only with a colour it declares. This is an
+  // advisory-tier rule at the object door, and that is this rule's own card's
+  // crossing, not one of the fenced rules': the fence
+  // (`RUNTIME_OBJECT_ADVISORY_VOLUME`) prices advisory VOLUME, and this rule
+  // fires on 0 of the platform's and the examples' declared option colours
+  // (every one is a family name or a 6-digit hex), so a save hears it only
+  // when its author wrote a colour that will not paint. `picklist` is not a
+  // runtime-creatable type, so picklists are judged on the CLI alone.
+  {
+    name: 'lintOptionColors',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack) => {
+      const extensions = [...objectExtensionsByTarget(stack).entries()].flatMap(([target, list]) =>
+        list.map((ext) => ({ target, path: ext.path, fields: ext.fields })),
+      );
+      const picklists: OptionColorPicklist[] = [];
+      const collect = (key: 'picklists' | 'picklistExtensions', nameKey: 'name' | 'extend', noun: string) => {
+        const entries = (stack as AnyRec)[key];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry: AnyRec, i: number) => {
+          const name = typeof entry?.[nameKey] === 'string' ? (entry[nameKey] as string) : '';
+          if (!name) return;
+          picklists.push({ name, path: `${key}[${i}]`, where: `${noun} "${name}"`, options: entry.options });
+        });
+      };
+      collect('picklists', 'name', 'picklist');
+      collect('picklistExtensions', 'extend', 'picklist extension of');
+      return lintOptionColors(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        extensions,
+        picklists,
+      ).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      }));
+    },
   },
   // Two visible fields of one object served under one label
   // (`field-label-duplicate`): the platform's `owner_id` and an author's
@@ -2832,23 +3204,34 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // semantics (system-elevated, the whole child collection, the parent field's
   // own FLS on read); this tells the author so where they configure the set.
   // Advisory: the pair is legal and often meant.
+  //
+  // Across the runtime publish gate for `permission` writes, on the measurement
+  // the previous `surfaceReason` asked for (the precedent is the crossing of
+  // `validateRetiredPermissionResidue` above). What a `permission` save hands
+  // this rule: the set is the written item, in `permissions`; the parent and
+  // child objects it judges the set against are the snapshot's `objects`, which
+  // the gate has carried since the security rules were measured, narrowed to
+  // the written package's closure plus that package's other drafts (the draft
+  // verdict's pending declarations). The rule reads only spec-declared keys, so
+  // the authored body answers as the parsed one does, and a child the snapshot
+  // does not carry is left unjudged by the rule's own "silence, never a guess"
+  // clause, so a narrowed snapshot can drop a finding but never invent one. The
+  // finding sits on the written set's own entry, so the differential charges it
+  // to that write and never to a stored sibling set. Pinned at this layer
+  // (`runtime-gate.rollup-source-visibility.test.ts`) and at the draft door
+  // that answers the MCP author's save (`metadata-protocol`'s
+  // `protocol.draft-publish-verdict.test.ts`). Advisory only, so it rides the
+  // 2xx the write earns and can never refuse one. `object` writes stay off: an
+  // advisory object rule crossing falls under RUNTIME_OBJECT_ADVISORY_VOLUME,
+  // a separate UX decision.
   {
     name: 'validateRollupSourceVisibility',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-rollup-source-visibility.ts',
-    surfaces: CLI_ONLY,
-    // The precedent the reason below names is #17936, the measured crossing of
-    // `validateRetiredPermissionResidue` onto `permission` writes.
-    surfaceReason:
-      'Advisory-tier rule over permission-set × summary-field pairs: it cannot refuse a write. CLI-only ' +
-      'because the crossing it would take is unmeasured: nothing yet measures, per write, what a ' +
-      '`permission` save hands this rule (the set, and the parent and child objects it judges the set ' +
-      'against), which is the measurement taken before `validateRetiredPermissionResidue` crossed on ' +
-      '`permission` writes. Crossing on `permission` writes is therefore a separate decision with that ' +
-      'precedent; crossing on `object` writes as well would fall under the RUNTIME_OBJECT_ADVISORY_VOLUME ' +
-      'fence. Never a bare `runtimeTypes` edit.',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['permission'],
     run: (stack) => validateRollupSourceVisibility(stack),
   },
   // #4983 — the sibling surface of the rule above, and ADR-0056 D4's gate,
@@ -2950,9 +3333,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // failed every run, on every door; `const input = ctx.input || {}` is the
   // shape an AI author writes, a redeclared parameter. Gating: no reading of
   // the metadata behaves as written, because the body never starts. A
-  // regular-expression PATTERN the host refuses is the one `warning` arm (the
-  // two engines' pattern dialects measurably differ; a literal that never
-  // closes or carries a bad flag set is refused; see the module). Across the runtime publish gate for `action` writes and for
+  // regular-expression pattern the host refuses for a measured dialect gap (a
+  // duplicate named group, a modifier group, a Unicode property name only
+  // QuickJS knows: Node 22's V8 refuses them, QuickJS runs them) is the one
+  // `warning` arm; every other
+  // pattern failure, a literal that never closes and a bad flag set are
+  // refused (see the module). Across the runtime publish gate for `action` writes and for
   // `object` writes, whose inline `actions[]` the same walk reads; the
   // differential charges a write only with the bodies it adds. The rule loads
   // no dependency: compiling goes through the host's `node:vm`.
@@ -2966,6 +3352,25 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['action', 'object'],
     run: (stack) => validateActionBodyCompiles(stack),
   },
+  // [#35143] An L2 action body that calls a write leaf of `ctx.api` (`insert`,
+  // `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without granting
+  // itself `api.write` (`action-body-write-capability-undeclared`). The sandbox
+  // refuses the call at the call site, so the action answers 403 on every click
+  // that reaches it. Gating: the grant and the refusal are both facts. Read,
+  // never parsed (the source parsers load at no runtime door), so it crosses
+  // the runtime publish gate for `action` writes and for `object` writes, whose
+  // inline `actions[]` the same walk reads; the differential charges a write
+  // only with the bodies it adds.
+  {
+    name: 'validateActionBodyCapabilities',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-capabilities.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCapabilities(stack),
+  },
   // The same compile check over an L2 hook body and an L2 job body, in the
   // wrapper the runtime runs both in (`(async (ctx) => { SOURCE })`, built from
   // the same function the rule compiles inside). Gating for the action rule's
@@ -2973,8 +3378,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `judgeBodyCompile`; two ids (`hook-body-does-not-compile`,
   // `job-body-does-not-compile`). Across the runtime publish gate for `hook`
   // writes only: a hook is runtime-creatable, a job is not
-  // (`allowRuntimeCreate: false`), so no door publishes a job body, and no
-  // object write carries a hook (`hooks` is not an ObjectSchema key). The rule
+  // (`allowRuntimeCreate: false`), so the metadata publish door never takes a
+  // job body, and no object write carries a hook (`hooks` is not an
+  // ObjectSchema key). That is the metadata door only: the boot and
+  // `os package install` bring hook and job bodies in from an artifact and run
+  // no author-time rule, so such a body reaches the runtime unjudged and the
+  // runner's coded compile failure is its answer there. The rule
   // loads no dependency: compiling goes through the host's `node:vm`.
   {
     name: 'validateHookAndJobBodyCompiles',

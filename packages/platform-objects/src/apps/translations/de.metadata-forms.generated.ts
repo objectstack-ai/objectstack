@@ -77,8 +77,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Feldnamen dieses Objekts, das wichtigste zuerst – der erste Eintrag gewinnt, wo nur einer Platz hat (ADR-0085). Steuert die Standardspalten von Listen und Bezugslisten, Karten, Vorschauen untergeordneter Datensätze, die Hover-Karte des Datensatzes und die Datensatzauswahl. Ein Name, der kein Feld dieses Objekts ist, wird bei der Veröffentlichung abgelehnt."
       },
       relatedLists: {
-        label: "Verknüpfte Listen",
-        helpText: "Fachliche Reihenfolge der verknüpften Listen dieses Objekts auf seiner Datensatzseite, die wichtigste zuerst. Jeder Eintrag ist ein Name eines untergeordneten Objekts (z. B. task) oder object.field, wenn dieses untergeordnete Objekt mehr als eine Beziehung zu diesem Objekt hat. Aufgeführte Listen kommen zuerst; die übrigen folgen in der abgeleiteten Reihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, platziert nichts, daher lehnt das Speichern oder Validieren des Objekts ihn ab."
+        label: "Tabs der Datensatzseite",
+        helpText: "Die Tabs der Datensatzseite nach der Übersicht, in Reihenfolge. Jeder Eintrag ist der Name eines untergeordneten Objekts (z. B. task), object.field, wenn dieses Objekt mehr als eine Beziehung zu diesem Objekt hat, ein integrierter Tab (sys_attachment, sys_approval_request, sys_activity) oder ein Eintrag mit eigenem Titel und eigenen Spalten, festgelegt in den Objekteinstellungen von Studio. Sobald etwas aufgeführt ist, zeigt eine verknüpfte Liste, die kein Eintrag nennt, keinen Tab, auch eine Liste, die ein anderes Paket hinzufügt, bis dieses Objekt sie nennt; Anhänge erscheinen nur, wenn sie aufgeführt sind. Leer: Alle Listen erscheinen in der Standardreihenfolge. Ein Name, der keiner auf dieses Objekt zeigenden Beziehung entspricht, wird beim Speichern des Objekts abgelehnt."
       },
       searchableFields: {
         label: "Durchsuchbare Felder",
@@ -114,7 +114,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein.",
+        options: {
+          none: "Keine — im Eingabeformular immer geöffnet, ohne Umschalter",
+          expanded: "Ausgeklappt — einklappbar, startet geöffnet",
+          collapsed: "Eingeklappt — einklappbar, startet geschlossen"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -134,7 +139,56 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "Typ",
-        helpText: "Feldtyp"
+        helpText: "Feldtyp",
+        options: {
+          text: "Textfeld",
+          textarea: "Textbereich",
+          email: "E-Mail",
+          url: "URL-Adresse",
+          phone: "Telefon",
+          password: "Passwort",
+          markdown: "Markdown-Text",
+          html: "HTML-Inhalt",
+          richtext: "Formatierter Text",
+          number: "Zahl",
+          currency: "Währung",
+          percent: "Prozent",
+          date: "Datum",
+          datetime: "Datum und Uhrzeit",
+          time: "Uhrzeit",
+          boolean: "Boolesch",
+          toggle: "Umschalter",
+          select: "Auswahl",
+          multiselect: "Mehrfachauswahl",
+          radio: "Optionsfeld",
+          checkboxes: "Kontrollkästchen",
+          lookup: "Nachschlagen (Referenz)",
+          master_detail: "Master-Detail-Beziehung",
+          tree: "Baum",
+          image: "Bild",
+          file: "Datei",
+          avatar: "Profilbild",
+          video: "Videodatei",
+          audio: "Audiodatei",
+          formula: "Formel (berechnet)",
+          summary: "Zusammenfassung (Rollup)",
+          autonumber: "Automatische Nummer",
+          composite: "Zusammengesetzt (eingebettet)",
+          repeater: "Wiederholung (eingebettetes Array)",
+          record: "Datensatz (Schlüssel-Map)",
+          location: "Standort (GPS)",
+          address: "Adresse",
+          code: "Quellcode",
+          json: "JSON-Daten",
+          color: "Farbe",
+          rating: "Bewertung",
+          slider: "Schieberegler",
+          signature: "Unterschrift",
+          qrcode: "QR-Code / Strichcode",
+          progress: "Fortschritt",
+          tags: "Schlagwörter",
+          vector: "Vektor-Embedding"
+        }
       },
       "fields.description": {
         label: "Beschreibung",
@@ -186,7 +240,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "Wertebereich",
-        helpText: "Standard, dem der geschriebene Wert angehören muss; ein Schreibvorgang mit einem Wert außerhalb wird abgelehnt"
+        helpText: "Standard, dem der geschriebene Wert angehören muss; ein Schreibvorgang mit einem Wert außerhalb wird abgelehnt",
+        options: {
+          iana_time_zone: "IANA-Zeitzone",
+          iso_4217_currency: "Währungscode nach ISO 4217",
+          iso_3166_alpha2: "Ländercode nach ISO 3166-1 alpha-2"
+        }
       },
       "fields.rows": {
         label: "Zeilen",
@@ -226,7 +285,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "Art",
-        helpText: "Lebenszykluskategorie (nur Einfachauswahl / Optionsfeld): ein Schritt auf dem Weg, das erfolgreiche Ende oder das erfolglose Ende. Für jede Option des Phasenfelds erforderlich."
+        helpText: "Lebenszykluskategorie (nur Einfachauswahl / Optionsfeld): ein Schritt auf dem Weg, das erfolgreiche Ende oder das erfolglose Ende. Für jede Option des Phasenfelds erforderlich.",
+        options: {
+          open: "Offen",
+          won: "Gewonnen",
+          lost: "Verloren"
+        }
       },
       "fields.reference": {
         label: "Referenz",
@@ -238,7 +302,20 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "Verhalten beim Löschen",
-        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird",
+        options: {
+          set_null: "Auf null setzen",
+          cascade: "Kaskadieren (untergeordnete löschen)",
+          restrict: "Einschränken (Löschen blockieren)"
+        }
+      },
+      "fields.transferBehavior": {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen",
+        options: {
+          none: "Keine (bleiben bei ihrem Besitzer)",
+          cascade: "Kaskadieren (Mitverschieben mit dem referenzierten Datensatz anbieten)"
+        }
       },
       "fields.multiple": {
         label: "Mehrfach",
@@ -250,7 +327,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "Rückgabetyp",
-        helpText: "Ergebnistyp für Formeln"
+        helpText: "Ergebnistyp für Formeln",
+        options: {
+          text: "Zeichenfolge",
+          number: "Zahl",
+          boolean: "Boolesch",
+          date: "Datum",
+          currency: "Währung",
+          percent: "Prozent"
+        }
       },
       "fields.summaryOperations": {
         label: "Zusammenfassungsoperationen",
@@ -266,7 +351,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "Funktion",
-        helpText: "Aggregationsfunktion"
+        helpText: "Aggregationsfunktion",
+        options: {
+          count: "Anzahl",
+          sum: "Summe",
+          avg: "Durchschnitt",
+          min: "Minimum",
+          max: "Maximum"
+        }
       },
       "fields.autonumberFormat": {
         label: "Format der automatischen Nummerierung",
@@ -276,9 +368,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sprache",
         helpText: "Sprache des Editors (z. B. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
-        helpText: "Dieses Feld in der Aktivitätszeitleiste des Datensatzes zusammenfassen"
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       "fields.visibleWhen": {
         label: "Sichtbar wenn",
@@ -298,6 +394,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Verlauf verfolgen"
+      },
+      "enable.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Standard ist an. Aus schaltet die Werte für das ganze Objekt ab, gleich was ein Feld sagt."
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -363,15 +463,31 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "Eindeutiger Index",
-        helpText: "Eindeutigkeitsbereich (ADR-0120). Nicht gesetzt: nicht eindeutig. Das veraltete bloße true (es bedeutet global) wird nicht angeboten; ein Index, der es trägt, behält es, bis Sie einen Bereich wählen."
+        helpText: "Eindeutigkeitsbereich (ADR-0120). Nicht gesetzt: nicht eindeutig. Das veraltete bloße true (es bedeutet global) wird nicht angeboten; ein Index, der es trägt, behält es, bis Sie einen Bereich wählen.",
+        options: {
+          global: "Global — ein Inhaber in der gesamten Installation, über genau diese Spalten",
+          organization: "Organisation — ein Inhaber pro Organisation (der Treiber stellt die Organisationsspalte voran)"
+        }
       },
       ownership: {
         label: "Eigentümerschaft",
-        helpText: "Modell der Datensatz-Eigentümerschaft. Fehlt es, gilt user."
+        helpText: "Modell der Datensatz-Eigentümerschaft. Fehlt es, gilt user.",
+        options: {
+          user: "Benutzer — neu zuweisbarer owner_id plus owning_business_unit_id",
+          business_unit: "Geschäftseinheit — nur owning_business_unit_id, kein owner_id",
+          org: "Organisation",
+          none: "Keine — kein Besitzer pro Datensatz, keiner der beiden Anker"
+        }
       },
       sharingModel: {
         label: "Freigabemodell",
-        helpText: "Organisationsweite Standardsichtbarkeit von Datensätzen für interne Benutzer. Ein benutzerdefiniertes Objekt, das es weglässt, gilt zur Laufzeit als private (ADR-0090 D1)."
+        helpText: "Organisationsweite Standardsichtbarkeit von Datensätzen für interne Benutzer. Ein benutzerdefiniertes Objekt, das es weglässt, gilt zur Laufzeit als private (ADR-0090 D1).",
+        options: {
+          private: "Privat — nur Besitzer",
+          public_read: "Öffentlich lesbar — alle lesen, der Besitzer schreibt",
+          public_read_write: "Öffentlich lesen/schreiben — alle lesen und schreiben",
+          controlled_by_parent: "Vom übergeordneten Datensatz gesteuert — vom Master-Datensatz abgeleitet"
+        }
       },
       sharing: {
         label: "Freigabe",
@@ -395,7 +511,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "Standard",
-        helpText: "public: durch Platzhalterzuweisungen '*' abgedeckt. private: benötigt eine ausdrückliche Zuweisung pro Objekt und ist von der Platzhalter-Sicherheit auf Zeilenebene ausgenommen."
+        helpText: "public: durch Platzhalterzuweisungen '*' abgedeckt. private: benötigt eine ausdrückliche Zuweisung pro Objekt und ist von der Platzhalter-Sicherheit auf Zeilenebene ausgenommen.",
+        options: {
+          public: "Öffentlich — durch Platzhalter-Berechtigungen (*) abgedeckt",
+          private: "Privat — erfordert eine explizite Berechtigung pro Objekt"
+        }
       },
       requiredPermissions: {
         label: "Erforderliche Berechtigungen",
@@ -411,11 +531,22 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "Zulässige Zielgruppen",
-        helpText: "Zielgruppen, die ein neuer Link nennen darf; jede andere wird abgelehnt. Nicht gesetzt: nur Link. Jede Zielgruppe benötigt dennoch den Link selbst: angemeldet erfordert zusätzlich einen angemeldeten Benutzer, E-Mail zusätzlich die Adresse des Empfängers auf der Liste des Links."
+        helpText: "Zielgruppen, die ein neuer Link nennen darf; jede andere wird abgelehnt. Nicht gesetzt: nur Link. Jede Zielgruppe benötigt dennoch den Link selbst: angemeldet erfordert zusätzlich einen angemeldeten Benutzer, E-Mail zusätzlich die Adresse des Empfängers auf der Liste des Links.",
+        options: {
+          public: "Öffentlich",
+          link_only: "Nur Link — jeder mit dem Link",
+          signed_in: "Angemeldet — angemeldete Benutzer mit dem Link",
+          email: "E-Mail — aufgeführte Empfänger mit dem Link"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "Zulässige Berechtigungen",
-        helpText: "Berechtigungsstufen, die ein neuer Link gewähren darf; jede andere wird abgelehnt. Nicht gesetzt: nur Ansehen."
+        helpText: "Berechtigungsstufen, die ein neuer Link gewähren darf; jede andere wird abgelehnt. Nicht gesetzt: nur Ansehen.",
+        options: {
+          view: "Ansehen",
+          comment: "Kommentieren",
+          edit: "Bearbeiten"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "Maximale Ablauftage",
@@ -461,9 +592,25 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Inhaber ändern",
         helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
       },
+      actionLayout: {
+        label: "Aktionsanordnung",
+        helpText: "Die Reihenfolge der Aktionen dieses Objekts und welche davon Schaltflächen sind, je Bereich: pinned (höchstens 3 Schaltflächen, in Reihenfolge) und more (die Reihenfolge des Menüs „Mehr“; eine in keinem von beiden genannte Aktion folgt in ihrer Standardreihenfolge). Nicht gesetzt: Jede Oberfläche wählt ihre Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "Die Symbolleiste der Listenseite, als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Listen-Symbolleiste; $import / $export nur in pinned. Höchstens 3 angeheftet. Nicht angeheftet zeigt die Seite weiterhin ihr eigenes Import-/Export-Menü. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeichnet nichts."
+      },
+      "actionLayout.record": {
+        label: "Datensatz",
+        helpText: "Die Datensatzkopfzeile (Datensatzseite, Seitenvorschau, Leiste unten auf dem Telefon), als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Datensatzkopfzeile oder ihrem Menü „Mehr“. Höchstens 3 angeheftet. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeichnet nichts."
+      },
       editMode: {
         label: "Bearbeitungsmodus",
-        helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung."
+        helpText: "Absicht der Bearbeitungsinteraktion für Datensätze dieses Objekts. Fehlt sie, wählt der Renderer seinen eigenen Standard. Rendererübergreifende Absicht, keine Gestaltung.",
+        options: {
+          modal: "Modal — Bearbeitungsformular als Dialog über der aktuellen Ansicht",
+          page: "Seite — zu einer eigenen ganzseitigen Bearbeitungsroute wechseln"
+        }
       },
       fileAccessDelegate: {
         label: "Delegat für Dateizugriff",
@@ -475,7 +622,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "Klasse",
-        helpText: "Persistenzvertrag für die Zeilen dieses Objekts"
+        helpText: "Persistenzvertrag für die Zeilen dieses Objekts",
+        options: {
+          record: "Datensatz (geschäftliche Wahrheit — dauerhaft)",
+          audit: "Audit (Compliance-Journal — aufbewahren → archivieren → löschen)",
+          telemetry: "Telemetrie (hochfrequentes Protokoll — kurze Aufbewahrung)",
+          transient: "Flüchtig (kurzlebiger Zustand — Ablauf per TTL)",
+          event: "Ereignis (Bus-Nachrichten — sehr kurze TTL)"
+        }
       },
       "lifecycle.retention": {
         label: "Aufbewahrung",
@@ -503,7 +657,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "Strategie",
-        helpText: "Speicherstrategie"
+        helpText: "Speicherstrategie",
+        options: {
+          rotation: "Rotation (Zeit-Shards + älteste verwerfen)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "Shards",
@@ -511,7 +668,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "Einheit",
-        helpText: "Zeitbreite eines Shards"
+        helpText: "Zeitbreite eines Shards",
+        options: {
+          day: "Tag",
+          week: "Woche",
+          month: "Monat"
+        }
       },
       "lifecycle.archive": {
         label: "Archiv",
@@ -642,7 +804,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "Prozentanzeige",
-        helpText: "Wie der Wert schreibgeschützt in Listenzellen und auf der Datensatzseite angezeigt wird. Nicht gesetzt: ein Fortschrittsbalken neben dem Prozentwert. Balken: immer der Fortschrittsbalken, für Fortschritt. Einfach: nur der Prozentwert, für eine Rate oder eine Wahrscheinlichkeit."
+        helpText: "Wie der Wert schreibgeschützt in Listenzellen und auf der Datensatzseite angezeigt wird. Nicht gesetzt: ein Fortschrittsbalken neben dem Prozentwert. Balken: immer der Fortschrittsbalken, für Fortschritt. Einfach: nur der Prozentwert, für eine Rate oder eine Wahrscheinlichkeit.",
+        options: {
+          bar: "Balken",
+          plain: "Einfach"
+        }
       },
       currencyConfig: {
         label: "Währungskonfiguration",
@@ -650,7 +816,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "Währungsmodus",
-        helpText: "dynamic (Standard): Das Feld hat keine eigene Währung, und Beträge werden in der Standardwährung des Mandanten angezeigt (Einstellung localization.currency). fixed: Das Feld hat eine Währung, defaultCurrency. record: Jeder Datensatz hat seine eigene Währung, gespeichert in dem Feld, das currencyField nennt."
+        helpText: "dynamic (Standard): Das Feld hat keine eigene Währung, und Beträge werden in der Standardwährung des Mandanten angezeigt (Einstellung localization.currency). fixed: Das Feld hat eine Währung, defaultCurrency. record: Jeder Datensatz hat seine eigene Währung, gespeichert in dem Feld, das currencyField nennt.",
+        options: {
+          dynamic: "Dynamisch — die Standardwährung des Mandanten",
+          fixed: "Fest — eine Währung für dieses Feld",
+          record: "Datensatz — jeder Datensatz nennt seine Währung"
+        }
       },
       "currencyConfig.currencyField": {
         label: "Währungsfeld",
@@ -747,7 +918,19 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "Verhalten beim Löschen",
-        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+        helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird",
+        options: {
+          cascade: "Kaskadieren (untergeordnete löschen)",
+          restrict: "Einschränken (Löschen blockieren)"
+        }
+      },
+      transferBehavior: {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen",
+        options: {
+          none: "Keine (bleiben bei ihrem Besitzer)",
+          cascade: "Kaskadieren (Mitverschieben mit dem referenzierten Datensatz anbieten)"
+        }
       },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",
@@ -789,6 +972,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Spalten der verknüpften Liste",
         helpText: "Spalten der verknüpften Liste dieser Beziehung auf der Detailseite des übergeordneten Datensatzes, als Feldnamen dieses (untergeordneten) Objekts, z. B. name, status. Nicht gesetzt: vom untergeordneten Objekt abgeleitet. Nur Namen – Bezeichnungen, Zelltypen und Formatierung stammen aus den Felddefinitionen des untergeordneten Objekts."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "Raster (Zeilen in einer Tabelle bearbeiten)",
+          form: "Formular (jede Zeile im vollständigen Formular öffnen)"
+        }
+      },
       inlineTitle: {
         label: "Inline-Titel",
         helpText: "Titel des Inline-Master-Detail-Rasters im übergeordneten Datensatz."
@@ -823,7 +1014,15 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "Rückgabetyp",
-        helpText: "Deklarierter Werttyp der Formel, gesetzt aus dem abgeleiteten CEL-Typ. Verbraucher lesen ihn, statt den Ausdruck erneut zu parsen. Currency: ein Geldbetrag in der Währung, die die Währungskonfiguration dieses Felds deklariert (dynamisch, wenn nicht gesetzt)."
+        helpText: "Deklarierter Werttyp der Formel, gesetzt aus dem abgeleiteten CEL-Typ. Verbraucher lesen ihn, statt den Ausdruck erneut zu parsen. Currency: ein Geldbetrag in der Währung, die die Währungskonfiguration dieses Felds deklariert (dynamisch, wenn nicht gesetzt).",
+        options: {
+          text: "Zeichenfolge",
+          number: "Zahl",
+          boolean: "Boolesch",
+          date: "Datum",
+          currency: "Währung",
+          percent: "Prozent"
+        }
       },
       summaryOperations: {
         label: "Zusammenfassungsoperationen",
@@ -835,7 +1034,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "Funktion",
-        helpText: "Aggregationsfunktion"
+        helpText: "Aggregationsfunktion",
+        options: {
+          count: "Anzahl",
+          sum: "Summe",
+          min: "Minimum",
+          max: "Maximum",
+          avg: "Durchschnitt"
+        }
       },
       "summaryOperations.field": {
         label: "Feld",
@@ -861,9 +1067,17 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Schreibgeschützt",
         helpText: "Das Feld ist in Formularen schreibgeschützt"
       },
+      uiReadonly: {
+        label: "In der Oberfläche schreibgeschützt",
+        helpText: "Niemand kann dieses Feld in der Konsole von Hand bearbeiten (Dialoge, Datensatzseite, Tabellen, Ziehen im Kanban, Kalender und Gantt, Zeiterfassung), während Aktionen, Importe, die API und Flows es weiterhin schreiben; jeder Schreibvorgang wird von den Validierungen des Objekts beurteilt. Ausgeschaltet lassen, wenn Schreibgeschützt eingeschaltet ist: Das hält bereits jeden Client-Schreibvorgang fern. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
+      },
       hidden: {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
+      },
+      showOnCreate: {
+        label: "Beim Anlegen anzeigen",
+        helpText: "Dieses Feld beim Anlegen eines Datensatzes abfragen. Aus: Der Anlegen-Dialog, das Anlegen auf ganzer Seite und ein von einer Aktion geöffnetes Anlegen lassen es weg; Bearbeiten, die Datensatzseite und Listen zeigen es weiterhin. Ein Pflichtfeld wird immer abgefragt und kann daher nicht ausgeschaltet werden."
       },
       searchable: {
         label: "Durchsuchbar",
@@ -881,6 +1095,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Schreibgeschützt wenn",
         helpText: "CEL-Prädikat über den Datensatz (z. B. record.status == 'paid') – das Feld ist schreibgeschützt, solange es TRUE ist, serverseitig durchgesetzt: Die Änderung eines gesperrten Felds durch eine Aktualisierung wird verworfen und der gespeicherte Wert behalten. Liest die eigenen Spalten des Datensatzes; objectstack validate lehnt ein Lesen über ein Referenzfeld ab."
       },
+      uiReadonlyWhen: {
+        label: "In der Oberfläche schreibgeschützt wenn",
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status != 'draft') – solange es TRUE ist, kann niemand das Feld eines bestehenden Datensatzes in der Konsole bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Ziehen in Kanban, Kalender und Gantt, Zeiterfassung); der Erstellungsdialog eines neuen Datensatzes wertet es nicht aus. Aktionen, Importe, die API und Flows schreiben es weiterhin, beurteilt von den Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes, wie Schreibgeschützt wenn. Der In-App-Assistent, der im Auftrag einer Person handelt, beachtet es noch nicht."
+      },
       requiredWhen: {
         label: "Erforderlich wenn",
         helpText: "CEL-Prädikat über den Datensatz – das Feld ist erforderlich, solange es TRUE ist, serverseitig als Übergangsschranke durchgesetzt: Ein Schreibvorgang, der den Wert fehlen lässt, wird abgelehnt, wenn der Datensatz die Regel zuvor erfüllte; eine Zeile, der der Wert bereits fehlt, besteht daher weiterhin unabhängige Bearbeitungen. Für eine Regel, die jeder Schreibvorgang erfüllen muss, verwenden Sie eine Skriptregel unter validations. Neben storage.notNull abgelehnt."
@@ -897,9 +1115,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Intern",
         helpText: "Den Wert dieses Felds nie über den allgemeinen Datenpfad zurückgeben: Die Engine lässt den Schlüssel in Ergebnissen von find/findOne und in den Antworttexten von create und update weg, bei der Standardprojektion und wenn ein Client das Feld in ?select= nennt. Speicherung, Filterung und Indizierung bleiben unberührt."
       },
+      fieldHistory: {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       trackHistory: {
         label: "Verlauf verfolgen",
-        helpText: "Wertänderungen dieses Felds als Einträge in der Aktivitätszeitleiste des Datensatzes darstellen (ADR-0052 §5b). Pro Feld einzeln zu aktivieren."
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       widget: {
         label: "Widget",
@@ -959,7 +1181,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Sprache",
-        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox"
+        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox",
+        options: {
+          expression: "Ausdruck (L1)",
+          js: "JavaScript (L2, in der Sandbox)"
+        }
       },
       "body.source": {
         label: "Quelle",
@@ -1022,7 +1248,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Im Hintergrund ausführen, die Transaktion nicht blockieren"
       },
       onError: {
-        label: "Bei Fehler"
+        label: "Bei Fehler",
+        options: {
+          abort: "Abbrechen",
+          log: "Protokollieren"
+        }
       },
       timeoutMs: {
         label: "Timeout (ms)",
@@ -1030,7 +1260,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "Ausführen als",
-        helpText: "Identität für Datenoperationen über ctx.api: die auslösende Schreiboperation übernehmen (Standard), system (erhöht) oder user (der auslösende Benutzer)"
+        helpText: "Identität für Datenoperationen über ctx.api: die auslösende Schreiboperation übernehmen (Standard), system (erhöht) oder user (der auslösende Benutzer)",
+        options: {
+          inherit: "Erben (auslösender Schreibvorgang)",
+          system: "System (erhöht)",
+          user: "Benutzer (auslösender Benutzer)"
+        }
       },
       condition: {
         label: "Bedingung",
@@ -1052,15 +1287,54 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Startdaten",
-    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden"
+    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden",
+    fields: {
+      object: {
+        label: "Objekt"
+      },
+      mode: {
+        label: "Modus"
+      }
+    }
   },
   picklist: {
     label: "Auswahlliste",
-    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen"
+    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      options: {
+        label: "Optionen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   mapping: {
     label: "Importzuordnung",
-    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert"
+    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      targetObject: {
+        label: "Zielobjekt"
+      },
+      mode: {
+        label: "Modus"
+      },
+      sourceFormat: {
+        label: "Quellformat"
+      }
+    }
   },
   view: {
     label: "Ansicht",
@@ -1203,7 +1477,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Kompakte Symbolleiste",
-        helpText: "Gruppierung/Farbe/Dichte/Felder ausblenden in einem einzigen Popover für Ansichtseinstellungen zusammenfassen"
+        helpText: "Gruppierung/Farbe/Dichte/Felder ausblenden in einem einzigen „Ansichtseinstellungen“-Popover zusammenfassen. Standardmäßig aktiv: Fehlt der Schlüssel oder ist er `true`, zeichnet der Renderer diese kompakte Symbolleiste; `false` zeichnet die breite Symbolleiste mit je einer Schaltfläche pro Steuerelement. Die kompakte Symbolleiste hat keine Schaltfläche „Aktualisieren“, daher steuert `userActions.refresh` nur die breite Symbolleiste; Ziehen zum Aktualisieren ist von keinem der beiden Schlüssel betroffen."
       },
       rowHeight: {
         label: "Zeilenhöhe",
@@ -1355,11 +1629,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "Navigation",
-        helpText: "Konfiguration der Navigation beim Klick auf ein Element (standardmäßig Seitenleiste, page, new_window oder none)"
+        helpText: "Konfiguration der Navigation beim Klick auf ein Element: die Größe der Seitenleiste und `preventNavigation` für eine Liste, deren Zeilen nichts öffnen (`mode` ist veraltet – der Datensatzname öffnet die Seite, das Hover-Symbol die Seitenleiste)"
       },
       "navigation.mode": {
         label: "Modus",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[VERALTET] Bestimmt bei der Liste eines Objekts (einer Listenansicht, den `listViews` eines Objekts) nicht mehr, wie ein Datensatz geöffnet wird: In der Konsole öffnet der Datensatzname für jeden Leser die vollständige Seite und das Hover-Symbol daneben die Seitenleiste. Dort werden `drawer`, `page` und `new_window` weiterhin geparst und ändern nichts, lassen Sie den Schlüssel also weg; `none` bedeutet weiterhin, dass Zeilen nichts öffnen – verwenden Sie besser `preventNavigation: true`. Ein Seitenblock mit `navigation` (ein Listenblock, die Zeitleiste, eine eingebettete Ansicht) berücksichtigt weiterhin jeden Wert."
       },
       "navigation.preventNavigation": {
         label: "Navigation verhindern",
@@ -1371,7 +1645,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "Größe",
-        helpText: "Größenstufe des Overlays für die Detailansicht in der Seitenleiste: 'auto' (Standard – der Renderer leitet sie aus Feldanzahl + Viewport ab; KI schreibt nichts) oder eine grobe Überschreibung sm/md/lg/xl/full. Der Pixelangabe `width` vorziehen; der Modus page ignoriert sie."
+        helpText: "Breitenstufe der Datensatz-Seitenleiste: 'auto' (Standard) behält die feste Standardbreite des Hosts bei, für jedes Objekt gleich, unabhängig von seiner Feldanzahl (die seitliche Datensatzleiste der Konsole öffnet mit 460px), oder eine grobe Überschreibung sm/md/lg/xl/full (Obergrenze 480/720/960/1200/1600px, stets auf den Viewport begrenzt). Eine vom Leser gezogene Breite hat Vorrang vor beiden. Der Pixelangabe `width` vorziehen; ohne Wirkung, wo der Datensatz als Seite öffnet (in der Konsole jeder Datensatz auf einem Smartphone), und auf einem Bildschirm in Smartphone-Breite, den die Seitenleiste ganz ausfüllt."
       },
       "navigation.width": {
         label: "Breite",
@@ -1384,8 +1658,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Gesperrt von",
         helpText: "Benutzer, der die Ansichtskonfiguration gesperrt hat"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
+      },
+      object: {
+        label: "Objekt"
       }
     }
+  },
+  form: {
+    label: "Formular"
   },
   page: {
     label: "Seite",
@@ -1426,7 +1710,14 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Typ",
-        helpText: "Seitenart. „Liste / Oberfläche“ bindet eine Quellansicht an eine kuratierte Oberfläche – wie sie aussieht (Raster / Kanban / Kalender / …), ist eine unter „Oberfläche“ festgelegte Visualisierung, kein Seitentyp."
+        helpText: "Seitenart. „Liste / Oberfläche“ bindet eine Quellansicht an eine kuratierte Oberfläche – wie sie aussieht (Raster / Kanban / Kalender / …), ist eine unter „Oberfläche“ festgelegte Visualisierung, kein Seitentyp.",
+        options: {
+          list: "Listen- / Interface-Seite",
+          record: "Datensatzseite",
+          home: "Startseite",
+          app: "App-Seite",
+          utility: "Dienstprogrammleiste"
+        }
       },
       template: {
         label: "Vorlage",
@@ -1539,7 +1830,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "Datensatzaktion",
-        helpText: "Wie ein Klick auf einen Datensatz dessen Details öffnet"
+        helpText: "Wie ein Klick auf einen Datensatz dessen Details öffnet",
+        options: {
+          drawer: "Seitenleiste (Vorschau rechts)",
+          page: "Ganze Seite",
+          none: "Nicht anklickbar"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "Anzahl der Datensätze anzeigen",
@@ -1582,6 +1878,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Filter",
         description: "Standard- und globale Filter, die auf alle Widgets angewendet werden."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "Erweitert",
         description: "Barrierefreiheit und Leistungsoptimierung."
@@ -1590,30 +1890,30 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "Eindeutige Kennung in snake_case"
+        helpText: "Eindeutiger interner Name dieses Dashboards: Kleinbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben (zum Beispiel sales_overview)."
       },
       label: {
         label: "Bezeichnung",
-        helpText: "Anzeigename"
+        helpText: "Der Titel, den Benutzer für dieses Dashboard sehen."
       },
       description: {
         label: "Beschreibung"
       },
       columns: {
         label: "Spalten",
-        helpText: "Rasterspalten (Standard 12)"
+        helpText: "Auf wie vielen Spalten die Widgets angeordnet werden, von 1 bis 24. Leer lassen, damit das Dashboard eine Breite wählt, die zu seinen Widgets passt."
       },
       gap: {
         label: "Abstand",
-        helpText: "Abstand zwischen Widgets in Schritten von 0,25rem (4 = 1rem)"
+        helpText: "Wie viel Platz zwischen den Widgets bleibt. Größere Zahlen rücken sie weiter auseinander; leer lassen für den Standardabstand."
       },
       refreshIntervalSeconds: {
         label: "Aktualisierungsintervall (Sekunden)",
-        helpText: "Automatische Aktualisierung (Sekunden)"
+        helpText: "Wie oft das Dashboard seine Daten neu lädt, in Sekunden. Leer lassen oder 0 eingeben, um das automatische Neuladen auszuschalten."
       },
       header: {
         label: "Kopfzeile",
-        helpText: "Konfiguration der Dashboard-Kopfzeile (Titel, Untertitel, Aktionen)"
+        helpText: "Was oben im Dashboard angezeigt wird: Titel, Beschreibung und Aktionsschaltflächen."
       },
       "header.showTitle": {
         label: "Titel anzeigen",
@@ -1641,7 +1941,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard-Widgets mit Position und Größe"
+        helpText: "Die Diagramme, Kennzahlen und Tabellen dieses Dashboards und wo jedes davon steht."
       },
       "widgets.id": {
         label: "Widget-ID"
@@ -1696,11 +1996,42 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Datumsbereich",
-        helpText: "Standardauswahl des Datumsbereichs"
+        helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
+      },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "Heute",
+          yesterday: "Gestern",
+          this_week: "Diese Woche",
+          last_week: "Letzte Woche",
+          this_month: "Dieser Monat",
+          last_month: "Letzter Monat",
+          next_month: "Nächster Monat",
+          this_quarter: "Dieses Quartal",
+          last_quarter: "Letztes Quartal",
+          next_quarter: "Nächstes Quartal",
+          this_year: "Dieses Jahr",
+          last_year: "Letztes Jahr",
+          last_7_days: "Letzte 7 Tage",
+          last_30_days: "Letzte 30 Tage",
+          last_90_days: "Letzte 90 Tage",
+          next_30_days: "Nächste 30 Tage",
+          custom: "Benutzerdefiniert…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
       },
       globalFilters: {
         label: "Globale Filter",
-        helpText: "Auf alle Widgets angewendete Filter"
+        helpText: "Filter, mit denen Betrachter alle Widgets auf einmal eingrenzen können oder nur die von Ihnen gewählten."
       },
       "globalFilters.name": {
         label: "Filtername"
@@ -1731,6 +2062,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "Ziel-Widgets"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
@@ -1868,7 +2203,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "Modus",
-        helpText: "Semantischer Modus der Aktion. Wird derzeit nur von der KI-Heuristik für menschliche Beteiligung gelesen – kein Renderer verzweigt danach."
+        helpText: "Semantischer Modus der Aktion. Wird derzeit nur von der KI-Heuristik für menschliche Beteiligung gelesen – kein Renderer verzweigt danach.",
+        options: {
+          create: "Erstellen",
+          edit: "Bearbeiten",
+          delete: "Löschen",
+          custom: "Benutzerdefiniert"
+        }
       },
       order: {
         label: "Reihenfolge",
@@ -1888,7 +2229,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "Sprache",
-        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox"
+        helpText: "expression = reine Formel; js = JavaScript in einer Sandbox",
+        options: {
+          expression: "Ausdruck (L1)",
+          js: "JavaScript (L2, in der Sandbox)"
+        }
       },
       "body.source": {
         label: "Quelle",
@@ -2005,7 +2350,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "Vorgang",
-        helpText: "Deklaratives Schreiben von Feldern eines einzelnen Datensatzes: 'update' wendet `patch`, unter den gesammelten `params` zusammengeführt, auf den aktuellen Datensatz ALS AUFRUFER an – nie mit erhöhten Systemrechten, sodass Berechtigungen des Aufrufers, Hooks und Validierungen des Objekts wie bei einer Benutzerbearbeitung greifen."
+        helpText: "Deklaratives Schreiben von Feldern eines einzelnen Datensatzes: 'update' wendet `patch`, unter den gesammelten `params` zusammengeführt, auf den aktuellen Datensatz ALS AUFRUFER an – nie mit erhöhten Systemrechten, sodass Berechtigungen des Aufrufers, Hooks und Validierungen des Objekts wie bei einer Benutzerbearbeitung greifen.",
+        options: {
+          update: "Aktuellen Datensatz aktualisieren"
+        }
       },
       patch: {
         label: "Patch",
@@ -2162,7 +2510,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung"
       },
       description: {
-        label: "Beschreibung"
+        label: "Beschreibung",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Typ",
@@ -2244,9 +2593,52 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Standardzeitraum und Umschalter für einen benutzerdefinierten Bereich. Die Dimension muss eine Datumsdimension des Datasets sein; leer lassen, wenn das Dataset genau eine hat."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with.",
+        options: {
+          today: "Heute",
+          yesterday: "Gestern",
+          this_week: "Diese Woche",
+          last_week: "Letzte Woche",
+          this_month: "Dieser Monat",
+          last_month: "Letzter Monat",
+          next_month: "Nächster Monat",
+          this_quarter: "Dieses Quartal",
+          last_quarter: "Letztes Quartal",
+          next_quarter: "Nächstes Quartal",
+          this_year: "Dieses Jahr",
+          last_year: "Letztes Jahr",
+          last_7_days: "Letzte 7 Tage",
+          last_30_days: "Letzte 30 Tage",
+          last_90_days: "Letzte 90 Tage",
+          next_30_days: "Nächste 30 Tage",
+          custom: "Benutzerdefiniert…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Exportoptionen",
         helpText: "Download-Formate (csv, xlsx) und Dateiname. Wer herunterladen darf, regelt die Exportberechtigung für das Dataset-Objekt."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2907,24 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Hintergrundjob"
+    label: "Hintergrundjob",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      schedule: {
+        label: "Zeitplan"
+      },
+      enabled: {
+        label: "Aktiviert"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   datasource: {
     label: "Datenquelle"
@@ -2525,10 +2934,41 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API-Endpunkt",
-    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten"
+    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      method: {
+        label: "Methode"
+      },
+      path: {
+        label: "Pfad"
+      },
+      type: {
+        label: "Typ"
+      },
+      "objectParams.object": {
+        label: "Objekt"
+      },
+      "objectParams.operation": {
+        label: "Vorgang"
+      }
+    }
   },
   translation: {
-    label: "Übersetzung"
+    label: "Übersetzung",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      locale: {
+        label: "Gebietsschema"
+      }
+    }
   },
   email_template: {
     label: "E-Mail-Vorlage",
@@ -2605,11 +3045,45 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Dokumentation",
-    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben"
+    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      group: {
+        label: "Gruppe"
+      },
+      tags: {
+        label: "Schlagwörter"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   book: {
     label: "Dokumentationsbuch",
-    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert"
+    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      audience: {
+        label: "Zielgruppe"
+      },
+      groups: {
+        label: "Gruppen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   permission: {
     label: "Berechtigungssatz",
@@ -2713,15 +3187,66 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Freigaberegel",
-    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup"
+    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      sharedWith: {
+        label: "Geteilt mit"
+      },
+      accessLevel: {
+        label: "Zugriffsebene"
+      }
+    }
   },
   queue: {
     label: "Warteschlange",
-    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup"
+    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      members: {
+        label: "Mitglieder"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   assignment_rule: {
     label: "Zuweisungsregel",
-    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten"
+    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      entries: {
+        label: "Einträge"
+      },
+      active: {
+        label: "Aktiv"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   agent: {
     label: "KI-Agent",
@@ -2766,7 +3291,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Oberfläche",
-        helpText: "Produktoberfläche, an die dieser Agent gebunden ist (ADR-0063 §1). Nur Fähigkeiten, deren eigene Oberfläche übereinstimmt – oder 'both' ist –, werden angehängt, und der Werkzeugsatz des Agenten ist die Vereinigung der Werkzeuge dieser Fähigkeiten. Standard 'ask'."
+        helpText: "Produktoberfläche, an die dieser Agent gebunden ist (ADR-0063 §1). Nur Fähigkeiten, deren eigene Oberfläche übereinstimmt – oder 'both' ist –, werden angehängt, und der Werkzeugsatz des Agenten ist die Vereinigung der Werkzeuge dieser Fähigkeiten. Standard 'ask'.",
+        options: {
+          ask: "Ask (Konversationsoberflächen)",
+          build: "Build (Erstellungsoberflächen)"
+        }
       },
       instructions: {
         label: "Anweisungen",
@@ -2774,11 +3303,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "Modell",
-        helpText: "Konfiguration des KI-Modells (Anbieter, Modellname, Temperatur usw.)"
+        helpText: "Konfiguration des KI-Modells (Modellname, Temperatur usw.)"
       },
       planning: {
         label: "Planung",
-        helpText: "Konfiguration des autonomen Denkens: die maximale Anzahl an Denkdurchläufen, bevor der Agent stoppt (1–100, Standard 10)."
+        helpText: "Konfiguration des autonomen Denkens: eine Sicherung gegen endlose Schleifen, gezählt in Modellaufrufen (je ein Modellaufruf samt seinem Tool-Stapel), nach der der Agent stoppt (1–1000, Standard 10)."
       },
       memory: {
         label: "Gedächtnis",
@@ -2803,6 +3332,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Schutzmaßnahmen",
         helpText: "Sicherheitsregeln und Inhaltsrichtlinien"
+      },
+      "model.model": {
+        label: "Modell"
       }
     }
   },
@@ -2880,7 +3412,12 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "Oberfläche",
-        helpText: "Agentenoberfläche, an die diese Fähigkeit gebunden ist (ADR-0063 §3). Sie an einen Agenten mit abweichender Oberfläche zu binden, ist beim Auflösen ein harter Fehler, kein stilles Überspringen. Standard 'ask'."
+        helpText: "Agentenoberfläche, an die diese Fähigkeit gebunden ist (ADR-0063 §3). Sie an einen Agenten mit abweichender Oberfläche zu binden, ist beim Auflösen ein harter Fehler, kein stilles Überspringen. Standard 'ask'.",
+        options: {
+          ask: "Ask (Konversationsoberflächen)",
+          build: "Build (Erstellungsoberflächen)",
+          both: "Beide"
+        }
       },
       instructions: {
         label: "Anweisungen",
@@ -2889,6 +3426,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tools: {
         label: "Werkzeuge",
         helpText: "Werkzeugnamen (unterstützt Platzhalter: action_*)"
+      },
+      context: {
+        label: "Kontextpaket",
+        helpText: "Kontextpaket, mit dem dieser Skill arbeitet (sein Name). Erfordert get_record_context unter Tools. Über MCP nimmt der Prompt dann eine optionale Datensatz-ID an"
       },
       triggerConditions: {
         label: "Auslösebedingungen",
@@ -2904,5 +3445,51 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Wert"
       }
     }
+  },
+  ai_context: {
+    label: "KI-Kontextpaket",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The pack's identity and the object whose records it reads."
+      },
+      material: {
+        label: "Material",
+        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+      },
+      object: {
+        label: "Root object",
+        helpText: "The root object: the pack reads one record of it."
+      },
+      fields: {
+        label: "Fields",
+        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+      },
+      related: {
+        label: "Related lists",
+        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+      },
+      body: {
+        label: "Body",
+        helpText: "The one long-text field read as the record's body."
+      },
+      "body.field": {
+        label: "Body field",
+        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+      }
+    }
+  },
+  knowledge_source: {
+    label: "Wissensquelle"
   }
 };

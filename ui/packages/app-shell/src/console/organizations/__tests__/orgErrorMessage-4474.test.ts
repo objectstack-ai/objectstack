@@ -35,6 +35,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ORG_ERROR_MESSAGE_KEYS,
   orgDeleteRefusalRows,
+  readOrgCreateNextStep,
   readOrgDeleteRefusal,
   resolveOrgErrorMessage,
 } from '../orgErrorMessage';
@@ -222,6 +223,83 @@ describe('#28124 — YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS (the p
   });
 });
 
+describe('objectstack#34221 — UNPAID_ORGANIZATION_LIMIT_REACHED (the hosted cap on free organizations)', () => {
+  // The cloud control plane refuses a create past its cap with 403 and a flat
+  // `{ code, message, userMessage, details: { unpaid_organization_limit,
+  // unpaid_organizations, next_step } }`, the sentence in the request's
+  // language (cloud#4308, cloud PR #4626). The auth client's `toAuthError`
+  // carries `code`, `userMessage` and `details` onto the thrown error.
+  const CODE = 'UNPAID_ORGANIZATION_LIMIT_REACHED';
+  const KEY = 'organization.errors.unpaidOrganizationLimitReached';
+  const ZH_SENTENCE =
+    '你已拥有 2 个免费组织，每个账号最多 2 个。要再创建组织，请先把其中一个 Free 组织升级到 Team：Team 组织不占这个名额。被邀请加入的组织不计入。';
+  const refusal = (fields: { userMessage?: string; details?: unknown; message?: string }) =>
+    Object.assign(new Error(fields.message ?? ZH_SENTENCE), {
+      code: CODE,
+      status: 403,
+      ...(fields.userMessage !== undefined ? { userMessage: fields.userMessage } : {}),
+      ...(fields.details !== undefined ? { details: fields.details } : {}),
+    });
+  const packValue = (lang: string): unknown =>
+    KEY.split('.').reduce<unknown>(
+      (n, k) => (n as Record<string, unknown> | undefined)?.[k],
+      builtInLocales[lang as keyof typeof builtInLocales],
+    );
+
+  it("shows the producer's localized userMessage, not the console pack sentence", () => {
+    const shown = resolveOrgErrorMessage(refusal({ userMessage: ZH_SENTENCE }), tZh);
+    expect(shown).toBe(ZH_SENTENCE);
+    expect(shown).not.toBe(packValue('zh-Hans'));
+  });
+
+  it('falls back to the console pack sentence when the refusal carries no userMessage', () => {
+    const shown = resolveOrgErrorMessage(
+      refusal({ message: 'You own 2 free organizations, and one account may own at most 2.' }),
+      tZh,
+    );
+    expect(shown).toBe(packValue('zh-Hans'));
+    expect(shown).toMatch(/\p{Script=Han}/u);
+  });
+
+  it('a blank userMessage is no sentence: the pack fallback is shown', () => {
+    expect(resolveOrgErrorMessage(refusal({ userMessage: '   ' }), tZh)).toBe(packValue('zh-Hans'));
+  });
+
+  it('every pack defines the fallback with its own sentence and no number in it', () => {
+    const en = packValue('en');
+    for (const lang of Object.keys(builtInLocales)) {
+      const value = packValue(lang);
+      expect(typeof value, `${lang} lacks ${KEY}`).toBe('string');
+      expect(value as string, `${lang} names a number the console does not know`).not.toMatch(/\p{Nd}/u);
+      if (lang !== 'en') expect(value, `${lang} still serves the English sentence`).not.toBe(en);
+    }
+  });
+
+  it('reads the next step from details.next_step, for this code only', () => {
+    expect(readOrgCreateNextStep(refusal({ details: { next_step: 'upgrade_to_team' } }))).toBe('upgrade_to_team');
+    expect(readOrgCreateNextStep(refusal({ details: { next_step: 'contact_support' } }))).toBe('contact_support');
+    // A step this console does not know, no details, or another code: no step.
+    expect(readOrgCreateNextStep(refusal({ details: { next_step: 'buy_more' } }))).toBeUndefined();
+    expect(readOrgCreateNextStep(refusal({}))).toBeUndefined();
+    expect(
+      readOrgCreateNextStep(
+        Object.assign(withCode('YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS', 'x'), {
+          details: { next_step: 'upgrade_to_team' },
+        }),
+      ),
+    ).toBeUndefined();
+    expect(readOrgCreateNextStep(new Error('upgrade_to_team'))).toBeUndefined();
+  });
+
+  it("CONTROL: better-auth's organization-limit code still maps to its pack sentence and ignores userMessage", () => {
+    const err = Object.assign(
+      withCode('YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS', 'You have reached the maximum number of organizations'),
+      { userMessage: 'a sentence the console must not show for this row' },
+    );
+    expect(resolveOrgErrorMessage(err, tZh)).toBe(at('organization.errors.organizationLimitReached'));
+  });
+});
+
 describe('#4474 — the mapping table itself', () => {
   it('every mapped code resolves to a key the zh pack actually defines', () => {
     // Guards the class of typo that only shows up as a raw i18n key on screen,
@@ -243,6 +321,8 @@ describe('#4474 — the mapping table itself', () => {
         'ORGANIZATION_ALREADY_EXISTS',
         'ORGANIZATION_CREATION_DISABLED',
         'ORGANIZATION_SLUG_ALREADY_TAKEN',
+        // objectstack#34221: the hosted control plane's cap on free organizations (cloud#4308).
+        'UNPAID_ORGANIZATION_LIMIT_REACHED',
         // objectstack#33650: better-auth 1.7.12 `create-invitation` refuses an address that already holds a membership.
         'USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION',
         'USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION',

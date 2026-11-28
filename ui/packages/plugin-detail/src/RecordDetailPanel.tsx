@@ -50,10 +50,10 @@
  */
 
 import React from 'react';
-import { isExpandableFieldType, resolveAffordance, type SchemaLike } from '@object-ui/core';
+import { fieldStaticallyReadOnlyByHand, isExpandableFieldType, resolveAffordance, type SchemaLike } from '@object-ui/core';
 import type { DataSource } from '@object-ui/types';
 import { SYSTEM_MANAGED_FIELD_NAMES } from '@object-ui/types';
-import { InlineEditProvider } from '@object-ui/react';
+import { InlineEditProvider, RecordContextProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { DetailView } from './DetailView';
 import { InlineEditSaveBar } from './InlineEditSaveBar';
@@ -181,13 +181,17 @@ export function buildRecordDetailFields(
         name,
         label: def.label,
         type: def.type as any,
-        readonly: !!def.readonly || isLookup,
+        // The static hand-lock verdict (`readonly` or `uiReadonly`).
+        readonly: fieldStaticallyReadOnlyByHand(def) || isLookup,
         options: def.options,
         currency: def.currency,
         // The spec's one declaration of a fixed currency: `FieldSchema`
         // refuses a field-level `currency`, so without this a fixed-EUR amount
         // read in the tenant's currency here (objectui#12242).
         currencyConfig: def.currencyConfig,
+        // A quantity's unit (ADR-0158): the number cell draws its label and
+        // display decimal places from it.
+        unitConfig: (def as { unitConfig?: unknown }).unitConfig,
         // A formula's declared result type, which picks its face in the formula
         // cell: `currency` draws through the currency cell with the
         // `currencyConfig` above. Without it a money formula read as a bare
@@ -321,7 +325,7 @@ export function RecordDetailPanel({
             ? [
                 {
                   type: 'action:bar',
-                  location: 'record_header',
+                  location: 'record_page',
                   systemActions: [
                     {
                       name: 'sys_open_new_tab',
@@ -347,19 +351,37 @@ export function RecordDetailPanel({
       />
       {/* Record-level Save/Cancel bar. Callback mode: loops the caller's
           per-field onFieldSave over the draft, preserving the overlay's
-          existing persistence contract (plugin-gantt/kanban/calendar). */}
-      <InlineEditSaveBar
-        onFieldSave={fieldSave ? async (field, value) => {
-          try {
-            await fieldSave(field, value);
-          } catch (err) {
-            console.error('[RecordDetailPanel] inline field save failed:', err);
-            // Rethrow so the save bar surfaces the failure inline and keeps
-            // the draft — swallowing made a rejected save look successful.
-            throw err;
-          }
-        } : undefined}
-      />
+          existing persistence contract (plugin-gantt/kanban/calendar).
+          objectstack#35995 — the record, its object and the data source go
+          along too, so a draft that makes other fields required asks for
+          them first and writes everything in one guarded update, as the
+          record page does. The record context names this record for the
+          bar alone (the object's fields), not for the panel's body. */}
+      <RecordContextProvider
+        objectName={objectName}
+        recordId={recordId}
+        data={record}
+        objectSchema={objectSchema}
+        dataSource={dataSource}
+        embedded
+      >
+        <InlineEditSaveBar
+          dataSource={dataSource}
+          objectName={objectName}
+          recordId={recordId}
+          data={record}
+          onFieldSave={fieldSave ? async (field, value) => {
+            try {
+              await fieldSave(field, value);
+            } catch (err) {
+              console.error('[RecordDetailPanel] inline field save failed:', err);
+              // Rethrow so the save bar surfaces the failure inline and keeps
+              // the draft — swallowing made a rejected save look successful.
+              throw err;
+            }
+          } : undefined}
+        />
+      </RecordContextProvider>
     </InlineEditProvider>
   );
 }

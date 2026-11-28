@@ -34,6 +34,7 @@ import { packageScopedRowWhere } from './sys-metadata-repository.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 import { ConflictError, assertProtocolCompat } from '@objectstack/metadata-core';
+import { isPlatformRecordRow } from '@objectstack/metadata';
 import {
     planUnmanagedImport,
     UNMANAGED_SEED_TYPE,
@@ -92,6 +93,7 @@ import {
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { RollbackMetaItemRequest } from './protocol-door-requests.js';
 import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './protocol-history-slots.js';
+import { packagelessHolderRefusal } from './protocol-save.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ImportUnmanagedPackageAnswer, InstallPackageStoredRowHook, StoredPackageRow } from './protocol-package-install.js';
@@ -116,6 +118,49 @@ const REVERT_PROJECTION_NOT_APPLIED =
 function storedGrantObjectKeys(stored: unknown): string[] {
     const objects = stored && typeof stored === 'object' ? (stored as { objects?: unknown }).objects : undefined;
     return objects && typeof objects === 'object' && !Array.isArray(objects) ? Object.keys(objects) : [];
+}
+
+/** A plan item's type as the registry keys it: `views` and `view` are one type. */
+const singularPlanType = (item: { type: string }): string => PLURAL_TO_SINGULAR[item.type] ?? item.type;
+
+/** A `view` row the commit edited (it stood before the commit): the revert restores it. */
+const isEditedViewItem = (item: CommitPlanItem): boolean => singularPlanType(item) === 'view' && item.existedBefore;
+
+/**
+ * [ADR-0159 D5, ADR-0067 D3] The order `revertCommit` walks a commit's plan
+ * in: newest first, with every `form` item walked after every `view` row the
+ * commit edited. A `form` publish records each old-shape `view` row it
+ * removed or re-saved as an edited row of the same commit, and the plan does
+ * not say which form a row carried, so a `form` item is taken back only once
+ * all of them have been walked ({@link editedViewsNotPutBack}). Every other
+ * item keeps its place.
+ */
+export function revertWalkOrder(items: readonly CommitPlanItem[]): CommitPlanItem[] {
+    const reversed = [...items].reverse();
+    let lastEditedView = -1;
+    reversed.forEach((item, at) => { if (isEditedViewItem(item)) lastEditedView = at; });
+    if (lastEditedView < 0) return reversed;
+    const head = reversed.slice(0, lastEditedView + 1);
+    return [
+        ...head.filter((item) => singularPlanType(item) !== 'form'),
+        ...head.filter((item) => singularPlanType(item) === 'form'),
+        ...reversed.slice(lastEditedView + 1),
+    ];
+}
+
+/**
+ * [ADR-0159 D5, ADR-0067 D3] The `view` rows of a commit's plan that the
+ * commit edited and that this revert has reported in `failed[]`: rows that do
+ * not stand again as they stood before the commit. While one does, no `form`
+ * item of the commit is taken back: the form stays as published, so an undo
+ * never leaves an address with neither the form nor the row that carried it.
+ */
+export function editedViewsNotPutBack(
+    items: readonly CommitPlanItem[],
+    failed: ReadonlyArray<{ type: string; name: string }>,
+): string[] {
+    const edited = new Set(items.filter(isEditedViewItem).map((item) => item.name));
+    return [...new Set(failed.filter((f) => singularPlanType(f) === 'view' && edited.has(f.name)).map((f) => f.name))];
 }
 
 export class ProtocolPackageCommitsFacet {
@@ -897,7 +942,13 @@ export class ProtocolPackageCommitsFacet {
             (r) => (r?.package_id == null || r.package_id === '' || r.package_id === 'sys_metadata')
                 // [#23198] An overlay of an artifact item keeps its binding
                 // (ADR-0070); see the header. The type folds as the save's does.
-                && !host.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
+                && !host.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name))
+                // [#37604] …nor the platform's own record: the package-less row
+                // the platform registers at every boot is no orphan an author
+                // left behind, and rebound it would become the target's item,
+                // mark and all (`isPlatformRecordRow`, `@objectstack/metadata`,
+                // the one reader the restore refusal and the overlay census ask).
+                && !isPlatformRecordRow(r),
         );
 
         // [ADR-0029 D9.9, ADR-0086 D3, #28776] ⭐ THE OWNER JUDGES, in the save
@@ -1242,8 +1293,26 @@ export class ProtocolPackageCommitsFacet {
         const advisories: RuntimeAuthoringIssue[] = [];
 
         // Reverse apply order so artifacts that depend on others (e.g. a view on
-        // a new object) are removed before the thing they reference.
-        for (const it of [...items].reverse()) {
+        // a new object) are removed before the thing they reference; every
+        // `form` item after the `view` rows the commit edited (ADR-0159 D5).
+        for (const it of revertWalkOrder(items)) {
+            // [ADR-0159 D5, ADR-0067 D3] A `form` item is taken back only once
+            // every `view` row the commit edited stands again: one that could
+            // not be put back keeps the form as published, reported here with
+            // nothing written for it.
+            const notPutBack = singularPlanType(it) === 'form' ? editedViewsNotPutBack(items, failed) : [];
+            if (notPutBack.length > 0) {
+                failed.push({
+                    type: it.type,
+                    name: it.name,
+                    error: `Commit item '${it.type}/${it.name}' was not reverted: the view row${notPutBack.length > 1 ? 's' : ''} `
+                        + `${notPutBack.map((n) => `'${n}'`).join(', ')} this commit also edited could not be put back, and a `
+                        + 'form is taken back only once every view row its commit edited stands again. Nothing was written '
+                        + 'for it, so the form stays as published. The entry for each such row here says why it was '
+                        + 'not put back.',
+                });
+                continue;
+            }
             // The version this item restores to, or `null` when it does not take
             // the restore limb at all — bound ONCE (#9174), because the pre-flight
             // below and the `else if` further down must never drift apart: a gate
@@ -1725,6 +1794,13 @@ export class ProtocolPackageCommitsFacet {
                         // [ADR-0146 D2] …and, for the pair's row, the override write gate.
                         deriveRestoredBody,
                         ...memberOption(member),
+                        // [#37130] The platform's own record is never restored:
+                        // refused into `failed[]` as {@link rollbackMetaItem}
+                        // refuses it, nothing written; the commit's other items
+                        // still revert (ADR-0067 D3), except its `form` items,
+                        // which wait for every `view` row the commit edited and
+                        // stay as published while one is not put back (ADR-0159 D5).
+                        refusePlatformRecord: true,
                     });
                     rowWritten = `its row was restored to the body of version ${restoreToVersion}`;
                     revertPlan.push({
@@ -2224,6 +2300,35 @@ export class ProtocolPackageCommitsFacet {
             );
             if (namedBase) throw namedBase;
         }
+        // [ADR-0150 D3, the 2026-11-26 note] A rollback naming no package
+        // that restores the package-unbound row of a name only disabled
+        // packages hold rewrote their customization, hidden with them, so the
+        // next enable served the restored body. It asks the judgment the
+        // save and the delete ask ({@link packagelessHolderRefusal}, its
+        // disabled-holders judgment only), after the D11 close above, and is
+        // refused with the enable as the remedy, nothing written.
+        //
+        // [#37851 ruling A] Whether or not a package-unbound row is stored
+        // now: with none stored but its history kept, the restore inserted
+        // the package-unbound row again, the same customization, so it is
+        // refused with the same remedy. And a rollback naming no package that
+        // restores a disabled package's OWN row (the binding read above names
+        // it) wrote that row, which the next enable served, while the bare
+        // save of the item is refused: it is asked the judgment's first state
+        // ({@link disabledHoldersOnlyRefusal}, the `?package=` remedy, which
+        // the rollback naming that package reaches).
+        if (request.packageId === undefined) {
+            const active = await host.packagelessAddress(singularType, request.name, member, 'active');
+            const holderRefusal = packagelessHolderRefusal(
+                host, 'rollback', request.type, singularType, request.name, member,
+                {
+                    candidates: [...new Set([...active.candidates, ...(rollbackPackageId !== null ? [rollbackPackageId] : [])])],
+                    unbound: rollbackPackageId === null,
+                },
+                'disabled-holders',
+            );
+            if (holderRefusal) throw holderRefusal;
+        }
         // [ADR-0146 D2] A rollback of the base's paired `.custom` row is the
         // pair's declared override, as its save is: it edits no managed item,
         // so the store is told a runtime-only write — never judged an artifact
@@ -2258,6 +2363,9 @@ export class ProtocolPackageCommitsFacet {
                 packageId: rollbackPackageId,
                 // [#32905] …and only a version of that row's slot.
                 ...(slot?.addressed ? { versionOf: slot.owner } : {}),
+                // [#37130] The platform's own record is never restored: refused
+                // as the metadata service's `rollback` refuses it, nothing written.
+                refusePlatformRecord: true,
             });
             // #4521 — a rollback is a live write like any other: the restored
             // body must be the one the runtime dispatches on immediately, not

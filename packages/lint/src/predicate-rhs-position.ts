@@ -154,7 +154,7 @@ function isRec(v: unknown): v is AnyRec {
 /**
  * The `schemaId` a form view resolves its row shape from, or `undefined` when
  * the view is not schema-bound. Read off `ViewDataSourceSchema`'s `schema`
- * member (`view.zod.ts:151-161`) — the shape `defineForm` writes.
+ * member (`view.zod.ts:151-161`) — the shape `defineMetadataForm` writes.
  *
  * Shared rather than duplicated: it is the test for "the metadata-admin
  * evaluator renders this", which is the precondition BOTH the rule that

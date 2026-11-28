@@ -217,16 +217,16 @@ const grid: ObjectGridBlockNode = {
 | `data` | `ViewData` | Bypasses the object query — see [Inline data](#inline-data). |
 | `selection` | `SelectionConfig` | `{ type: 'none' \| 'single' \| 'multiple' }`. |
 | `rowActions` / `bulkActions` | `string[]` | **Names** of actions, not definitions. |
-| `editable` / `singleClickEdit` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). |
-| `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). On by default when the grid renders editable. |
+| `editable` | `boolean` | Inline editing — see [Inline Editing](#inline-editing). `singleClickEdit` is retired (objectstack#36270). |
+| `keyboardNavigation` | `boolean` | Arrow keys move focus between cells, and the cells are one Tab stop — see [Keyboard navigation](#keyboard-navigation). Always on when the grid renders editable. |
 | `navigation` | `NavigationConfig` | What a row click does, `{ mode: 'drawer' \| 'page' \| 'new_window' \| 'none', … }`; a block written without `mode` opens the drawer. |
 | `operations` | `object` | Toggles the built-in CRUD/export/import affordances, e.g. `{ delete: false }`. |
 | `rowHeight`, `frozenColumns`, `resizable`, `reorderableColumns`, `showColumnTypeIcons`, `rowColor`, `conditionalFormatting`, `aggregations`, `exportOptions` | | The rest of the declared surface. (`className` is a base prop: it stays on the node, beside the bag.) |
 | `grouping` | `GroupingConfig` | Row grouping — **server-side**: group set, counts and aggregations come from the query, rows are paged per group; see [Grouping is server-side](#grouping-is-server-side). |
 
 **There is no `sortable`, `filterable`, `onRowClick`, `onSelectionChange`,
-`onCellChange`, `onRowSave`, `onBatchSave` or `object` on this schema.** The
-booleans do not exist at all; the five `on*` names are **component props**
+`onCellChange`, `onRowSave` or `object` on this schema.** The
+booleans do not exist at all; the four `on*` names are **component props**
 (`ObjectGridComponentProps`), which no metadata document can carry — see
 [Row callbacks are component props](#row-callbacks-are-component-props).
 
@@ -835,15 +835,15 @@ verdict.
 
 ### Row callbacks are component props
 
-`onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`, `onBatchSave`, `onEdit`,
+`onRowClick`, `onRowSelect`, `onCellChange`, `onRowSave`, `onEdit`,
 `onDelete`, `onBulkDelete` and `onAddRecord` are React props on
 `ObjectGridComponentProps` — they are functions, so no metadata document can hold
 them, and writing one into a schema does nothing at all: the grid builds the inner
-table's handlers itself and never reads any of these nine off the schema.
+table's handlers itself and never reads any of these eight off the schema.
 
 The one callback the grid does read off the schema is `onNavigate`, declared on
 `ObjectGridSchema` for programmatic callers only. It is a function value too, so
-it is no more authorable than the nine — it is deliberately absent from the
+it is no more authorable than the eight — it is deliberately absent from the
 manifest and the designer panel, and prefer passing it as a prop
 (objectui#5234, maintainer ruling of 2026-08-19).
 
@@ -957,6 +957,49 @@ schema key: list metadata cannot set it. The console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for an object whose data API serves
 no single-record read (objectstack#33317).
 
+### A cell's own menu items
+
+Right-clicking a data cell opens the row's context menu in two sections
+(objectstack#36289). Above a separator, the cell's own items: **Copy**,
+**Paste**, **Clear**, then **Change history** (below). Under it, the row's
+items, unchanged: Open, Open in new tab and the row's actions. A right-click
+off a data cell (the selection cell, the row's "⋮" cell) opens the row's
+section only.
+
+- **Copy** writes the cell's value to the clipboard, as Ctrl/Cmd+C on the
+  selected cell does. A masked cell copies nothing, so it is unavailable there.
+- **Paste** reads the clipboard and writes it into the cell as a paste on the
+  selected cell does: the same conversion, the checks the cell's editor makes
+  (required, length, range, the email and URL shape) and the same save. Text
+  the column cannot read, or a value the checks refuse, is not saved and the
+  cell says why. When the browser will not hand the clipboard over, the cell
+  says so and names Ctrl/Cmd+V. It is offered on text, number, currency,
+  percent, email, URL, phone, date and single-choice fields (an option is
+  matched by value or label), and is unavailable on any other type.
+- **Clear** empties the cell and saves it, as Backspace on the selected cell
+  does. It is unavailable on a required field and on a yes/no field.
+- Paste and Clear are unavailable on a cell the reader may not edit: a
+  read-only or calculated field, a grid that is not editable, a record the
+  reader may not update.
+
+`data-table` hands these to the host's `renderRowContextMenu` as
+`context.cell` (`copy`, `paste`, `clear`, each absent where the table refuses
+it), beside `context.column`. A grid that offers no row action and no
+selection opens the menu for a cell only when the cell can be changed or has a
+change history; otherwise the browser's own menu stays.
+
+### A cell's change history
+
+Right-clicking a cell of a field the object declares adds **Change history**
+to the row's context menu, when the grid's data source can read activity
+(`find`), the field's changes are recorded with their values
+(`resolveFieldHistory` from `@objectstack/spec/data`) and the reader may read
+the field. Choosing it opens
+`@object-ui/plugin-detail`'s `FieldHistoryPopover` at that point: that
+record's changes of that field, newest first, ten at a time, or **No changes
+recorded** with who created the record. `data-table` names the cell's column to
+the host's `renderRowContextMenu` as `context.column`.
+
 ### Inline Editing
 
 Enable inline cell editing for quick updates:
@@ -976,28 +1019,36 @@ const schema: ObjectGridBlockNode = {
       { field: 'status', label: 'Status', type: 'select' },
     ],
     editable: true,
-    singleClickEdit: false,
   } satisfies ObjectGridProps,
 };
 ```
 
 `editable` is the only switch: it is a grid-level flag, and edits persist through
-the host's data source (`dataSource.update`) with no callback to wire.
+the host's data source (`dataSource.update`) with no callback to wire. A grid that
+renders editable (`editable` set and the viewer allowed to edit the object) selects
+a cell first, and each committed cell is saved on its own, with no "Save All"
+(objectstack#36270). A grid that renders read-only keeps its click-to-open row.
+`singleClickEdit` is retired: `@objectstack/spec` refuses it, and `os migrate meta`
+deletes it from existing sources.
 
 **Inline Editing Features:**
-- **Double-click to edit**: double-click any editable cell to enter edit mode
-  (`singleClickEdit: true` opens it on the first click instead)
+- **Select, then edit**: a click selects a cell; double-click, `Enter`, `F2` or
+  typing opens its editor
 - **Keyboard shortcuts**:
-  - Press `Enter` on a focused cell to start editing
-  - Press `Enter` while editing to save changes
+  - Press `Enter` while editing to save the cell
   - Press `Escape` to cancel editing
 - **Per-field read-only**: which cells open is decided by the **field definition**,
   not by a column key — a field marked `readonly`, and computed/binary field types
   (formula, autonumber, file, …), never open an editor
-  (`isFieldInlineEditable`, `src/inline-edit-options.ts:82`). There is no
+  (`isFieldInlineEditable` in `src/inline-edit-options.ts`). There is no
   `editable` key on `ListColumn`.
-- **Visual feedback**: editable cells show a hover state
-- **Automatic focus**: the input is focused and selected when editing begins
+- **Rich text edits in a panel**: a `markdown`, `html` or `richtext` cell opens
+  the record form's text box in a panel under the cell (Enter is a new line,
+  Ctrl/Cmd+Enter saves, Escape discards, a click outside saves); the cell keeps
+  showing its value and the row its height.
+- **Visual feedback**: the selected cell is ringed
+- **Automatic focus**: the editor takes the caret, after the value, when editing
+  begins
 
 **Use Cases:**
 - Quick data corrections
@@ -1031,49 +1082,58 @@ WAI-ARIA grid pattern (objectui#11068):
 - **Editing.** On an editable grid, Enter still opens the focused cell, and an
   open cell's editor keeps every key. An edit ended with Enter or Escape hands
   focus back to its cell, so the arrows carry on from there.
-- **Default.** On when the grid renders editable — the authored `editable` *and*
-  the viewer's permission to update the object, the same value inline editing
-  obeys. A read-only grid keeps every cell its own Tab stop unless you write
-  `true`, and `false` turns it off on an editable grid.
+- **Default.** Always on when the grid renders editable — the authored
+  `editable` *and* the viewer's permission to update the object, the same value
+  inline editing obeys — because that grid selects a cell first and moves the
+  selection with these keys; `false` does not turn it off there
+  (objectstack#36270). A read-only grid keeps every cell its own Tab stop unless
+  you write `true`.
 - While it is on, the table is exposed to assistive technology as a `grid`. A
   grouped grid navigates within each group's table; the mobile card layout has
   no cells and is unaffected.
 
-### Batch Editing & Multi-Row Save
+### Owning persistence: `onRowSave`
 
-Edit multiple cells across multiple rows and save them individually or all at once:
+There is one editing model. Every grid that renders editable is select-first and
+saves each committed cell on its own (objectstack#36270); the staged model it
+replaced — click-to-edit, a pending-changes bar, "Save All" and the batch handler
+`onBatchSave` — is retired (objectstack#35827), and so is the host's way back into
+it, `cellSelection={false}`. `cellSelection` takes only `true` now: it asks for the
+select-first model on a grid that renders read-only. An editable grid needs no prop:
 
-The schema half is just `editable` — the save/cancel affordances appear on their
-own once a row has pending changes:
+```tsx
+import { ObjectGrid, type ObjectGridComponentProps } from '@object-ui/plugin-grid';
 
-```typescript
-import type { ObjectGridBlockNode } from '@object-ui/types';
-import type { ObjectGridProps } from '@objectstack/spec/ui';
+declare const dataSource: NonNullable<ObjectGridComponentProps['dataSource']>;
 
-const schema: ObjectGridBlockNode = {
-  type: 'object-grid',
-  properties: {
-    objectName: 'products',
-    columns: [
-      { field: 'sku', label: 'SKU' },
-      { field: 'name', label: 'Name' },
-      { field: 'price', label: 'Price', type: 'currency', align: 'right' },
-      { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
-    ],
-    editable: true,
-  } satisfies ObjectGridProps,
-};
+export const ProductsGrid = () => (
+  <ObjectGrid
+    dataSource={dataSource}
+    schema={{
+      type: 'object-grid',
+      objectName: 'products',
+      columns: [
+        { field: 'sku', label: 'SKU' },
+        { field: 'name', label: 'Name' },
+        { field: 'price', label: 'Price', type: 'currency', align: 'right' },
+        { field: 'stock', label: 'Stock', type: 'number', align: 'right' },
+      ],
+      editable: true,
+    }}
+  />
+);
 ```
 
-Left alone, saving goes through the host's data source. A React host that needs to
-own persistence supplies `onRowSave` / `onBatchSave` as **component props** — and
-because they are props, they take the adapter from the host's own scope rather than
-from anything in the schema:
+Left alone, each committed cell is written through the host's data source. A React
+host that needs to own persistence supplies `onRowSave` as a **component prop** — and
+because it is a prop, it takes the adapter from the host's own scope rather than from
+anything in the schema. It is called once per commit, with every edit that record
+still holds:
 
 ```tsx
 import type { ObjectGridComponentProps } from '@object-ui/plugin-grid';
 
-type Persistence = Pick<ObjectGridComponentProps, 'onRowSave' | 'onBatchSave'>;
+type Persistence = Pick<ObjectGridComponentProps, 'onRowSave'>;
 
 const persistence = (
   dataSource: NonNullable<ObjectGridComponentProps['dataSource']>,
@@ -1081,51 +1141,38 @@ const persistence = (
   onRowSave: async (rowIndex, changes, row) => {
     await dataSource.update('products', row.id, changes);
   },
-  onBatchSave: async (allChanges) => {
-    await Promise.all(
-      allChanges.map(({ row, changes }) => dataSource.update('products', row.id, changes)),
-    );
-  },
 });
 ```
 
-**Batch Editing Features:**
-- **Pending changes tracking**: Edit multiple cells across multiple rows before saving
-- **Visual indicators**: 
-  - Modified rows are highlighted with amber background
-  - Modified cells are shown in bold with amber text
-  - Toolbar shows count of modified rows
-- **Row-level actions**: Save or cancel changes for individual rows
-- **Batch operations**: 
-  - "Save All" button to save all modified rows at once
-  - "Cancel All" button to discard all pending changes
-- **Flexible callbacks** — all three are `ObjectGridComponentProps`, never schema keys:
-  - `onRowSave`: called when saving a single row
-  - `onBatchSave`: called when saving multiple rows at once
-  - `onCellChange`: called for each staged cell edit
-- **A concurrent write is refused, not overwritten**: the default saves send each
+**Upgrading from the staged model:** drop `cellSelection={false}`; move a batch
+`onBatchSave(allChanges)` handler to a per-record `onRowSave(rowIndex, changes, row)`,
+or drop it and let the grid write through its data source.
+
+- **A refused save keeps the edit**: the cell keeps what was typed and says the
+  server's reason; the record's next commit sends it again together with the new
+  cell, as one update.
+- **A concurrent write is refused, not overwritten**: the default save sends the
   row's `updated_at` as `If-Match`, and an editable grid asks for that column even
   when no column shows it. A row someone else saved after it was read answers
   `409`, which opens the record page's conflict dialog (Reload latest, Overwrite
-  anyway, Cancel). "Save All" reports each row on its own: a refused row stays
-  pending and flagged, and the rows that saved are cleared.
-- **Each pending edit stays on its record**: edits are kept by the record's `id`,
-  not by row position, so a re-read in a new order (a row save's refresh, the
-  data-invalidation bus, a page change) draws and saves every edit on the record
-  it was typed on. An edit whose record the current page no longer holds stays
-  pending, and "Save All" still writes it to that record.
-- **Editing during a save is kept**: cells stay editable while a row save or
-  "Save All" is in flight, and the save clears only the values it sent. An edit
-  made during the save, on any row or on the cell being saved, stays pending.
+  anyway, Cancel).
+- **Each edit stays on its record**: edits are kept by the record's `id`, not by row
+  position, so a re-read in a new order draws and saves every edit on the record it
+  was typed on.
 
-**Example Workflow:**
-1. User edits multiple cells across different rows
-2. Modified rows are visually highlighted
-3. Toolbar shows "X rows modified" with Save All/Cancel All buttons
-4. User can:
-   - Save individual rows using row-level save button
-   - Save all changes at once using "Save All" button
-   - Cancel individual row changes or all changes
+### Export
+
+The toolbar's Export menu (offered when the schema declares `exportOptions`) and
+the table's own CSV button (`operations.export: true`) are both offered only
+while the object's resolved export verdict is open:
+`isObjectExportOffered(objectSchema, effectiveApiOperations)` from
+`@object-ui/core`, which is the object's `userActions.exportCsv` over its
+`managedBy` default, ANDed with the caller's effective `export` API operation.
+An object that sets `userActions.exportCsv: false` gets neither entry, in any
+format; one that does not set it keeps them, since every `managedBy` bucket
+defaults it on. `operations.export: false` on the schema closes them too. The
+setting hides the entries and is not a permission: who may export is the
+permission set's `allowExport`.
 
 ## TypeScript Support
 

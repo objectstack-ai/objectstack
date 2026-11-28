@@ -405,7 +405,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // to a workspace-root marker file, so it names no root-level path and this
     // entry adds no new top-level root for `check-ci-filter-parity.mjs` to want
     // in ci.yml's `crosspkg:` filter. Its own header records that trade.
-    globs: ['packages/**/*.ts'],
+    //
+    // src/studio-review-links.callers.test.ts (#36895) walks the same `.ts`
+    // population for hand-built Studio addresses, and reads the one skill eval
+    // that quotes the server's draft review links, to hold each quoted link
+    // equal to what this package builds. That file sits under the published
+    // skills root, which ci.yml's `crosspkg:` filter already covers whole.
+    globs: ['packages/**/*.ts', 'skills/objectstack-mcp-build/evals/draft-door-procedure.json'],
   },
   '@objectstack/organizations': {
     // src/no-framework-dependents.pin.test.ts is ADR-0132 D3's mechanical half.
@@ -459,8 +465,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // The `examples/` globs are the showcase modules two i18n tests import LIVE
     // across the workspace boundary, each named per file because the two read
     // DIFFERENT namespaces and are not interchangeable:
-    //   test/i18n-section-coverage.test.ts dynamically imports `contact.view`
-    //     and `semantic-zoo.object` and asserts `toEqual` over an exhaustive
+    //   test/i18n-section-coverage.test.ts dynamically imports `contact.view`,
+    //     `contact.object` (whose `fieldGroups` lay out the contact's forms
+    //     since #36553) and `semantic-zoo.object` and asserts `toEqual` over an exhaustive
     //     hardcoded `_sections` key list, so any newly NAMED section in either
     //     module goes red -- this is what PR #8742 broke in queue build
     //     31825946401, where the merge queue was the first signal.
@@ -570,6 +577,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/services/service-cluster/src/**',
       'packages/connectors/connector-mcp/src/connector-mcp-plugin.ts',
       'examples/app-showcase/src/ui/views/contact.view.ts',
+      'examples/app-showcase/src/data/objects/contact.object.ts',
       'examples/app-showcase/src/data/objects/semantic-zoo.object.ts',
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',
@@ -1019,6 +1027,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     them. A real read: the enumeration changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      //   src/validate-action-body-capabilities.test.ts (#35143) READS the
+      //     sandbox runner's source and pins the rule's write-method set to its
+      //     `WRITE` list, so a method the runner starts gating on `api.write`
+      //     turns this suite red instead of leaving the rule a method short.
+      'packages/runtime/src/sandbox/quickjs-runner.ts',
+      //   src/validate-seed-record-keys.test.ts (#35143) READS the engine's
+      //     `PLATFORM_PROVISIONED_COLUMNS` and pins the rule's mirror of it, so
+      //     a column the engine starts provisioning turns this suite red.
+      'packages/objectql/src/declared-read-columns.ts',
     ],
     heldBy: {
       // `const commandsDir = join(repoRoot, 'packages/cli/src/commands')`
@@ -1437,8 +1454,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     //
     // test/score/entry.test.ts reads ADR-0150 D1's bucket-1 and position rows,
     // the table the bare-name check restates, so an edit to that table does too.
+    //
+    // test/verified-builds.test.ts pins each verified build under
+    // docs/qa/scenarios/builds/ to its provenance and to its card's sha256
+    // (#34920), so a build, provenance or card edit moves its verdict.
     globs: [
       'docs/qa/scenarios/*.json',
+      'docs/qa/scenarios/builds/*.json',
       'docs/qa/platform-checklist/areas/*.json',
       'packages/cli/src/lint/corpus.ts',
       'docs/adr/0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md',
@@ -1450,6 +1472,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/qa/scenarios/test/library.test.ts',
         'packages/qa/scenarios/test/refusals.test.ts',
       ],
+      // The builds directory is listed the same way, to pair each build with its card.
+      'docs/qa/scenarios/builds/*.json': ['packages/qa/scenarios/test/verified-builds.test.ts'],
     },
   },
   '@objectstack/formula': {
@@ -1492,11 +1516,19 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // scanned them in this package (`rest-server-canonical-query-ast.test.ts`;
     // the three `error-response-*` arm-derivation tests) now read them there,
     // each bound to one relative literal.
+    //
+    // The two `examples/app-crm` files are ADR-0159 card ②'s byte-equal pin
+    // (`public-form-app-crm-byte-equal.test.ts`): it boots the CRM's lead
+    // object and its lead views, the container whose `formViews` entry is the
+    // first-party public form, and holds `GET /forms/contact-us` to the answer
+    // taken before the `form` type. An edit to either file can move that answer.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
       'packages/types/src/data-error-classification.ts',
       'packages/core/src/utils/import-runner.ts',
+      'examples/app-crm/src/objects/index.ts',
+      'examples/app-crm/src/views/lead.view.ts',
       'content/**',
       'docs/**',
       'skills/**',
@@ -1776,6 +1808,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/cli/src/commands/serve.ts',
       'scripts/publish-smoke.sh',
       'packages/cli/src/commands/init.ts',
+      // The platform's Starter app, READ by src/blank-template-starter-parity.test.ts
+      // (#36945). The blank template ships the Starter's companies, contacts,
+      // their views and its menu entries as source, and that test holds each
+      // template file equal to the Starter's, modulo the namespace. A
+      // Starter-only diff is exactly the drift it exists to catch, and without
+      // this declaration `create-objectstack#test` would hash the same across
+      // it and replay a cached green over the divergence (#7802's Layer B).
+      // `src/**`, not the whole example: the test reads its objects, views and
+      // app, and nothing outside `src/` but the config's namespace line.
+      'examples/app-starter/src/**',
+      'examples/app-starter/objectstack.config.ts',
     ],
     heldBy: {
       // Read through `git grep -- content/docs` and `git ls-files`, so the
@@ -1789,6 +1832,10 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // flat literal collector can see" while a change to it really does break
       // that test (measured there).
       'scripts/invoked-as.mjs': ['packages/create-objectstack/src/template-version-stamps.test.ts'],
+      // A walked root: the parity test resolves `examples/app-starter/src` once
+      // and joins each object, view and app file onto it, so the paths it reads
+      // are built from a variable this scan cannot fold — the witness names it.
+      'examples/app-starter/src/**': ['packages/create-objectstack/src/blank-template-starter-parity.test.ts'],
     },
   },
 };

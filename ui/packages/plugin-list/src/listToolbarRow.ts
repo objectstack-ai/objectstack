@@ -71,6 +71,6 @@ export const TOOLBAR_CLUSTER = 'flex items-center gap-0.5 shrink-0';
  * `sm` the trigger keeps its icon and a 44px touch target).
  */
 export const TOOLBAR_TEXT_TRIGGER =
-  'h-7 min-w-7 gap-1 px-1.5 sm:px-2 text-[13px] font-normal text-muted-foreground hover:text-foreground transition-colors duration-150';
+  'h-7 min-w-7 gap-1 px-1.5 sm:px-2 text-sm font-normal text-muted-foreground hover:text-foreground transition-colors duration-150';
 /** Added below `sm` with a leading node: on a wrapped line the cluster keeps the right edge. */
 export const TOOLBAR_CLUSTER_LEADING_PHONE = 'max-sm:ml-auto';

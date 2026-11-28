@@ -41,7 +41,7 @@ import {
   type ViewData,
   type HttpRequest,
   defineView,
-  defineForm,
+  defineMetadataForm,
   ViewItemSchema,
   ViewMetadataSchema,
   VIEW_METADATA_MEMBERS,
@@ -783,7 +783,7 @@ describe('FormViewSchema', () => {
   });
 
   // form `data` SURVIVED the #3896 sweep: the removal attempt broke the build
-  // — defineForm writes data.provider='schema' onto every metadata form — so
+  // — defineMetadataForm writes data.provider='schema' onto every metadata form — so
   // the ledger verdict was corrected instead. These pin the surviving shapes.
   it('accepts form view with object provider', () => {
     expect(() => FormViewSchema.parse({
@@ -792,7 +792,7 @@ describe('FormViewSchema', () => {
       sections: [{ fields: ['name'] }],
     })).not.toThrow();
   });
-  it('accepts the schema provider defineForm writes', () => {
+  it('accepts the schema provider defineMetadataForm writes', () => {
     expect(() => FormViewSchema.parse({
       type: 'simple',
       data: { provider: 'schema', schemaId: 'flow' },
@@ -1119,8 +1119,8 @@ describe('FormViewSchema — the `groups` legacy alias folds onto `sections`', (
       expect(view.form?.sections?.map((s) => s.label)).toEqual(['Account']);
     });
 
-    it('defineForm (the metadata-admin form door)', () => {
-      const form = defineForm({ schemaId: 'report', type: 'simple', groups: [S('Account')] });
+    it('defineMetadataForm (the metadata-admin form door)', () => {
+      const form = defineMetadataForm({ schemaId: 'report', type: 'simple', groups: [S('Account')] });
       expect(has(form, 'groups')).toBe(false);
       expect(form.sections?.map((s) => s.label)).toEqual(['Account']);
     });

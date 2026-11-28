@@ -305,7 +305,31 @@ function settled<S>(
   // Not awaited: the label lookup must not hold the click's outcome (or its
   // refresh), and the reader never rejects.
   if (launch.judged.result.success !== false) void announceFlowDroppedFields(json, droppedFields);
-  return launch;
+  return withHandOffVerdict(launch);
+}
+
+/**
+ * A handed-off run answers which hand-off it was on its result, beside the
+ * follow-up that opens the host's surface: a run that ended `refused` carries
+ * `ActionResult.refusal`, and a run that paused at a screen carries
+ * `ActionResult.paused` (objectstack#36931). The judged results of those two
+ * arms are byte for byte the same `{ success, silent, handedOff }`, so without
+ * the member a caller that counts outcomes (the grid's per-record bulk
+ * fan-out) could tell neither from a completed run: a refused record would
+ * read as done, and so would one whose run still waits at a screen.
+ */
+function withHandOffVerdict<S>(launch: ConsoleFlowLaunch<S>): ConsoleFlowLaunch<S> {
+  const followUp = launch.judged.followUp;
+  const verdict = followUp?.kind === 'refusal'
+    ? { refusal: { message: followUp.message } }
+    : followUp?.kind === 'screen'
+      ? { paused: { runId: followUp.runId } }
+      : undefined;
+  if (!verdict) return launch;
+  return {
+    ...launch,
+    judged: { ...launch.judged, result: { ...launch.judged.result, ...verdict } },
+  };
 }
 
 /** Start the flow a click names, through the door {@link findDeclaredFlowAction} picks. */

@@ -643,13 +643,14 @@
 // `node_modules` exclusion: an exact-path list matches nothing it does not name.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { BaseSequencer, parseCLI, type TestSpecification, type TestUserConfig } from 'vitest/node';
 import {
   runFilterPreflight,
   runProjectCliOverridePreflight,
 } from '../qa/vitest-filter-preflight/src/index.js';
 import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
+import { fileWeight, planSlices } from './vitest-slices.js';
 import { readTierMode } from '../../scripts/nightly-tiers.mjs';
 import { memoryBackedTmpEnv } from '../../scripts/vitest-memory-tmp.mjs';
 
@@ -756,11 +757,13 @@ runProjectCliOverridePreflight({
 //
 // vitest's own `shard()` scatters files by the sha1 of their path, so those
 // files sat in all four CLI slices and every slice shard paid the ~4.5 min
-// declaration closure for one or two files. `DeclarationReaderSequencer` puts
-// them first, then every other file in vitest's own sha1 order, and cuts that
-// one sequence into vitest's own equal-count ranges, so the readers take the
-// first places of slice 1/n and each other file moves at most a few places
-// along vitest's order. ci.yml then keeps declarations for slice 1/n only, and
+// declaration closure for one or two files. `DeclarationReaderSequencer` seeds
+// them into slice 1/n and places every other file by weight
+// (`planSlices()`, `vitest-slices.ts`: heaviest first into the lightest slice,
+// a file weighing the budget its header declares). It cut vitest's equal-COUNT
+// ranges until the merge-queue speed card measured the slice that ended the
+// queue's slowest runs at 2178-2347 s of file time against siblings of
+// 1172-2164 s; that module's header has the readings. ci.yml then keeps declarations for slice 1/n only, and
 // `scripts/partition-test-shards.mjs` (`DECLARATION_READER_SLICES`) charges
 // that slice the closure so its shard carries less whole-package work. The
 // index is spelled in those three places; the partitioner's self-test reads the
@@ -799,16 +802,6 @@ if (readTierMode() === 'queue') {
   }
 }
 
-// vitest's equal-count range for slice `index` of `count` over `total` files
-// (`BaseSequencer.calculateShardRange`, which vitest declares private).
-function shardRange(total: number, index: number, count: number): [number, number] {
-  const base = Math.floor(total / count);
-  const remainder = total % count;
-  if (remainder >= index) return [(base + 1) * (index - 1), (base + 1) * index];
-  const start = remainder * (base + 1) + (index - remainder - 1) * base;
-  return [start, start + base];
-}
-
 const READER_SET = new Set<string>(DECLARATION_READER_FILES);
 
 class DeclarationReaderSequencer extends BaseSequencer {
@@ -816,26 +809,12 @@ class DeclarationReaderSequencer extends BaseSequencer {
     const { root, shard } = this.ctx.config;
     if (!shard) return files;
     const { index, count } = shard;
-    const relative = (spec: TestSpecification) =>
-      path.relative(root, spec.moduleId).split(path.sep).join('/');
-    // vitest's own key: the path below the root, with its leading separator.
-    const key = (spec: TestSpecification) => createHash('sha1').update(`/${relative(spec)}`).digest('hex');
-    const readers = files.filter((spec) => READER_SET.has(relative(spec)));
-    const rest = files
-      .filter((spec) => !READER_SET.has(relative(spec)))
-      .map((spec) => ({ spec, hash: key(spec) }))
-      .sort((a, b) => (a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0))
-      .map(({ spec }) => spec);
-    const ordered = [...readers.sort((a, b) => (relative(a) < relative(b) ? -1 : 1)), ...rest];
-    const [start, end] = shardRange(ordered.length, DECLARATION_READER_SLICE, count);
-    if (readers.length > end - start) {
-      throw new Error(
-        `packages/cli/vitest.config.ts: ${readers.length} declaration readers do not fit in slice ` +
-          `${DECLARATION_READER_SLICE}/${count}, which holds ${end - start} files. Pin fewer files, or slice fewer ways.`
-      );
-    }
-    const [from, to] = shardRange(ordered.length, index, count);
-    return ordered.slice(from, to);
+    const entries = files.map((spec) => {
+      const relative = path.relative(root, spec.moduleId).split(path.sep).join('/');
+      return { path: relative, weight: fileWeight(readFileSync(spec.moduleId, 'utf8')), reader: READER_SET.has(relative) };
+    });
+    const slices = planSlices(entries, count, DECLARATION_READER_SLICE);
+    return files.filter((_, i) => slices[i] === index);
   }
 }
 
@@ -1007,6 +986,15 @@ export default defineConfig({
       {
         find: /^@objectstack\/service-push$/,
         replacement: path.resolve(__dirname, '../services/service-push/src/index.ts'),
+      },
+      // `serve-capability-identity.test.ts` imports the package as the
+      // `record-context` provider and constructs `RecordContextServicePlugin`
+      // to read its registered name. Resolved to source for the reason its
+      // neighbours give; its own value imports (`@objectstack/spec`,
+      // `@objectstack/core`) are already in this package's ledger entry.
+      {
+        find: /^@objectstack\/service-record-context$/,
+        replacement: path.resolve(__dirname, '../services/service-record-context/src/index.ts'),
       },
       // `setup-integrations-order.pin.test.ts` reads `SLACK_SETUP_UI_BUNDLE`,
       // the Setup › Integrations › Slack contribution. Resolved to source for

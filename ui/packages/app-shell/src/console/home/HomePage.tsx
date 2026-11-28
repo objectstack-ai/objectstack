@@ -18,17 +18,24 @@
  * With no app yet it is drawn above the empty state at every width, and while
  * the page is loading it is not drawn, so it mounts once, where it stays.
  *
+ * From 768 px up the page is retired (objectstack#36732): the host redirects
+ * `/home` into an app whenever the viewer has a product app, so a desktop
+ * reaches this page only with none, and draws the no-apps empty state
+ * ({@link DesktopNoApps}): a new blank app, start from a template, the app
+ * marketplace, for the viewers who may add an app. Neither 「Build with AI」
+ * nor 「Build an app」 is drawn on this page (objectstack#37227).
+ *
  * @module
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { useRecentItems, type RecentItem } from '../../hooks/useRecentItems.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
 import { useNavTargetLabel, type NavTargetLabelOptions } from '../../hooks/useNavTargetLabel.js';
-import { objectPresence, readObjectsByName } from '../../hooks/useObjectPresence.js';
-import { readObjectPresence } from '../appObjectScope.js';
+import { readObjectsByName } from '../../hooks/useObjectPresence.js';
+import { readRecentObjects, type RecentObjectReading } from './readRecentObjects.js';
 import { useFavorites } from '../../hooks/useFavorites.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useObjectLabel } from '@object-ui/i18n';
@@ -42,6 +49,7 @@ import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCa
 import { HomeAppsStrip } from './HomeAppsStrip.js';
 import { PhoneAppList } from '../../layout/PhoneAppList.js';
 import { appAddressSegment } from '../../utils/appRoute.js';
+import { inboxPagePath } from '../../views/inbox/inboxPageModel.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
@@ -59,6 +67,9 @@ import {
   matchAppBySegment,
   resolveHostAppSegment,
 } from '../../utils/index.js';
+import { isApprovalsInboxLink, resolveApprovalsHostSegment } from '../../utils/appRoute.js';
+import { useLastApp } from '../../context/LastAppProvider.js';
+import { approvalQueueState } from '../../views/approval-decision/approvalQueueAdvance.js';
 import { useInboxBell } from '../../hooks/useInboxBell.js';
 import { openInboxNotification } from '../../layout/openInboxNotification.js';
 import { resolveSetupAppPath } from '../ConsoleShell.js';
@@ -73,23 +84,31 @@ import {
   TooltipTrigger,
   cn,
 } from '@object-ui/components';
-import { Sparkles, MessageSquareText, Hammer, LayoutGrid } from 'lucide-react';
+import { MessageSquareText, Hammer, LayoutGrid } from 'lucide-react';
 import { usePendingDrafts } from '../../preview/usePendingDrafts.js';
 import { usePublishAllDrafts } from '../../preview/usePublishAllDrafts.js';
 import { fetchPackages } from '../../views/studio-design/packages-io.js';
 import { resolveAiApiBase } from '../../hooks/useAiSurface.js';
 import { isAiStudioEnabled, isMarketplaceEnabled } from '../../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPackage.js';
-import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { useNewPackageDoorPath } from '../../hooks/useNewPackageDoorPath.js';
+import { useAskAiEntry } from '../../layout/AssistantTopBarButton.js';
+import { isProductApp } from '../../utils/homePath.js';
+import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
+import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
  * source of truth) — gated PER agent, because the community edition can be in
  * any of three states:
  *  - `askAvailable` — a data/query agent (`ask`/`data_chat`) is deployed → "Ask AI".
- *  - `buildAvailable` — a build/authoring agent is deployed → "Build with AI".
- *    That's a cloud / AI-Studio feature, ABSENT on open-source builds.
+ *  - `buildAvailable` — a build/authoring agent is deployed. That's a cloud /
+ *    AI-Studio feature, ABSENT on open-source builds. Home draws no build
+ *    button for it (objectstack#37227); it withholds "Ask AI" from a maker.
  *  - `aiEnabled` — any agent at all (AI is on here in some form).
+ *  - `buildServed` — the catalog lists the build agent itself, alias-aware
+ *    (`catalogServesBuild`, objectstack#36969). Where in-app building is
+ *    closed the catalog keeps `ask` and drops `build`; there the builder chip
+ *    takes its Studio form, "New blank app".
  * All false while the catalog loads or when AI isn't enabled, so nothing
  * flashes and no AI CTA appears where there's no agent to back it.
  *
@@ -106,6 +125,7 @@ function useHomeAiAvailability(): {
   aiResolved: boolean;
   askAvailable: boolean;
   buildAvailable: boolean;
+  buildServed: boolean;
 } {
   const apiBase = useMemo(() => resolveAiApiBase(), []);
   const { agents, isLoading } = useAgents({ apiBase });
@@ -118,13 +138,14 @@ function useHomeAiAvailability(): {
     askAvailable: agents.some((a) => isAskAgent(a.name)),
     // cloud#816 — authoring availability by DECLARED capability (name-check fallback inside).
     buildAvailable: agents.some((a) => agentHasCapability(agents, a.name, 'authoring')),
+    buildServed: catalogServesBuild(agents),
   };
 }
 
 /**
  * One 32 px builder chip at the greeting's right (objectui#12601): "Start with
- * a template" outlined, "Build an app" on the soft primary tint with its icon in
- * the primary colour. Admins only — the caller decides that.
+ * a template" outlined, "New blank app" on the soft primary tint with its icon
+ * in the primary colour. Admins only — the caller decides that.
  *
  * Disabled (not hidden) when the session cannot use it: a vanished front door
  * reads as a broken page, while a dimmed one explains the deployment's
@@ -163,7 +184,7 @@ function BuilderChip({
       onClick={disabled ? undefined : onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors max-sm:h-11',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium transition-colors max-sm:h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:pointer-events-none disabled:opacity-60',
         tone === 'outline'
@@ -199,20 +220,84 @@ function BuilderChip({
 }
 
 /**
- * Home AI call-to-action(s). "Build with AI" only when a build agent is
- * deployed AND the session may author metadata; "Ask AI" only when a
- * data/query agent is deployed. Renders nothing when neither exists (AI off, or
- * only custom agents — those are reachable via the assistant launcher / FAB).
- * `layout="stack"` is used by the empty-state; the hero uses the default inline
- * row. Availability is passed in so the host fetches the catalog once.
+ * The desktop's no-apps empty state (objectstack#36732; design board 45,
+ * picture 4): what is left of the retired platform home page. A viewer who may
+ * add an app (`useMayAddApp`, the sidebar app menu's own gate) is offered its
+ * 「Add app」 doors as buttons, the first one primary; an administrator
+ * without `manage_metadata` is told why there are none (objectstack#8270);
+ * anyone else is told their administrator shares apps with them.
+ */
+function DesktopNoApps({
+  showAuthoringGate,
+  authoringGateReason,
+  t,
+}: {
+  showAuthoringGate: boolean;
+  authoringGateReason: string;
+  t: (key: string, opts?: any) => string;
+}) {
+  const mayAddApp = useMayAddApp();
+  return (
+    <Empty data-testid="home-no-apps">
+      <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
+      {mayAddApp ? (
+        <EmptyDescription>
+          {t('home.noAppsAddDescription', {
+            defaultValue: 'Build your first app, or start from a template or the app marketplace.',
+          })}
+        </EmptyDescription>
+      ) : showAuthoringGate ? (
+        <EmptyDescription data-testid="home-authoring-gate-reason-empty">{authoringGateReason}</EmptyDescription>
+      ) : (
+        <EmptyDescription>
+          {t('home.noAppsDescription', {
+            defaultValue: 'The system is being set up — apps your admin shares with you will show up here.',
+          })}
+        </EmptyDescription>
+      )}
+      {mayAddApp && <NoAppsAddActions />}
+    </Empty>
+  );
+}
+
+/**
+ * The 「Add app」 doors as the empty state's buttons. Its own component so
+ * only a viewer who may add an app pays the agent-catalog read the list makes.
+ */
+function NoAppsAddActions() {
+  const entries = useAddAppEntries();
+  if (entries.length === 0) return null;
+  return (
+    <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+      {entries.map((entry, index) => (
+        <Button
+          key={entry.key}
+          asChild
+          variant={index === 0 ? 'default' : 'outline'}
+          className="max-sm:h-11"
+        >
+          <Link to={entry.to} data-testid={`home-no-apps-${entry.key}`}>
+            <entry.icon className="mr-2 h-4 w-4" />
+            {entry.label}
+          </Link>
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Home's AI call-to-action: "Ask AI", only when a data/query agent is
+ * deployed. Renders nothing when none is (AI off, or only custom agents —
+ * those are reachable via the assistant launcher / FAB). `layout="stack"` is
+ * used by the empty-state; the hero uses the default inline row. Availability
+ * is passed in so the host fetches the catalog once.
  *
- * "Build with AI" routes to the AI authoring studio, whose output is
- * draft metadata nobody without `manage_metadata` can publish — so it is one of
- * the "any other metadata-authoring CTA" the objectstack#8270 ruling covers.
- * It is HIDDEN rather than disabled: unlike the builder chips it is not the
- * page's structural front door, the chips beside it already carry the reason,
- * and a disabled hero button next to a live "Ask AI" would read as a transient
- * failure. "Ask AI" is read-only and never gated.
+ * There is no "Build with AI" button here any more (objectstack#37227): the
+ * maintainer ruled it off the home page. "Ask AI" keeps the gate it had beside
+ * it, the cloud#1674 maker convergence below: a session for which the build
+ * agent is deployed and that may author metadata is not offered "Ask AI",
+ * since the ask agent would converge that maker straight back onto build.
  */
 function HomeAiActions({
   askAvailable,
@@ -226,41 +311,29 @@ function HomeAiActions({
   buildAvailable: boolean;
   canAuthorMetadata: boolean;
   /** objectstack#34608 — opens the console's chat drawer on this agent, in place. */
-  openAssistant: (agent: 'build' | 'ask') => void;
+  openAssistant: (agent: 'ask') => void;
   t: (key: string, opts?: any) => string;
   layout?: 'row' | 'stack';
 }) {
-  const showBuild = buildAvailable && canAuthorMetadata;
-  if (!askAvailable && !showBuild) return null;
+  const maker = buildAvailable && canAuthorMetadata;
+  if (!askAvailable || maker) return null;
   const container =
     layout === 'stack'
       ? 'mt-6 flex flex-col sm:flex-row items-center gap-3'
       : 'flex shrink-0 items-center gap-2';
-  // In the greeting row the buttons take the builder chips' 32 px height;
+  // In the greeting row the button takes the builder chips' 32 px height;
   // below `sm` both layouts take the 44 px touch target.
-  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-[13px] max-sm:h-11';
+  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-sm max-sm:h-11';
   return (
     <div className={container}>
-      {showBuild && (
-        <Button onClick={() => openAssistant('build')} className={buttonClass} data-testid="home-build-with-ai">
-          <Sparkles className="mr-2 h-4 w-4" />
-          {t('home.buildWithAI', { defaultValue: 'Build with AI' })}
-        </Button>
-      )}
-      {/* cloud#1674 maker convergence: with the build CTA shown, "Ask AI" is
-          not a second door — the build composer answers data questions too
-          (data superset since cloud#1673), and the ask agent would converge a
-          maker straight back onto build. Non-authoring sessions keep it. */}
-      {askAvailable && !showBuild && (
-        <Button
-          onClick={() => openAssistant('ask')}
-          className={buttonClass}
-          data-testid="home-ask-ai"
-        >
-          <MessageSquareText className="mr-2 h-4 w-4" />
-          {t('home.askAI', { defaultValue: 'Ask AI' })}
-        </Button>
-      )}
+      <Button
+        onClick={() => openAssistant('ask')}
+        className={buttonClass}
+        data-testid="home-ask-ai"
+      >
+        <MessageSquareText className="mr-2 h-4 w-4" />
+        {t('home.askAI', { defaultValue: 'Ask AI' })}
+      </Button>
     </div>
   );
 }
@@ -376,57 +449,16 @@ export interface HomePageProps {
 /** Home's labels read each object they name by name (objectstack#29121). */
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
-/**
- * What Home may do with the object a "Recently accessed" row names
- * (objectstack#34692): `read` it (its label, its icon), leave it `unread`
- * while nobody has said whether this environment registers it, or drop the
- * row, because the environment does not (`absent`).
- */
-export type RecentObjectReading = 'read' | 'unread' | 'absent';
-
-/**
- * objectstack#34692 — the rule objectstack#26988 applies to a record page's
- * lists, `DashboardView` to its widgets and the navigation to its
- * `requiresObject` entries, applied to Home's recent rows: a row whose object
- * the registered object list does not hold (its package disabled after the
- * row was stored) is neither drawn nor asked about by name.
- *
- * While nothing has loaded the whole registry, `names` are asked in the ONE
- * `GET /meta/object?names=` presence read (`readObjectPresence`), which leaves
- * an unregistered name out instead of answering it 404. A name it answered
- * served is read by name, as before (objectstack#29121); a name it left out is
- * `absent`; a name not answered yet, or whose read failed, is `unread`: its
- * row is drawn, as every #26988 surface draws an entry its list has not
- * answered, and nothing is asked by name for it (`servedByName`'s rule).
- *
- * Once the whole registry is loaded, or on its way, or on a context with no
- * scope reads, `objectPresence` answers from that list: `absent` only from a
- * list that answered and holds other objects; an empty or unanswered list
- * reads every name as `read`, where no by-name request is made anyway.
- */
-export function readRecentObjects(
-  metadata: Pick<ReturnType<typeof useMetadata>, 'objects' | 'readObjectScope' | 'getTypeStatus'>,
-  names: readonly string[],
-): (name: string) => RecentObjectReading {
-  const { readObjectScope, getTypeStatus } = metadata;
-  if (readObjectScope && getTypeStatus?.('object') === 'idle') {
-    if (names.length === 0) return () => 'read';
-    const { presence } = readObjectPresence(readObjectScope, undefined, names);
-    const served = new Set(presence.objects.map((o) => (o as { name?: unknown } | null | undefined)?.name));
-    const missing = new Set(presence.missing);
-    return (name) => (served.has(name) ? 'read' : missing.has(name) ? 'absent' : 'unread');
-  }
-  const status = getTypeStatus?.('object');
-  const objects = metadata.objects ?? [];
-  return (name) => (objectPresence(name, status, objects) === 'absent' ? 'absent' : 'read');
-}
+export { readRecentObjects, type RecentObjectReading };
 
 export function HomePage({ checklist }: HomePageProps = {}) {
   const navigate = useNavigate();
   // objectstack#34608 — the Home AI buttons open the same right-side drawer
-  // every console page has (in place, no navigation).
-  const openAssistant = useOpenAssistant();
-  const openHomeAssistant = (agent: 'build' | 'ask') => openAssistant({ agent });
+  // every console page has (in place, no navigation). objectstack#37858 —
+  // through the Ask AI entry the top bar's button opens it with, so the two
+  // change together when opening comes to mean a new conversation.
+  const askAi = useAskAiEntry();
+  const openHomeAssistant = (agent: 'ask') => askAi({ agent });
   const { t, language } = useObjectTranslation();
   const metadata = useMetadata();
   const { apps, loading } = metadata;
@@ -472,15 +504,18 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // every app mount) is the only "which app is the user in" signal available
   // here, and it is undefined on a cold landing straight at `/home`.
   const { currentAppName } = useNavigationContext();
-  // AI CTA gating, per agent: "Build with AI" only when a build agent is
-  // deployed (cloud / AI Studio); "Ask AI" only when a data agent is; neither
-  // when AI isn't enabled. Community builds typically land in the ask-only state.
-  const { aiEnabled, aiResolved, askAvailable, buildAvailable } = useHomeAiAvailability();
+  // AI CTA gating, per agent: "Ask AI" only when a data agent is deployed,
+  // and not for a maker the build agent serves; nothing when AI isn't
+  // enabled. Home draws no "Build with AI" (objectstack#37227).
+  const { aiResolved, askAvailable, buildAvailable, buildServed } = useHomeAiAvailability();
   // objectstack#8270 — the authoring CTAs below are gated on the SERVER's
   // capability answer, not on the admin ROLE: on the EE multi-tenant deploy an
   // `org_owner` is an admin (`isAdmin === true`) yet deliberately holds no
   // `manage_metadata`, so role alone offered a front door the backend refuses.
   const canAuthorMetadata = useCanAuthorMetadata();
+  // objectstack#36908 — New Package in Setup, or the "All metadata" area for an
+  // author who may not open Setup → Packages.
+  const newPackagePath = useNewPackageDoorPath();
   // objectui#5504 — a runtime deployed with `OS_CLOUD_URL=off` (the EE
   // deploy template's shipped default) mounts no marketplace at all. Home
   // used to recommend it first and error afterwards; that ORDERING was the
@@ -537,6 +572,16 @@ export function HomePage({ checklist }: HomePageProps = {}) {
    * renders no action center, so these producers never run there.
    */
   const hostAppSegment = resolveHostAppSegment(activeApps, currentAppName);
+
+  /**
+   * The app an approval opened from Home stays in (objectstack#35505): the
+   * current app, then the last used one (`LastAppProvider`), then the first.
+   * The request page then prefers the app that lists the request's record
+   * (`ApprovalsInboxPage`'s deep link), and Setup is never the default.
+   */
+  const { lastApp } = useLastApp();
+  const approvalsHostSegment = resolveApprovalsHostSegment(activeApps, currentAppName, lastApp);
+  const approvalsInboxPath = `/apps/${approvalsHostSegment}/system/approvals`;
 
   /**
    * Setup leaves the tile row (objectui#12601): it administers the workspace
@@ -615,12 +660,15 @@ export function HomePage({ checklist }: HomePageProps = {}) {
         icon: undefined,
       };
     }
-    const objectIcon =
-      item.type === 'record' && objectName
-        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown } | null | undefined>).find(
+    // objectstack#36141 — an object, view or record row draws its object's
+    // tile, so all three read the object's icon and colour.
+    const objectDef =
+      objectName
+        ? (readObjectsByName(metadata, [objectName]) as Array<{ name?: unknown; icon?: unknown; color?: unknown } | null | undefined>).find(
             (o) => o?.name === objectName,
-          )?.icon
+          )
         : undefined;
+    const objectIcon = objectDef?.icon;
     return {
       context:
         item.type === 'record' && objectName
@@ -628,6 +676,8 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           : recentItemTypeLabel(t, item.type),
       app: app ? appLabel(app) : undefined,
       icon: typeof objectIcon === 'string' && objectIcon !== '' ? objectIcon : undefined,
+      color: typeof objectDef?.color === 'string' ? objectDef.color : undefined,
+      object: !!objectDef,
     };
   };
 
@@ -698,7 +748,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
     );
   }
 
-  if (activeApps.length === 0) {
+  // objectstack#36732 — a desktop with no product app (none at all, or only
+  // the platform's own Setup and Studio) draws the no-apps empty state.
+  // The launcher's list (`/me/apps`): an app a permission set hides is not one
+  // of the viewer's, as the landing that sent them here reads it.
+  const desktopNoApps = !phone && !launcher.apps.some(isProductApp);
+
+  if (activeApps.length === 0 || desktopNoApps) {
     return (
       <div className="flex flex-col flex-1">
         {/* With no app yet, the drafts row is the whole of "My work": the
@@ -729,7 +785,13 @@ export function HomePage({ checklist }: HomePageProps = {}) {
           builder CTAs, so they get the reason instead of the instruction. AI
           "Ask" stays offered — it reads data and needs no authoring capability.
         */}
-        {isAdmin && !canAuthorMetadata ? (
+        {desktopNoApps ? (
+          <DesktopNoApps
+            showAuthoringGate={isAdmin && !canAuthorMetadata}
+            authoringGateReason={authoringGateReason}
+            t={t}
+          />
+        ) : isAdmin && !canAuthorMetadata ? (
           <Empty>
             <EmptyTitle>{t('home.noAppsTitle', { defaultValue: 'No applications yet' })}</EmptyTitle>
             <EmptyDescription data-testid="home-authoring-gate-reason-empty">
@@ -754,22 +816,29 @@ export function HomePage({ checklist }: HomePageProps = {}) {
               white-label deployments should see their own name in the hero, that
               is a copy change to the ten packs, not an argument at this call site.
             */}
-            <EmptyTitle>{t('home.welcome', { defaultValue: 'Build your business system with AI' })}</EmptyTitle>
-            <EmptyDescription>
+            {/*
+              objectstack#37227 — where the build agent is deployed this
+              welcome used to promise building with AI, the 「Build with AI」
+              button below it. That button is gone from Home, so the promise
+              would be false: the title is the plain no-apps one there, and the
+              description is the same NoBuild / NoAi copy any other deployment
+              reads. The assistant drawer still serves the build agent.
+            */}
+            <EmptyTitle>
               {buildAvailable
-                ? t('home.welcomeAdminDescription', {
+                ? t('home.noAppsTitle', { defaultValue: 'No applications yet' })
+                : t('home.welcome', { defaultValue: 'Build your business system with AI' })}
+            </EmptyTitle>
+            <EmptyDescription>
+              {askAvailable
+                ? t('home.welcomeAdminDescriptionNoBuild', {
                     defaultValue:
-                      'Describe your business in one sentence — AI generates the objects, screens, APIs and agent tools. Or set things up yourself from the menu on the left.',
+                      'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
                   })
-                : askAvailable
-                  ? t('home.welcomeAdminDescriptionNoBuild', {
-                      defaultValue:
-                        'Set up your first application from the Administration menu on the left. Once you have data, the AI assistant can help you explore it.',
-                    })
-                  : t('home.welcomeAdminDescriptionNoAi', {
-                      defaultValue:
-                        'Set up your first application from the Administration menu on the left.',
-                    })}
+                : t('home.welcomeAdminDescriptionNoAi', {
+                    defaultValue:
+                      'Set up your first application from the Administration menu on the left.',
+                  })}
             </EmptyDescription>
             <HomeAiActions
               askAvailable={askAvailable}
@@ -830,7 +899,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                 {displayName && <span className="text-primary">{displayName}</span>}
                 <span className="text-foreground/40">{t('home.greetingEnd', { defaultValue: '.' })}</span>
               </h1>
-              <p className="mt-1 min-h-5 text-[13px] text-muted-foreground" data-testid="home-work-summary">
+              <p className="mt-1 min-h-5 text-xs text-muted-foreground" data-testid="home-work-summary">
                 {workSummary}
               </p>
             </div>
@@ -890,29 +959,24 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                   {/* objectstack#26614 — on a deployment whose agent catalog
                     * is empty or absent, "Build an app" promises a build nothing
                     * here can start. There the chip says what it opens instead,
-                    * "New in Studio", and opens Studio's new-package flow; and
+                    * "New blank app", and opens New Package in Setup → Packages,
+                    * which lands in Studio on the new package (objectstack#36908); and
                     * since Studio is then the ONLY way to build, a session that
                     * may not author gets no chip rather than a dimmed one (the
                     * template chip beside it still carries the reason). With
-                    * agents present nothing changes. The chip waits for the
-                    * catalog's answer, so neither form flashes before the other. */}
-                  {aiStudioEnabled && aiEnabled && (
+                    * the build agent served, the chip's other form, "Build an
+                    * app" to bare `/studio`, is gone (objectstack#37227): the
+                    * maintainer ruled it off this page, with "Build with AI".
+                    * The Studio form waits for the catalog's answer, so it
+                    * never flashes, and is drawn only where the catalog does not
+                    * serve the build agent itself (`buildServed`,
+                    * objectstack#36969). */}
+                  {aiStudioEnabled && aiResolved && !buildServed && canAuthorMetadata && (
                     <BuilderChip
                       icon={Hammer}
-                      label={t('home.build.title', { defaultValue: 'Build an app' })}
+                      label={t('home.build.inStudio', { defaultValue: 'New blank app' })}
                       tone="soft"
-                      onClick={() => navigate('/studio')}
-                      disabledReason={!canAuthorMetadata ? authoringGateReason : undefined}
-                      reasonId={authoringReasonId}
-                      testId="home-build-app"
-                    />
-                  )}
-                  {aiStudioEnabled && aiResolved && !aiEnabled && canAuthorMetadata && (
-                    <BuilderChip
-                      icon={Hammer}
-                      label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}
-                      tone="soft"
-                      onClick={() => navigate(STUDIO_NEW_PACKAGE_PATH)}
+                      onClick={() => navigate(newPackagePath)}
                       disabledReason={undefined}
                       reasonId={undefined}
                       testId="home-build-in-studio"
@@ -998,16 +1062,22 @@ export function HomePage({ checklist }: HomePageProps = {}) {
             notificationsStatus={notificationsStatus}
             notificationsReadable={notificationsReadable}
             draftsRow={draftsRow}
-            onOpenApprovals={() => navigate(`/apps/${hostAppSegment}/system/approvals`)}
-            /* The Approvals inbox opens a request's drawer from `?request=`
-               (#2678), the link its notifications already carry. */
+            onOpenApprovals={() => navigate(approvalsInboxPath)}
+            /* The Approvals inbox opens a request's page from `?request=`
+               (#2678), the link its notifications already carry. It is handed
+               the reader's pending queue (objectstack#35505), so the request
+               page counts through it and 「处理后打开下一条」 moves on. */
             onOpenApproval={(r) =>
-              navigate(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`)
+              navigate(`${approvalsInboxPath}?request=${encodeURIComponent(r.id)}`, {
+                state: approvalQueueState(
+                  { pathname: approvalsInboxPath, label: t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' }) },
+                  pendingApprovals.map((p) => p.id),
+                ),
+              })
             }
-            /* The bell's own "view all" target (`InboxPopover`): `?view=mine`
-               selects the user-scoped view, so the full page matches what the
-               column showed (objectui#4074). */
-            onOpenInbox={() => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`)}
+            /* The inbox page the bell opens (objectstack#36741), which lists
+               the same signed-in user's messages the column showed. */
+            onOpenInbox={() => navigate(inboxPagePath(hostAppSegment))}
             /* `action_url` is APP-RELATIVE (`/{object}/{id}`, ADR-0030 L5),
                so it has to be hosted under an app before it is a route —
                navigating it verbatim is objectui#5179, where the console
@@ -1020,10 +1090,10 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                badged on the bell), then follows the resolved link — or, when
                the notification carries no link at all, opens the inbox. */
             onOpenNotification={(n) =>
-              openInboxNotification(n, hostAppSegment, {
+              openInboxNotification(n, isApprovalsInboxLink(n.actionUrl) ? approvalsHostSegment : hostAppSegment, {
                 markRead: markNotificationRead,
                 goTo: (path) => navigate(path),
-                openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
+                openInbox: () => navigate(inboxPagePath(hostAppSegment)),
               })
             }
             t={t}

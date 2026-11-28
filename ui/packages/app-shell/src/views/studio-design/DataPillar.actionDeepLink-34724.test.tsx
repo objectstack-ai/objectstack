@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#34724 (ADR-0146 D4 as amended 2026-11-17) — a Data pillar link
- * can open an object's Actions view on one action:
- * `?surface=object:<object>&action=<name>`. Studio's landing links a
+ * objectstack#34724 (ADR-0146 D4 as amended 2026-11-17) — an object designer
+ * link can open its Actions view on one action: `?action=<name>` on the
+ * object's address (objectstack#36904). Studio's landing links a
  * switched-off action that lives in its object's `actions[]` here, since such
  * an action has no item page and its switch is on the Actions view.
  *
@@ -12,18 +12,17 @@
  *    (its inspector shows its label, not the first action's);
  *  - CONTROL: the same link without `action=` opens the object on Records, as
  *    before, with no action inspector;
- *  - the param is read once: picking another view afterwards stays there;
- *  - the param leaves the URL once another object opens, so a reload or a
- *    shared copy never opens that object on an action (seat L2 S4); the first
- *    write, naming the deep-linked object, keeps it.
+ *  - the param is read once: picking another view afterwards stays there.
+ *    (Another object is another address, so the param never follows it.)
  */
 
 import '@testing-library/jest-dom/vitest';
 // The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { ActionSchema } from '@objectstack/spec/ui';
@@ -32,7 +31,7 @@ const SEND = {
   name: 'showcase_task_send',
   label: 'Send',
   objectName: 'showcase_task',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };
@@ -159,9 +158,9 @@ function UrlProbe(): React.ReactElement {
 function mountAt(search: string): void {
   objectDef = TASK;
   render(
-    <MemoryRouter initialEntries={[`/studio/com.example.showcase/data${search}`]}>
+    <MemoryRouter initialEntries={[`/studio/com.example.showcase/metadata/object/showcase_task${search}`]}>
       <UrlProbe />
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>,
   );
 }
@@ -171,13 +170,13 @@ const labelInput = async () =>
 
 describe('Studio data page — `?action=` opens the object\'s Actions view on that action (objectstack#34724)', () => {
   it('lands on the Actions view with the named action selected, not the first one', async () => {
-    mountAt('?surface=object%3Ashowcase_task&action=showcase_task_send');
+    mountAt('?action=showcase_task_send');
     expect(await labelInput()).toHaveValue('Send');
     expect(screen.queryByDisplayValue('Archive')).not.toBeInTheDocument();
   });
 
   it('CONTROL: without `action=` the object opens on Records, with no action inspector', async () => {
-    mountAt('?surface=object%3Ashowcase_task');
+    mountAt('');
     // The object loaded: its tabs are drawn.
     await screen.findAllByRole('button', { name: L('engine.studio.data.tab.actions') });
     await act(async () => {
@@ -187,25 +186,12 @@ describe('Studio data page — `?action=` opens the object\'s Actions view on th
   });
 
   it('is read once: a later pick of another view stays there', async () => {
-    mountAt('?surface=object%3Ashowcase_task&action=showcase_task_send');
+    mountAt('?action=showcase_task_send');
     expect(await labelInput()).toHaveValue('Send');
     fireEvent.click(screen.getAllByRole('button', { name: L('engine.studio.data.tab.form') })[0]);
     await act(async () => {
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(screen.queryByText(L('engine.inspector.action.label'), { selector: 'label' })).not.toBeInTheDocument();
-  });
-
-  it('drops `action=` from the URL once another object opens, and keeps it until then', async () => {
-    mountAt('?surface=object%3Ashowcase_task&action=showcase_task_send');
-    expect(await labelInput()).toHaveValue('Send');
-    const url = () => new URLSearchParams(screen.getByTestId('url').textContent ?? '');
-    // The mirror's first write names the deep-linked object: the key stays.
-    expect(url().get('surface')).toBe('object:showcase_task');
-    expect(url().get('action')).toBe('showcase_task_send');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Note' }));
-    await waitFor(() => expect(url().get('surface')).toBe('object:showcase_note'));
-    expect(url().has('action')).toBe(false);
   });
 });

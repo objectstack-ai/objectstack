@@ -62,7 +62,7 @@ import { FormulaField } from '../widgets/FormulaField';
 import { SummaryField } from '../widgets/SummaryField';
 import { AutoNumberField } from '../widgets/AutoNumberField';
 import { VectorField } from '../widgets/VectorField';
-import { GridField } from '../widgets/GridField';
+import { GridFieldWidget as GridField } from '../widgets/grid-field/GridFieldWidget';
 import { TextField } from '../widgets/TextField';
 
 const DISPLAY_TYPES = ['formula', 'summary', 'auto_number', 'vector'] as const;

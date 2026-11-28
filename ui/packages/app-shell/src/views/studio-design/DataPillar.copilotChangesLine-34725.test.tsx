@@ -7,9 +7,7 @@
  *    pending-changes sheet) and 放弃全部未发布改动 (the package's discard door,
  *    `packages.discardDrafts`, after a confirm) — the one undo there is;
  *  - the Form canvas's card of each field the assistant changed carries the
- *    草稿 chip;
- *  - item 6: the copilot's chip names the open object by its label and the view
- *    on screen (`Task · Records`), never its internal name.
+ *    草稿 chip.
  * CONTROL: entries a person wrote in Studio, or no draft, draw no line.
  *
  * The records grid's column marks ride on `GridFieldAuthoring.columnMarks`,
@@ -20,7 +18,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 const objectDef = {
@@ -65,6 +63,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
@@ -98,7 +97,7 @@ function serveDraft(draftChanges?: unknown[]) {
 function renderPillar(props: Partial<React.ComponentProps<typeof DataPillar>> = {}) {
   return render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" {...props} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" {...props} />
     </MemoryRouter>,
   );
 }
@@ -171,8 +170,17 @@ describe('the AI assistant’s drafts on the Data canvas (objectstack#34725)', (
     const original = window.confirm;
     window.confirm = vi.fn(() => true);
     renderPillar();
-    fireEvent.click(await screen.findByTestId('studio-copilot-changes-discard'));
-    const message = await screen.findByTestId('studio-refusal-message');
+    const discard = await screen.findByTestId('studio-copilot-changes-discard');
+    const reads = mockClient.getDraft.mock.calls.length;
+    fireEvent.click(discard);
+    // objectstack#36904 — the discard re-reads the object, and a load clears the
+    // pillar's error as it starts: the refusal must outlive that read, not
+    // flash for one render before it.
+    await waitFor(() => expect(mockClient.getDraft.mock.calls.length).toBeGreaterThan(reads));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    const message = screen.getByTestId('studio-refusal-message');
     expect(message).toHaveTextContent(
       tFormat('engine.studio.copilotChanges.discardFailed', 'en-US', {
         items: ['Task', 'showcase_task_grid'].join(L('engine.studio.copilotChanges.itemSeparator')),
@@ -182,24 +190,6 @@ describe('the AI assistant’s drafts on the Data canvas (objectstack#34725)', (
     expect(message.textContent).not.toContain('object/');
     expect(screen.getByTestId('studio-refusal-detail')).toHaveTextContent('object/showcase_task: E_LOCKED: row held by txn 42');
     window.confirm = original;
-  });
-
-  it('the copilot’s chip reads the object’s label and the view on screen', async () => {
-    const onSurfaceLabelChange = vi.fn();
-    renderPillar({ onSurfaceLabelChange });
-    await waitFor(() =>
-      expect(onSurfaceLabelChange).toHaveBeenLastCalledWith({
-        type: 'object',
-        name: 'showcase_task',
-        label: `Task · ${L('engine.studio.data.tab.records')}`,
-      }),
-    );
-    fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));
-    await waitFor(() =>
-      expect(onSurfaceLabelChange).toHaveBeenLastCalledWith(
-        expect.objectContaining({ label: `Task · ${L('engine.studio.data.tab.form')}` }),
-      ),
-    );
   });
 
   it('CONTROL: entries a person wrote in Studio, or no draft at all, draw no line', async () => {

@@ -112,8 +112,10 @@ async function settle(): Promise<void> {
 
 /** Each selected-value chip's label, read from its remove control's name. */
 function chipLabels(): string[] {
+  // `hidden`: read while the (modal) dropdown is open, the field behind it is
+  // hidden from assistive technology, and the chip with it.
   return screen
-    .queryAllByRole('button', { name: /^Remove / })
+    .queryAllByRole('button', { name: /^Remove /, hidden: true })
     .map((b) => (b.getAttribute('aria-label') ?? '').replace(/^Remove /, ''));
 }
 

@@ -4,9 +4,9 @@
  *
  * The REAL surface on its Data tab, with the REAL `fetchPackages` and the REAL
  * `usePendingDrafts`, over a stubbed `fetch` that counts requests on the wire.
- * Three readers of `GET /api/v1/packages` mount here at once — the package
- * switcher, the writability courtesy gate and `DataPillar`'s namespace lookup
- * — and the top bar reads the drafts ledger both from the hook and from its
+ * Two readers of `GET /api/v1/packages` mount here at once — the
+ * writability courtesy gate and `DataPillar`'s namespace lookup (the package
+ * switcher was a third until objectstack#36501 removed it) — and the top bar reads the drafts ledger both from the hook and from its
  * own publish/draft-nonce effect. Each of those used to send its own request.
  *
  * The package list is HELD until every mount effect has run, so the count
@@ -57,13 +57,16 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
+// The surface mounts the command palette, whose record preview reaches the
+// `lazy()` detail entry: its first load is paid here too, not in a test's clock.
+import '@object-ui/plugin-detail';
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { StudioPillarRedirect } from './StudioPillarRedirect';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -91,7 +94,7 @@ interface Held {
 let held: Held[] = [];
 let requested: string[] = [];
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
   held = [];
@@ -109,7 +112,7 @@ beforeEach(() => {
               resolve(
                 answer({
                   success: true,
-                  data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: true }] },
+                  data: { packages: [{ manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: false }] },
                 }),
               ),
           });
@@ -142,7 +145,8 @@ describe('StudioDesignSurface — entry reads each question once (objectui#11797
     render(
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
+          <Route path="/studio/:packageId/:tab" element={<StudioPillarRedirect><StudioDesignSurface /></StudioPillarRedirect>} />
         </Routes>
       </MemoryRouter>,
     );
@@ -156,9 +160,9 @@ describe('StudioDesignSurface — entry reads each question once (objectui#11797
       for (const h of held) h.release();
       await drain();
     });
-    await waitFor(() =>
-      expect(screen.getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
-    expect(screen.getByTestId('studio-pkg-chip')).toHaveTextContent('Field Ops');
+    // The writability gate's answer reaches the left column: the package is
+    // served read-only, so the package switcher draws its lock
+    // (objectstack#37456; the top bar's Create app, which said it before, is gone).
+    await waitFor(() => expect(screen.getByTestId('studio-pkg-readonly')).toBeInTheDocument());
   });
 });

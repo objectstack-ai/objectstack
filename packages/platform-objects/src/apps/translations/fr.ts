@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { frObjects } from './fr.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * Français (fr) — Setup App Translations
  */
 export const fr: TranslationData = {
   objects: frObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('fr'),
   apps: {
     account: {
       label: 'Compte',
@@ -40,7 +43,7 @@ export const fr: TranslationData = {
         group_overview: { label: 'Aperçu' },
         group_apps: { label: 'Applications' },
         nav_marketplace_browse: { label: 'Parcourir la Marketplace' },
-        nav_marketplace_installed: { label: 'Applications installées' },
+        nav_packages: { label: 'Packages' },
         nav_cloud_connection: { label: 'Connexion au cloud' },
         group_people_org: { label: 'Personnes et organisation' },
         group_access_control: { label: 'Contrôle d’accès' },
@@ -77,6 +80,7 @@ export const fr: TranslationData = {
         // of `sys_scim_connection_credential.pluralLabel`.
         nav_scim_credentials: { label: 'Identifiants SCIM' },
         nav_api_keys: { label: 'Clés API' },
+        nav_access_directory: { label: 'Postes et autorisations' },
 
         // Centre d’approbations = the Approvals Inbox component (#7234) — the
         // surface with decision actions. The three below are the engine's raw
@@ -97,6 +101,7 @@ export const fr: TranslationData = {
         nav_settings_localization: { label: 'Localisation' },
         nav_exchange_rates: { label: 'Taux de change' },
         nav_units_of_measure: { label: 'Unités de mesure' },
+        nav_standard_unit_settings: { label: 'Paramètres des unités standard' },
         nav_work_calendars: { label: 'Calendriers de travail' },
         nav_work_calendar_exceptions: { label: 'Exceptions de calendrier' },
         nav_settings_company: { label: 'Entreprise' },
@@ -110,6 +115,7 @@ export const fr: TranslationData = {
         nav_settings_knowledge: { label: 'Connaissances' },
         nav_settings_lifecycle: { label: 'Cycle de vie des données' },
         nav_recycle_bin: { label: 'Corbeille' },
+        nav_public_forms: { label: 'Formulaires publics' },
         nav_notification_preferences: { label: 'Préférences de notification' },
         nav_notification_templates: { label: 'Modèles de notification' },
 
@@ -133,7 +139,7 @@ export const fr: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'Atelier de métadonnées pour les développeurs, les analystes et les intégrateurs',
       navigation: {
         group_overview: { label: 'Aperçu' },

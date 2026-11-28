@@ -40,7 +40,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
 import type { GridFieldMetadata } from '@object-ui/types';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 /** Authored exactly as `GridFieldMetadata['columns']` declares — keyed by `name`. */
 const columns: NonNullable<GridFieldMetadata['columns']> = [

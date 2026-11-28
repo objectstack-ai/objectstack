@@ -46,6 +46,9 @@ import {
   providesCapability,
   resolveServedCapabilities,
   resolveCapabilityArgument,
+  resolveCapabilityExtras,
+  stackItemCapabilities,
+  type CapabilityDatabase,
   materializeStackPlugin,
   STACK_TIER_PRESETS,
   CAPABILITY_TO_TIER as SHARED_CAPABILITY_TO_TIER,
@@ -2765,6 +2768,10 @@ export default class Serve extends Command {
     // multi-replica local-database refusal before step 2 reads the runtime's
     // own resolution of it. Unset on the legacy route.
     let standaloneDatabaseInput: StandaloneStackConfig | undefined;
+    // The platform database this command's own `OS_DATABASE_URL` fallback
+    // declared (step 2), for the `knowledge` store choice in the capability
+    // resolver (`resolveCapabilityExtras`). Unset on every other route.
+    let fallbackPrimaryDatabase: CapabilityDatabase | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -3123,7 +3130,14 @@ export default class Serve extends Command {
       const hostDefaults: string[] = [];
       if (isMcpServerEnabled()) hostDefaults.push('mcp');
       if (stampSearchPinyinEnabled((config as any).i18n)) hostDefaults.push('pinyin-search');
-      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), { preset: presetName, hostDefaults });
+      // [ADR-0161 K8 item 12] A stack that ships a `knowledge_source` is
+      // served the knowledge service and the deployment's store as if it
+      // listed `requires: ['knowledge']` (`stackItemCapabilities`).
+      const served = resolveServedCapabilities(stackDeclaredCapabilities(config), {
+        preset: presetName,
+        hostDefaults,
+        itemTokens: stackItemCapabilities(config),
+      });
       const requires: string[] = [...served.tokens];
       const declaredRequires: ReadonlySet<string> = served.declared;
       // Capability → tier: any capability that is gated by a tier
@@ -3600,6 +3614,7 @@ export default class Serve extends Command {
              resolvedDriverLabel = resolution.label;
              resolvedDatabaseUrl = resolution.displayUrl;
              servedSqliteFilePath = resolution.sqliteFilePath;
+             fallbackPrimaryDatabase = { driver: resolution.driverId, url: databaseUrl };
 
              // ADR-0057 §3.6 (#2834 ②): the dedicated `telemetry` datasource
              // next to an explicit SQLite primary (`sqliteFilePath`, unset for
@@ -4658,8 +4673,11 @@ export default class Serve extends Command {
               // dispatcher's inbound rate limiter receives below: whether the
               // ADR-0069 D5 IP allow-list and the D7 login audit may believe
               // X-Forwarded-For / X-Real-IP when establishing a client address.
-              // Undeclared, both judge the transport's peer address.
-              trustProxy: (config as any).server?.trustProxy === true,
+              // Undeclared, both judge the transport's peer address. Handed over
+              // as authored, either form: AuthPlugin reads it with the
+              // client-address rule's own `readTrustProxy`, which refuses a
+              // malformed trusted-network form at boot.
+              trustProxy: (config as any).server?.trustProxy,
               // The stack's `demoStaff`, read off the definition this process
               // loaded — the authored config, since `os build` writes the key
               // into no artifact. Handed over whatever the boot: plugin-auth
@@ -5206,7 +5224,12 @@ export default class Serve extends Command {
       try {
         const { createRestApiPlugin } = await import('@objectstack/rest');
         await kernel.use(
-          createRestApiPlugin({ api: { api: { enableProjectScoping, projectResolution } } as any }),
+          createRestApiPlugin({
+            api: { api: { enableProjectScoping, projectResolution } } as any,
+            // The same switch the dispatcher plugin is handed below, so the two
+            // doors of this host judge environment membership alike.
+            enforceProjectMembership: apiConfig.enforceProjectMembership,
+          }),
         );
         trackPlugin('RestAPI');
       } catch (e: any) {
@@ -5235,7 +5258,9 @@ export default class Serve extends Command {
         const serverConfig = (config as any).server ?? {};
         const rateLimitConfig = {
             ...(serverConfig.security?.rateLimit ? { budget: serverConfig.security.rateLimit } : {}),
-            trustProxy: serverConfig.trustProxy === true,
+            // As authored, either form; the dispatcher reads it with
+            // `readTrustProxy`, the same reading AuthPlugin applies above.
+            trustProxy: serverConfig.trustProxy,
         };
 
         // Register Dispatcher plugin (auth, graphql, analytics, packages, hub, storage, automation)
@@ -5464,6 +5489,22 @@ export default class Serve extends Command {
       // token's own required/best-effort semantics — under the next.
       const resolverMounted: unknown[] = [];
 
+      // The platform database, as the token rows whose providers depend on it
+      // read it (today the `knowledge` store: pgvector on PostgreSQL, else a
+      // libSQL file of its own). The one each route resolved for itself: this
+      // command's fallback (step 2), else the standalone stack's own
+      // resolution over the input it was composed from. Neither ⇒ a host
+      // whose own plugin provides the driver, and the rule reads the
+      // environment (`resolveKnowledgeStore`).
+      let capabilityDatabase: CapabilityDatabase | undefined = fallbackPrimaryDatabase;
+      if (!capabilityDatabase && standaloneDatabaseInput !== undefined) {
+        try {
+          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+          const primary = resolveStandaloneDatabase(standaloneDatabaseInput);
+          capabilityDatabase = { driver: primary.driver, url: primary.url };
+        } catch { /* the stack's own boot reports a database it cannot resolve */ }
+      }
+
       // Exact identity comparison, NOT substring containment — a consumer named
       // after the capability it consumes must never be mistaken for its
       // provider (#7652). See Serve.providesCapability.
@@ -5555,11 +5596,15 @@ export default class Serve extends Command {
           // transport can deliver through (#5087, #5132, #5713) — the catch
           // below turns that into the boot failure / loud error it should be,
           // never a log transport substituted behind the operator's back.
+          // `database` too: the `knowledge` service is told which store is the
+          // deployment's (`deploymentAdapter`), by the choice the extras below
+          // read, so the two agree (ADR-0161 K4).
           const resolved = resolveCapabilityArgument(cap, {
             stack: config,
             packageRoot: path.dirname(absolutePath),
             providerModule: mod,
             env: process.env,
+            database: capabilityDatabase,
           });
           const arg: any = resolved.argument;
           if (resolved.localStorageRoot && !isDev) {
@@ -5591,21 +5636,34 @@ export default class Serve extends Command {
           resolverMounted.push(provider);
           trackPlugin(spec.export);
 
-          if (spec.extras) {
-            for (const ex of spec.extras) {
-              if (hasPluginMatching(ex.identities)) continue;
-              try {
-                const exMod: any = await import(/* webpackIgnore: true */ ex.pkg);
-                const ExCtor = exMod[ex.export];
-                if (ExCtor) {
-                  const extra = new ExCtor();
-                  await kernel.use(extra);
-                  resolverMounted.push(extra);
-                  trackPlugin(ex.export);
-                }
-              } catch {
-                // optional extra — silently skip
+          // A row's extras, or for `knowledge` the one store the platform
+          // database chooses, each with its own argument — the rule the
+          // handle reads too (`resolveCapabilityExtras`, `@objectstack/core`).
+          const extras = resolveCapabilityExtras(cap, {
+            stack: config,
+            packageRoot: path.dirname(absolutePath),
+            env: process.env,
+            database: capabilityDatabase,
+          });
+          for (const ex of extras) {
+            if (hasPluginMatching(ex.identities)) continue;
+            try {
+              const exMod: any = await import(/* webpackIgnore: true */ ex.pkg);
+              const ExCtor = exMod[ex.export];
+              if (ExCtor) {
+                const extra = ex.argument !== undefined ? new ExCtor(ex.argument) : new ExCtor();
+                await kernel.use(extra);
+                resolverMounted.push(extra);
+                trackPlugin(ex.export);
+              } else {
+                console.warn(chalk.yellow(`  ⚠ Capability "${cap}": ${ex.pkg} did not export ${ex.export}; it was not mounted`));
               }
+            } catch (exErr: unknown) {
+              // The main provider is mounted; an extra that cannot load is
+              // said once, never skipped in silence (a `knowledge` source
+              // naming the store then answers why at its first use).
+              const exMsg = exErr instanceof Error ? exErr.message : String(exErr);
+              console.warn(chalk.yellow(`  ⚠ Capability "${cap}": ${ex.export} (${ex.pkg}) was not mounted: ${exMsg}`));
             }
           }
         } catch (err: unknown) {

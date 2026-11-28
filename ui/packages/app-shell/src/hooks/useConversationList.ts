@@ -11,6 +11,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { publishPlanApprovalPending } from '../assistant/assistantBus.js';
 import { isHitlContinuation } from '@object-ui/plugin-chatbot/core';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * One row of the conversation-history list.
@@ -32,6 +38,11 @@ export interface ConversationListItem {
   updatedAt?: string;
   /** Preview text derived from the most recent message, if available. */
   preview?: string;
+  /**
+   * `AiConversationSchema.metadata` (`@objectstack/spec/api`) as the list row
+   * carries it; absent when the row carries none or a value that is not a record.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface UseConversationListOptions {
@@ -59,6 +70,11 @@ interface ServerConversation {
   updatedAt?: string;
   preview?: unknown;
   messages?: Array<{ role: string; content: unknown }>;
+  metadata?: unknown;
+}
+
+function readMetadata(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 const PLACEHOLDER_TITLES = new Set([
@@ -136,6 +152,7 @@ function normalize(row: ServerConversation): ConversationListItem {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     preview,
+    metadata: readMetadata(row.metadata),
   };
 }
 
@@ -143,10 +160,26 @@ async function fetchConversationDetail(
   apiBase: string,
   id: string,
 ): Promise<ConversationListItem | undefined> {
-  const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
     credentials: 'include',
   });
   if (!res.ok) return undefined;
+  const body = (await res.json()) as ServerConversation | { conversation?: ServerConversation };
+  const row = 'conversation' in body && body.conversation ? body.conversation : body;
+  return normalize(row as ServerConversation);
+}
+
+/**
+ * One conversation's history row, read by id; `null` when the server answers
+ * that it is gone or not this user's (404, 403). Any other failure throws, so
+ * a network blip never reads as a deleted conversation.
+ */
+export async function readConversationRow(apiBase: string, id: string): Promise<ConversationListItem | null> {
+  const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+    credentials: 'include',
+  });
+  if (res.status === 404 || res.status === 403) return null;
+  if (!res.ok) throw Object.assign(new Error(`GET conversation failed: ${res.status}`), { status: res.status });
   const body = (await res.json()) as ServerConversation | { conversation?: ServerConversation };
   const row = 'conversation' in body && body.conversation ? body.conversation : body;
   return normalize(row as ServerConversation);
@@ -168,7 +201,7 @@ export function useConversationList(
   const remove = useCallback(
     async (id: string) => {
       try {
-        await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+        await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
           method: 'DELETE',
           credentials: 'include',
         });
@@ -189,7 +222,7 @@ export function useConversationList(
       setConversations((rows) =>
         rows.map((r) => (r.id === id ? { ...r, title: trimmed || undefined } : r)),
       );
-      const res = await fetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
+      const res = await authFetch(`${apiBase}/conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -216,7 +249,7 @@ export function useConversationList(
     setError(undefined);
     (async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `${apiBase}/conversations?limit=${encodeURIComponent(String(limit))}`,
           { credentials: 'include' },
         );
@@ -273,4 +306,50 @@ export function useConversationList(
   }, [userId, apiBase, limit, internalKey, refreshKey]);
 
   return { conversations, isLoading, error, refetch, remove, rename };
+}
+
+export interface UseConversationLabelOptions {
+  apiBase: string;
+  /** The conversation the drawer shows; absent before the first send creates it. */
+  conversationId: string | undefined;
+  /** Bump to read the label again (a sent turn, the server titling the thread). */
+  refreshKey?: number | string;
+}
+
+export interface ConversationLabelReading {
+  /** The label the history list gives this conversation's row; absent when it has none yet. */
+  label: string | undefined;
+  /** False while the label of the conversation now shown has not been read yet. */
+  settled: boolean;
+}
+
+/**
+ * ui ADR-0057 Amendment A5 — the drawer's header names the conversation it
+ * shows by the label its history row carries: the title the server gave it,
+ * else the latest message the user wrote in it (`normalize`, the list's own
+ * reading of one row). A read that fails settles with no label.
+ */
+export function useConversationLabel({
+  apiBase,
+  conversationId,
+  refreshKey,
+}: UseConversationLabelOptions): ConversationLabelReading {
+  const [reading, setReading] = useState<{ id: string; label: string | undefined } | undefined>(undefined);
+  useEffect(() => {
+    if (!conversationId) return;
+    let cancelled = false;
+    fetchConversationDetail(apiBase, conversationId).then(
+      (row) => {
+        if (!cancelled) setReading({ id: conversationId, label: row?.title || row?.preview || undefined });
+      },
+      () => {
+        if (!cancelled) setReading({ id: conversationId, label: undefined });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, conversationId, refreshKey]);
+  if (!conversationId) return { label: undefined, settled: true };
+  return reading?.id === conversationId ? { label: reading.label, settled: true } : { label: undefined, settled: false };
 }

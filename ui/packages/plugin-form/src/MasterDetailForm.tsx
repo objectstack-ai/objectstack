@@ -34,7 +34,7 @@ import React, { startTransition, useCallback, useContext, useEffect, useMemo, us
 import { createPortal } from 'react-dom';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { isUntouchedNewRow, LineItemsField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
+import { isUntouchedNewRow, LineItemsField, preloadGridField, lookupAutofillByField, columnHelpByField, UNTOUCHED_NEW_ROW, useBooleanValueLabel, type BooleanValueLabel, type ColumnHelp, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -45,7 +45,7 @@ import {
   useObjectTranslation,
 } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
-import { dataChangeMatches, subscribeDataChanges } from '@object-ui/react';
+import { dataChangeMatches, extractFieldErrors, subscribeDataChanges } from '@object-ui/react';
 import { ObjectForm } from './ObjectForm';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
@@ -67,7 +67,7 @@ import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
 import { schemaDefaultValues } from './schemaDefaults';
-import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
+import { currencyFieldDefsOf, parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
 // objectui#11396 — one `details` entry, by reference: the spec's own type for
@@ -455,6 +455,12 @@ interface DetailEntry {
    * currency. Internal state, never authored.
    */
   parentCurrencyFields?: ReturnType<typeof parentCurrencyFieldsOf>;
+  /**
+   * The child fields that hold an amount of money, by name
+   * (`currencyFieldDefsOf`): a pick copies an amount into a line column only
+   * in the same currency (objectstack#36249). Internal state, never authored.
+   */
+  currencyFields?: ReturnType<typeof currencyFieldDefsOf>;
 }
 
 /** The field shape `resolveFieldCurrency` reads — the one currency resolver. */
@@ -913,18 +919,49 @@ interface MasterDetailLinesProps {
  * never blocks Save with a browser bubble), a line button without a `type`
  * submits only the wrapper, which does nothing, and Enter in a cell finds the
  * wrapper's disabled default button and submits nothing.
+ *
+ * `ownsForm` says `children` already are a form of their own (an expanded row
+ * editor is an `ObjectForm`, its only other control a `type="button"`), so no
+ * wrapper is drawn: a form inside a form is a nesting React refuses.
  */
 const preventSubmit = (event: React.FormEvent) => event.preventDefault();
 
-const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: React.ReactNode }> = ({
-  store,
-  id,
-  children,
-}) => {
+/**
+ * The child objects a refused batch was refused on, presented from the
+ * refusal and never re-derived (the record page's `attributeRecordEditRefusal`
+ * reads the same evidence): the operation the server names as the failed one,
+ * else each field it names that only line operations write (a field the
+ * parent's own operation carries is the header form's to mark). The parent is
+ * operation 0 in both batch builders. A refusal that names neither, a lock or
+ * a permission denial, is on no collection.
+ */
+function refusedChildObjects(err: unknown, ops: readonly BatchTransactionOperation[]): Set<string> {
+  const out = new Set<string>();
+  const failed = (err as { details?: { failedOperation?: { index?: unknown } } } | null)?.details?.failedOperation?.index;
+  if (typeof failed === 'number') {
+    if (failed > 0 && ops[failed]?.object) out.add(ops[failed].object);
+    return out;
+  }
+  const carries = (op: BatchTransactionOperation | undefined, field: string) =>
+    !!op && op.action !== 'delete' && !!op.data && Object.prototype.hasOwnProperty.call(op.data, field);
+  for (const { field } of extractFieldErrors(err) ?? []) {
+    if (carries(ops[0], field)) continue;
+    for (const op of ops.slice(1)) if (carries(op, field)) out.add(op.object);
+  }
+  return out;
+}
+
+const FormSlotPlacement: React.FC<{
+  store: FormSlotStore;
+  id: string;
+  ownsForm?: boolean;
+  children: React.ReactNode;
+}> = ({ store, id, ownsForm = false, children }) => {
   useSyncExternalStore(store.subscribe, store.getVersion, store.getVersion);
   const at = store.placement(id);
   if (at === 'inline') return <>{children}</>;
   if (!at) return null;
+  if (ownsForm) return createPortal(children, at);
   return createPortal(
     <form noValidate onSubmit={preventSubmit} data-form-slot-owner="">
       <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
@@ -933,6 +970,34 @@ const FormSlotPlacement: React.FC<{ store: FormSlotStore; id: string; children: 
     at,
   );
 };
+
+/**
+ * Set once this module's own `preloadGridField()` has settled, so a form that
+ * mounts after that renders its grids at its first paint.
+ */
+let gridBodySettled = false;
+
+/**
+ * Whether the line grid's body is here (objectstack#36102). The grid is drawn
+ * only once it is, so a collection stays on "Loading columns…" until then and
+ * the grid never mounts on its loading placeholder, however its columns were
+ * reached: derived from the child schema, authored in full, or authored
+ * untyped and drawn while the derivation is still in flight. A failed load
+ * settles too: the grid then reports it, through the nearest error boundary.
+ */
+function useGridBodySettled(): boolean {
+  const [settled, setSettled] = useState(gridBodySettled);
+  useEffect(() => {
+    if (settled) return;
+    let live = true;
+    void preloadGridField().then(() => {
+      gridBodySettled = true;
+      if (live) setSettled(true);
+    });
+    return () => { live = false; };
+  }, [settled]);
+  return settled;
+}
 
 /**
  * The line-item grids + document totals, isolated from the header form.
@@ -969,6 +1034,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   // used to pass `toLocaleString` an explicit `undefined`, i.e. the MACHINE's
   // locale (objectui#9909).
   const displayLocale = useDisplayLocale();
+  const gridBodyReady = useGridBodySettled();
   // The tenant default currency (ADR-0053): the totals stack's currency when
   // the amount field fixes none (objectui#11132).
   const { currency: tenantCurrency } = useLocalization();
@@ -1180,7 +1246,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
                 { object: d.childObject, parent: parentObjectName, property: 'relationshipField' },
               )}
             </p>
-          ) : !d.columns?.length ? (
+          ) : !d.columns?.length || !gridBodyReady ? (
             <p className="py-4 text-sm text-muted-foreground">{t('form.masterDetail.loadingColumns')}</p>
           ) : (
             <LineItemsField
@@ -1203,6 +1269,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The columns whose amount follows this header's currency
               // (ADR-0144 D2 as amended), in the header's live code.
               columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
+              // Each currency column's own currency (a `fixed` code, a code on
+              // the line), for a pick's cross-currency rule (objectstack#36249).
+              columnFields={entry.currencyFields}
               // objectstack#35940 — a new line starts on the child's defaults,
               // and its empty required cell reads red once a save was tried,
               // as on the record page's edit state.
@@ -1266,7 +1335,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               <dt className="text-muted-foreground">{t('form.masterDetail.tax', { rate: taxPct })}</dt>
               <dd className="tabular-nums" data-testid="md-tax">{money(taxAmount)}</dd>
             </div>
-            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-semibold">
+            <div className="flex items-center justify-between border-t border-border pt-1.5 text-base font-medium">
               <dt>{t('form.masterDetail.total')}</dt>
               <dd className="tabular-nums" data-testid="md-grand-total">{money(grandTotal)}</dd>
             </div>
@@ -1288,6 +1357,9 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
   dataSource,
   className,
 }) => {
+  // The line grid's body loads on first use (objectstack#36102). Start it now,
+  // while the child schema is fetched, so the grid is there before its columns.
+  preloadGridField();
   const rawDetails = schema.details || [];
   const isEdit = schema.mode === 'edit' && !!schema.recordId;
   // `title` / `submitText` / `cancelText` are `I18nLabel` (see the schema
@@ -1506,6 +1578,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
                 columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
                 parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
+                currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
               };
             }
             return {
@@ -1525,6 +1598,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
               columnHelp: columnHelpByField(childSchema?.fields as Record<string, unknown> | undefined),
               parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
+              currencyFields: currencyFieldDefsOf(childSchema?.fields as Record<string, unknown> | undefined),
             };
           } catch (err) {
             // THE DERIVE FAILED, on a schema that loaded fine — almost always
@@ -2136,7 +2210,15 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               childSchema: childSchemasRef.current[e.config.childObject],
             })),
           );
-      const res = await runBatchTransaction(dataSource, ops);
+      let res: Awaited<ReturnType<typeof runBatchTransaction>>;
+      try {
+        res = await runBatchTransaction(dataSource, ops);
+      } catch (err) {
+        // A refusal on a placed collection marks the tab that holds it.
+        const refused = refusedChildObjects(err, ops);
+        slotStore.refuse(entries.filter((e) => refused.has(e.config.childObject)).map((e) => e.id));
+        throw err;
+      }
       // The batch COMMITTED: advance the child rows' baseline from it, so a
       // form that stays mounted diffs its next save against what this one
       // wrote (objectui#10564). The parent's baseline advances in the header
@@ -2178,7 +2260,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       // create → parent is op 0; edit → echo the parent values back.
       return res?.results?.[0] ?? { ...parentData, id: schema.recordId };
     },
-    [dataSource, entries, schema.objectName, schema.recordId, isEdit],
+    [dataSource, entries, schema.objectName, schema.recordId, isEdit, slotStore],
   );
 
   /**
@@ -2200,6 +2282,8 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
       }
       batchInFlightRef.current = true;
       setSaveTried(true);
+      // Past validation: the last refusal's marks retire, as the form's own do.
+      slotStore.refuse([]);
       holdSaveForBatch();
       try {
         return await sendBatch(parentValues);
@@ -2209,7 +2293,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
         batchInFlightRef.current = false;
       }
     },
-    [sendBatch, holdSaveForBatch],
+    [sendBatch, holdSaveForBatch, slotStore],
   );
 
   // The parent form renders WITHOUT its own submit button — the master-detail
@@ -2384,7 +2468,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
           everything on the parent Save. */}
       {expanded && expandedDetail && (
         // Beside its collection: where the header placed that collection, there.
-        <FormSlotPlacement store={slotStore} id={expanded.entryId}>
+        <FormSlotPlacement store={slotStore} id={expanded.entryId} ownsForm>
         <Card className="border-primary/40 shadow-none ring-1 ring-primary/10" data-testid="md-row-form">
           <CardHeader className="pb-2 flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-sm font-medium">

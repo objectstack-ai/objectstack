@@ -115,6 +115,7 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   relatedRowDelete: 'delete',
   attachmentUpload: 'create',
   attachmentDelete: 'delete',
+  attachmentRename: 'update',
   // The rows the write census found: affordances that read no grant at all.
   calendarQuickCreate: 'create',
   calendarReschedule: 'update',
@@ -132,6 +133,10 @@ const EXPECTED_GRANT: Record<string, Grant> = {
   // asked of `sys_comment`.
   feedCommentEdit: 'update',
   feedCommentDelete: 'delete',
+  // objectstack#36191: the same Delete through the own-comment delete door,
+  // which needs no delete grant, so it asks the grant the comment was posted
+  // under (as `feedReactionRemove` does for a reaction).
+  feedCommentDeleteOwn: 'create',
   // objectui#12982: Setup's Clone of a declared sharing rule, asked of
   // `sys_sharing_rule`: it creates an organization rule.
   declarationClone: 'create',
@@ -657,7 +662,6 @@ const LIST_VIEW = 'packages/plugin-list/src/ListView.tsx';
 const RECORD_PANEL = 'packages/plugin-detail/src/RecordDetailPanel.tsx';
 const OBJECT_GANTT = 'packages/plugin-gantt/src/ObjectGantt.tsx';
 const MASTER_DETAIL = 'packages/plugin-form/src/MasterDetailForm.tsx';
-const EXCEL_IMPORT_BAR = 'packages/app-shell/src/console/ai/ExcelImportBar.tsx';
 const RELATED_LIST = 'packages/plugin-detail/src/RelatedList.tsx';
 const RELATED_LIST_BLOCK = 'packages/plugin-detail/src/renderers/record-related-list.tsx';
 // Setup's holders sections: each reads its own rows, so every mount (the
@@ -695,6 +699,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // own completion attaches it (the upload adapter's `attachTo`), so the
   // `attachmentUpload` row is read where the upload is offered and no
   // `create` is called. Its delete is still a data-source write.
+  // Studio's 「新建应用」 door (objectstack#36748): the dialog's `newApp` step
+  // writes the new package's app as METADATA (a draft, then its publish), not a
+  // record through a data source; the member is named `create` like one.
+  'packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx :: PackageFormDialog > submit :: create':
+    outOfFamily("Studio's new-app door writes the new package's app metadata (draft, then publish) through the metadata client, not a record the caller browses; the Studio surface it is offered on is the author's own"),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleDelete :: delete':
     mapped(['attachmentDelete'], 'packages/app-shell/src/views/RecordAttachmentsPanel.tsx'),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > apiHandler :: update':
@@ -853,6 +862,10 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // the picked rows (relatedRowEdit).
   'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleAddRecords :: batch':
     mapped(['relatedNew', 'relatedRowEdit'], RELATED_LIST),
+  // The related tab's bulk delete (objectstack#35892): one batch call to the
+  // data source, offered beside the host's row delete and read here.
+  'packages/plugin-detail/src/RelatedList.tsx :: RelatedList > handleConfirmBulkDelete :: delete':
+    mapped(['relatedRowDelete'], RELATED_LIST),
   'packages/plugin-detail/src/renderers/record-related-list.tsx :: RecordRelatedListBody :: delete': {
     ...mapped(['relatedRowDelete'], RELATED_LIST_BLOCK),
     note: "the FALLBACK remove (an `add` config, no host delete) reads the same row the host's delete reads, so it never puts back a delete the host withheld",
@@ -888,12 +901,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   'packages/plugin-gantt/src/ObjectGantt.tsx :: ObjectGantt > renderRecordOverlay :: delete': mapped(['recordDelete'], DETAIL_VIEW),
   // ── plugin-grid ──
   'packages/plugin-grid/src/ImportWizard.tsx :: ImportWizard > legacyImport :: create': {
-    ...mapped(['listImport'], CONSOLE_LIST, 'packages/app-shell/src/views/importTargetFields.ts', EXCEL_IMPORT_BAR),
-    note: "one site, two mounts: the console list's Import and the AI build panel's spreadsheet import (`ExcelImportBar`) each read the row where they offer Import; HOST_GATED below holds every mount of the wizard to this list",
+    ...mapped(['listImport'], CONSOLE_LIST, 'packages/app-shell/src/views/importTargetFields.ts'),
+    note: "the console list's Import reads the row where it offers Import; HOST_GATED below holds every mount of the wizard to this list",
   } as WriteSite,
-  // The inline-edit saves (objectui#12292): `defaultRowSave` and
-  // `defaultBatchSave` both write through `writeRowGuarded`, the `If-Match`
-  // write; `resolveRowConflict` is the same save's Overwrite after a 409, re-keyed
+  // The inline-edit save (objectui#12292): `defaultRowSave` writes through
+  // `writeRowGuarded`, the `If-Match` write; `resolveRowConflict` is the same save's Overwrite after a 409, re-keyed
   // to the server's version. One affordance, the grid's `listInlineEdit` row.
   'packages/plugin-grid/src/ObjectGrid.tsx :: ObjectGrid > writeRowGuarded :: update': mapped(['listInlineEdit'], OBJECT_GRID),
   'packages/plugin-grid/src/ObjectGrid.tsx :: ObjectGrid > resolveRowConflict :: update': mapped(['listInlineEdit'], OBJECT_GRID),
@@ -1222,6 +1234,6 @@ describe('the write census: every write call site sits behind a map row, or says
     // A derivation that found nothing would pass the pin above over every
     // tree; this is the site the hand-written list it replaced held.
     expect(hostGatedSites(mountsBy).map(([component]) => component)).toEqual(expect.arrayContaining(['ImportWizard']));
-    expect([...(mountsBy.get('ImportWizard') ?? [])]).toEqual(expect.arrayContaining([CONSOLE_LIST, EXCEL_IMPORT_BAR]));
+    expect([...(mountsBy.get('ImportWizard') ?? [])]).toEqual(expect.arrayContaining([CONSOLE_LIST]));
   });
 });

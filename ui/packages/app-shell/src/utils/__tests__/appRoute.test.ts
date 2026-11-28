@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appRouteSegment, matchAppBySegment, appAddressSegment, canonicalAppPathname, filterActiveApps, resolveHostAppSegment, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
+import { appRouteSegment, matchAppBySegment, appAddressSegment, canonicalAppPathname, filterActiveApps, resolveHostAppSegment, resolveApprovalsHostSegment, isApprovalsInboxLink, appStudioDesignPath, appStudioSurfacePath, appStudioObjectPath, appStudioRoutePath } from '../appRoute';
 
 /**
  * ADR-0048 (option A) — package-id route segment.
@@ -199,6 +199,61 @@ describe('resolveHostAppSegment', () => {
 });
 
 /**
+ * objectstack#35505 (ruling option A, item 1) — the app an approval opened
+ * with no source app stays in, after the object's own app (which the request
+ * page asks): the current app, then the last used app, then the first app.
+ */
+describe('resolveApprovalsHostSegment (objectstack#35505)', () => {
+  const setup = { name: 'setup', _packageId: 'com.objectstack.setup' };
+  const crm = { name: 'crm', _packageId: 'com.acme.crm' };
+  const hr = { name: 'hr' };
+  const ops = { name: 'ops' };
+
+  it('tier 2 — the current app wins over the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, crm], 'crm', 'hr')).toBe('com.acme.crm');
+  });
+
+  it('tier 3 — with no current app, the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, crm], undefined, 'crm')).toBe('com.acme.crm');
+  });
+
+  it('tier 3 — a current app the user can no longer open falls through to the last used app', () => {
+    expect(resolveApprovalsHostSegment([setup, hr, { ...crm, active: false }, ops], 'crm', 'ops')).toBe('ops');
+  });
+
+  it('tier 4 — neither current nor last answers: the first app, not Setup ahead of it', () => {
+    expect(resolveApprovalsHostSegment([hr, setup, crm], undefined, undefined)).toBe('hr');
+    expect(resolveApprovalsHostSegment([hr, setup], 'gone', 'also_gone')).toBe('hr');
+    expect(resolveApprovalsHostSegment([hr, { ...crm, hidden: true }], undefined, 'crm')).toBe('hr');
+  });
+
+  it('Setup stays the answer when it is the current or the last used app (ruling item 3)', () => {
+    expect(resolveApprovalsHostSegment([hr, setup], 'setup', 'hr')).toBe('com.objectstack.setup');
+    expect(resolveApprovalsHostSegment([hr, setup], undefined, 'setup')).toBe('com.objectstack.setup');
+  });
+
+  it('an unloaded list keeps the hint, current first', () => {
+    expect(resolveApprovalsHostSegment([], 'crm', 'hr')).toBe('crm');
+    expect(resolveApprovalsHostSegment(undefined, undefined, 'hr')).toBe('hr');
+  });
+});
+
+describe('isApprovalsInboxLink (objectstack#35505)', () => {
+  it('names the inbox and its request deep link, as the approvals service writes them', () => {
+    expect(isApprovalsInboxLink('/system/approvals')).toBe(true);
+    expect(isApprovalsInboxLink('/system/approvals?request=req_1')).toBe(true);
+    expect(isApprovalsInboxLink('system/approvals?request=req_1')).toBe(true);
+  });
+
+  it('CONTROL: other links, and a segment that only starts the same way, are not it', () => {
+    expect(isApprovalsInboxLink('/invoice/inv_1')).toBe(false);
+    expect(isApprovalsInboxLink('/system/approvals_archive')).toBe(false);
+    expect(isApprovalsInboxLink('/apps/crm/system/approvals')).toBe(false);
+    expect(isApprovalsInboxLink(undefined)).toBe(false);
+  });
+});
+
+/**
  * ADR-0080 — app → Studio reverse bridge.
  */
 describe('appStudioDesignPath', () => {
@@ -226,20 +281,21 @@ describe('appStudioDesignPath', () => {
 });
 
 /**
- * App → Studio interface deep-link (dashboard design page).
+ * App → Studio interface deep-link: the item's page in the All-metadata area
+ * (objectstack#36502 retired the Interfaces pillar it opened before).
  */
 describe('appStudioSurfacePath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links to the interface surface in the Interfaces pillar', () => {
+  it('deep-links to the interface\'s item page in the All-metadata area (objectstack#36502)', () => {
     expect(appStudioSurfacePath(crm, true, { type: 'dashboard', name: 'executive_dashboard' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=dashboard:executive_dashboard',
+      '/studio/com.acme.crm/metadata/dashboard/executive_dashboard',
     );
   });
   it('URL-encodes the package id and the surface name', () => {
     expect(
       appStudioSurfacePath({ _packageId: 'com.acme/crm' }, true, { type: 'dashboard', name: 'sales dash' }),
-    ).toBe('/studio/com.acme%2Fcrm/interfaces?surface=dashboard:sales%20dash');
+    ).toBe('/studio/com.acme%2Fcrm/metadata/dashboard/sales%20dash');
   });
   it('returns null for non-admins', () => {
     expect(appStudioSurfacePath(crm, false, { type: 'dashboard', name: 'd' })).toBeNull();
@@ -261,14 +317,13 @@ describe('appStudioSurfacePath', () => {
 describe('appStudioObjectPath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links to the object surface in the Data pillar', () => {
-    expect(appStudioObjectPath(crm, true, 'showcase_task')).toBe(
-      '/studio/com.acme.crm/data?surface=object:showcase_task',
-    );
+  // objectstack#36904 — the object designer on its metadata address.
+  it("deep-links to the object's designer", () => {
+    expect(appStudioObjectPath(crm, true, 'showcase_task')).toBe('/studio/com.acme.crm/metadata/object/showcase_task');
   });
   it('URL-encodes the package id and the object name', () => {
     expect(appStudioObjectPath({ _packageId: 'com.acme/crm' }, true, 'my object')).toBe(
-      '/studio/com.acme%2Fcrm/data?surface=object:my%20object',
+      '/studio/com.acme%2Fcrm/metadata/object/my%20object',
     );
   });
   it('returns null for non-admins', () => {
@@ -286,39 +341,39 @@ describe('appStudioObjectPath', () => {
 
 /**
  * App → Studio route bridge — maps a running-app route to its Studio target:
- * an interface surface (dashboard / page / report) deep-links into the
- * Interfaces pillar; an object record page deep-links that object in the Data
+ * an interface surface (dashboard / page / report) deep-links to its
+ * All-metadata item page (objectstack#36502); an object record page deep-links that object in the Data
  * pillar; everything else opens the package's Data tab.
  */
 describe('appStudioRoutePath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links a dashboard route to its Interfaces surface', () => {
+  it('deep-links a dashboard route to its All-metadata item page', () => {
     expect(appStudioRoutePath(crm, true, { type: 'dashboard', name: 'executive_dashboard' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=dashboard:executive_dashboard',
+      '/studio/com.acme.crm/metadata/dashboard/executive_dashboard',
     );
   });
 
-  it('deep-links a page route to its Interfaces surface (the fix — was the Data tab)', () => {
+  it('deep-links a page route to its All-metadata item page (the fix — was the Data tab)', () => {
     expect(appStudioRoutePath(crm, true, { type: 'page', name: 'showcase_crm_workbench' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=page:showcase_crm_workbench',
+      '/studio/com.acme.crm/metadata/page/showcase_crm_workbench',
     );
   });
 
-  it('deep-links a report route to its Interfaces surface', () => {
+  it('deep-links a report route to its All-metadata item page', () => {
     expect(appStudioRoutePath(crm, true, { type: 'report', name: 'pipeline_report' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=report:pipeline_report',
+      '/studio/com.acme.crm/metadata/report/pipeline_report',
     );
   });
 
   it('deep-links an object route (routeType is the object name) to its Data-pillar surface', () => {
     // The fix: an object records page now opens THAT object, not the generic Data tab.
     expect(appStudioRoutePath(crm, true, { type: 'showcase_task', name: undefined })).toBe(
-      '/studio/com.acme.crm/data?surface=object:showcase_task',
+      '/studio/com.acme.crm/metadata/object/showcase_task',
     );
     // A record-detail route (name='record') still keys off the object route type.
     expect(appStudioRoutePath(crm, true, { type: 'account', name: 'record' })).toBe(
-      '/studio/com.acme.crm/data?surface=object:account',
+      '/studio/com.acme.crm/metadata/object/account',
     );
   });
 

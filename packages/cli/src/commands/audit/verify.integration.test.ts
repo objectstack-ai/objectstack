@@ -18,7 +18,8 @@
  *      the run exits 1;
  *   3. a usage error, a declared archive this boot cannot reach, and a run
  *      with no data key to open the stored checkpoints, exit 2 with no verdict;
- *   4. a project that seals nothing exits 0 and says so, and no run starts
+ *   4. a project that declares no seal of its own still checks the platform's
+ *      sealed audit log and exits 0, and no run starts
  *      the sealer: a due row stays unsealed and no run reports on sealing;
  *   5. `--out` writes the proof bundle, with no stored value and no wrapped
  *      secret in it, and `--bundle` re-judges it with no boot, from an empty
@@ -293,7 +294,7 @@ beforeAll(async () => {
   ], [sealedObject]);
   runs.unreachable = await verify(unreachable, join(unreachable, 'main.db'), ['--json']);
 
-  // A project that seals nothing.
+  // A project that declares no seal of its own: only the platform's audit log is sealed.
   const plain = mkdtempSync(join(tmpdir(), 'os-31908-plain-'));
   dirs.push(plain);
   writeArtifact(plain, [], [{ name: 'os31908_plain', fields: { name: { type: 'text' } } }]);
@@ -325,7 +326,8 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     const run = runs.clean;
     expect(run.code, run.stderr.slice(-2000)).toBe(0);
     const { report } = doc(run);
-    expect(report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER], faults: [], rows: [] });
+    // `sys_audit_log` is sealed by its own declaration (ADR-0154 D10), so every project checks it too.
+    expect(report).toMatchObject({ ok: true, sealed: true, objects: [LEDGER, 'sys_audit_log'], faults: [], rows: [] });
     expect(report.totals.unmodified).toBe(5);
     expect(report.keys.trusted).toHaveLength(1);
     expect(report.keys.trusted[0]).toMatch(/^[0-9a-f]{64}$/);
@@ -360,7 +362,7 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     const run = runs.unreachable;
     expect(run.code, run.stderr.slice(-2000)).toBe(2);
     expect(doc(run)).toMatchObject({ error: 'archive_not_connected' });
-    expect(doc(run).message).toContain("Archive datasource 'archive' (os31908_ledger) is not connected on this boot");
+    expect(doc(run).message).toContain("Archive datasource 'archive' (os31908_ledger, sys_audit_log) is not connected on this boot");
   });
 
   it('3c. a run with no data key exits 2 with no verdict: the checkpoints it would judge cannot be opened', () => {
@@ -377,10 +379,10 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     for (const [name, run] of Object.entries(runs)) expect(run.stderr, name).not.toContain('AuditSealer');
   });
 
-  it('4. a project that seals nothing exits 0 and says so', () => {
+  it('4. a project that declares no seal of its own still checks the platform\'s sealed audit log, and exits 0 (ADR-0154 D10)', () => {
     const run = runs.nothing;
     expect(run.code, run.stderr.slice(-2000)).toBe(0);
-    expect(doc(run).report).toMatchObject({ ok: true, sealed: false, objects: [] });
+    expect(doc(run).report).toMatchObject({ ok: true, sealed: true, objects: ['sys_audit_log'], faults: [], rows: [] });
   });
 });
 

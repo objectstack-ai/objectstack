@@ -24,6 +24,7 @@ export const SysMember = ObjectSchema.create({
   label: 'Member',
   pluralLabel: 'Members',
   icon: 'user-check',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
@@ -78,7 +79,7 @@ export const SysMember = ObjectSchema.create({
       // move this page if it did. Looking for the tab order in
       // this directory finds nothing; it lives one directory over (#16270).
       // Declaration order is render order — the related-list toolbar bridge
-      // maps the child object's `list_toolbar` actions in array order
+      // maps the child object's `list` actions in array order
       // (objectui `RelatedRecordActionsBridge.deriveActions` →
       // `RelatedList`), so this sits left of `add_member`.
       //
@@ -99,7 +100,7 @@ export const SysMember = ObjectSchema.create({
         'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       // Same gate as the other two mirrors — the org CAPABILITY, not
@@ -175,7 +176,7 @@ export const SysMember = ObjectSchema.create({
       label: 'Add Member',
       icon: 'link-2',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/add-member',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -224,7 +225,7 @@ export const SysMember = ObjectSchema.create({
       description: "Choose the new organization role for {{ record.user_id.name | default:'this member' }}.",
       icon: 'shield',
       mode: 'edit',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
@@ -253,7 +254,7 @@ export const SysMember = ObjectSchema.create({
       icon: 'user-minus',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/remove-member',
       recordIdParam: 'memberIdOrEmail',
@@ -292,7 +293,7 @@ export const SysMember = ObjectSchema.create({
       icon: 'crown',
       variant: 'danger',
       mode: 'custom',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
@@ -301,7 +302,7 @@ export const SysMember = ObjectSchema.create({
       // then the feature gate are AND-composed onto it by the lowerings.
       // Owner only: better-auth refuses to SET the creator role unless the
       // caller holds it, whatever an admin's statements say.
-      // `has()` guards the SPARSE action face (#8990): this is a `list_item`
+      // `has()` guards the SPARSE action face (#8990): this is a `record_row`
       // action, so a member list that does not project `role` would abort the
       // predicate at key resolution and drop the button silently. `has()`
       // alone — the operand is a bare equality against a literal (see

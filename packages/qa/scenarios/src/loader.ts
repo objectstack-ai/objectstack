@@ -36,11 +36,13 @@ import { basename, join } from 'node:path';
 
 import { ErrorCode } from '@objectstack/spec/api';
 
+import { checkAskKinds } from './ask-kinds.js';
 import { checkDatasets } from './datasets.js';
 import {
   AppCodeSchema,
   GUARDRAIL_CHECKS,
   isGalleryTier,
+  MASTER_DETAIL_INLINE_EDIT_TAG,
   ROW_SCOPE_TAG,
   ScenarioCardSchema,
   type ScenarioCard,
@@ -604,6 +606,13 @@ function checkCard(
       );
     }
   });
+  // The inline-edit tag credits only a `master_detail` field, so the build prompt must name one as such.
+  if (card.capabilities.includes(MASTER_DETAIL_INLINE_EDIT_TAG) && !(expect.lookups ?? []).some((l) => l.masterDetail === true)) {
+    refuse(
+      ['expect', 'lookups'],
+      `the card carries \`${MASTER_DETAIL_INLINE_EDIT_TAG}\`, whose check credits only a \`master_detail\` field, but no expect.lookups row is marked \`"masterDetail": true\`: mark the detail's relationship to its master, or the build prompt lists it as a plain lookup`,
+    );
+  }
 
   // ── seed: every expected object is seeded, and the seed models the shape ──
   const seed = run.seed;
@@ -721,6 +730,11 @@ function checkCard(
     });
     (p.hidden.fields ?? []).forEach((f, j) => {
       const at: IssuePath = ['run', 'personas', i, 'hidden', 'fields', j];
+      if (!objects.has(f.object)) refuse([...at, 'object'], `\`${f.object}\` is not in expect.objects`);
+      else checkField(f.object, f.field, [...at, 'field']);
+    });
+    (p.withheldRollups ?? []).forEach((f, j) => {
+      const at: IssuePath = ['run', 'personas', i, 'withheldRollups', j];
       if (!objects.has(f.object)) refuse([...at, 'object'], `\`${f.object}\` is not in expect.objects`);
       else checkField(f.object, f.field, [...at, 'field']);
     });
@@ -924,6 +938,13 @@ function checkCard(
       checkRef(op.object, field, value, [...at, 'values', field]);
     }
     if (!personas.has(op.actingAs)) refuse([...at, 'actingAs'], `no persona \`${op.actingAs}\``);
+    if (op.via !== undefined) {
+      if (op.outcome.kind === 'refused') {
+        refuse([...at, 'via'], `a \`refused\` write goes through no route: \`via\` names the agent action an applied or confirmation-gated write is designed to go through`);
+      } else if (!(run.agentActions ?? []).some((a) => a.name === op.via && a.object === op.object)) {
+        refuse([...at, 'via'], `\`${op.via}\` is not one of the card's \`run.agentActions\` on \`${op.object}\``);
+      }
+    }
     const actor = run.personas.find((p) => p.id === op.actingAs);
     if (actor !== undefined) checkReach(op, actor, at);
     const out = op.outcome;
@@ -1049,6 +1070,9 @@ function checkCard(
     return values.every((v) => v === null || typeof v === 'number') ? 'number' : 'other';
   };
   checkDatasets(card, seedField, new Set([...run.questions.map((q) => q.id), ...run.operations.map((o) => o.id)]), refuse);
+
+  // ── ask kinds: every kind a question declares fits what the card states (ask-kinds.ts) ──
+  checkAskKinds(card, personaTruths, refuse);
 
   // ── iterate: the delta is additive and lands in a consistent expect ──
   const delta = card.iterate.expectDelta;

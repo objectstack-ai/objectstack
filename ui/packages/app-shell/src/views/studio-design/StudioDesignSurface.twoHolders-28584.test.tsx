@@ -22,7 +22,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 // Module-scope import of the lazily loaded dashboard renderer (AGENTS.md,
 // flaky-test discipline).
@@ -31,8 +31,6 @@ import { MetadataClient } from '@object-ui/data-objectstack';
 
 const PKG = 'com.acme.app';
 const OTHER = 'com.other.app';
-const NAV = [{ id: 'n1', type: 'dashboard', label: 'Customers', dashboardName: 'customer_dashboard' }];
-const OTHER_NAV = [{ id: 'n1', type: 'dashboard', label: 'Elsewhere', dashboardName: 'other_dashboard' }];
 const flow = (name: string, label: string) => ({
   name,
   label,
@@ -120,10 +118,17 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+// The source under test reaches these dynamic imports (the command palette's
+// record preview, the drafts panel's lint, the code editor): their first load
+// is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@object-ui/plugin-detail';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -169,35 +174,12 @@ function layersReads(type: string, name: string) {
 const refused = () => server.requests.filter((r) => r.status === 409).map((r) => `${r.path}${r.search}`);
 
 describe('Studio pillars — an item two packages hold is read at this package (objectstack#28584)', () => {
-  it('Interfaces: the app and its dashboard leaf are read at this package, and its nav loads', async () => {
-    holdBoth('app', 'acme_app', { name: 'acme_app', label: 'Acme', navigation: NAV }, { name: 'acme_app', label: 'Other', navigation: OTHER_NAV });
-    holdBoth(
-      'dashboard',
-      'customer_dashboard',
-      { name: 'customer_dashboard', label: 'Mine', widgets: [] },
-      { name: 'customer_dashboard', label: 'Theirs', widgets: [] },
-    );
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await waitFor(() => expect(layersReads('dashboard', 'customer_dashboard')).toHaveLength(1));
-    await settle();
-
-    expect(layersReads('app', 'acme_app')).toEqual([{ search: `?package=${PKG}`, status: 200 }]);
-    expect(layersReads('dashboard', 'customer_dashboard')).toEqual([{ search: `?package=${PKG}`, status: 200 }]);
-    expect(refused()).toEqual([]);
-    // This package's nav, not the other holder's.
-    expect(await screen.findByTitle('dashboard · customer_dashboard')).toBeInTheDocument();
-    expect(screen.queryByTitle('dashboard · other_dashboard')).toBeNull();
-  });
 
   it('Automations: the flow is read at this package', async () => {
     holdBoth('flow', 'p_flow', flow('p_flow', 'Mine'), flow('p_flow', 'Theirs'));
     render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-        <AutomationsPillar packageId={PKG} />
+      <MemoryRouter initialEntries={[`/studio/${PKG}/metadata/flow/p_flow`]}>
+        <AutomationsPillar packageId={PKG} flowName="p_flow" />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('flow', 'p_flow')).toHaveLength(1));
@@ -216,7 +198,7 @@ describe('Studio pillars — an item two packages hold is read at this package (
     );
     render(
       <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="acme_account" packageId={PKG} />
       </MemoryRouter>,
     );
     await waitFor(() => expect(layersReads('object', 'acme_account')).toHaveLength(1));

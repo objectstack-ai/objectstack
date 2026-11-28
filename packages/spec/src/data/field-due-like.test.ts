@@ -26,7 +26,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { FieldSchema } from './field.zod';
-import { fieldForm } from './field.form';
+import { fieldForm } from './field.metadata-form';
 
 const DEADLINE_TYPES = ['date', 'datetime'] as const;
 
@@ -158,7 +158,7 @@ describe('settledWhen without dueLike: true is refused (ADR-0049: a declared key
 describe('field.form offers the deadline keys on exactly the types the door accepts', () => {
   const rows = (fieldForm.sections ?? []).flatMap((s) => s.fields ?? []) as Array<{ field?: string; visibleWhen?: unknown }>;
   const rowFor = (key: string) => rows.find((r) => r.field === key);
-  // `defineForm` normalizes a bare predicate string to its `{ dialect, source }`
+  // `defineMetadataForm` normalizes a bare predicate string to its `{ dialect, source }`
   // envelope, so the gate is read off `source`.
   const gateOf = (row: { visibleWhen?: unknown }) => {
     const v = row.visibleWhen as string | { source?: string } | undefined;

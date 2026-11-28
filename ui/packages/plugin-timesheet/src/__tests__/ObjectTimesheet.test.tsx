@@ -357,3 +357,63 @@ describe('ObjectTimesheet cell writes under each grant (#34382)', () => {
     expect(screen.getByTestId('timesheet-add-row')).toBeTruthy();
   });
 });
+
+/**
+ * objectstack#37448 — a cell write is an edit by hand, so the field hand lock
+ * holds (`@object-ui/core`'s one verdict). Retyping or clearing a one-record
+ * cell edits that record's value field, judged over the record
+ * (`uiReadonlyWhen` included); a create writes the row, date and value fields,
+ * judged by the static half as the create dialog judges a create.
+ */
+describe('ObjectTimesheet — the field hand lock (objectstack#37448)', () => {
+  const lockedSchema = (locks: Record<string, Record<string, unknown>>) => ({
+    ...objectSchema,
+    fields: {
+      ...objectSchema.fields,
+      status: { name: 'status', type: 'text', label: 'Status' },
+      hours: { ...objectSchema.fields.hours, ...locks.hours },
+      project: { ...objectSchema.fields.project, ...locks.project },
+    },
+  });
+
+  async function mountLocked(locks: Record<string, Record<string, unknown>>) {
+    const ds = makeDataSource([
+      { id: 'r1', project: 'Apollo', work_date: '2026-11-16', hours: 2, status: 'approved' },
+      { id: 'r2', project: 'Apollo', work_date: '2026-11-17', hours: 3, status: 'draft' },
+    ]);
+    ds.getObjectSchema.mockResolvedValue(lockedSchema(locks) as any);
+    renderTimesheet(ds);
+    await waitFor(() => expect(screen.getAllByTestId('timesheet-row')).toHaveLength(1));
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalled());
+    return ds;
+  }
+
+  /** Sunday..Saturday: whether each day's cell is an input. Monday holds r1, Tuesday r2. */
+  const inputs = (): boolean[] =>
+    Array.from(screen.getByTestId('timesheet-row').querySelectorAll('td'))
+      .slice(1, 8)
+      .map((td) => td.querySelector('[data-testid="timesheet-cell"]') !== null);
+
+  it('a record whose value field is locked by hand draws a read-only cell; the other record still edits', async () => {
+    const ds = await mountLocked({ hours: { uiReadonlyWhen: "record.status == 'approved'" } });
+    await waitFor(() => expect(inputs()).toEqual([true, false, true, true, true, true, true]));
+    const tuesday = screen.getAllByTestId('timesheet-cell')[1] as HTMLInputElement;
+    expect(tuesday.value).toBe('3');
+    fireEvent.change(tuesday, { target: { value: '5' } });
+    fireEvent.blur(tuesday);
+    await waitFor(() => expect(ds.update).toHaveBeenCalledWith('time_entry', 'r2', { hours: 5 }));
+    expect(ds.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('a value field locked by hand on every record takes no create, no edit and no clear', async () => {
+    await mountLocked({ hours: { uiReadonly: true } });
+    await waitFor(() => expect(inputs()).toEqual([false, false, false, false, false, false, false]));
+    expect(screen.queryByTestId('timesheet-add-row')).toBeNull();
+  });
+
+  it('a row field locked by hand closes the create only: stored values still edit', async () => {
+    await mountLocked({ project: { uiReadonly: true } });
+    await waitFor(() => expect(inputs()).toEqual([false, true, true, false, false, false, false]));
+    expect(screen.queryByTestId('timesheet-add-row')).toBeNull();
+  });
+});

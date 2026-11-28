@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { arObjects } from './ar.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * العربية (ar) — Setup App Translations
  */
 export const ar: TranslationData = {
   objects: arObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('ar'),
   apps: {
     account: {
       label: 'الحساب',
@@ -40,7 +43,7 @@ export const ar: TranslationData = {
         group_overview: { label: 'نظرة عامة' },
         group_apps: { label: 'التطبيقات' },
         nav_marketplace_browse: { label: 'تصفح السوق' },
-        nav_marketplace_installed: { label: 'التطبيقات المثبّتة' },
+        nav_packages: { label: 'الحزم' },
         nav_cloud_connection: { label: 'الاتصال السحابي' },
         group_people_org: { label: 'الأشخاص والمؤسسة' },
         group_access_control: { label: 'التحكم في الوصول' },
@@ -76,6 +79,7 @@ export const ar: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'بيانات اعتماد SCIM' },
         nav_api_keys: { label: 'مفاتيح API' },
+        nav_access_directory: { label: 'المناصب والأذونات' },
 
         // صندوق الموافقات = the Approvals Inbox component (#7234) — the surface
         // with decision actions. The three below are the engine's raw tables; the
@@ -95,6 +99,7 @@ export const ar: TranslationData = {
         nav_settings_localization: { label: 'الترجمة والإعدادات المحلية' },
         nav_exchange_rates: { label: 'أسعار الصرف' },
         nav_units_of_measure: { label: 'وحدات القياس' },
+        nav_standard_unit_settings: { label: 'إعدادات الوحدات القياسية' },
         nav_work_calendars: { label: 'تقويمات العمل' },
         nav_work_calendar_exceptions: { label: 'استثناءات التقويم' },
         nav_settings_company: { label: 'الشركة' },
@@ -108,6 +113,7 @@ export const ar: TranslationData = {
         nav_settings_knowledge: { label: 'المعرفة' },
         nav_settings_lifecycle: { label: 'دورة حياة البيانات' },
         nav_recycle_bin: { label: 'سلة المحذوفات' },
+        nav_public_forms: { label: 'النماذج العامة' },
         nav_notification_preferences: { label: 'تفضيلات الإشعارات' },
         nav_notification_templates: { label: 'قوالب الإشعارات' },
 
@@ -131,7 +137,7 @@ export const ar: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: 'App Studio',
       description: 'منضدة عمل البيانات الوصفية للمطوّرين والمحللين والمنفّذين',
       navigation: {
         group_overview: { label: 'نظرة عامة' },

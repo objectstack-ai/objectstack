@@ -19,8 +19,12 @@
  * production's.
  *
  * The first save after a load is pinned to that load's read: `If-Match` with
- * the draft's version, or `If-None-Match: *` when no draft was pending — so the
- * card's literal race (two editors who each load and save ONCE) is refused too.
+ * the draft's version, or `If-None-Match: *` when no draft was pending.
+ *
+ * objectstack#36511 — a Save is the draft and then that item's publish, so no
+ * draft is left after it and the next Save asserts none. The race refused
+ * here is over a draft pending when both editors opened (a copilot's): the
+ * second Save is pinned to a draft the first one published.
  *
  * The two editors are two mounted `DataPillar`s over one server double: each
  * pillar holds its own buffer and its own version, exactly as two tabs do.
@@ -63,6 +67,14 @@ const server = vi.hoisted(() => ({
   drafts: new Map<string, { body: Record<string, unknown>; version: string }>(),
   saves: [] as SaveCall[],
   seq: 0,
+  // objectstack#36601 — the published row's version, served on `/layers` as
+  // `overlayVersion` only while `servesPublishedVersion` (a server from
+  // before it serves none), and pinned by the publish's `If-Match`.
+  activeVersions: new Map<string, string>(),
+  servesPublishedVersion: false,
+  publishes: [] as Array<{ name: string; ifMatch: string | undefined; ifNoneMatch: string | undefined }>,
+  // objectstack#36601 (contract review S2) — the draft discard fails.
+  resetFails: false,
 }));
 
 /**
@@ -107,7 +119,10 @@ const mockClient = vi.hoisted(() => {
       // The stored draft row, as the layered read serves it (objectstack#29793).
       const stored = server.drafts.get(k(type, name));
       const draft = stored ? JSON.parse(JSON.stringify(stored.body)) : null;
-      return { code: null, overlay: eff, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
+      const published = server.servesPublishedVersion
+        ? { overlayVersion: eff ? (server.activeVersions.get(k(type, name)) ?? null) : null }
+        : {};
+      return { code: null, overlay: eff, ...published, overlayScope: eff ? 'env' : null, effective: eff, draft, editable: true, deletable: true, resettable: false, lock: 'none' };
     }),
     // The draft read serves the body and its version; no draft is `null`, as
     // the real client resolves the read's 404.
@@ -129,8 +144,29 @@ const mockClient = vi.hoisted(() => {
       server.drafts.set(k(type, name), { body, version });
       return { success: true, version, seq: server.seq, state: 'draft', message: `Saved ${type} '${name}' [seq=${server.seq}]` };
     }),
-    publish: vi.fn(async () => ({ success: true })),
-    reset: vi.fn(async () => ({})),
+    // The Save's own publish (objectstack#36511): the draft goes live, and none is left.
+    // objectstack#36601 — pinned by `If-Match` / `If-None-Match: *` on the live row.
+    publish: vi.fn(async (type: string, name: string, options?: { ifMatch?: string; ifNoneMatch?: string }) => {
+      server.publishes.push({ name, ifMatch: options?.ifMatch, ifNoneMatch: options?.ifNoneMatch });
+      const live = server.active.has(k(type, name)) ? (server.activeVersions.get(k(type, name)) ?? null) : null;
+      if (options?.ifMatch !== undefined && options.ifMatch !== live) throw await conflictRefusal(type, name, live);
+      if (options?.ifNoneMatch !== undefined && live !== null) throw await conflictRefusal(type, name, live);
+      const draft = server.drafts.get(k(type, name));
+      server.seq += 1;
+      const version = `hmac-sha256:live${server.seq}`;
+      if (draft) {
+        server.active.set(k(type, name), draft.body);
+        server.activeVersions.set(k(type, name), version);
+      }
+      server.drafts.delete(k(type, name));
+      return { success: true, version };
+    }),
+    // The draft discard a refused Save sends (`?state=draft`).
+    reset: vi.fn(async (type: string, name: string, options?: { state?: string }) => {
+      if (server.resetFails) throw new Error('reset unavailable');
+      if (options?.state === 'draft') server.drafts.delete(k(type, name));
+      return {};
+    }),
   };
 });
 
@@ -176,8 +212,12 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
+// The source reaches a dynamic import of it: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { DataPillar } from './StudioDesignSurface';
-import { addFieldFromFormToolbar, addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
+import { addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 
@@ -188,6 +228,10 @@ beforeEach(() => {
   server.drafts.clear();
   server.saves.length = 0;
   server.seq = 0;
+  server.activeVersions.clear();
+  server.servesPublishedVersion = false;
+  server.publishes.length = 0;
+  server.resetFails = false;
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   server.active.set(`object/${OBJECT.name}`, JSON.parse(JSON.stringify(OBJECT)));
 });
@@ -197,9 +241,11 @@ afterEach(cleanup);
 /** One editor: a mounted Data pillar, as one browser tab holds it. */
 function openEditor(): HTMLElement {
   const { container } = render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+        <DataPillar objectName="acme_task" packageId={PKG} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
   return container;
 }
@@ -209,7 +255,22 @@ const fieldNames = (body: Record<string, unknown>) => readFields(body.fields).en
 // counts its own fields with the same words, so the read is scoped.
 const fieldCount = (editor: HTMLElement) =>
   within(within(editor).getByTestId('data-object-header')).getByText(/^\d+ fields?( \(\+\d+ system\))?$/).textContent;
-const serverDraftFields = () => fieldNames(server.drafts.get(`object/${OBJECT.name}`)!.body);
+const liveFields = () => fieldNames(server.active.get(`object/${OBJECT.name}`)!);
+
+/** Press this editor's own top-bar Save (objectstack#36511) and wait for its draft save to be sent. */
+async function saveIn(editor: HTMLElement): Promise<void> {
+  const before = server.saves.length;
+  const save = await within(editor).findByTestId('studio-save', undefined, { timeout: 4000 });
+  await act(async () => {
+    fireEvent.click(save);
+  });
+  await waitFor(() => expect(server.saves.length).toBe(before + 1), { timeout: 8000 });
+}
+
+/** A draft pending when the editors open (a copilot's): the version both pin their first Save to. */
+const PENDING = 'hmac-sha256:pending';
+const servePendingDraft = () =>
+  server.drafts.set(`object/${OBJECT.name}`, { body: JSON.parse(JSON.stringify(OBJECT)), version: PENDING });
 
 async function loaded(editor: HTMLElement, count: string): Promise<void> {
   await waitFor(() => expect(fieldCount(editor)).toBe(count), { timeout: 8000 });
@@ -219,7 +280,7 @@ async function loaded(editor: HTMLElement, count: string): Promise<void> {
 const SECOND: AddFieldInput = { label: 'Second field' };
 
 /**
- * Add a field and wait until the autosave carrying it has landed. From the
+ * Add a field, press Save and wait until it has landed. From the
  * Records grid's "+" column by default; a draft-only object has no grid, so
  * its case adds from the Form toolbar (objectui#12511). A second field on the
  * same object takes another label (`input`): a repeated label derives a taken
@@ -230,113 +291,100 @@ async function addFieldAndSave(
   add = addFieldFromGrid,
   input?: AddFieldInput,
 ): Promise<void> {
-  const before = server.saves.length;
   await add(editor, input);
-  await waitFor(() => expect(server.saves.length).toBe(before + 1), { timeout: 8000 });
-  await waitFor(() => expect(within(editor).queryByTestId('data-autosaving')).toBeNull(), { timeout: 8000 });
+  await saveIn(editor);
+  await waitFor(() => expect(within(editor).queryByTestId('studio-save')).toBeNull(), { timeout: 8000 });
 }
 
-/** Reverse the grid's columns (a save the pillar sends itself) and wait for it. */
+/** Reverse the grid's columns and press Save. */
 async function reorderAndSave(editor: HTMLElement): Promise<void> {
-  const before = server.saves.length;
   fireEvent.click(await within(editor).findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
-  await waitFor(() => expect(server.saves.length).toBe(before + 1), { timeout: 8000 });
-  await waitFor(() => expect(within(editor).queryByTestId('data-autosaving')).toBeNull(), { timeout: 8000 });
+  await saveIn(editor);
 }
 
 /**
- * The race, with both editors past their first save: A saves, B opens on A's
- * draft and saves its own change, then A — still holding the copy it saved —
- * edits again.
+ * The race over a draft pending when both editors opened: A saves (its draft,
+ * then its publish), then B — still holding the copy it opened — saves its own
+ * change, pinned to the draft that is no longer there.
  */
 async function raceTwoEditors(): Promise<{ a: HTMLElement; b: HTMLElement }> {
+  servePendingDraft();
   const a = openEditor();
   await loaded(a, '2 fields');
-  await addFieldAndSave(a); // A: + new_field
   const b = openEditor();
-  await loaded(b, '3 fields');
-  await reorderAndSave(b); // B: status before title
-  expect(serverDraftFields()).toEqual(['status', 'title', 'new_field']);
-  await addFieldFromGrid(a, SECOND); // A's stale copy + second_field
+  await loaded(b, '2 fields');
+  // B edits first: its unsaved edit holds the page's re-read when A's publish
+  // pulses (one tab here; two tabs never share it).
+  fireEvent.click(await within(b).findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
+  await addFieldAndSave(a); // A: + new_field, live
+  expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+  await saveIn(b); // B's stale copy, reordered
   await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
   return { a, b };
 }
 
 describe('Data pillar — a draft saved elsewhere is not overwritten in silence (objectui#11773)', () => {
-  it('one editor: the first autosave is pinned to the load ("no draft"), and each later one to the receipt before it', async () => {
+  it('one editor: every Save asserts no draft is pending, since the Save before it published (objectstack#36511)', async () => {
     const a = openEditor();
     await loaded(a, '2 fields');
     await addFieldAndSave(a);
     await addFieldAndSave(a, addFieldFromGrid, SECOND);
-    await reorderAndSave(a);
     expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
       [undefined, '*'],
-      ['hmac-sha256:v1', undefined],
-      ['hmac-sha256:v2', undefined],
+      [undefined, '*'],
     ]);
     // The draft was read at the package the saves write.
     expect(mockClient.getDraft).toHaveBeenCalledWith('object', OBJECT.name, { packageId: PKG });
     expect(server.saves.every((s) => s.packageId === PKG)).toBe(true);
+    // objectstack#37440 — each publish is pinned to the draft its own Save wrote (its receipt).
+    expect(mockClient.publish).toHaveBeenCalledWith('object', OBJECT.name, { packageId: PKG, draftVersion: expect.any(String) });
+    expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
     expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
   });
 
-  it('the card\'s race: two editors who each load and save ONCE — the later first save is refused, and the earlier one\'s field survives', async () => {
-    const a = openEditor();
-    await loaded(a, '2 fields');
-    const b = openEditor();
-    await loaded(b, '2 fields');
-    await addFieldAndSave(a); // A: + new_field, the first draft
-    expect(serverDraftFields()).toEqual(['title', 'status', 'new_field']);
-    await addFieldFromGrid(b); // B's first save, built on the published object
-    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
-    const refused = server.saves[server.saves.length - 1]!;
-    expect([refused.ifMatch, refused.ifNoneMatch]).toEqual([undefined, '*']);
-    // A's field is still in the draft: B's stale copy was not written over it.
-    expect(serverDraftFields()).toEqual(['title', 'status', 'new_field']);
-  });
-
   it('an editor that opens on a pending draft pins its first save to the version that read served', async () => {
-    server.drafts.set(`object/${OBJECT.name}`, { body: JSON.parse(JSON.stringify(OBJECT)), version: 'hmac-sha256:pending' });
+    servePendingDraft();
     const a = openEditor();
     await loaded(a, '2 fields');
     await addFieldAndSave(a);
-    expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([['hmac-sha256:pending', undefined]]);
+    expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([[PENDING, undefined]]);
   });
 
   it('two editors: the stale save is refused with the conflict dialog, and the other editor\'s change survives', async () => {
-    const { a } = await raceTwoEditors();
+    const { b } = await raceTwoEditors();
     const refused = server.saves[server.saves.length - 1]!;
-    expect(refused.ifMatch).toBe('hmac-sha256:v1');
-    expect(fieldNames(refused.body)).toEqual(['title', 'status', 'new_field', 'second_field']);
-    // Nothing was written over B's draft.
-    expect(serverDraftFields()).toEqual(['status', 'title', 'new_field']);
+    expect(refused.ifMatch).toBe(PENDING);
+    expect(fieldNames(refused.body)).toEqual(['status', 'title']);
+    // Nothing was written over A's change.
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    expect(server.drafts.size).toBe(0);
     expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('acme_task');
 
     fireEvent.click(screen.getByTestId('draft-conflict-cancel'));
     await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
-    // Keep editing: A's edit stays on screen, unsaved, and the refusal says so.
-    expect(fieldCount(a)).toBe('4 fields');
-    expect(within(a).getByText(/^Not saved:/)).toBeInTheDocument();
-    expect(serverDraftFields()).toEqual(['status', 'title', 'new_field']);
+    // Keep editing: B's edit stays on screen, unsaved, and the refusal says so.
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(within(b).getByText(/^Not saved:/)).toBeInTheDocument();
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
   });
 
-  it('"reload" replaces the stale buffer with the saved draft, and the next save is pinned to that draft\'s version', async () => {
-    const { a } = await raceTwoEditors();
+  it('"reload" replaces the stale buffer with what A saved, and the next save is built on it', async () => {
+    const { b } = await raceTwoEditors();
     const savesBefore = server.saves.length;
     fireEvent.click(screen.getByTestId('draft-conflict-reload'));
     await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
-    await loaded(a, '3 fields');
+    await loaded(b, '3 fields');
     expect(server.saves.length).toBe(savesBefore);
 
-    await addFieldAndSave(a, addFieldFromGrid, SECOND);
+    await addFieldAndSave(b, addFieldFromGrid, SECOND);
     const next = server.saves[server.saves.length - 1]!;
-    expect(next.ifMatch).toBe('hmac-sha256:v2');
-    // Built on B's draft: B's column order is kept.
-    expect(fieldNames(next.body)).toEqual(['status', 'title', 'new_field', 'second_field']);
+    expect([next.ifMatch, next.ifNoneMatch]).toEqual([undefined, '*']);
+    // Built on A's change: its field is kept.
+    expect(fieldNames(next.body)).toEqual(['title', 'status', 'new_field', 'second_field']);
   });
 
-  it('"overwrite" asks again, then re-sends pinned to the refusal\'s currentVersion and wins; the next save is pinned to it', async () => {
-    const { a } = await raceTwoEditors();
+  it('"overwrite" asks again, then re-sends pinned to the refusal\'s currentVersion and wins', async () => {
+    await raceTwoEditors();
     fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
     // The second, explicit confirmation — nothing is sent until it is given.
     const savesBefore = server.saves.length;
@@ -347,35 +395,186 @@ describe('Data pillar — a draft saved elsewhere is not overwritten in silence 
     });
     await waitFor(() => expect(server.saves.length).toBe(savesBefore + 1), { timeout: 8000 });
     const overwrite = server.saves[server.saves.length - 1]!;
-    // B's draft is the version the refusal named.
-    expect([overwrite.ifMatch, overwrite.ifNoneMatch]).toEqual(['hmac-sha256:v2', undefined]);
-    expect(serverDraftFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
-    await waitFor(() => expect(within(a).queryByTestId('data-autosaving')).toBeNull(), { timeout: 8000 });
-
-    await addFieldAndSave(a, addFieldFromGrid, { label: 'Third field' });
-    expect(server.saves[server.saves.length - 1]!.ifMatch).toBe(`hmac-sha256:v${server.seq - 1}`);
+    // No draft is the version the refusal named.
+    expect([overwrite.ifMatch, overwrite.ifNoneMatch]).toEqual([undefined, '*']);
+    await waitFor(() => expect(liveFields()).toEqual(['status', 'title']), { timeout: 8000 });
   });
 });
 
-describe('Data pillar — a create sends If-None-Match: * (objectui#11773)', () => {
-  it('the new object\'s skeleton is sent with the first-write pin; its first edit after the load is pinned to the read', async () => {
-    server.active.clear();
-    const a = openEditor();
-    fireEvent.click(await within(a).findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(dialog.querySelectorAll('input')[0]!, { target: { value: 'Ticket' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: /save as draft/i }));
-    await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });
-    expect([server.saves[0]!.ifMatch, server.saves[0]!.ifNoneMatch]).toEqual([undefined, '*']);
+// objectstack#36904 — the object designer has no 「新建」: the create's first-write
+// pin is pinned on the list's dialog (`MetadataListCreateDialog.pairCreate-36897`,
+// `ifNoneMatch: '*'`), and each later Save asserting no draft by the case above.
+describe('Data pillar — two Saves over one published object are not last-writer-wins (objectstack#36601)', () => {
+  /** The live row's version both editors open at. */
+  const LIVE = 'hmac-sha256:live0';
 
-    await loaded(a, '1 field');
-    fireEvent.click(within(a).getAllByRole('button', { name: 'Form' })[0]!);
-    await addFieldAndSave(a, addFieldFromFormToolbar);
-    await addFieldAndSave(a, addFieldFromFormToolbar, SECOND);
-    expect(server.saves.map((s) => [s.ifMatch, s.ifNoneMatch])).toEqual([
-      [undefined, '*'],
-      ['hmac-sha256:v1', undefined],
-      ['hmac-sha256:v2', undefined],
-    ]);
+  /**
+   * The race the draft pin cannot see: no draft is pending when A and B open
+   * the object, so each Save asserts none and passes the draft door. A's
+   * publish lands; B's, pinned to the live row it opened at, is refused.
+   */
+  async function racePublished(): Promise<{ a: HTMLElement; b: HTMLElement }> {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    const b = openEditor();
+    await loaded(b, '2 fields');
+    fireEvent.click(await within(b).findByRole('button', { name: 'Reverse columns' }, { timeout: 8000 }));
+    await addFieldAndSave(a); // A: + new_field, live
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    await saveIn(b); // B's stale copy, reordered: its draft passes, its publish is refused
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    return { a, b };
+  }
+
+  it('the second Save is refused at its publish, worded as a live change, and A\'s change stays live', async () => {
+    const { b } = await racePublished();
+    // Both drafts asserted "no draft"; both publishes were pinned to the row each opened at.
+    expect(server.saves.map((s) => s.ifNoneMatch)).toEqual(['*', '*']);
+    expect(server.publishes.map((p) => p.ifMatch)).toEqual([LIVE, LIVE]);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    const dialog = screen.getByTestId('draft-conflict-dialog');
+    expect(dialog).toHaveTextContent('This changed since you opened it');
+    expect(dialog).toHaveTextContent('acme_task');
+
+    fireEvent.click(screen.getByTestId('draft-conflict-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    // Keep editing: nothing went live, the draft B's Save wrote is taken back,
+    // and B's edit stays on screen, unsaved, read as the draft conflict's own
+    // "not saved" line (never as a refused publish).
+    expect(await within(b).findByText(/^Not saved:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).queryByText(/^Not published:/)).toBeNull();
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+    expect(server.drafts.size).toBe(0);
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(within(b).queryByText('Unpublished draft')).toBeNull();
+  });
+
+  it('"reload" takes B\'s draft back, re-reads A\'s live object, and B\'s next Save is pinned to it', async () => {
+    const { b } = await racePublished();
+    const aLive = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    expect(aLive).not.toBe(LIVE);
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    await loaded(b, '3 fields');
+    expect(server.drafts.size).toBe(0);
+
+    await addFieldAndSave(b, addFieldFromGrid, SECOND);
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(aLive);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
+  });
+
+  it('"reload" whose draft cannot be taken back does not reload: the losing draft is never installed, and the next Save is asked again (contract review S2)', async () => {
+    const { b } = await racePublished();
+    server.resetFails = true;
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    // Refused, not reloaded: B's buffer stays on the page, unsaved, and the
+    // draft that lost is still pending (listed under Changes), never re-read.
+    expect(await within(b).findByText(/^Not published:/, undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(within(b).getByTestId('studio-save')).toBeInTheDocument();
+    expect(server.drafts.size).toBe(1);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+
+    // The published pin is the one the conflict was raised on: B's next Save
+    // is refused and asked about again, never published over A.
+    server.resetFails = false;
+    const publishesBefore = server.publishes.length;
+    await saveIn(b);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(liveFields()).toEqual(['title', 'status', 'new_field']);
+  });
+
+  it('"overwrite" asks again, then re-publishes pinned to the refusal\'s currentVersion and B\'s copy goes live', async () => {
+    await racePublished();
+    const aLive = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
+    const publishesBefore = server.publishes.length;
+    expect(await screen.findByTestId('draft-conflict-overwrite-confirm')).toBeInTheDocument();
+    expect(screen.getByTestId('draft-conflict-dialog')).toHaveTextContent('Overwrite the saved version?');
+    expect(server.publishes.length).toBe(publishesBefore);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('draft-conflict-overwrite-confirm'));
+    });
+    await waitFor(() => expect(liveFields()).toEqual(['status', 'title']), { timeout: 8000 });
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(aLive);
+  });
+
+  it('one editor: each Save\'s publish is pinned to the version the last publish left, so it never conflicts with itself', async () => {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    await addFieldAndSave(a);
+    const first = server.activeVersions.get(`object/${OBJECT.name}`)!;
+    await addFieldAndSave(a, addFieldFromGrid, SECOND);
+    expect(server.publishes.map((p) => p.ifMatch)).toEqual([LIVE, first]);
+    expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
+    expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']);
+  });
+
+  it('control: a server that serves no `overlayVersion` gets an unpinned publish, as before', async () => {
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    await addFieldAndSave(a);
+    expect(server.publishes.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[undefined, undefined]]);
+  });
+});
+
+describe('Data pillar — a reload over a pending draft does not pin its publish to the fresh read (objectstack#36726)', () => {
+  const LIVE = 'hmac-sha256:live0';
+  const MOVED = 'hmac-sha256:moved';
+
+  /**
+   * The residual the draft pin cannot stop: a draft is pending before the
+   * Save (a copilot's), and another writer moves the live row without
+   * touching it (a direct active save, a rollback). The Save writes into the
+   * pending draft, its publish is refused, and the author reloads: the draft,
+   * which the Save never discards, is re-read carrying the page's edit.
+   */
+  async function reloadOverPendingDraft(): Promise<HTMLElement> {
+    server.servesPublishedVersion = true;
+    server.activeVersions.set(`object/${OBJECT.name}`, LIVE);
+    servePendingDraft();
+    const a = openEditor();
+    await loaded(a, '2 fields');
+    server.active.set(`object/${OBJECT.name}`, { ...JSON.parse(JSON.stringify(OBJECT)), label: 'Task (moved)' });
+    server.activeVersions.set(`object/${OBJECT.name}`, MOVED);
+    await addFieldFromGrid(a);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.saves[server.saves.length - 1]!.ifMatch).toBe(PENDING);
+    fireEvent.click(screen.getByTestId('draft-conflict-reload'));
+    await waitFor(() => expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull(), { timeout: 8000 });
+    await loaded(a, '3 fields');
+    expect(server.drafts.size).toBe(1);
+    return a;
+  }
+
+  it('the next Save is asked again, pinned to the version the conflict was raised on', async () => {
+    const a = await reloadOverPendingDraft();
+    const publishesBefore = server.publishes.length;
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    expect(server.publishes.slice(publishesBefore).map((p) => p.ifMatch)).toEqual([LIVE]);
+    expect(server.active.get(`object/${OBJECT.name}`)!.label).toBe('Task (moved)');
+    expect(liveFields()).toEqual(['title', 'status']);
+  });
+
+  it('asked again, "overwrite" is the re-confirmation: it publishes over the moved row, pinned to it', async () => {
+    const a = await reloadOverPendingDraft();
+    await addFieldFromGrid(a, SECOND);
+    await saveIn(a);
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    fireEvent.click(screen.getByTestId('draft-conflict-overwrite'));
+    await act(async () => {
+      fireEvent.click(await screen.findByTestId('draft-conflict-overwrite-confirm'));
+    });
+    await waitFor(() => expect(liveFields()).toEqual(['title', 'status', 'new_field', 'second_field']), { timeout: 8000 });
+    expect(server.publishes[server.publishes.length - 1]!.ifMatch).toBe(MOVED);
   });
 });

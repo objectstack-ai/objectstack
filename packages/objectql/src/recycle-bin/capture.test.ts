@@ -217,16 +217,28 @@ const ephemeral = {
 };
 /** Nothing references it: the plain, non-cascading delete. */
 const loner = { name: 'loner', label: 'Loner', fields: { id: text('id'), name: text('name') } };
+/** A platform-global business object: no tenant column, so its records name no organization (ADR-0066). */
+const globalNote = { name: 'global_note', label: 'Global note', tenancy: { enabled: false }, fields: { id: text('id'), title: text('title') } };
 
-async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number } } = {}) {
+/**
+ * The Default Organization the `single` posture holds from boot (ADR-0131 D3).
+ * A delete whose record and context name no organization stamps its entry with
+ * it, as any system insert is stamped (ADR-0131 D9); a composition that
+ * registers `sys_organization` and holds none is the broken boot invariant D9
+ * refuses, never a shape an entry can land in.
+ */
+const DEFAULT_ORG = 'org_default';
+
+async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number }; defaultOrganization?: boolean } = {}) {
   const rec = recordingLogger();
   const engine = new ObjectQL({ logger: rec.logger } as any);
   const driver = makeDriver(options);
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, note, task, sysThing, cloudThing, aiThing, organization, ephemeral, loner];
+  const objects: any[] = [account, contact, note, task, sysThing, cloudThing, aiThing, organization, ephemeral, loner, globalNote];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
+  if (options.defaultOrganization !== false) driver.seed('sys_organization', { id: DEFAULT_ORG, name: 'Default' });
   return { engine, driver, rec };
 }
 
@@ -532,7 +544,8 @@ describe('the TTL sweep reaps an entry once its stamped deadline has passed (D3)
 
 describe("an organization's delete takes its entries with it (ruling Q4)", () => {
   it('removes the entries of that organization, is not refused by them, and leaves other organizations\' entries', async () => {
-    const { engine, driver } = await makeEngine();
+    // Every delete here names its organization on the context.
+    const { engine, driver } = await makeEngine({ defaultOrganization: false });
     driver.seed('sys_organization', { id: 'org_1', name: 'One' });
     driver.seed('sys_organization', { id: 'org_2', name: 'Two' });
     driver.seed('loner', { id: 'l1', name: 'one' });
@@ -597,5 +610,50 @@ describe('cascadeMembersInOrder', () => {
     };
     expect(cascadeMembersInOrder(set, { object: 'a', id: '1' }).map((m) => `${m.object}/${m.id}`))
       .toEqual(['a/1', 'b/2', 'b/3', 'c/4', 'd/5']);
+  });
+});
+
+/**
+ * [ADR-0131 D9, ADR-0148 D1] A system-door delete of a record that names no
+ * organization, on a store that enforces no NOT NULL (this harness keeps rows
+ * the way `driver-memory` does). Measured before the fix: the delete answered
+ * true and wrote the entry with no organization at all. The entry is a row of
+ * a tenant-column object, so it takes the organization any system insert
+ * takes: the Default Organization under `single`, a refusal under a wall. The
+ * SQL half, where the bin's NOT NULL column used to fail the delete, is pinned
+ * in `packages/runtime/src/recycle-bin-orgless-system-delete.test.ts`.
+ */
+describe('a system-door delete of a record that names no organization (ADR-0131 D9)', () => {
+  const SYSTEM = { context: { isSystem: true } } as any;
+
+  it('under single: answers true, the entry carries the Default Organization, and restore brings the record back', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('global_note', { id: 'g1', title: 'kept' });
+
+    expect(await engine.delete('global_note', { where: { id: 'g1' }, ...SYSTEM })).toBe(true);
+
+    expect(driver.rowsOf('global_note')).toHaveLength(0);
+    const entries = entriesOf(driver);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ object_name: 'global_note', record_id: 'g1', organization_id: DEFAULT_ORG });
+
+    await engine.restore(String(entries[0].id), SYSTEM);
+    expect(driver.rowsOf('global_note')).toMatchObject([{ id: 'g1', title: 'kept' }]);
+    expect(entriesOf(driver)).toHaveLength(0);
+  });
+
+  it('under a wall: refused with ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED before the record is removed, and no entry stays', async () => {
+    const { engine, driver } = await makeEngine();
+    engine.setTenancyPostureProvider(() => 'isolated');
+    driver.seed('global_note', { id: 'g1', title: 'kept' });
+
+    const refusal = await engine.delete('global_note', { where: { id: 'g1' }, ...SYSTEM }).then(
+      () => undefined,
+      (e: unknown) => e as { code?: unknown; status?: unknown },
+    );
+
+    expect(refusal).toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+    expect(driver.rowsOf('global_note')).toMatchObject([{ id: 'g1', title: 'kept' }]);
+    expect(entriesOf(driver)).toHaveLength(0);
   });
 });

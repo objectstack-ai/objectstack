@@ -25,10 +25,13 @@
  *    fully localized — verb template, object label, and since #7230 the field
  *    label. The authored option value was the one untranslated token left in
  *    it, so translating it makes the string uniformly localized. **Localized.**
- *  - `renderMilestoneSummary` (#7290) interpolates tokens into an author-written
- *    sentence that has no bundle key and is deliberately NOT translated (#7290
- *    called that a contract decision and left it). #7290's own change — a
- *    reference id → the record's title — is locale-INDEPENDENT data, the same
+ *  - `renderMilestoneSummary` (#7290) interpolates tokens into the author-written
+ *    sentence the row STORES. #7290 left that sentence untranslated as a
+ *    contract decision; since #37524 a reader whose language translates the
+ *    milestone (`objects.<o>._milestones.<field>.<value>.summary`) reads it
+ *    composed from the row's code instead, and the stored sentence itself is
+ *    still rendered untranslated, which is what this file pins. #7290's own
+ *    change — a reference id → the record's title — is locale-INDEPENDENT data, the same
  *    string in every locale, which is why it could be added to an untranslated
  *    sentence. An option label is locale-DEPENDENT rendering: reading the bundle
  *    there would guarantee a split sentence (`Deal moved to 已赢单`) in exactly
@@ -425,15 +428,22 @@ describe('[#7289] tracked-change branch — select option labels resolve through
     expect(readerSummary()).toBe('阶段: 提案中 → On Hold');
   });
 
-  it('localizes the BARE-STRING option shape, whose authored label is the value', async () => {
+  /**
+   * [#35384] A reader's option labels are read off the definition
+   * `translateObject` serves, the one `/meta` serves the field with, and that
+   * translator translates an option OBJECT only: a bare string is not a
+   * `SelectOptionSchema` (a strict object with a `label`), so `/meta` serves
+   * `p1` as written, and the summary names it the same way. The field's own
+   * label is still translated.
+   */
+  it('names a BARE-STRING option (not a spec option) by its value, as /meta serves it', async () => {
     const { engine, readerSummary } = await boot({ locale: 'zh-CN', i18n: makeI18n() });
     await seed(engine);
 
     // `options: ['p1', 'p2']` → the authored label chain has only `ov` in it.
-    // `p1` is in the bundle, `p2` is not, so both directions are pinned here.
     await engine.update('biz_deal', { priority: 'p1' }, { where: { id: 'deal_1' } } as any);
 
-    expect(readerSummary()).toBe('优先级: p2 → 最高');
+    expect(readerSummary()).toBe('优先级: p2 → p1');
   });
 
   it('renders String(value) for a value matching NO declared option, bundle key or not', async () => {

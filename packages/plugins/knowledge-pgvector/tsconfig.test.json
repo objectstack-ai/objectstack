@@ -1,0 +1,10 @@
+// The TEST-layer type-check program, the `packages/plugins/**` family's shape
+// (see `../knowledge-memory/tsconfig.test.json` for the reasons, which hold
+// here unchanged). Module semantics only, as vitest executes the tests;
+// strictness, `paths` and `types` are all inherited from `tsconfig.json`.
+// No `test-typecheck-debt.json` beside it: its absence is the zero.
+{
+  "extends": ["./tsconfig.json", "../../../tsconfig.test.base.json"],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

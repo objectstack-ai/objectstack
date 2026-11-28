@@ -27,6 +27,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from '../ModalForm';
+import { ObjectFormContainer } from '../ObjectFormContainer';
 import { modalFormMaximizedStorageKey } from '../modalMaximize';
 
 registerAllFields();
@@ -384,5 +385,171 @@ describe('#34604 — beside the section nav strip of a sectioned flat form', () 
     fireEvent.click(maximizeButton());
     expectRestored(dialog());
     expect(screen.getByTestId('form-section-nav')).toBe(nav);
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#35980 — the create dialog's 「Create more」 switch,
+ * its ⌘↵ / Ctrl+Enter save and the object icon before the title. The switch
+ * is a per-object preference like the maximize switch above, which is why its
+ * pins share this harness.
+ */
+describe('#35980 — 「Create more」, the save shortcut and the title icon', () => {
+  const createMoreSwitch = () => screen.queryByTestId('modal-form-create-more');
+  const submitButton = () => screen.getByRole('button', { name: /^Create/ });
+
+  function renderCreate(extra: Record<string, unknown> = {}, defs: Record<string, unknown> = { deal: DEAL }) {
+    const onOpenChange = vi.fn();
+    const onSuccess = vi.fn();
+    const ds = flatDs(defs);
+    render(
+      <ModalForm
+        schema={{
+          type: 'object-form', formType: 'modal', objectName: 'deal', mode: 'create', title: 'New deal',
+          open: true, onOpenChange, onSuccess, createMore: true, ...extra,
+        } as any}
+        dataSource={ds}
+      />,
+    );
+    return { onOpenChange, onSuccess, ds };
+  }
+
+  it('is offered only when the host asks, and only on a create', async () => {
+    renderFlat('deal');
+    await nameInput();
+    expect(createMoreSwitch()).toBeNull();
+    cleanup();
+
+    renderCreate({ mode: 'edit', recordId: 'r1' });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy());
+    expect(createMoreSwitch()).toBeNull();
+    cleanup();
+
+    renderCreate();
+    await nameInput();
+    expect(createMoreSwitch()?.getAttribute('aria-checked')).toBe('false');
+    expect(createMoreSwitch()?.closest('label')?.textContent).toContain('Create more');
+  });
+
+  it("an object-form page schema that writes createMore gets no switch: it is a host opt-in on ModalForm", async () => {
+    render(
+      <ObjectFormContainer
+        schema={{
+          type: 'object-form', formType: 'modal', objectName: 'deal', mode: 'create', title: 'New deal',
+          open: true, onOpenChange: vi.fn(), createMore: true,
+        } as any}
+        dataSource={flatDs({ deal: DEAL })}
+      />,
+    );
+    await nameInput();
+    expect(createMoreSwitch()).toBeNull();
+  });
+
+  it('off: a save closes the dialog, and the host is not told to stay', async () => {
+    const { onOpenChange, onSuccess, ds } = renderCreate();
+    fireEvent.change(await nameInput(), { target: { value: 'Acme' } });
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(onSuccess).toHaveBeenCalledWith({ id: '1' });
+  });
+
+  it('on: a save keeps the dialog, empties the form, focuses the first field, and saves again', async () => {
+    const { onOpenChange, onSuccess, ds } = renderCreate();
+    fireEvent.change(await nameInput(), { target: { value: 'Acme' } });
+    fireEvent.click(createMoreSwitch()!);
+    expect(createMoreSwitch()?.getAttribute('aria-checked')).toBe('true');
+    expect(window.localStorage.getItem('modal-form-create-more:deal')).toBe('1');
+
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ name: 'Acme' });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith({ id: '1' }, { createMore: true }));
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
+    // The form is drawn again from its opening values, and the first field has focus.
+    await waitFor(() => expect((document.querySelector('input[name="name"]') as HTMLInputElement).value).toBe(''));
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('input[name="name"]')));
+
+    fireEvent.change(await nameInput(), { target: { value: 'Globex' } });
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(2));
+    expect(ds.create.mock.calls[1][1]).toMatchObject({ name: 'Globex' });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
+    // Off again: the next save closes.
+    fireEvent.click(createMoreSwitch()!);
+    expect(window.localStorage.getItem('modal-form-create-more:deal')).toBeNull();
+    fireEvent.change(await nameInput(), { target: { value: 'Initech' } });
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it('reopens with the switch as it was last left, per object', async () => {
+    window.localStorage.setItem('modal-form-create-more:deal', '1');
+    renderCreate();
+    await nameInput();
+    expect(createMoreSwitch()?.getAttribute('aria-checked')).toBe('true');
+    cleanup();
+
+    render(
+      <ModalForm
+        schema={{ type: 'object-form', formType: 'modal', objectName: 'account', mode: 'create', title: 'New', open: true, createMore: true } as any}
+        dataSource={flatDs({ account: ACCOUNT })}
+      />,
+    );
+    await nameInput();
+    expect(createMoreSwitch()?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('⌘↵ and Ctrl+Enter save from a field; Shift or a lone Enter do not take the shortcut', async () => {
+    const { ds } = renderCreate({ createMore: false });
+    const input = await nameInput();
+    fireEvent.change(input, { target: { value: 'Acme' } });
+
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(input, { key: 'Enter', altKey: true, metaKey: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ds.create).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+  });
+
+  it('⌘↵ saves too', async () => {
+    const { ds } = renderCreate({ createMore: false });
+    const input = await nameInput();
+    fireEvent.change(input, { target: { value: 'Acme' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+  });
+
+  it('the Save button names the shortcut, with keycaps from sm up', async () => {
+    renderCreate();
+    await nameInput();
+    const btn = submitButton();
+    expect(btn.getAttribute('aria-keyshortcuts')).toBe('Meta+Enter Control+Enter');
+    const kbd = screen.getByTestId('modal-form-submit-shortcut');
+    expect(btn.contains(kbd)).toBe(true);
+    expect(kbd.getAttribute('aria-hidden')).toBe('true');
+    expect(kbd.className).toContain('hidden');
+    expect(kbd.className).toContain('sm:inline');
+    expect(['⌘↵', 'Ctrl ↵']).toContain(kbd.textContent);
+  });
+
+  it("the title is 16px and follows the object's own icon", async () => {
+    renderCreate({}, { deal: { ...DEAL, icon: 'briefcase' } });
+    await nameInput();
+    const title = screen.getByRole('heading', { name: 'New deal' });
+    expect(title.className).toContain('text-base');
+    const icon = await waitFor(() => screen.getByTestId('modal-form-title-icon'));
+    expect(title.contains(icon)).toBe(true);
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('an object with no icon draws the title alone', async () => {
+    renderCreate();
+    await nameInput();
+    expect(screen.queryByTestId('modal-form-title-icon')).toBeNull();
   });
 });

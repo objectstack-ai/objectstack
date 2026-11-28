@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/rest",
-  "version": "18.6.0",
+  "version": "19.0.0-next.2",
   "license": "Apache-2.0",
   "description": "ObjectStack REST API Server - automatic REST endpoint generation from protocol",
   "type": "module",
@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
+    "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run --project local",
     "test:repo": "vitest run --project repo",

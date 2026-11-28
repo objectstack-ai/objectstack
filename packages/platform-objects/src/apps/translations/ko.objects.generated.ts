@@ -176,7 +176,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "사용자 차단",
-        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다.",
+        description: "이 사용자를 차단하시겠습니까? 차단이 해제될 때까지 로그아웃되고 로그인할 수 없으며, API 키와 OAuth 액세스 토큰 및 토큰 갱신도 거부됩니다. 차단을 해제하면 키가 다시 작동합니다. 차단하면 이 사용자가 책임자인 AI 서비스 계정도 일시 중지되고, 등록한 OAuth 애플리케이션은 비활성화되며, 발급한 SCIM 자격 증명은 폐기됩니다. 차단을 해제해도 이들은 복원되지 않습니다.",
         successMessage: "사용자 차단됨",
         params: {
           banReason: {
@@ -327,6 +327,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
             helpText: "이 사람이 보고하는 사용자입니다. 서버는 조직 외부의 상사, 자기 자신 지정, 보고 체계를 순환시키거나 너무 깊게 만드는 연결을 거부합니다."
           }
         }
+      },
+      remove_user_manager: {
+        label: "상사 제거",
+        confirmText: "이 사용자의 상사를 제거하시겠습니까? 상사를 다시 지정할 때까지 이 사용자는 아무에게도 보고하지 않으며, 승인 라우팅과 own_and_reports 레코드 범위도 이 변경을 따릅니다.",
+        successMessage: "상사가 제거되었습니다"
       },
       list_platform_admins: {
         label: "플랫폼 관리자",
@@ -491,6 +496,10 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "취소 사유",
         help: "세션이 취소된 이유입니다(idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "SSO 공급자",
+        help: "이 세션이 로그인할 때 거친 SSO 공급자(있는 경우)입니다. 해당 공급자를 삭제하면 세션이 종료됩니다. 시스템에서 관리합니다."
       },
       active_organization_id: {
         label: "활성 조직"
@@ -4496,6 +4505,42 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_standard_unit_setting: {
+    label: "Standard Unit Setting",
+    pluralLabel: "Standard Unit Settings",
+    description: "How many decimal places a quantity in a standard unit of measure (KGM, H87, …) displays with in this organization — one row per standard unit the organization has set.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Standard Unit",
+        help: "The standard unit code (UN/ECE Recommendation 20) in exact uppercase, for example KGM for kilogram, GRM for gram or H87 for piece. The organization's own units carry their decimal places on the unit itself, under Units of Measure. The code cannot be changed after the setting is created."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored and shown. Delete the setting to clear it."
+      }
+    },
+    _views: {
+      all_settings: {
+        label: "All",
+        description: "Decimal places a quantity in a standard unit displays with in this organization. A field's own decimal places still limit what is stored and shown.",
+        emptyState: {
+          title: "No standard unit settings yet",
+          message: "Standard units display with the decimal places of the field that holds the quantity. Add a setting to give a standard unit, such as grams or kilograms, its own number of decimal places."
+        }
+      }
+    },
+    _validations: {
+      standard_unit_setting_code_standard: {
+        message: "Enter a standard unit code in exact uppercase, for example KGM or H87. An organization's own unit carries its decimal places on the unit itself, under Units of Measure."
+      },
+      standard_unit_setting_code_immutable: {
+        message: "A setting's unit cannot be changed after it is created. Delete it and add a setting for the other unit instead."
+      }
+    }
+  },
   sys_work_calendar: {
     label: "근무 캘린더",
     pluralLabel: "근무 캘린더",
@@ -4616,6 +4661,91 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
           title: "아직 캘린더 예외 없음",
           message: "공휴일이나 대체 근무일마다 한 행을 추가하거나, 파일에서 1년 치를 가져오세요."
         }
+      }
+    }
+  },
+  sys_task: {
+    label: "작업",
+    pluralLabel: "작업",
+    description: "담당자와 마감 시간이 있는 할 일.",
+    fields: {
+      title: {
+        label: "제목"
+      },
+      description: {
+        label: "설명"
+      },
+      status: {
+        label: "상태",
+        options: {
+          todo: "할 일",
+          in_progress: "진행 중",
+          done: "완료"
+        }
+      },
+      due_at: {
+        label: "마감"
+      },
+      assignee_id: {
+        label: "담당자"
+      },
+      completed_at: {
+        label: "완료 시간",
+        help: "상태가 '완료'가 되면 플랫폼이 기록하고, '완료'에서 벗어나면 지웁니다."
+      },
+      owner_id: {
+        label: "소유자"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "나에게 할당됨",
+        emptyState: {
+          title: "할당된 작업이 없습니다",
+          message: "나에게 할당된 미완료 작업이 여기에 표시됩니다."
+        }
+      },
+      created_by_me: {
+        label: "내가 만든 작업",
+        emptyState: {
+          title: "아직 작업이 없습니다",
+          message: "내가 만든 작업이 여기에 표시됩니다."
+        }
+      },
+      all: {
+        label: "모든 작업"
+      }
+    }
+  },
+  sys_note: {
+    label: "메모",
+    pluralLabel: "메모",
+    description: "메모: 제목과 서식 있는 본문.",
+    fields: {
+      title: {
+        label: "제목"
+      },
+      body: {
+        label: "본문"
+      },
+      heading: {
+        label: "표시 제목",
+        help: "제목이며, 제목이 비어 있으면 본문의 첫 줄입니다. 플랫폼이 관리합니다."
+      },
+      owner_id: {
+        label: "소유자"
+      }
+    },
+    _views: {
+      mine: {
+        label: "내 메모",
+        emptyState: {
+          title: "아직 메모가 없습니다",
+          message: "내가 작성한 메모가 여기에 표시됩니다."
+        }
+      },
+      all: {
+        label: "모든 메모"
       }
     }
   }

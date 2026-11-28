@@ -980,7 +980,10 @@ describe('planUnmanagedImport — `targetNamespace`, the rename-on-install (#307
 
     it('refuses an object whose copy name another object\'s copy claims — INVALID_REQUEST / 400, naming it', () => {
         // `lead` lacks the prefix, so its copy is `acme_lead`, which `crm_lead`'s copy already takes.
+        // Namespace-less (`crm` derived from the id): under a declared `crm` the bare
+        // name is refused first, as the declared prefix rule refuses it.
         const body = renamableBody();
+        delete body.namespace;
         (body.objects as unknown[]).push({ name: 'lead', label: 'Bare', sharingModel: 'private', fields: {} });
         const err = (() => { try { plan(body, { targetNamespace: 'acme' }); } catch (e) { return e as any; } })();
         const envelope = resolveThrownHttpError(err);
@@ -1135,6 +1138,209 @@ describe('importUnmanagedPackage — `targetNamespace` (#30794)', () => {
         const err = await refusalOf(() => protocol.importUnmanagedPackage({ manifest: renamableBody(), targetNamespace: 7 }));
         expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'VALIDATION_ERROR']);
         expect(writes).toEqual([]);
+    });
+});
+
+/**
+ * A body that declares no `namespace` has one derived from its id. Renamed into
+ * a `targetNamespace`, a package whose object names all share another prefix
+ * is refused, never double-prefixed; anything else keeps ADR-0048 §3.5's
+ * rename. The refused body is the shape a publish snapshot that dropped
+ * `manifest.namespace` hands over: a gallery package whose objects carry their
+ * real prefix, `demoasset_`, under an id that derives `asset_lifecycle_b`.
+ */
+function namespacelessBody(objectNames: string[], extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+        id: 'ai.objectstack.gallery.asset-lifecycle-b',
+        version: '1.0.0',
+        type: 'app',
+        name: 'Asset lifecycle',
+        objects: objectNames.map((name) => ({
+            name, label: name, sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } },
+        })),
+        views: [{
+            name: `${objectNames[0]}_all`,
+            label: 'All',
+            object: objectNames[0],
+            viewKind: 'list',
+            columns: [{ field: 'title', label: 'Title' }],
+        }],
+        ...extra,
+    };
+}
+
+const renamedObjects = (body: Record<string, unknown>) =>
+    plan(body, { targetNamespace: 'trialdemoasset' }).items
+        .filter((i) => i.type === 'object')
+        .map((i) => `${i.sourceName} -> ${i.name}`);
+
+describe('a namespace derived from the id, contradicted by the object names\' common prefix — refused, never double-prefixed', () => {
+    const refusedPlan = (body: Record<string, unknown>) =>
+        (() => { try { plan(body, { targetNamespace: 'trialdemoasset' }); } catch (e) { return e as any; } throw new Error('expected a refusal'); })();
+
+    it('every object sharing a prefix other than the derived namespace is refused — INVALID_REQUEST / 400, naming both', () => {
+        const body = namespacelessBody(['demoasset_asset', 'demoasset_site']);
+        expect(plan(body).sourceNamespace).toBe('asset_lifecycle_b');
+        const err = refusedPlan(body);
+        const envelope = resolveThrownHttpError(err);
+        expect([envelope.status, envelope.code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.targetNamespace).toBe('trialdemoasset');
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/demoasset_asset', 'object/demoasset_site']);
+        const [{ reason }] = err.details.refused;
+        // Both prefixes named, and the key whose absence made the guess.
+        expect(reason).toContain("derived from its id as 'asset_lifecycle_b'");
+        expect(reason).toContain("begins 'demoasset_'");
+        expect(reason).toContain('declares no `namespace`');
+        expect(err.message).toContain("cannot be installed unmanaged into namespace 'trialdemoasset'");
+    });
+
+    it('the verb refuses before anything is written: no base, no row — the snapshot that dropped its namespace', async () => {
+        const { protocol, writes, packages, table } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: namespacelessBody(['demoasset_asset', 'demoasset_site']), targetNamespace: 'trialdemoasset',
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => r.name)).toEqual(['demoasset_asset', 'demoasset_site']);
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+        expect(table('sys_metadata')).toEqual([]);
+    });
+
+    it('CONTROL: a multi-segment unprefixed name takes the target prefix in front, as ADR-0048 §3.5 renames it', () => {
+        expect(renamedObjects(namespacelessBody(['purchase_order']))).toEqual(['purchase_order -> trialdemoasset_purchase_order']);
+        // Two names with no common first segment: no shared prefix to contradict the derived one.
+        expect(renamedObjects(namespacelessBody(['purchase_order', 'asset_owner']))).toEqual([
+            'purchase_order -> trialdemoasset_purchase_order',
+            'asset_owner -> trialdemoasset_asset_owner',
+        ]);
+        // A bare one-segment name too.
+        expect(renamedObjects(namespacelessBody(['asset', 'site']))).toEqual([
+            'asset -> trialdemoasset_asset',
+            'site -> trialdemoasset_site',
+        ]);
+    });
+
+    it('DECIDED: a single-object package keeps the ADR rename, foreign prefix or not — one name carries no signal', () => {
+        // Decided to stay as ADR-0048 §3.5's rename, recorded on the ADR: a single
+        // name cannot tell a two-word short name from a foreign prefix.
+        expect(renamedObjects(namespacelessBody(['demoasset_asset']))).toEqual(['demoasset_asset -> trialdemoasset_demoasset_asset']);
+    });
+
+    it('one stray object beside a shared prefix does not lift the refusal — the group is refused, the stray named nowhere', () => {
+        for (const stray of ['site', 'purchase_order']) {
+            const err = refusedPlan(namespacelessBody(['demoasset_asset', 'demoasset_site', stray]));
+            expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+            expect(err.details.targetNamespace).toBe('trialdemoasset');
+            expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/demoasset_asset', 'object/demoasset_site']);
+            const [{ reason }] = err.details.refused;
+            expect(reason).toContain("derived from its id as 'asset_lifecycle_b'");
+            expect(reason).toContain("begin 'demoasset_'");
+        }
+    });
+
+    it('two refused groups in one body: every object of both is named, in manifest order', () => {
+        const err = refusedPlan(namespacelessBody(['beta_x', 'alpha_x', 'beta_y', 'alpha_y']));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`))
+            .toEqual(['object/beta_x', 'object/alpha_x', 'object/beta_y', 'object/alpha_y']);
+    });
+
+    it('the verb refuses the stray-object package before anything is written: no base, no row', async () => {
+        const { protocol, writes, packages, table } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: namespacelessBody(['demoasset_asset', 'demoasset_site', 'site']), targetNamespace: 'trialdemoasset',
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => r.name)).toEqual(['demoasset_asset', 'demoasset_site']);
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+        expect(table('sys_metadata')).toEqual([]);
+    });
+
+    it('a two-word short name the package repeats is refused with a stray as without one — the same family, `namespace` lifts it', () => {
+        expect(refusedPlan(namespacelessBody(['purchase_order', 'purchase_item'])).details.refused.map((r: any) => r.name))
+            .toEqual(['purchase_order', 'purchase_item']);
+        expect(refusedPlan(namespacelessBody(['purchase_order', 'purchase_item', 'vendor'])).details.refused.map((r: any) => r.name))
+            .toEqual(['purchase_order', 'purchase_item']);
+        // Declared, the prefix is the package's own: the names copy under the target in its place.
+        expect(renamedObjects(namespacelessBody(['purchase_order', 'purchase_item'], { namespace: 'purchase' }))).toEqual([
+            'purchase_order -> trialdemoasset_order',
+            'purchase_item -> trialdemoasset_item',
+        ]);
+    });
+
+    it('CONTROL: one object carrying the derived prefix confirms the derived namespace — nothing is refused', () => {
+        expect(renamedObjects(namespacelessBody(['asset_lifecycle_b_asset', 'demoasset_site']))).toEqual([
+            'asset_lifecycle_b_asset -> trialdemoasset_asset',
+            'demoasset_site -> trialdemoasset_demoasset_site',
+        ]);
+    });
+
+    it('CONTROL: a declared `namespace` the object names carry renames as before — in place of the declared prefix', () => {
+        expect(renamedObjects(namespacelessBody(['demoasset_asset', 'demoasset_site'], { namespace: 'demoasset' }))).toEqual([
+            'demoasset_asset -> trialdemoasset_asset',
+            'demoasset_site -> trialdemoasset_site',
+        ]);
+    });
+
+    it('CONTROL: without a rename the plan does not ask — the save door\'s prefix rule answers those names', () => {
+        expect(plan(namespacelessBody(['demoasset_asset', 'demoasset_site'])).items.map((i) => i.name))
+            .toEqual(['demoasset_asset', 'demoasset_site', 'demoasset_asset_all']);
+    });
+
+    it('CONTROL: the verb copies a namespace-less body whose names carry the derived prefix', async () => {
+        const { protocol, table } = makeProtocol();
+        const result = await protocol.importUnmanagedPackage({
+            manifest: namespacelessBody(['asset_lifecycle_b_asset', 'asset_lifecycle_b_site']), targetNamespace: 'trialdemoasset',
+        });
+        expect(result).toMatchObject({ namespace: 'trialdemoasset', sourceNamespace: 'asset_lifecycle_b' });
+        expect(table('sys_metadata').filter((r) => r.state === 'active').map((r) => `${r.type}/${r.name}`).sort()).toEqual([
+            'object/trialdemoasset_asset',
+            'object/trialdemoasset_site',
+            'view/trialdemoasset_asset_all',
+        ]);
+    });
+});
+
+describe('a declared namespace the object names contradict — refused on the rename path, never double-prefixed', () => {
+    const refusedPlan = (body: Record<string, unknown>) =>
+        (() => { try { plan(body, { targetNamespace: 'trialdemoasset' }); } catch (e) { return e as any; } throw new Error('expected a refusal'); })();
+
+    it('every object the declared prefix rule refuses is refused — INVALID_REQUEST / 400, naming each and the declared namespace', () => {
+        const err = refusedPlan(namespacelessBody(['demoasset_asset', 'demoasset_site'], { namespace: 'other' }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.targetNamespace).toBe('trialdemoasset');
+        expect(err.details.refused.map((r: any) => `${r.type}/${r.name}`)).toEqual(['object/demoasset_asset', 'object/demoasset_site']);
+        expect(err.details.refused[0].reason).toContain("declares `namespace` 'other'");
+    });
+
+    it('only the objects that miss the declared prefix are named — one carrying it confirms nothing for the rest', () => {
+        const err = refusedPlan(namespacelessBody(['other_asset', 'demoasset_site'], { namespace: 'other' }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => r.name)).toEqual(['demoasset_site']);
+        // A bare name too: the rename has no declared prefix in it to replace.
+        expect(refusedPlan(namespacelessBody(['other_asset', 'site'], { namespace: 'other' })).details.refused.map((r: any) => r.name))
+            .toEqual(['site']);
+    });
+
+    it('the verb refuses before anything is written: no base, no row', async () => {
+        const { protocol, writes, packages, table } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: namespacelessBody(['demoasset_asset', 'demoasset_site'], { namespace: 'other' }), targetNamespace: 'trialdemoasset',
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([400, 'INVALID_REQUEST']);
+        expect(err.details.refused.map((r: any) => r.name)).toEqual(['demoasset_asset', 'demoasset_site']);
+        expect(writes).toEqual([]);
+        expect(packages.size).toBe(0);
+        expect(table('sys_metadata')).toEqual([]);
+    });
+
+    it('CONTROL: without a rename the save door\'s prefix rule refuses the same body — the two doors agree', async () => {
+        const { protocol } = makeProtocol();
+        const err = await refusalOf(() => protocol.importUnmanagedPackage({
+            manifest: namespacelessBody(['demoasset_asset', 'demoasset_site'], { namespace: 'other' }),
+        }));
+        expect([resolveThrownHttpError(err).status, resolveThrownHttpError(err).code]).toEqual([422, 'NAMESPACE_PREFIX']);
     });
 });
 

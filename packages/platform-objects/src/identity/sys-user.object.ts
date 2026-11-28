@@ -101,6 +101,7 @@ export const SysUser = ObjectSchema.create({
   label: 'User',
   pluralLabel: 'Users',
   icon: 'user',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0092 D4 — the ONE generic affordance opened on an identity table:
@@ -140,7 +141,7 @@ export const SysUser = ObjectSchema.create({
         'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       // Gated on the org CAPABILITY, not multi-org (cloud ADR-0081 D1): the
@@ -210,7 +211,7 @@ export const SysUser = ObjectSchema.create({
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
     // UI surfaces them under the row menu AND the
-    // record-detail header (`record_header`, overflowing into the ⋯
+    // record-detail header (`record_page`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
     // a custom Setup wizard.
@@ -244,7 +245,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Ban User',
       icon: 'ban',
       variant: 'danger',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -264,7 +265,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -273,7 +274,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. The ban also suspends the AI service accounts the user is accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted, and the unban restores none of these. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -282,7 +283,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Unban User',
       icon: 'check-circle-2',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -298,7 +299,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Lift the ban on a banned user (the record), so they can sign in again. Platform administrators only. Ask the human to confirm before calling.',
+          'Lift the ban on a banned user (the record), so they can sign in again. It resumes no AI service account, enables no OAuth application and restores no SCIM credential the ban ended. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -311,7 +312,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Unlock Account',
       icon: 'lock-open',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -351,7 +352,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Create User',
       icon: 'user-plus',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -478,7 +479,7 @@ export const SysUser = ObjectSchema.create({
         "Add someone by email address before their first sign-in. They sign in through your organization's identity provider; no password is set here.",
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/add-sso-user',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -540,7 +541,7 @@ export const SysUser = ObjectSchema.create({
         "Add many people at once from CSV text. Each row is added on its own, so a bad row fails alone. They sign in through your organization's identity provider; no password is set here.",
       icon: 'upload',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/import-sso-users',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -605,7 +606,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Remove Pending User',
       icon: 'user-minus',
       variant: 'danger',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/remove-sso-user',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -622,7 +623,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Set Password',
       icon: 'key-round',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       // #2766 V1 — same path as better-auth's stock route, but served by the
       // plugin-auth wrapper registered ahead of the catch-all: it accepts the
@@ -692,7 +693,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Impersonate User',
       icon: 'user-cog',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/impersonate-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -744,7 +745,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Set Manager',
       icon: 'network',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/set-user-manager',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -774,26 +775,27 @@ export const SysUser = ObjectSchema.create({
       description: "Set this user's manager. The reporting chain drives approval routing and the own_and_reports record scope.",
       params: [
         {
-          // INLINE, not field-backed. A field-backed `{ field: 'manager_id' }`
-          // param inherits the referenced field's metadata, and that field is
-          // `readonly: true` (ADR-0092 D4 — it must stay non-editable in the
-          // standard edit form), so inheriting it here is a picker that may
-          // render read-only. `name` is the request-body key, and it is the
-          // camelCase spelling the endpoint reads first (`readId(body,
-          // 'managerId', 'manager_id')`).
+          // FIELD-BACKED on `manager_id` and seeded from the row
+          // (`defaultFromRow`), so the dialog opens on the CURRENT manager and
+          // an admin sees what a re-point would replace. Both doors that draw
+          // this dialog pass the row: the record header stamps its record and a
+          // list row is projected with every field a `defaultFromRow` param
+          // seeds from. The field's `readonly: true` (ADR-0092 D4) is not
+          // inherited: the console's param resolver carries the field's type,
+          // target and label onto the param and never its `readonly`, so the
+          // picker stays editable while the edit form keeps the column locked.
+          // `name` is the request-body key, the camelCase spelling the endpoint
+          // reads first (`readId(body, 'managerId', 'manager_id')`).
           name: 'managerId',
+          field: 'manager_id',
+          defaultFromRow: true,
           label: 'Manager',
-          type: 'lookup',
-          reference: 'sys_user',
           // Required, because the endpoint refuses an ABSENT or empty key by
           // design — "managerId is required — send null to clear the link,
           // never omit the key" — so a dialog that could submit nothing would
           // turn a normal click into a 400 about a key the user never saw.
-          // Required means a value is collected before anything is POSTed.
-          // ⚠️ Clearing the link (`managerId: null`) is a real endpoint
-          // capability that this action therefore does not reach; it is
-          // recorded in the PR's acceptance notes rather than half-declared
-          // here.
+          // Required means a value is collected before anything is POSTed;
+          // clearing is `remove_user_manager` below.
           required: true,
           helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
         },
@@ -806,6 +808,42 @@ export const SysUser = ObjectSchema.create({
           'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
+    },
+    {
+      // The clear half of the same endpoint: `managerId: null` unsets the
+      // link ("send null to clear the link, never omit the key"), which the
+      // required picker above cannot send. The null rides `bodyExtra`, the
+      // action's static request body, merged last at both doors
+      // (`buildApiActionRequest`), so the action collects nothing and asks a
+      // confirm question instead. Same door, same gate, same refusals as
+      // `set_user_manager` — the SCIM-held one included, which the endpoint
+      // applies to the clear as well — and ⛔ no client-side copy of any of
+      // them (maintainer ruling record 6895645364, option A).
+      //
+      // `visible` is `set_user_manager`'s standing term, then the row's state,
+      // in the form of Ban / Unban above: it is offered only while the row
+      // HAS a manager, so it never reports success for removing nothing. The
+      // `has()` guard because a CEL read of an absent key faults; a list row
+      // carries `manager_id` because the console projects every column an
+      // action predicate reads.
+      //
+      // No `ai` block: this action postdates the ADR-0011 identity-actions
+      // assessment, and an unassessed action stays human-only.
+      name: 'remove_user_manager',
+      label: 'Remove Manager',
+      icon: 'user-minus',
+      variant: 'secondary',
+      locations: ['record'],
+      type: 'api',
+      target: '/api/v1/auth/admin/set-user-manager',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: 'current_user.isPlatformAdmin == true && has(record.manager_id) && record.manager_id != null',
+      recordIdParam: 'userId',
+      bodyExtra: { managerId: null },
+      confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+      successMessage: 'Manager removed',
+      refreshAfter: true,
     },
     {
       // ADR-0095 D3 — who holds platform-admin standing. Standing is derived
@@ -824,7 +862,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Platform Administrators',
       icon: 'shield-check',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/list-platform-admins',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -858,7 +896,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Register AI Service Account',
       icon: 'bot',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/service-account/register',
       // Offered in a cloud-managed environment too: an account is no person
@@ -894,7 +932,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Create API Key',
       icon: 'key-round',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/service-account/create-key',
       // An AI service account's row only. Its owner is admitted by the door
@@ -954,7 +992,7 @@ export const SysUser = ObjectSchema.create({
       icon: 'user-pen',
       variant: 'primary',
       mode: 'edit',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       target: '/api/v1/auth/update-user',
       visible: 'has(record.id) && record.id == ctx.user.id',
@@ -976,7 +1014,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Password',
       icon: 'key',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-password',
       // Managed (IdP-provisioned) users hold no local credential — hide the
@@ -997,7 +1035,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Email',
       icon: 'mail',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-email',
       // A managed user's email is owned by the IdP — a local change would
@@ -1014,7 +1052,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Resend Verification Email',
       icon: 'mail-check',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/send-verification-email',
       // Only render for the row owner AND when their email is still
@@ -1036,7 +1074,7 @@ export const SysUser = ObjectSchema.create({
       icon: 'user-x',
       variant: 'danger',
       mode: 'delete',
-      locations: ['record_more', 'record_section'],
+      locations: ['record_page', 'record_section'], component: 'action:menu',
       type: 'api',
       target: '/api/v1/auth/delete-user',
       // Self-delete needs a local password; managed users are deprovisioned

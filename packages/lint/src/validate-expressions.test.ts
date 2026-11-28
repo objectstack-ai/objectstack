@@ -1685,7 +1685,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     it('flags a bare-field `visible` on a stack action (the trap that hid Mark Done)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'showcase_task', fields: { done: { type: 'boolean' }, status: { type: 'select' } } }],
-        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_header'], visible: '!done' }],
+        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_page'], visible: '!done' }],
       });
       const v = issues.filter(i => i.where.includes("action 'mark_done' visible"));
       expect(v).toHaveLength(1);
@@ -1800,6 +1800,46 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
       expect(issues.some(i => i.where.includes('readonlyWhen') && /bare reference `done`/.test(i.message))).toBe(true);
       expect(issues.some(i => i.where.includes('requiredWhen') && /bare reference `status`/.test(i.message))).toBe(true);
+    });
+
+    // [#36806] The console hand lock has no server judge (ADR-0137 D2): the
+    // console locks the field on a fault, so this pass is the only place an
+    // author hears about one. Judged as `readonlyWhen` is at the field site.
+    describe('`uiReadonlyWhen` is checked as `readonlyWhen` is (#36806)', () => {
+      const lint = (uiReadonlyWhen: string) =>
+        validateStackExpressions({
+          objects: [{
+            name: 'hlk_order',
+            fields: {
+              status: { type: 'select', options: [{ value: 'draft', label: 'Draft' }], uiReadonlyWhen },
+            },
+          }],
+        }).filter(i => i.where === "object 'hlk_order' · field 'status' uiReadonlyWhen");
+
+      it('accepts a predicate over the record\'s own columns', () => {
+        expect(lint("record.status != 'draft'")).toEqual([]);
+      });
+
+      it('refuses a bare field reference', () => {
+        const found = lint("status != 'draft'");
+        expect(found.map(i => i.severity)).toContain('error');
+        expect(found.some(i => /bare reference `status`/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a predicate that does not parse', () => {
+        expect(lint('record.(').some(i => i.severity === 'error')).toBe(true);
+      });
+
+      it('refuses a field the object does not declare', () => {
+        expect(lint("record.stage == 'won'").some(i => i.severity === 'error' && /stage/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a root the field level does not bind, naming the console\'s locked outcome', () => {
+        const found = lint("current_user.id == 'u1'");
+        expect(found.map(i => i.severity)).toEqual(['error']);
+        expect(found[0]!.message).toMatch(/`uiReadonlyWhen` reads `current_user`/);
+        expect(found[0]!.message).toMatch(/resolves a hand lock it cannot evaluate to LOCKED/);
+      });
     });
 
     // `qty` carries `required` + `defaultValue` so it can never be null. That
@@ -4217,7 +4257,10 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `referenceTo` is absent — likewise.
     // [#29026] `summaryOperations` joined: a `count` / `sum` roll-up is
     // always valued for the null-guard gate, and its function is read below.
-    expected: ['defaultValue', 'options', 'reference', 'required', 'summaryOperations', 'type'],
+    // [#36167] `multiple` joined: with `type`, it says whether the field's
+    // value is a list (`isMultiValueField`), handed to the validator as
+    // `ExprSchemaHint.multiValueFields`.
+    expected: ['defaultValue', 'multiple', 'options', 'reference', 'required', 'summaryOperations', 'type'],
     declaredBy: 'FieldSchema',
     keys: () => Object.keys(FieldSchema.shape),
   },
@@ -4409,7 +4452,8 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
     const slots = [...fieldKeys![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
     // [#25767] `conditionalRequired` left the list with its tombstone: the
     // schema no longer declares it, so the walk no longer reads it.
-    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen']);
+    // [#36806] `uiReadonlyWhen`, the console hand lock, joined as the fifth.
+    expect(slots).toEqual(['requiredWhen', 'readonlyWhen', 'visibleWhen', 'settledWhen', 'uiReadonlyWhen']);
     expect(slots.filter((k) => !Object.keys(FieldSchema.shape).includes(k))).toEqual([]);
   });
 
@@ -4432,6 +4476,9 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // the metadata reads, `options` and `picklist`, go through
       // `declaresOptionsOnceServed`.
       'fieldList', 'declaredNames',
+      // [#36167] object name → its list-valued field names; its keys are Map
+      // methods (`get`), never metadata keys.
+      'multiValueFieldIndex',
       // [#33494] The names the door's stored extensions add (a Set of field
       // names), read to keep the target's served copy from filling a tied
       // name back in. Its keys are Set methods (`add`, `has`), never metadata keys.
@@ -4481,6 +4528,10 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // artefact as `scope` above. The action copy pass reads its metadata in
       // that module, not here.
       'templates',
+      // [#35356] NOT a receiver either — the tail of the
+      // `'./validate-working-day-sites.js'` import specifier, the same artefact
+      // as `templates` above. That pass reads its metadata in that module.
+      'sites',
       // [#19939] The spec's value-slot template judge, one refusal at a time.
       // Its keys are that helper's own `{ path, label, message, source }` —
       // never metadata keys — and it is named to stay clear of the `message` /
@@ -4571,6 +4622,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // The served body the hop's field index is read from is indexed by
       // position (`typedObjects[objectPosition]`), so it is no receiver here.
       'inputs', 'fieldDefs', 'finding',
+      // [#36237] The hop list-equality refusal: the object's own list-valued
+      // field names, one hop target's, and the reference → leaves map handed
+      // to the formula package. Their keys are Array / Map methods, never
+      // metadata keys; the reference is read off the tabled `def` receiver.
+      'ownLists', 'leaves', 'listLeaves',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -6956,6 +7012,143 @@ describe('validateStackExpressions — a flow condition\'s record. / previous. r
         const source = `timestamp(${root}.picked_up_at) < now()`;
         expect(validateStackExpressions(stackWith(site, source)), `${site}: ${source}`).toEqual([]);
       }
+    }
+  });
+});
+
+// [#34946] A flow CONDITION reads the run's row through `record.<field>` /
+// `previous.<field>` as well as through the flattened bare name, and the
+// date-arithmetic verdict judged only the bare name: `record.due_date + 1 > 5`
+// got zero findings and fails every run on the `YYYY-MM-DD` text, while
+// `due_date + 1 > 5` was refused. The root read now takes the same finding,
+// at the same path and severity, under the same rule.
+describe('validateStackExpressions — a flow condition\'s record. / previous. read takes the date-arithmetic verdict (#34946)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { due_date: { type: 'date', required: true }, picked_up_at: { type: 'datetime', required: true } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Due', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const at = (issues: ExprIssue[]) => issues.map((i) => [i.severity, i.path ?? i.where]);
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses date arithmetic on a date field through record. and previous. in a %s condition, as its bare name is',
+    (site) => {
+      const bare = validateStackExpressions(stackWith(site, 'due_date + 1 > 5'));
+      expect(at(bare)).toHaveLength(1);
+      expect(bare[0].severity).toBe('error');
+      expect(bare[0].message.startsWith('date arithmetic `google.protobuf.Timestamp + int` — `due_date` is a date')).toBe(true);
+      for (const root of ['record', 'previous']) {
+        const source = `${root}.due_date + 1 > 5`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(at(issues), source).toEqual(at(bare));
+        expect(issues[0].message, source).toBe(bare[0].message.replace('`due_date`', `\`${root}.due_date\``));
+      }
+    },
+  );
+
+  it('reports it under the expression rule id, as the bare name is', () => {
+    for (const source of ['due_date + 1 > 5', 'record.due_date + 1 > 5', 'previous.due_date + 1 > 5']) {
+      const stack = stackWith('start', source);
+      // The minimal fixture draws other rules' findings (region shape, sharing); this one's is the date arithmetic's.
+      const findings = runAuthoringRules('build', { normalized: stack, parsed: stack } as never)
+        .filter((f) => /^date arithmetic/.test(f.message));
+      expect(findings.map((f) => [f.rule, f.severity]), source).toEqual([[EXPRESSION_INVALID, 'error']]);
+    }
+  });
+
+  it('CONTROL: a datetime field\'s root reads take exactly the bare name\'s finding', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      const bare = validateStackExpressions(stackWith(site, 'picked_up_at + 1 > 5'));
+      for (const root of ['record', 'previous']) {
+        const source = `${root}.picked_up_at + 1 > 5`;
+        const issues = validateStackExpressions(stackWith(site, source));
+        expect(at(issues), `${site}: ${source}`).toEqual(at(bare));
+        expect(issues.map((i) => i.message), `${site}: ${source}`)
+          .toEqual(bare.map((i) => i.message.replace('`picked_up_at`', `\`${root}.picked_up_at\``)));
+      }
+    }
+  });
+
+  it('CONTROL: an ordering against today() stays clean, and timestamp() over the date keeps its one date-text finding', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      for (const root of ['record', 'previous']) {
+        expect(validateStackExpressions(stackWith(site, `${root}.due_date < today()`)), `${site}: ${root}`).toEqual([]);
+        const dateText = validateStackExpressions(stackWith(site, `timestamp(${root}.due_date) < now()`));
+        expect(dateText.map((i) => i.severity), `${site}: ${root}`).toEqual(['error']);
+        expect(dateText[0].message).toContain(`\`timestamp(${root}.due_date)\` — \`${root}.due_date\` is a date field`);
+      }
+    }
+  });
+});
+
+// [#36377] A flow CONDITION that orders the BARE date name against a text
+// literal before it does arithmetic on the field's `record.` / `previous.`
+// read got zero findings, while its all-bare and all-root spellings were
+// refused, and it fails every run on the `YYYY-MM-DD` text. It now takes the
+// all-root spelling's finding, at the same path and severity.
+describe('validateStackExpressions — a bare date ordering before date arithmetic on a record. / previous. read is refused (#36377)', () => {
+  const LOAN = {
+    name: 'library_loan',
+    fields: { due_date: { type: 'date', required: true }, picked_up_at: { type: 'datetime', required: true } },
+  };
+  type Site = 'start' | 'edge' | 'decision';
+  const stackWith = (site: Site, condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Due', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+  const shape = (issues: ExprIssue[]) => issues.map((i) => [i.severity, i.path ?? i.where, i.message]);
+
+  it.each(['start', 'edge', 'decision'] as const)(
+    'refuses the mixed spelling in a %s condition with the all-root spelling\'s finding',
+    (site) => {
+      for (const [root, field, op] of [
+        ['record', 'due_date', '+ 1'], ['previous', 'due_date', '- 7'], ['record', 'picked_up_at', '+ 1'],
+      ] as const) {
+        const allRoot = validateStackExpressions(stackWith(site, `${root}.${field} > "2026-01-01" && ${root}.${field} ${op} > 5`));
+        expect(allRoot.map((i) => i.severity), `${site}: ${root}.${field}`).toEqual(['error']);
+        const mixed = `${field} > "2026-01-01" && ${root}.${field} ${op} > 5`;
+        expect(shape(validateStackExpressions(stackWith(site, mixed))), `${site}: ${mixed}`).toEqual(shape(allRoot));
+      }
+    },
+  );
+
+  it('CONTROL: the same bare ordering before an ordering of the root read against today() stays clean', () => {
+    for (const site of ['start', 'edge', 'decision'] as const) {
+      expect(validateStackExpressions(stackWith(site, 'due_date > "2026-01-01" && record.due_date < today()')), site).toEqual([]);
     }
   });
 });

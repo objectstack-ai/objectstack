@@ -1916,6 +1916,14 @@ export interface FormField {
    */
   readonlyWhen?: string | { dialect?: string; source: string };
   /**
+   * CEL predicate: when TRUE the field is read-only BY HAND — the form draws it
+   * and a person cannot edit it, while API, import, action and flow writes keep
+   * it (no server strip). Aligns with @objectstack/spec Field.uiReadonlyWhen
+   * and folds into the same read-only verdict as `readonlyWhen`. Fails open.
+   * @example "record.status != 'draft'"
+   */
+  uiReadonlyWhen?: string | { dialect?: string; source: string };
+  /**
    * CEL predicate: when TRUE the field is required (the server enforces the
    * same rule in its rule-validator). Aligns with @objectstack/spec
    * Field.requiredWhen. Fails open (field is not required).
@@ -2093,6 +2101,18 @@ export interface FormField {
    */
   currencyConfig?: SpecField['currencyConfig'];
   /**
+   * The unit a quantity is drawn with (ADR-0158, objectstack#35490). On a
+   * `number` field, `{ unitMode: 'fixed', unit: 'KGM' }` gives every value one
+   * unit and `{ unitMode: 'record', unitField: 'unit_code' }` reads it off the
+   * record's own unit field. On a `text` field, `{ unitMode: 'code' }` marks
+   * the value itself as a unit code: the text widget draws the unit picker
+   * (the organization's units and the standard codes, by name; read-only, the
+   * unit's name), as it does for the `unitField` a quantity on the same form
+   * points at. The `number` widget shows the unit's name beside the value, at
+   * the unit's display decimal places.
+   */
+  unitConfig?: SpecField['unitConfig'];
+  /**
    * Minimum character length. The built-in `input` and `textarea` branches
    * put it on the native control as `minlength`, which the browser enforces
    * at submit. For a react-hook-form rule with its own message, write
@@ -2148,7 +2168,7 @@ export interface FormField {
    * `name`-keyed inline grid column (`{ name, label?, type?, width?, … }`).
    * The `grid` widget reads `columns` off its metadata carrier and each column
    * by exactly the spec's keys, so a column the spec refuses (the retired
-   * `field` spelling, a `title`, a `type` outside its nine cell controls) is
+   * `field` spelling, a `title`, a `type` outside its cell controls) is
    * refused here too rather than rendered as an empty or plain-text cell. The
    * spec spells the list `inlineColumns` on a `master_detail` field; a `grid`
    * field is objectui's own type, whose key is `columns` (objectui#11070).

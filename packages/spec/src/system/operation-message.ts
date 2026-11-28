@@ -308,6 +308,96 @@ export function operationMessageTranslationKey(messageKey: string): string {
  *     delegated administrator's write outside their own `adminScope`. The
  *     reason in `message` names business units and permission sets by their
  *     API names and ids; the user's half names none of them.
+ *
+ * The four `print_*` keys are the print door's own sentences for a print that
+ * failed on the server (`POST /api/v1/print/records`, `@objectstack/service-print`):
+ * the `message` of a 5xx whose producer declared no text for its caller. The
+ * door writes them in the request's language (`Accept-Language`) through
+ * `operationUserMessage` (`@objectstack/core`). None takes a placeholder: what
+ * the engine or the host said is withheld from the wire and kept in the server
+ * fault log, so the sentence can only name the situation.
+ *
+ *   - `print_engine_unavailable` — `503`: the print engine is not ready.
+ *   - `print_timed_out` — `504`: the render ran past the time a print is allowed.
+ *   - `print_failed` — any other 5xx, the door's fallback.
+ *   - `print_caller_unresolved` — `500`: the door could not resolve who asked.
+ *
+ * Their English is byte-identical to the fixed sentences the door answered
+ * before they were localized.
+ *
+ * How the door reads them, for whoever overrides or debugs them:
+ *
+ *   - The door holds no `i18n` service, so a `translation` item's
+ *     `errors.print_*` entry is NOT consulted for these keys: the built-in
+ *     catalog is the only source of their text.
+ *   - `Accept-Language` is read by its top tag only
+ *     (`preferredLocaleFromHeader`, no q-value negotiation), the platform's
+ *     existing reading. The tag is matched to a catalog locale by language
+ *     (`resolveBundleLocale`): `es-MX` reads `es-ES`, `zh` and `zh-TW` read
+ *     `zh-CN`, `ja` reads `ja-JP`. Only a language the catalog holds no
+ *     locale of (`fr`, `de`, …) answers English.
+ *   - The server fault log records the thrown error's own message. Only a
+ *     throw with an EMPTY message puts the localized sentence into the log line
+ *     in its place (`serverFaultLogMessage`'s fallback); every other throw logs
+ *     its own text, whatever language the caller was answered in.
+ *
+ * The `action_forward_*` keys are the `/actions` door's `503` for a same-origin
+ * `type: 'api'` action it cannot forward (`apiActionForwardUnavailableError`,
+ * `@objectstack/runtime`): the kernel exposes no in-process request path. They
+ * are an operator's sentence, not a business user's, and they say so; they are
+ * localized because the console shows the wire `message` of a refused action
+ * to whoever clicked it (a print action whose forward is unavailable among
+ * them). The door renders them in the caller's language through its execution
+ * context (`locale`, which the dispatcher resolves from the request's top
+ * `Accept-Language` tag, then `workspaceLocale`, then `en`), the reading every
+ * other refusal of that door uses. `{{action}}` is the action's name,
+ * `{{target}}` its quoted target, or `action_forward_target_unnamed` when it
+ * declares none. Code and status are unchanged, and no `userMessage` is added
+ * to the fault.
+ *
+ *   - `action_forward_unavailable` — the REST and MCP doors: the deployment's
+ *     HTTP server is the remedy.
+ *   - `action_forward_unavailable_host` — the host door (`dispatchAction`):
+ *     the kernel the call was handed is the remedy.
+ *
+ * The `own_door_*` keys are the own-door bridge's `501 NOT_IMPLEMENTED` on a
+ * kernel with no `http.server` (`own-door-bridge.ts`, `@objectstack/runtime`):
+ * no service is registered for the door's slot, or the registered one lacks
+ * the door's member. `{{door}}` is the door's noun, itself a key of this
+ * catalog (`own_door_print`, `own_door_personal_view_delete`,
+ * `own_door_attachment_mutate`), capitalized; `{{slot}}`, `{{producer}}` and
+ * `{{member}}` are the slot, package and member names, never translated. The
+ * bridge reads the request's top `Accept-Language` tag, as the print door
+ * does, and holds no `i18n` service either, so no `errors.own_door_*`
+ * override is consulted. Every bridge names its noun key. A bridge whose noun
+ * is plural (`own_door_attachment_mutate`) reads the `_plural` pair, so the
+ * English verb agrees.
+ *
+ * The `comment_doors_*`, `webhook_redeliver_*`, `approvals_act_*` and
+ * `automation_hooks_*` keys are the same `501` on the comment doors
+ * (`comments.ts`), the webhook redelivery door (`webhooks.ts`), the approval
+ * action-page door (`approvals.ts`) and the inbound automation hooks
+ * (`automation-hooks.ts`), which are not own-door bridges: each sentence is
+ * whole, with its slot, member and package names written in, never
+ * translated. Each door reads them as the bridge does: by the request's top
+ * `Accept-Language` tag (`requestLocaleOf`, `own-door-bridge.ts`), matched to
+ * a catalog locale by language as the print door's is (a language the catalog
+ * holds no locale of answering English), and with no `i18n` service, so no
+ * `errors.comment_doors_*`, `errors.webhook_redeliver_*`,
+ * `errors.approvals_act_*` or `errors.automation_hooks_*` override is
+ * consulted. Their English is byte-identical to the fixed sentences the doors
+ * answered before they were localized.
+ *
+ * The keys from `auth_service_unavailable` to `share_links_unconfigured` are
+ * the remaining `501`s of the dispatcher's domain modules (`auth.ts`,
+ * `i18n.ts`, `mcp.ts`, `meta.ts`, `packages.ts`, `automation.ts`,
+ * `actions.ts`, `catalog-activation.ts`, `permission-set-clone.ts`,
+ * `security.ts`, `share-links.ts`, #37811), read the same way: by the
+ * request's top `Accept-Language` tag, with no `errors.*` override consulted.
+ * Their English is byte-identical to the fixed sentences they replace.
+ * `{{member}}`, `{{table}}`, `{{name}}` and `{{packageId}}` are code, table,
+ * item and package names, never translated; `{{noun}}` is one of the
+ * `catalog_activation_noun_*` keys, rendered in the same locale.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -369,6 +459,91 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'This request filters, sorts or groups by a field you do not have access to. Remove that condition and try again, or contact your administrator if you need access.',
     delegation_scope_violation:
       'This change is outside the scope you were delegated to administer. Contact your administrator if it needs to be made.',
+    print_engine_unavailable:
+      'Records cannot be printed to a file right now: the print engine is not ready. The server log records why.',
+    print_timed_out: 'The record could not be printed to a file in the time a print is allowed.',
+    print_failed: 'The record could not be printed to a file because of an error on the server.',
+    print_caller_unresolved: 'The caller of this print could not be resolved.',
+    action_forward_unavailable:
+      "Action '{{action}}' is a same-origin `type: 'api'` action whose `target` ({{target}}) this door forwards to in-process, but this deployment's HTTP server exposes no in-process request path (IHttpServer.getRawApp). Operator: run an HTTP server plugin that implements getRawApp; the action is not dispatched around the door.",
+    action_forward_unavailable_host:
+      "Action '{{action}}' is a same-origin `type: 'api'` action whose `target` ({{target}}) this door forwards to in-process, but the kernel dispatchAction was handed exposes no in-process request path (IHttpServer.getRawApp). Pass dispatchAction the kernel your HTTP door is served from: on a multi-kernel host, the kernel that registers `kernel-resolver`, with the call's `environmentId` (an environment's own kernel owns no socket). On a single kernel, run an HTTP server plugin that implements getRawApp. The action is not dispatched around the door.",
+    action_forward_target_unnamed: 'endpoint',
+    own_door_service_unregistered:
+      '{{door}} is not available: no {{slot}} service is registered on this kernel. {{producer}} registers it.',
+    own_door_member_missing: '{{door}} is not available: the registered {{slot}} service does not implement {{member}}.',
+    own_door_print: 'the print door',
+    own_door_personal_view_delete: 'the personal view delete door',
+    own_door_attachment_mutate: 'the attachment removal and rename doors',
+    own_door_service_unregistered_plural:
+      '{{door}} are not available: no {{slot}} service is registered on this kernel. {{producer}} registers it.',
+    own_door_member_missing_plural: '{{door}} are not available: the registered {{slot}} service does not implement {{member}}.',
+    comment_doors_service_unregistered:
+      'The comment doors are not available: no comments service is registered. @objectstack/plugin-audit registers it; compose AuditPlugin on this kernel.',
+    comment_doors_member_missing:
+      'The comment doors are not available: the registered comments service does not implement handleCommentDoor.',
+    webhook_redeliver_service_unregistered:
+      'Webhook redelivery is not available: no webhooks service is registered. @objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
+    webhook_redeliver_member_missing:
+      'Webhook redelivery is not available: the registered webhooks service does not implement handleRedeliver.',
+    approvals_act_service_unregistered:
+      'Approval action pages are not available: no approvals service is registered. Register @objectstack/plugin-approvals to serve them.',
+    approvals_act_member_missing:
+      'Approval action pages are not available: the registered approvals service does not implement handleActionPage.',
+    automation_hooks_service_unregistered:
+      'Inbound automation hooks are not available: no trigger-api service is registered. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that service; compose it on the environment that owns the flow.',
+    automation_hooks_member_missing:
+      'Inbound automation hooks are not available: the registered trigger-api service does not implement handleInboundHook.',
+    auth_service_unavailable: 'Auth service not available — register @objectstack/plugin-auth to enable authentication',
+    i18n_service_unavailable: 'i18n service not available',
+    mcp_server_unavailable: 'MCP server is not available',
+    meta_layered_view_unsupported: 'Layered metadata view not supported by protocol implementation',
+    meta_save_conditions_unsupported:
+      'This host has no protocol saveMetaItem, so it cannot honour If-Match, If-None-Match or ?mode=draft on a save. Send the save without them, or save through a host whose protocol implements saveMetaItem.',
+    meta_save_unsupported: 'Save not supported',
+    meta_draft_listing_unsupported: 'Draft listing not supported',
+    meta_stored_migration_unsupported: 'Stored-metadata migration not supported',
+    packages_draft_publish_unsupported: 'Draft publishing not supported',
+    packages_draft_discard_unsupported: 'Draft discarding not supported',
+    packages_commit_history_unsupported: 'Commit history not supported',
+    packages_commit_revert_unsupported: 'Commit revert not supported',
+    packages_commit_rollback_unsupported: 'Commit rollback not supported',
+    packages_orphan_adoption_unsupported: 'Orphan adoption not supported',
+    packages_duplication_unsupported: 'Package duplication not supported',
+    packages_customization_ensure_unsupported: 'Customization package ensure not supported',
+    automation_connector_credentials_unsupported:
+      'Connector credentials are not supported by the automation service this deployment mounts — it does not implement `{{member}}`, an optional member of `IAutomationService`. Nothing was read or changed.',
+    automation_connector_connections_unsupported:
+      'Connector connections are not supported by the automation service this deployment mounts — it does not implement `{{member}}`, an optional member of `IAutomationService`. Nothing was read or changed.',
+    automation_flow_clone_unsupported:
+      'Flow clone not supported: a copy lands in a package, and this deployment has no metadata protocol that can ensure a customization package and save a flow into it.',
+    automation_resume_unsupported: 'Resume not supported',
+    automation_run_cancel_unsupported:
+      'Cancelling a run is not supported by the automation service this deployment mounts — it does not implement `cancelRun`, an optional member of `IAutomationService`. No run was cancelled.',
+    automation_run_restore_unsupported:
+      'Restoring a consumed suspension is not supported by the automation service this deployment mounts — it does not implement `restoreConsumedSuspension`, an optional member of `IAutomationService`. No suspension was restored.',
+    automation_screen_lookup_unsupported: 'Screen lookup not supported',
+    automation_runs_list_unsupported:
+      'Listing the runs of a flow is not supported by the automation service this deployment mounts — it does not implement `listRunsPage`, an optional member of `IAutomationService`. No runs were listed.',
+    action_activation_ledger_unsupported:
+      "This deployment's data engine does not implement the packaged-metadata activation ledger (ADR-0126 §8), so a packaged action cannot be switched off here.",
+    catalog_activation_ledger_missing_on:
+      "This deployment does not carry the activation ledger ({{table}}, ADR-0126 §4), so {{noun}} '{{name}}' cannot be switched on here.",
+    catalog_activation_ledger_missing_off:
+      "This deployment does not carry the activation ledger ({{table}}, ADR-0126 §4), so {{noun}} '{{name}}' cannot be switched off here.",
+    catalog_activation_noun_position: 'position',
+    catalog_activation_noun_permission: 'permission set',
+    catalog_activation_noun_sharing_rule: 'declared sharing rule',
+    catalog_activation_noun_webhook: 'declared webhook',
+    catalog_activation_noun_queue: 'declared queue',
+    catalog_activation_noun_assignment_rule: 'declared assignment rule',
+    permission_set_clone_pair_unsupported:
+      "Permission set '{{name}}' is shipped by read-only package '{{packageId}}', so its copy belongs in that package's paired customization package, and this deployment's metadata protocol cannot ensure one.",
+    permission_set_clone_no_protocol:
+      'This deployment has no metadata protocol to save the copy through, so a permission set cannot be cloned here.',
+    security_audience_reopen_unsupported:
+      "This deployment's security service does not implement re-opening a dismissed audience-binding suggestion, so the dismissal stands.",
+    share_links_unconfigured: 'Sharing is not configured',
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -407,6 +582,76 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_not_found: '该记录不存在，或您无权访问它。',
     query_field_not_readable: '当前请求按您无权查看的字段筛选、排序或分组，请去掉该条件后重试，或联系管理员。',
     delegation_scope_violation: '此更改超出了您被委派管理的范围，如需更改请联系管理员。',
+    print_engine_unavailable: '暂时无法将记录打印为文件：打印引擎尚未就绪，原因已记录在服务器日志中。',
+    print_timed_out: '打印超时：记录未能在允许的时间内打印为文件。',
+    print_failed: '服务器出错，记录未能打印为文件。',
+    print_caller_unresolved: '无法确认发起此次打印的用户。',
+    action_forward_unavailable:
+      "动作 '{{action}}' 是同源的 `type: 'api'` 动作，本接口会在进程内将其转发到它的 `target`（{{target}}），但此部署的 HTTP 服务器未提供进程内请求通道（IHttpServer.getRawApp）。运维人员：请运行实现了 getRawApp 的 HTTP 服务器插件；该动作不会绕过本接口执行。",
+    action_forward_unavailable_host:
+      "动作 '{{action}}' 是同源的 `type: 'api'` 动作，本接口会在进程内将其转发到它的 `target`（{{target}}），但传给 dispatchAction 的内核未提供进程内请求通道（IHttpServer.getRawApp）。请把提供 HTTP 接口的内核传给 dispatchAction：在多内核主机上，传入注册了 `kernel-resolver` 的内核，并带上本次调用的 `environmentId`（环境自身的内核不持有套接字）。在单内核上，请运行实现了 getRawApp 的 HTTP 服务器插件。该动作不会绕过本接口执行。",
+    action_forward_target_unnamed: '端点',
+    own_door_service_unregistered: '{{door}}不可用：此内核上未注册 {{slot}} 服务。该服务由 {{producer}} 注册。',
+    own_door_member_missing: '{{door}}不可用：已注册的 {{slot}} 服务未实现 {{member}}。',
+    own_door_print: '打印接口',
+    own_door_personal_view_delete: '个人视图删除接口',
+    own_door_attachment_mutate: '附件删除和重命名接口',
+    own_door_service_unregistered_plural: '{{door}}不可用：此内核上未注册 {{slot}} 服务。该服务由 {{producer}} 注册。',
+    own_door_member_missing_plural: '{{door}}不可用：已注册的 {{slot}} 服务未实现 {{member}}。',
+    comment_doors_service_unregistered:
+      '评论接口不可用：未注册 comments 服务。该服务由 @objectstack/plugin-audit 注册；请在此内核上组合 AuditPlugin。',
+    comment_doors_member_missing: '评论接口不可用：已注册的 comments 服务未实现 handleCommentDoor。',
+    webhook_redeliver_service_unregistered:
+      'Webhook 重新投递不可用：未注册 webhooks 服务。@objectstack/plugin-webhooks 在安装其重新投递否决器后注册该服务，这需要数据引擎和 @objectstack/service-messaging；启动日志会指出缺少的是哪一个。',
+    webhook_redeliver_member_missing: 'Webhook 重新投递不可用：已注册的 webhooks 服务未实现 handleRedeliver。',
+    approvals_act_service_unregistered:
+      '审批操作页不可用：未注册 approvals 服务。请注册 @objectstack/plugin-approvals 来提供这些页面。',
+    approvals_act_member_missing: '审批操作页不可用：已注册的 approvals 服务未实现 handleActionPage。',
+    automation_hooks_service_unregistered:
+      '入站自动化钩子不可用：未注册 trigger-api 服务。入站钩子触发器（@objectstack/trigger-api）通过该服务提供此路由；请在拥有该流程的环境上组合它。',
+    automation_hooks_member_missing: '入站自动化钩子不可用：已注册的 trigger-api 服务未实现 handleInboundHook。',
+    auth_service_unavailable: '认证服务不可用：请注册 @objectstack/plugin-auth 以启用认证。',
+    i18n_service_unavailable: 'i18n 服务不可用。',
+    mcp_server_unavailable: 'MCP 服务器不可用。',
+    meta_layered_view_unsupported: '不支持分层元数据视图：当前的协议实现未提供该功能。',
+    meta_save_conditions_unsupported:
+      '此主机的协议未提供 saveMetaItem，因此保存时无法遵循 If-Match、If-None-Match 或 ?mode=draft。请去掉这些条件后再保存，或通过协议实现了 saveMetaItem 的主机保存。',
+    meta_save_unsupported: '不支持保存。',
+    meta_draft_listing_unsupported: '不支持列出草稿。',
+    meta_stored_migration_unsupported: '不支持迁移已存储的元数据。',
+    packages_draft_publish_unsupported: '不支持发布草稿。',
+    packages_draft_discard_unsupported: '不支持丢弃草稿。',
+    packages_commit_history_unsupported: '不支持查看提交历史。',
+    packages_commit_revert_unsupported: '不支持撤销提交。',
+    packages_commit_rollback_unsupported: '不支持回滚到某次提交。',
+    packages_orphan_adoption_unsupported: '不支持认领孤立的元数据。',
+    packages_duplication_unsupported: '不支持复制软件包。',
+    packages_customization_ensure_unsupported: '不支持确保定制软件包存在。',
+    automation_connector_credentials_unsupported:
+      '此部署挂载的自动化服务不支持连接器凭据：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
+    automation_connector_connections_unsupported:
+      '此部署挂载的自动化服务不支持连接器连接：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
+    automation_flow_clone_unsupported: '不支持复制流程：副本要存入一个软件包，而此部署没有能够确保定制软件包存在并将流程保存进去的元数据协议。',
+    automation_resume_unsupported: '不支持恢复运行。',
+    automation_run_cancel_unsupported: '此部署挂载的自动化服务不支持取消运行：它未实现 `IAutomationService` 的可选成员 `cancelRun`。没有取消任何运行。',
+    automation_run_restore_unsupported:
+      '此部署挂载的自动化服务不支持恢复已消费的挂起：它未实现 `IAutomationService` 的可选成员 `restoreConsumedSuspension`。没有恢复任何挂起。',
+    automation_screen_lookup_unsupported: '不支持查询屏幕。',
+    automation_runs_list_unsupported: '此部署挂载的自动化服务不支持列出流程的运行：它未实现 `IAutomationService` 的可选成员 `listRunsPage`。没有列出任何运行。',
+    action_activation_ledger_unsupported: '此部署的数据引擎未实现软件包元数据的启用台账（ADR-0126 §8），因此无法在这里停用软件包中的动作。',
+    catalog_activation_ledger_missing_on: "此部署没有启用台账（{{table}}，ADR-0126 §4），因此无法在这里启用{{noun}} '{{name}}'。",
+    catalog_activation_ledger_missing_off: "此部署没有启用台账（{{table}}，ADR-0126 §4），因此无法在这里停用{{noun}} '{{name}}'。",
+    catalog_activation_noun_position: '岗位',
+    catalog_activation_noun_permission: '权限集',
+    catalog_activation_noun_sharing_rule: '声明的共享规则',
+    catalog_activation_noun_webhook: '声明的 webhook',
+    catalog_activation_noun_queue: '声明的队列',
+    catalog_activation_noun_assignment_rule: '声明的分配规则',
+    permission_set_clone_pair_unsupported:
+      "权限集 '{{name}}' 由只读软件包 '{{packageId}}' 提供，因此它的副本应存入该软件包配对的定制软件包，而此部署的元数据协议无法确保该定制软件包存在。",
+    permission_set_clone_no_protocol: '此部署没有可用于保存副本的元数据协议，因此无法在这里复制权限集。',
+    security_audience_reopen_unsupported: '此部署的安全服务未实现重新打开已忽略的受众绑定建议，因此该忽略保持有效。',
+    share_links_unconfigured: '未配置共享。',
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -462,6 +707,89 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'この要求は、閲覧権限のない項目で絞り込み、並べ替え、またはグループ化しています。その条件を削除して再試行するか、アクセスが必要な場合は管理者にお問い合わせください。',
     delegation_scope_violation:
       'この変更は、管理を委任された範囲を超えています。変更が必要な場合は管理者にお問い合わせください。',
+    print_engine_unavailable:
+      '印刷エンジンの準備ができていないため、現在レコードをファイルに印刷できません。原因はサーバーログに記録されています。',
+    print_timed_out: '制限時間内にレコードをファイルに印刷できませんでした。',
+    print_failed: 'サーバーでエラーが発生したため、レコードをファイルに印刷できませんでした。',
+    print_caller_unresolved: 'この印刷を要求したユーザーを特定できませんでした。',
+    action_forward_unavailable:
+      "アクション '{{action}}' は同一オリジンの `type: 'api'` アクションで、このエンドポイントはその `target`（{{target}}）へプロセス内で転送しますが、このデプロイメントの HTTP サーバーはプロセス内リクエスト経路（IHttpServer.getRawApp）を提供していません。運用担当者：getRawApp を実装した HTTP サーバープラグインを実行してください。アクションがこのエンドポイントを迂回して実行されることはありません。",
+    action_forward_unavailable_host:
+      "アクション '{{action}}' は同一オリジンの `type: 'api'` アクションで、このエンドポイントはその `target`（{{target}}）へプロセス内で転送しますが、dispatchAction に渡されたカーネルはプロセス内リクエスト経路（IHttpServer.getRawApp）を提供していません。HTTP エンドポイントを提供しているカーネルを dispatchAction に渡してください。マルチカーネルのホストでは、`kernel-resolver` を登録しているカーネルを呼び出しの `environmentId` とともに渡します（環境自身のカーネルはソケットを持ちません）。単一カーネルでは、getRawApp を実装した HTTP サーバープラグインを実行してください。アクションがこのエンドポイントを迂回して実行されることはありません。",
+    action_forward_target_unnamed: 'エンドポイント',
+    own_door_service_unregistered:
+      '{{door}}は利用できません。このカーネルには {{slot}} サービスが登録されていません。このサービスは {{producer}} が登録します。',
+    own_door_member_missing: '{{door}}は利用できません。登録されている {{slot}} サービスは {{member}} を実装していません。',
+    own_door_print: '印刷エンドポイント',
+    own_door_personal_view_delete: '個人ビュー削除エンドポイント',
+    own_door_attachment_mutate: '添付ファイルの削除・名前変更エンドポイント',
+    own_door_service_unregistered_plural:
+      '{{door}}は利用できません。このカーネルには {{slot}} サービスが登録されていません。このサービスは {{producer}} が登録します。',
+    own_door_member_missing_plural: '{{door}}は利用できません。登録されている {{slot}} サービスは {{member}} を実装していません。',
+    comment_doors_service_unregistered:
+      'コメントエンドポイントは利用できません。comments サービスが登録されていません。このサービスは @objectstack/plugin-audit が登録します。このカーネルに AuditPlugin を組み込んでください。',
+    comment_doors_member_missing:
+      'コメントエンドポイントは利用できません。登録されている comments サービスは handleCommentDoor を実装していません。',
+    webhook_redeliver_service_unregistered:
+      'Webhook の再配信は利用できません。webhooks サービスが登録されていません。@objectstack/plugin-webhooks は再配信の拒否フックがインストールされると登録します。それにはデータエンジンと @objectstack/service-messaging が必要です。不足しているものは起動ログに示されます。',
+    webhook_redeliver_member_missing:
+      'Webhook の再配信は利用できません。登録されている webhooks サービスは handleRedeliver を実装していません。',
+    approvals_act_service_unregistered:
+      '承認アクションページは利用できません。approvals サービスが登録されていません。これらのページを提供するには @objectstack/plugin-approvals を登録してください。',
+    approvals_act_member_missing:
+      '承認アクションページは利用できません。登録されている approvals サービスは handleActionPage を実装していません。',
+    automation_hooks_service_unregistered:
+      '受信自動化フックは利用できません。trigger-api サービスが登録されていません。受信フックトリガー（@objectstack/trigger-api）がこのサービスを通じてこのルートを提供します。フローを所有する環境に組み込んでください。',
+    automation_hooks_member_missing:
+      '受信自動化フックは利用できません。登録されている trigger-api サービスは handleInboundHook を実装していません。',
+    auth_service_unavailable: '認証サービスは利用できません。認証を有効にするには @objectstack/plugin-auth を登録してください。',
+    i18n_service_unavailable: 'i18n サービスは利用できません。',
+    mcp_server_unavailable: 'MCP サーバーは利用できません。',
+    meta_layered_view_unsupported: 'レイヤー化されたメタデータビューはサポートされていません。プロトコル実装がこの機能を提供していません。',
+    meta_save_conditions_unsupported:
+      'このホストのプロトコルには saveMetaItem がないため、保存時に If-Match、If-None-Match、?mode=draft を適用できません。これらを付けずに保存するか、プロトコルが saveMetaItem を実装しているホストを通じて保存してください。',
+    meta_save_unsupported: '保存はサポートされていません。',
+    meta_draft_listing_unsupported: '下書きの一覧表示はサポートされていません。',
+    meta_stored_migration_unsupported: '保存済みメタデータの移行はサポートされていません。',
+    packages_draft_publish_unsupported: '下書きの公開はサポートされていません。',
+    packages_draft_discard_unsupported: '下書きの破棄はサポートされていません。',
+    packages_commit_history_unsupported: 'コミット履歴はサポートされていません。',
+    packages_commit_revert_unsupported: 'コミットの取り消しはサポートされていません。',
+    packages_commit_rollback_unsupported: 'コミットへのロールバックはサポートされていません。',
+    packages_orphan_adoption_unsupported: '孤立したメタデータの引き取りはサポートされていません。',
+    packages_duplication_unsupported: 'パッケージの複製はサポートされていません。',
+    packages_customization_ensure_unsupported: 'カスタマイズパッケージの確保はサポートされていません。',
+    automation_connector_credentials_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはコネクタ資格情報をサポートしていません。`IAutomationService` の任意メンバー `{{member}}` を実装していません。何も読み取り・変更されていません。',
+    automation_connector_connections_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはコネクタ接続をサポートしていません。`IAutomationService` の任意メンバー `{{member}}` を実装していません。何も読み取り・変更されていません。',
+    automation_flow_clone_unsupported:
+      'フローの複製はサポートされていません。コピーはパッケージに保存されますが、このデプロイメントにはカスタマイズパッケージを確保してフローを保存できるメタデータプロトコルがありません。',
+    automation_resume_unsupported: '再開はサポートされていません。',
+    automation_run_cancel_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスは実行のキャンセルをサポートしていません。`IAutomationService` の任意メンバー `cancelRun` を実装していません。実行はキャンセルされていません。',
+    automation_run_restore_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスは消費済みの一時停止の復元をサポートしていません。`IAutomationService` の任意メンバー `restoreConsumedSuspension` を実装していません。一時停止は復元されていません。',
+    automation_screen_lookup_unsupported: '画面の参照はサポートされていません。',
+    automation_runs_list_unsupported:
+      'このデプロイメントに組み込まれた自動化サービスはフローの実行一覧をサポートしていません。`IAutomationService` の任意メンバー `listRunsPage` を実装していません。実行は一覧表示されていません。',
+    action_activation_ledger_unsupported:
+      'このデプロイメントのデータエンジンはパッケージ化されたメタデータの有効化台帳（ADR-0126 §8）を実装していないため、ここではパッケージ化されたアクションを無効にできません。',
+    catalog_activation_ledger_missing_on:
+      "このデプロイメントには有効化台帳（{{table}}、ADR-0126 §4）がないため、ここでは{{noun}} '{{name}}' を有効にできません。",
+    catalog_activation_ledger_missing_off:
+      "このデプロイメントには有効化台帳（{{table}}、ADR-0126 §4）がないため、ここでは{{noun}} '{{name}}' を無効にできません。",
+    catalog_activation_noun_position: '役職',
+    catalog_activation_noun_permission: '権限セット',
+    catalog_activation_noun_sharing_rule: '宣言された共有ルール',
+    catalog_activation_noun_webhook: '宣言された Webhook',
+    catalog_activation_noun_queue: '宣言されたキュー',
+    catalog_activation_noun_assignment_rule: '宣言された割り当てルール',
+    permission_set_clone_pair_unsupported:
+      "権限セット '{{name}}' は読み取り専用パッケージ '{{packageId}}' が提供しているため、そのコピーはこのパッケージと対になるカスタマイズパッケージに属しますが、このデプロイメントのメタデータプロトコルはそれを確保できません。",
+    permission_set_clone_no_protocol: 'このデプロイメントにはコピーを保存するためのメタデータプロトコルがないため、ここでは権限セットを複製できません。',
+    security_audience_reopen_unsupported: 'このデプロイメントのセキュリティサービスは却下された対象者バインドの提案を再度開く機能を実装していないため、却下はそのまま有効です。',
+    share_links_unconfigured: '共有が構成されていません。',
   },
   'es-ES': {
     permission_denied:
@@ -522,6 +850,93 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'Esta solicitud filtra, ordena o agrupa por un campo al que no tiene acceso. Quite esa condición e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
     delegation_scope_violation:
       'Este cambio está fuera del ámbito que se le ha delegado para administrar. Póngase en contacto con su administrador si es necesario realizarlo.',
+    print_engine_unavailable:
+      'En este momento no se pueden imprimir registros en un archivo: el motor de impresión no está listo. El motivo figura en el registro del servidor.',
+    print_timed_out: 'No se pudo imprimir el registro en un archivo dentro del tiempo permitido.',
+    print_failed: 'No se pudo imprimir el registro en un archivo debido a un error en el servidor.',
+    print_caller_unresolved: 'No se pudo identificar a la persona que solicitó esta impresión.',
+    action_forward_unavailable:
+      "La acción '{{action}}' es una acción `type: 'api'` del mismo origen cuyo `target` ({{target}}) este punto de acceso reenvía dentro del proceso, pero el servidor HTTP de esta implementación no expone ninguna vía de solicitud en proceso (IHttpServer.getRawApp). Operador: ejecute un plugin de servidor HTTP que implemente getRawApp; la acción no se despacha eludiendo este punto de acceso.",
+    action_forward_unavailable_host:
+      "La acción '{{action}}' es una acción `type: 'api'` del mismo origen cuyo `target` ({{target}}) este punto de acceso reenvía dentro del proceso, pero el kernel que se pasó a dispatchAction no expone ninguna vía de solicitud en proceso (IHttpServer.getRawApp). Pase a dispatchAction el kernel desde el que se sirve su punto de acceso HTTP: en un host con varios kernels, el kernel que registra `kernel-resolver`, con el `environmentId` de la llamada (el kernel propio de un entorno no tiene socket). En un solo kernel, ejecute un plugin de servidor HTTP que implemente getRawApp. La acción no se despacha eludiendo este punto de acceso.",
+    action_forward_target_unnamed: 'punto de acceso',
+    own_door_service_unregistered:
+      '{{door}} no está disponible: no hay ningún servicio {{slot}} registrado en este kernel. Lo registra {{producer}}.',
+    own_door_member_missing: '{{door}} no está disponible: el servicio {{slot}} registrado no implementa {{member}}.',
+    own_door_print: 'el punto de acceso de impresión',
+    own_door_personal_view_delete: 'el punto de acceso para eliminar vistas personales',
+    own_door_attachment_mutate: 'los puntos de acceso para eliminar y renombrar adjuntos',
+    own_door_service_unregistered_plural:
+      '{{door}} no están disponibles: no hay ningún servicio {{slot}} registrado en este kernel. Lo registra {{producer}}.',
+    own_door_member_missing_plural: '{{door}} no están disponibles: el servicio {{slot}} registrado no implementa {{member}}.',
+    comment_doors_service_unregistered:
+      'Los puntos de acceso de comentarios no están disponibles: no hay ningún servicio comments registrado. Lo registra @objectstack/plugin-audit; componga AuditPlugin en este kernel.',
+    comment_doors_member_missing:
+      'Los puntos de acceso de comentarios no están disponibles: el servicio comments registrado no implementa handleCommentDoor.',
+    webhook_redeliver_service_unregistered:
+      'El reenvío de webhooks no está disponible: no hay ningún servicio webhooks registrado. @objectstack/plugin-webhooks lo registra una vez instalado su veto de reenvío, que necesita el motor de datos y @objectstack/service-messaging; el registro de arranque indica cuál falta.',
+    webhook_redeliver_member_missing:
+      'El reenvío de webhooks no está disponible: el servicio webhooks registrado no implementa handleRedeliver.',
+    approvals_act_service_unregistered:
+      'Las páginas de acción de aprobación no están disponibles: no hay ningún servicio approvals registrado. Registre @objectstack/plugin-approvals para servirlas.',
+    approvals_act_member_missing:
+      'Las páginas de acción de aprobación no están disponibles: el servicio approvals registrado no implementa handleActionPage.',
+    automation_hooks_service_unregistered:
+      'Los ganchos de automatización entrantes no están disponibles: no hay ningún servicio trigger-api registrado. El disparador de ganchos entrantes (@objectstack/trigger-api) sirve esta ruta a través de ese servicio; compóngalo en el entorno al que pertenece el flujo.',
+    automation_hooks_member_missing:
+      'Los ganchos de automatización entrantes no están disponibles: el servicio trigger-api registrado no implementa handleInboundHook.',
+    auth_service_unavailable:
+      'El servicio de autenticación no está disponible: registre @objectstack/plugin-auth para habilitar la autenticación.',
+    i18n_service_unavailable: 'El servicio i18n no está disponible.',
+    mcp_server_unavailable: 'El servidor MCP no está disponible.',
+    meta_layered_view_unsupported:
+      'La vista de metadatos por capas no está disponible: la implementación del protocolo no la admite.',
+    meta_save_conditions_unsupported:
+      'Este host no tiene saveMetaItem en su protocolo, por lo que no puede respetar If-Match, If-None-Match ni ?mode=draft al guardar. Guarde sin ellos o guarde a través de un host cuyo protocolo implemente saveMetaItem.',
+    meta_save_unsupported: 'No se admite guardar.',
+    meta_draft_listing_unsupported: 'No se admite listar borradores.',
+    meta_stored_migration_unsupported: 'No se admite migrar los metadatos almacenados.',
+    packages_draft_publish_unsupported: 'No se admite publicar borradores.',
+    packages_draft_discard_unsupported: 'No se admite descartar borradores.',
+    packages_commit_history_unsupported: 'No se admite el historial de confirmaciones.',
+    packages_commit_revert_unsupported: 'No se admite revertir una confirmación.',
+    packages_commit_rollback_unsupported: 'No se admite restaurar una confirmación anterior.',
+    packages_orphan_adoption_unsupported: 'No se admite adoptar metadatos huérfanos.',
+    packages_duplication_unsupported: 'No se admite duplicar paquetes.',
+    packages_customization_ensure_unsupported: 'No se admite asegurar el paquete de personalización.',
+    automation_connector_credentials_unsupported:
+      'El servicio de automatización que monta esta implementación no admite credenciales de conector: no implementa `{{member}}`, un miembro opcional de `IAutomationService`. No se leyó ni cambió nada.',
+    automation_connector_connections_unsupported:
+      'El servicio de automatización que monta esta implementación no admite conexiones de conector: no implementa `{{member}}`, un miembro opcional de `IAutomationService`. No se leyó ni cambió nada.',
+    automation_flow_clone_unsupported:
+      'No se admite clonar flujos: la copia se guarda en un paquete, y esta implementación no tiene un protocolo de metadatos que pueda asegurar un paquete de personalización y guardar en él un flujo.',
+    automation_resume_unsupported: 'No se admite reanudar.',
+    automation_run_cancel_unsupported:
+      'El servicio de automatización que monta esta implementación no admite cancelar una ejecución: no implementa `cancelRun`, un miembro opcional de `IAutomationService`. No se canceló ninguna ejecución.',
+    automation_run_restore_unsupported:
+      'El servicio de automatización que monta esta implementación no admite restaurar una suspensión consumida: no implementa `restoreConsumedSuspension`, un miembro opcional de `IAutomationService`. No se restauró ninguna suspensión.',
+    automation_screen_lookup_unsupported: 'No se admite consultar la pantalla.',
+    automation_runs_list_unsupported:
+      'El servicio de automatización que monta esta implementación no admite listar las ejecuciones de un flujo: no implementa `listRunsPage`, un miembro opcional de `IAutomationService`. No se listó ninguna ejecución.',
+    action_activation_ledger_unsupported:
+      'El motor de datos de esta implementación no implementa el registro de activación de metadatos empaquetados (ADR-0126 §8), por lo que aquí no se puede desactivar una acción empaquetada.',
+    catalog_activation_ledger_missing_on:
+      "Esta implementación no tiene el registro de activación ({{table}}, ADR-0126 §4), por lo que aquí no se puede activar {{noun}} '{{name}}'.",
+    catalog_activation_ledger_missing_off:
+      "Esta implementación no tiene el registro de activación ({{table}}, ADR-0126 §4), por lo que aquí no se puede desactivar {{noun}} '{{name}}'.",
+    catalog_activation_noun_position: 'el puesto',
+    catalog_activation_noun_permission: 'el conjunto de permisos',
+    catalog_activation_noun_sharing_rule: 'la regla de uso compartido declarada',
+    catalog_activation_noun_webhook: 'el webhook declarado',
+    catalog_activation_noun_queue: 'la cola declarada',
+    catalog_activation_noun_assignment_rule: 'la regla de asignación declarada',
+    permission_set_clone_pair_unsupported:
+      "El conjunto de permisos '{{name}}' lo proporciona el paquete de solo lectura '{{packageId}}', así que su copia pertenece al paquete de personalización emparejado con ese paquete, y el protocolo de metadatos de esta implementación no puede asegurarlo.",
+    permission_set_clone_no_protocol:
+      'Esta implementación no tiene un protocolo de metadatos con el que guardar la copia, por lo que aquí no se puede clonar un conjunto de permisos.',
+    security_audience_reopen_unsupported:
+      'El servicio de seguridad de esta implementación no implementa reabrir una sugerencia de vinculación de audiencia descartada, por lo que el descarte se mantiene.',
+    share_links_unconfigured: 'El uso compartido no está configurado.',
   },
 };
 

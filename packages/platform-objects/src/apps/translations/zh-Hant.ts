@@ -2,12 +2,15 @@
 
 import type { TranslationData } from '@objectstack/spec/system';
 import { zhHantObjects } from './zh-Hant.objects.generated.js';
+import { standardUnitMessages } from './standard-unit-names.js';
 
 /**
  * 繁體中文 (zh-Hant) — Setup App Translations
  */
 export const zhHant: TranslationData = {
   objects: zhHantObjects,
+  // ADR-0158 L2 (2A): each standard unit code's name (`standard-unit-names.ts`).
+  messages: standardUnitMessages('zh-Hant'),
   apps: {
     account: {
       label: '帳戶',
@@ -40,7 +43,7 @@ export const zhHant: TranslationData = {
         group_overview: { label: '總覽' },
         group_apps: { label: '應用程式' },
         nav_marketplace_browse: { label: '瀏覽應用程式市場' },
-        nav_marketplace_installed: { label: '已安裝應用程式' },
+        nav_packages: { label: '套件' },
         nav_cloud_connection: { label: '雲端連線' },
         group_people_org: { label: '人員與組織' },
         group_access_control: { label: '存取控制' },
@@ -76,6 +79,7 @@ export const zhHant: TranslationData = {
         // the same case as the entry above; see `en.ts` (#31123).
         nav_scim_credentials: { label: 'SCIM 憑證' },
         nav_api_keys: { label: 'API 金鑰' },
+        nav_access_directory: { label: '職位與權限' },
 
         // 核准中心 = the Approvals Inbox component (#7234) — the surface with
         // decision actions. The three below are the engine's raw tables; the
@@ -95,6 +99,7 @@ export const zhHant: TranslationData = {
         nav_settings_localization: { label: '在地化' },
         nav_exchange_rates: { label: '匯率' },
         nav_units_of_measure: { label: '計量單位' },
+        nav_standard_unit_settings: { label: '標準單位設定' },
         nav_work_calendars: { label: '工作日曆' },
         nav_work_calendar_exceptions: { label: '日曆例外' },
         nav_settings_company: { label: '公司' },
@@ -108,6 +113,7 @@ export const zhHant: TranslationData = {
         nav_settings_knowledge: { label: '知識庫' },
         nav_settings_lifecycle: { label: '資料生命週期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '對外表單' },
         nav_notification_preferences: { label: '通知偏好設定' },
         nav_notification_templates: { label: '通知範本' },
 
@@ -131,7 +137,7 @@ export const zhHant: TranslationData = {
       },
     },
     studio: {
-      label: 'Studio',
+      label: '應用搭建',
       description: '供開發者、分析師與導入人員使用的中繼資料工作台',
       navigation: {
         group_overview: { label: '總覽' },

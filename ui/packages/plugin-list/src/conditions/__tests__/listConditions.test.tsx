@@ -14,13 +14,13 @@
  * which the host owns: one click is spent before any of these panels mounts.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import * as React from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 import { FieldList, fieldTypeIcon, moveFieldInOrder, orderFieldList } from '../FieldList';
 import { FilterValuePanel, quickDateWindowValue } from '../FilterValuePanel';
-import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortDirectionLabel } from '../ListConditionControls';
+import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue } from '../ListConditionControls';
 import {
   addSortLevel,
   chipsAreIndependent,
@@ -36,9 +36,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { operatorsForField } from '@object-ui/components';
-import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
+import { PhoneFilterSheet } from '../../phone/PhoneListPanels';
+import { setDisplayTimeZone } from '@object-ui/core';
 
 // The server's JSON-column refusal set, read from the module every server face
 // imports it from (`@objectstack/core`, which no UI package depends on): the
@@ -412,6 +415,38 @@ describe('FilterValuePanel', () => {
   });
 });
 
+describe('FilterValuePanel — option chips are coloured only when declared (objectstack#36882)', () => {
+  it('an undeclared option chip is neutral (light and dark), a declared family keeps its classes', () => {
+    const field: ConditionField = {
+      value: 'stage',
+      label: 'Stage',
+      type: 'select',
+      options: [
+        // `won` and `critical` were coloured by the retired value table.
+        { value: 'won', label: 'Won' },
+        { value: 'critical', label: 'Critical', color: 'red' },
+      ],
+    };
+    render(
+      <FilterValuePanel
+        field={field}
+        row={{ id: 'r', field: 'stage', operator: 'in', value: [] }}
+        onChange={() => {}}
+      />,
+    );
+    const chip = (label: string) =>
+      Array.from(document.querySelectorAll<HTMLElement>('span.rounded-full')).find(
+        (el) => el.textContent?.trim() === label,
+      )!;
+    expect(chip('Won').className).toContain('bg-muted text-muted-foreground border-border');
+    expect(chip('Won').className).not.toMatch(
+      /(^|\s)(dark:)?(bg|text|border)-(gray|red|orange|yellow|green|blue|indigo|purple|pink)-\d/,
+    );
+    expect(chip('Critical').className).toContain('bg-red-50');
+    expect(chip('Critical').className).toContain('dark:bg-red-950/40');
+  });
+});
+
 describe('multi-value fields — the quick filter and the advanced panel offer only what the server accepts', () => {
   const OPTIONS = [
     { value: 'quality_lead', label: 'Quality lead' },
@@ -549,7 +584,7 @@ describe('multi-value fields — the quick filter and the advanced panel offer o
     const enQuick = enPack.listConditions.operators as Record<string, string>;
     expect(MULTI_OFFER.map((op) => enQuick[op])).toEqual(['contains', 'does not contain', 'is empty', 'is not empty']);
     const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
-    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never)).toBe('contains Quality lead');
+    expect(describeConditionValue(MULTI_VALUE[0], 'contains', 'quality_lead', t as never, undefined, 'en-US')).toBe('contains Quality lead');
   });
 });
 
@@ -594,13 +629,6 @@ describe('SortPanel — the same field list with the direction on top', () => {
   it('CONTROL: without renderAdvanced the sort panel has no footer entry', () => {
     render(<SortPanel fields={FIELDS} shownFields={SHOWN} value={[]} onChange={() => {}} />);
     expect(screen.queryByTestId('sort-panel-open-advanced')).toBeNull();
-  });
-
-  it('words the direction by type: time for dates, size for numbers, the alphabet for text', () => {
-    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
-    expect(sortDirectionLabel('date', 'asc', t as never)).toBe('Oldest → Newest');
-    expect(sortDirectionLabel('currency', 'desc', t as never)).toBe('High → Low');
-    expect(sortDirectionLabel('text', 'asc', t as never)).toBe('A → Z');
   });
 });
 
@@ -769,10 +797,10 @@ describe('condition model', () => {
   it('describes a chip value by operator: a bare list for 「is any of」, the operator named otherwise', () => {
     const t = (key: string, o?: Record<string, unknown>) =>
       (LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, k) => String(o?.[k] ?? ''));
-    expect(describeConditionValue(STAGE, 'in', ['proposal', 'negotiation'], t as never)).toBe('Proposal, Negotiation');
-    expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never)).toBe('≥ 100');
-    expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never)).toBe('Today');
-    expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never)).toBe('is empty');
+    expect(describeConditionValue(STAGE, 'in', ['proposal', 'negotiation'], t as never, undefined, 'en-US')).toBe('Proposal, Negotiation');
+    expect(describeConditionValue(FIELDS[2], 'greater_than_or_equal', 100, t as never, undefined, 'en-US')).toBe('≥ 100');
+    expect(describeConditionValue(FIELDS[3], 'between', quickDateWindowValue('today'), t as never, undefined, 'en-US')).toBe('Today');
+    expect(describeConditionValue(STAGE, 'is_empty', undefined, t as never, undefined, 'en-US')).toBe('is empty');
   });
 });
 
@@ -871,5 +899,341 @@ describe('ConditionChipRow — the resident row of the two-row toolbar (objectst
     render(<TwoRow filters={stageFilter} />);
     const row = screen.getByTestId('condition-chips');
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-nowrap', 'overflow-x-auto']));
+  });
+});
+
+describe('ConditionChipRow — a view condition on a related record\'s field (objectstack#36507)', () => {
+  // The HotCRM industry-donut drill: the drilled list is a child of
+  // `crm_account`, its slice is a condition on the account's industry. The
+  // base object's lookup is labelled by the host (as the list translates its
+  // own fields); the related field and its options live on `crm_account`.
+  const LOOKUP_EN: ConditionField = { value: 'crm_account', label: 'Account', type: 'lookup', referenceTo: 'crm_account' };
+  const LOOKUP_ZH: ConditionField = { ...LOOKUP_EN, label: '所属客户' };
+  const AMOUNT: ConditionField = { value: 'amount', label: 'Amount', type: 'currency' };
+  const ACCOUNT_DEF = {
+    name: 'crm_account',
+    fields: {
+      name: { type: 'text', label: 'Account Name' },
+      industry: {
+        type: 'select',
+        label: 'Industry',
+        options: [
+          { value: 'technology', label: 'Technology' },
+          { value: 'finance', label: 'Finance' },
+        ],
+      },
+    },
+  };
+  const ZH_BUNDLE = {
+    'zh-CN': {
+      crm: {
+        fields: { crm_account: { industry: '行业' } },
+        fieldOptions: { crm_account: { industry: { technology: '科技' } } },
+      },
+    },
+  };
+  // The drill's base filter as the list receives it: the nested form
+  // `{ crm_account: { industry: 'technology' } }`, lowered by `toFilterNode`.
+  const DRILLED = ['crm_account', '=', { industry: 'technology' }];
+
+  function source(def: () => Promise<unknown>) {
+    return { find: vi.fn(async () => ({ data: [] })), getObjectSchema: vi.fn(def) };
+  }
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={[LOOKUP_EN, AMOUNT]}
+        filters={EMPTY}
+        filterFields={[LOOKUP_EN, AMOUNT]}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+
+  it('reads the nested-relation form, as written and as lowered, into one chip on the path', () => {
+    const chip = { key: 'view-0', field: 'crm_account.industry', operator: 'equals', value: 'technology' };
+    expect(readViewConditions(DRILLED)).toEqual([chip]);
+    expect(readViewConditions({ crm_account: { industry: 'technology' } })).toEqual([chip]);
+    expect(readViewConditions([{ crm_account: { industry: 'technology' } }, ['amount', '>=', 10]])).toEqual([
+      chip,
+      { key: 'view-1', field: 'amount', operator: '>=', value: 10 },
+    ]);
+    // A nested condition it cannot say as one equality is the view's
+    // condition, never a value printed as `[object Object]`.
+    expect(readViewConditions(['crm_account', '=', { industry: { $in: ['technology'] } }])).toEqual([{ key: 'view-0' }]);
+    expect(readViewConditions(['crm_account', '=', { industry: 'technology', name: 'Acme' }])).toEqual([{ key: 'view-0' }]);
+    // CONTROL: a condition on the list's own field reads as before.
+    expect(readViewConditions(['amount', '>=', 10])).toEqual([{ key: 'view-0', field: 'amount', operator: '>=', value: 10 }]);
+  });
+
+  it('en: labels the chip from the lookup, the related field and its option', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('crm_account.industry');
+    expect(chip.getAttribute('data-locked')).toBe('true');
+    await vi.waitFor(() => expect(chip.textContent).toBe('Account › Industry: Technology'));
+    expect(ds.getObjectSchema).toHaveBeenCalledTimes(1);
+    expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account');
+    // No record-name read for it: the value is an option, not a record id.
+    expect(ds.find).not.toHaveBeenCalled();
+  });
+
+  it('zh-CN: the related field and option labels come from the locale bundle', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false, resources: ZH_BUNDLE }} persistLanguage={false}>
+        <Row viewFilter={DRILLED} filterFields={[LOOKUP_ZH, AMOUNT]} dataSource={ds as never} />
+      </I18nProvider>,
+    );
+    const chip = await screen.findByTestId('view-condition-chip');
+    await vi.waitFor(() => expect(chip.textContent).toBe('所属客户的行业：科技'));
+    expect(chip.getAttribute('aria-label')).toContain('所属客户的行业：科技');
+  });
+
+  it('falls back to the raw names when the lookup is not among the list\'s fields', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} filterFields={[AMOUNT]} dataSource={ds as never} />);
+    await act(async () => {});
+    // No lookup in the field list (one the reader may not read) ⇒ no target
+    // to read, and every name raw.
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('crm_account › industry: equals technology');
+  });
+
+  it('falls back to the raw related names when the definition read fails', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    await vi.waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account'));
+    await act(async () => {});
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('Account › industry: equals technology');
+  });
+
+  it('CONTROL: a condition on the list\'s own field beside it is unchanged, and reads no definition', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={[['amount', '>=', 10]]} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('amount');
+    expect(chip.textContent).toBe('Amount: >= 10');
+    await act(async () => {});
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConditionChipRow — an operator only the advanced panel writes (objectstack#36462)', () => {
+  // A drill dialog's base filter carries the panel's own operators as view
+  // triples (`['amount', 'is_not_null', true]`); a reader's filter can carry
+  // them too, written by the advanced panel. Each chip names the operator in
+  // the panel's own words, never by its id.
+  const PANEL_ONLY = ['not_equals', 'greater_than', 'less_than', 'is_null', 'is_not_null', 'icontains', 'ends_with'] as const;
+  const fieldsIn = (amount: string, stage: string, name: string, lost: string): ConditionField[] => [
+    { value: 'amount', label: amount, type: 'currency' },
+    { value: 'stage', label: stage, type: 'select', options: [{ value: 'lost', label: lost }] },
+    { value: 'name', label: name, type: 'text' },
+  ];
+  const EN_FIELDS = fieldsIn('Deal Value', 'Stage', 'Name', 'Lost');
+  const ZH_FIELDS = fieldsIn('金额', '阶段', '名称', '输单');
+  const VIEW_FILTER = [
+    ['stage', 'not_equals', 'lost'],
+    ['amount', 'greater_than', 100],
+    ['amount', 'less_than', 500],
+    ['amount', 'is_null', true],
+    ['amount', 'is_not_null', true],
+    ['name', 'icontains', 'acme'],
+    ['name', 'ends_with', 'inc'],
+  ];
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={EN_FIELDS}
+        filters={EMPTY}
+        filterFields={EN_FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+  const chipTexts = () => screen.getAllByTestId('view-condition-chip').map((chip) => chip.textContent);
+
+  it('en: each chip reads the panel\'s word for its operator', () => {
+    render(<Row viewFilter={VIEW_FILTER} />);
+    expect(chipTexts()).toEqual([
+      'Stage: Does not equal Lost',
+      'Deal Value: Greater than 100',
+      'Deal Value: Less than 500',
+      'Deal Value: Is null',
+      'Deal Value: Is not null',
+      'Name: Contains (ignore case) acme',
+      'Name: Ends with inc',
+    ]);
+  });
+
+  it('zh-CN: each chip reads the panel\'s word for its operator', async () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={VIEW_FILTER} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual([
+      '阶段：不等于 输单',
+      '金额：大于 100',
+      '金额：小于 500',
+      '金额：为 null',
+      '金额：不为 null',
+      '名称：包含（忽略大小写） acme',
+      '名称：以…结尾 inc',
+    ]);
+  });
+
+  it('the reader\'s own filter chip and its operator choice read the same words', () => {
+    const filters: FilterBuilderRowGroup = {
+      id: 'root',
+      logic: 'and',
+      conditions: [{ id: 'c1', field: 'amount', operator: 'is_not_null', value: undefined }],
+    };
+    render(<Row filters={filters} />);
+    expect(screen.getByTestId('filter-chip-open-amount').textContent).toBe('Deal Value: Is not null');
+  });
+
+  it('every pack words each of them, as the panel does, and never as the id', () => {
+    for (const [tag, pack] of Object.entries(builtInLocales)) {
+      const words = pack.filterBuilder.operators as Record<string, string>;
+      for (const op of PANEL_ONLY) {
+        expect(words[op], `${tag} ${op}`).toBeTruthy();
+        expect(words[op], `${tag} ${op}`).not.toBe(op);
+      }
+    }
+  });
+
+  it('an operator nothing words is named as a condition, never by its id, in en and zh-CN', async () => {
+    const unknown = [['amount', 'nin', [1, 2]], { field: 'amount', operator: 'exists' }];
+    const { unmount } = render(<Row viewFilter={unknown} />);
+    expect(chipTexts()).toEqual(['Deal Value: Condition 1, 2', 'Deal Value: Condition']);
+    unmount();
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={unknown} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual(['金额：条件 1、2', '金额：条件']);
+  });
+
+  it('CONTROL: a view triple\'s comparison symbol still reads as written', () => {
+    render(<Row viewFilter={[['amount', '>=', 10], ['amount', '!=', 0]]} />);
+    expect(chipTexts()).toEqual(['Deal Value: >= 10', 'Deal Value: != 0']);
+  });
+});
+
+// objectstack#37034 — a date condition's value reads as a date in the viewer's
+// language, by the field's type, on every condition row (the desktop chips and
+// the phone filter sheet's rows). On the wire a `date` bound is `YYYY-MM-DD`
+// and a `datetime` bound an ISO instant: the card's sighting was a drilled
+// month bucket on `created_at`, 「创建时间：≥ 2026-10-01T00:00:00.000Z」.
+// The display zone is pinned to UTC, so an instant's day and time do not
+// depend on the zone the runner sits in.
+describe('date condition values read as dates (objectstack#37034)', () => {
+  beforeAll(() => setDisplayTimeZone('UTC'));
+  afterAll(() => setDisplayTimeZone(undefined));
+
+  const ISSUED_ON: ConditionField = { value: 'issued_on', label: '开具日期', type: 'date' };
+  const CREATED_AT: ConditionField = { value: 'created_at', label: '创建时间', type: 'datetime' };
+  const STARTS_AT: ConditionField = { value: 'starts_at', label: 'Starts at', type: 'time' };
+  const rows = (conditions: Array<[string, string, unknown]>): FilterBuilderRowGroup => ({
+    id: 'root',
+    logic: 'and',
+    conditions: conditions.map(([field, operator, value], i) => ({ id: `r${i}`, field, operator, value }) as FilterBuilderRow),
+  });
+  const inZh = (node: React.ReactNode) => (
+    <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>{node}</I18nProvider>
+  );
+  function zhChips(filters: FilterBuilderRowGroup, field: string): string[] {
+    render(inZh(
+      <ConditionChipRow
+        sort={[]}
+        sortFields={[ISSUED_ON, CREATED_AT]}
+        onSortChange={() => {}}
+        filters={filters}
+        filterFields={[ISSUED_ON, CREATED_AT]}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+      />,
+    ));
+    return screen.getAllByTestId(`filter-chip-open-${field}`).map((b) => b.textContent ?? '');
+  }
+  const NOT_ISO = /T\d\d:\d\d|\d{4}-\d{2}-\d{2}/;
+
+  it('the sighting: a drilled month bucket on a datetime field reads as two localized date-times, not ISO', () => {
+    const chips = zhChips(rows([
+      ['created_at', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z'],
+      ['created_at', 'before', '2026-11-01T00:00:00.000Z'],
+    ]), 'created_at');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toMatch(/^创建时间：≥ 2026年10月1日.*00:00$/);
+    expect(chips[1]).toMatch(/^创建时间：.*2026年11月1日.*00:00$/);
+    for (const chip of chips) expect(chip).not.toMatch(NOT_ISO);
+  });
+
+  it('a date field bound, as the wire writes it (YYYY-MM-DD), reads as its day', () => {
+    const chips = zhChips(rows([
+      ['issued_on', 'greater_than_or_equal', '2026-10-01'],
+      ['issued_on', 'before', '2026-11-01'],
+    ]), 'issued_on');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]).toBe('开具日期：≥ 2026年10月1日');
+    expect(chips[1]).toContain('2026年11月1日');
+    for (const chip of chips) expect(chip).not.toMatch(NOT_ISO);
+  });
+
+  it('a date field compared with an instant at UTC midnight reads as that day', () => {
+    const [chip] = zhChips(rows([['issued_on', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z']]), 'issued_on');
+    expect(chip).toBe('开具日期：≥ 2026年10月1日');
+  });
+
+  it('a datetime reads in the display zone', () => {
+    const [chip] = zhChips(rows([['created_at', 'greater_than_or_equal', '2026-10-15T12:00:00.000Z']]), 'created_at');
+    expect(chip).toMatch(/^创建时间：≥ 2026年10月15日.*12:00$/);
+  });
+
+  it('a date between reads both ends as dates', () => {
+    const [chip] = zhChips(rows([['issued_on', 'between', ['2026-10-01', '2026-10-31']]]), 'issued_on');
+    expect(chip).toContain('2026年10月1日 – 2026年10月31日');
+  });
+
+  it("the phone filter sheet's row reads the date in the viewer's language, not the runtime default", () => {
+    // The runtime's own locale here is English: a row that left the locale out
+    // would read 「Oct 1, 2026」 on a zh-CN session.
+    expect(new Intl.DateTimeFormat().resolvedOptions().locale).toMatch(/^en/);
+    render(inZh(
+      <PhoneFilterSheet
+        open
+        onOpenChange={() => {}}
+        fields={[ISSUED_ON, CREATED_AT]}
+        value={rows([['issued_on', 'greater_than_or_equal', '2026-10-01']])}
+        onApply={() => {}}
+      />,
+    ));
+    expect(screen.getByTestId('phone-filter-item-condition').textContent).toBe('≥ 2026年10月1日');
+  });
+
+  it('CONTROL: a time field and an unreadable value are shown as written', () => {
+    const { t } = { t: (k: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[k] ?? k };
+    expect(describeConditionValue(STARTS_AT, 'after', '09:30', t as never, undefined, 'zh-CN')).toBe('after 09:30');
+    expect(describeConditionValue(ISSUED_ON, 'after', 'not a date', t as never, undefined, 'zh-CN')).toBe('after not a date');
   });
 });

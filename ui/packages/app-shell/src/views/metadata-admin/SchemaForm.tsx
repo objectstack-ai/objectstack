@@ -719,7 +719,7 @@ function detectFieldRefWidget(
  * Detect the icon picker by NAME CONVENTION: a string prop named `icon` (or
  * `*Icon`) with no enum. Mirrors {@link detectFieldRefWidget} so every metadata
  * type's icon field renders the searchable Lucide picker instead of a free-text
- * input, without each spec `*.form.ts` having to pin `widget: 'icon'`.
+ * input, without each spec `*.metadata-form.ts` having to pin `widget: 'icon'`.
  */
 function detectIconWidget(name: string, schema: JsonSchema | undefined): string | undefined {
   if (Array.isArray(schema?.enum)) return undefined;
@@ -2711,6 +2711,42 @@ function summariseComposite(obj: Record<string, unknown>, specs: FormFieldSpec[]
   return parts.join(' · ');
 }
 
+/**
+ * The composite's next value after one sub-field's change (objectstack#37143).
+ * A cleared sub-field (`undefined` or `''`) drops its key, as `setField` does at
+ * the top level; and a composite left empty while its schema requires a key
+ * that has NO default is no value at all, so it is removed rather than written
+ * as `{}` or `{ field: '' }` (a context pack's `body` after "None"), which the
+ * save door refuses with no way back in the form.
+ *
+ * ⚠️ Only a required key without a `default` counts. `/meta/types` serves the
+ * OUTPUT derivation, where a key with `.default()` is listed as required; `{}`
+ * is legal there and the key's presence is read (a view's `pagination: {}` is
+ * the pager at its default size, `selection: {}` the default selection), so
+ * such a composite keeps `{}`.
+ */
+export function compositeWith(
+  obj: Record<string, unknown>,
+  key: string,
+  v: unknown,
+  schema: JsonSchema | undefined,
+): Record<string, unknown> | undefined {
+  const next: Record<string, unknown> = { ...obj, [key]: v };
+  if (v === undefined || v === '') delete next[key];
+  if (Object.keys(next).length === 0 && emptyObjectRefused(schema)) return undefined;
+  return next;
+}
+
+/** True when an object node refuses `{}`: a required key whose property node carries no `default`. */
+export function emptyObjectRefused(schema: JsonSchema | undefined): boolean {
+  const required = Array.isArray(schema?.required) ? (schema!.required as unknown[]) : [];
+  const props = (schema?.properties ?? {}) as Record<string, unknown>;
+  return required.some((k) => {
+    const node = typeof k === 'string' ? props[k] : undefined;
+    return !(node && typeof node === 'object' && 'default' in (node as object));
+  });
+}
+
 function CompositeField({
   value,
   fields,
@@ -2758,7 +2794,7 @@ function CompositeField({
         fieldSpec={spec}
         widgetContext={widgetContext}
         formData={obj}
-        onChange={(v) => onChange({ ...obj, [spec.field]: v })}
+        onChange={(v) => onChange(compositeWith(obj, spec.field, v, schema))}
       />
     );
   });

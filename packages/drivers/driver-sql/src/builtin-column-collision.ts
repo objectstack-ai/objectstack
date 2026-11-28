@@ -114,13 +114,18 @@ export const FIELD_KEY_STORAGE_CLASS: Readonly<Record<string, FieldKeyClass>> = 
   searchable: 'presentation',
   sortable: 'presentation',
   trackHistory: 'presentation', // history rows live in their own object
+  fieldHistory: 'presentation', // whether this field's old → new values show on the activity timeline (#36290) — read by the audit writer, never by `createColumn`
   group: 'presentation',
   widget: 'presentation',
   hidden: 'presentation',
+  showOnCreate: 'presentation', // whether a create surface asks for the field; the DDL never reads it
+  transferBehavior: 'presentation', // a Change Owner cascade of the relationship (ruling 7000907189 point 4) — read by the Change Owner action, never by `createColumn`
   internal: 'presentation',
   readonly: 'presentation',
+  uiReadonly: 'presentation', // the console's hand lock (#36806) — read by the console's edit surfaces, never by `createColumn`
   visibleWhen: 'presentation',
   readonlyWhen: 'presentation',
+  uiReadonlyWhen: 'presentation', // the hand lock's CEL predicate (#36806) — read by the console, never by `createColumn`
   requiredWhen: 'presentation',
   // `conditionalRequired` (the pre-17 spelling of `requiredWhen`) was a row
   // here while the spec carried its tombstone; the tombstone aged out of

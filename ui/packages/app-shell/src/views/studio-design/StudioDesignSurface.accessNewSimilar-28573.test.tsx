@@ -2,7 +2,8 @@
 
 /**
  * objectstack#28573 (ADR-0146 D6, N-20b) — "New similar" on a read-only base's
- * permission set, in Studio's Access pillar.
+ * permission set, on the set's full-screen page (objectstack#36905: in its ⋯
+ * menu; the Access pillar that drew it is gone).
  *
  * The clone door (`POST /security/permission-sets/:name/clone`) decides where
  * the copy lands: since #28563 a set a read-only package X ships is copied into
@@ -11,8 +12,8 @@
  *
  *  - offers "New similar" on a read-only base's open set, and posts exactly
  *    `{ name, label }` (no package, no facet);
- *  - opens the copy where the answer says it landed: that package's Access
- *    pillar with the copy selected, the server's notice shown as sent;
+ *  - opens the copy where the answer says it landed: the copy's metadata
+ *    address in that package, the server's notice shown as sent;
  *  - opens nothing on an answer that names no package (absent or `null`), and
  *    says so;
  *  - shows a refusal (409) in the server's words, staying on the base;
@@ -21,9 +22,9 @@
  *  - draws no override gesture on a base set, and no "New similar" on a
  *    writable package's set.
  *
- * The REAL `AccessPillar`, `PermissionMatrixEditPage` and
- * `PermissionSetCloneDialog`, routed the way `StudioDesignSurface` mounts the
- * pillar (`/studio/:packageId/access`, keyed by package). The door's answer is
+ * The REAL `StudioPermissionSetPage`, `PermissionMatrixEditPage` and
+ * `PermissionSetCloneDialog`, routed the way the "All metadata" area mounts the
+ * page (`/studio/:packageId/metadata/permission/:name`, keyed by item). The door's answer is
  * the shape `packages/runtime/src/domains/permission-set-clone.ts` sends:
  * `{ permissionSet, package, notice }`.
  */
@@ -88,10 +89,9 @@ vi.mock('../metadata-admin/catalog-scope', async (importOriginal) => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n';
-import { AccessPillar } from './StudioDesignSurface';
+import { StudioPermissionSetPage } from './StudioPermissionSetPage';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -166,23 +166,25 @@ function stubFetch() {
   );
 }
 
-/** `StudioDesignSurface`'s mount of the pillar: one route, keyed by package. */
+/** The area's mount of the page: one route, keyed by item. */
 function StudioAccessRoute() {
-  const { packageId = '' } = useParams<{ packageId?: string }>();
+  const { packageId = '', name = '' } = useParams<{ packageId?: string; name?: string }>();
   const { pathname, search } = useLocation();
   return (
     <>
       <span data-testid="route">{pathname + search}</span>
-      <AccessPillar key={packageId} packageId={packageId} readOnly={packageId === BASE_PKG} />
+      <StudioPermissionSetPage key={`${packageId}/${name}`} packageId={packageId} name={name} readOnly={packageId === BASE_PKG} />
     </>
   );
 }
 
+/** A package's set at its metadata address: the base's own set, or the copy in the pair. */
 function renderAccess(pkg = BASE_PKG, lang: 'en' | 'zh' = 'en') {
+  const set = pkg === BASE_PKG ? BASE_SET : COPY_NAME;
   const tree = (
-    <MemoryRouter initialEntries={[`/studio/${pkg}/access`]}>
+    <MemoryRouter initialEntries={[`/studio/${pkg}/metadata/permission/${set}?package=${pkg}`]}>
       <Routes>
-        <Route path="/studio/:packageId/access" element={<StudioAccessRoute />} />
+        <Route path="/studio/:packageId/metadata/permission/:name" element={<StudioAccessRoute />} />
       </Routes>
     </MemoryRouter>
   );
@@ -194,8 +196,20 @@ function renderAccess(pkg = BASE_PKG, lang: 'en' | 'zh' = 'en') {
   render(<I18nProvider instance={zh}>{tree}</I18nProvider>);
 }
 
-const newSimilar = () => screen.findByRole('button', { name: en('perm.clone.action') }, { timeout: 8000 });
+/** The header's ⋯ menu, opened. */
+async function openMore() {
+  const more = await screen.findByTestId('studio-detail-more', undefined, { timeout: 8000 });
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+}
+/** "New similar" in the open ⋯ menu. */
+const newSimilar = async (label = en('perm.clone.action')) => {
+  await openMore();
+  return screen.findByRole('menuitem', { name: label }, { timeout: 8000 });
+};
 const route = () => screen.getByTestId('route').textContent ?? '';
+/** The copy's metadata address in `pkg`. */
+const copyAt = (pkg: string) => `/studio/${pkg}/metadata/permission/${COPY_NAME}`;
+const baseAt = `/studio/${BASE_PKG}/metadata/permission/${BASE_SET}`;
 
 async function fillAndCreate() {
   fireEvent.click(await newSimilar());
@@ -225,7 +239,7 @@ afterEach(() => {
 describe('objectstack#28573 — New similar on a read-only base permission set', () => {
   it('reads "New similar" (en) and draws no override gesture on the base set', async () => {
     renderAccess();
-    expect(await newSimilar()).toBeEnabled();
+    expect(await newSimilar()).not.toHaveAttribute('aria-disabled', 'true');
     expect(en('perm.clone.action')).toBe('New similar');
     expect(screen.queryByRole('button', { name: /customi[sz]e|override/i })).toBeNull();
   });
@@ -237,13 +251,11 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]).toEqual({ url: DOOR, method: 'POST', body: { name: COPY_NAME, label: COPY_LABEL } });
 
-    // The pair's Access pillar, with the copy selected.
-    await waitFor(() => expect(new URL(route(), 'http://x').pathname).toBe(`/studio/${CUSTOM_PKG}/access`));
-    expect(new URL(route(), 'http://x').searchParams.get('surface')).toBe(`permission:${COPY_NAME}`);
+    // The copy's own address, in the pair.
+    await waitFor(() => expect(new URL(route(), 'http://x').pathname).toBe(copyAt(CUSTOM_PKG)));
+    expect(new URL(route(), 'http://x').searchParams.get('package')).toBe(CUSTOM_PKG);
     expect(await screen.findByRole('heading', { level: 1, name: COPY_LABEL }, { timeout: 8000 })).toBeInTheDocument();
     expect(clientImpl.list).toHaveBeenCalledWith('permission', { packageId: CUSTOM_PKG });
-    // Writable there: the copy is no base, so no New similar is offered on it.
-    expect(screen.queryByRole('button', { name: en('perm.clone.action') })).toBeNull();
     // Where it went and what was not copied, in the server's words.
     const strip = screen.getByTestId('access-new-similar-strip');
     expect(strip).toHaveTextContent(
@@ -280,7 +292,7 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
       const strip = await screen.findByTestId('access-new-similar-strip');
       expect(strip).toHaveTextContent(tFormat('engine.studio.access.newSimilar.noPackage', 'en', { name: COPY_NAME }));
       expect(strip).toHaveTextContent(NOTICE);
-      expect(route()).toBe(`/studio/${BASE_PKG}/access?surface=permission%3A${BASE_SET}`);
+      expect(route()).toBe(`${baseAt}?package=${BASE_PKG}`);
       expect(clientImpl.layered.mock.calls.every((c: unknown[]) => c[1] === BASE_SET)).toBe(true);
     });
   }
@@ -291,7 +303,7 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     await fillAndCreate();
 
     expect(await screen.findByTestId('access-new-similar-strip')).toHaveTextContent(en('perm.clone.noName'));
-    expect(new URL(route(), 'http://x').pathname).toBe(`/studio/${BASE_PKG}/access`);
+    expect(new URL(route(), 'http://x').pathname).toBe(baseAt);
   });
 
   it('409: the server\'s sentence in the dialog, which stays open on the base', async () => {
@@ -304,14 +316,14 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(NAME_TAKEN);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(new URL(route(), 'http://x').pathname).toBe(`/studio/${BASE_PKG}/access`);
+    expect(new URL(route(), 'http://x').pathname).toBe(baseAt);
   });
 
   it('walled posture: disabled, in the console\'s own words, and nothing is sent', async () => {
     walled = true;
     renderAccess();
     const button = await newSimilar();
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAccessibleDescription(
       tFormat('engine.catalog.readOnly.walled', 'en', { type: translateMetadataType('permission', 'en') }),
     );
@@ -324,7 +336,7 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     canAuthor = false;
     renderAccess();
     const button = await newSimilar();
-    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-disabled', 'true');
     expect(button).toHaveAccessibleDescription(en('engine.edit.capabilityReadOnly'));
   });
 
@@ -332,7 +344,9 @@ describe('objectstack#28573 — New similar on a read-only base permission set',
     clientImpl = makeClient({ [COPY_NAME]: { pkg: CUSTOM_PKG, body: { ...BASE_BODY, name: COPY_NAME, label: COPY_LABEL } } });
     renderAccess(CUSTOM_PKG);
     expect(await screen.findByRole('heading', { level: 1, name: COPY_LABEL }, { timeout: 8000 })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: en('perm.clone.action') })).toBeNull();
+    await openMore();
+    await screen.findByRole('menuitem', { name: en('perm.basics.editHint') });
+    expect(screen.queryByRole('menuitem', { name: en('perm.clone.action') })).toBeNull();
   });
 });
 
@@ -349,7 +363,7 @@ describe('objectstack#29727 — New similar on a permission set: the notice in t
 
   async function cloneInZh(): Promise<HTMLElement> {
     renderAccess(BASE_PKG, 'zh');
-    fireEvent.click(await screen.findByRole('button', { name: zh('perm.clone.action') }, { timeout: 8000 }));
+    fireEvent.click(await newSimilar(zh('perm.clone.action')));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(zh('perm.clone.name')), { target: { value: COPY_NAME } });
     fireEvent.change(within(dialog).getByLabelText(zh('perm.clone.label')), { target: { value: COPY_LABEL } });
@@ -369,7 +383,7 @@ describe('objectstack#29727 — New similar on a permission set: the notice in t
       const strip = await cloneInZh();
       if (pkg !== null) {
         // The copy opens in the package the answer names: the code rides the navigation there.
-        await waitFor(() => expect(new URL(route(), 'http://x').pathname).toBe(`/studio/${pkg}/access`));
+        await waitFor(() => expect(new URL(route(), 'http://x').pathname).toBe(copyAt(pkg)));
       }
       expect(strip).not.toHaveTextContent(NOTICE);
       expect(zh(key)).not.toBe(key);

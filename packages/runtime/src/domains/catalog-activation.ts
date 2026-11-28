@@ -152,6 +152,8 @@ import {
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
+import { operationUserMessage } from '@objectstack/core';
 
 /** The reserved first segment of the door (see the module doc). */
 export const CATALOG_ACTIVATION_SEGMENT = '_activation';
@@ -1102,14 +1104,14 @@ export async function handleCatalogActivationWrite(
         || typeof ql.update !== 'function') {
         // The resolver reads an absent ledger as "nothing switched off", so a
         // 200 here would report a switch that never existed.
-        return {
-            handled: true,
-            response: deps.error(
-                `This deployment does not carry the activation ledger (${METADATA_ACTIVATION_TABLE}, ADR-0126 §4), ` +
-                `so ${NOUN[type].toLowerCase()} '${name}' cannot be switched ${enabled ? 'on' : 'off'} here.`,
-                501,
-            ),
-        };
+        // [#37811] In the request's language; the noun is the catalog's own
+        // (`catalog_activation_noun_<type>`), rendered in the same locale.
+        const locale = requestLocaleOf(context);
+        return catalogNotImplemented(deps, context, enabled ? 'catalog_activation_ledger_missing_on' : 'catalog_activation_ledger_missing_off', {
+            table: METADATA_ACTIVATION_TABLE,
+            noun: operationUserMessage(`catalog_activation_noun_${type}`, { locale }),
+            name,
+        });
     }
     try {
         // [#22621 → A] The row carries the definition's package when it names

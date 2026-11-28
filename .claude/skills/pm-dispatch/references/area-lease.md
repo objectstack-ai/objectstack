@@ -4,53 +4,48 @@
 
 ## 分不分区,动态定
 
-- 区是席内的文件簇租约;`area:*` 是卡的产品专题标签,由席的座位贴接卡行点名。两者不是一个词:一个 `area:*` 可切成几区,也可并入现有区。
+- 区是席内的文件簇租约,只防两个 dev 同时改同一批文件,⛔ 不定席取哪张卡:取卡照座位贴点名的专题(`area:*`、epic)与级。一个 `area:*` 可切成几区,也可并入现有区。
 - 坐席、每次交接或换班时席位重判三件:分不分、分几区、边界;⛔ 不沿用上一班的表。
 - 分区阈值(经验):可认领卡 ≥15 张且跨 ≥3 个互不相干的模块簇;不足即照常按卡认领。
 - 边界按卡触及的文件与包聚类,让两区极少改同一函数;⛔ 不按卡标题或词汇分。
-- 排空的区并入邻区,积压即再拆(「比如增加分区」),⛔ 不抬一容器 dev 上限(住项目记忆)。
+- 排空的区并入邻区,积压即再拆,⛔ 不抬一容器 dev 上限(住项目记忆)。
 - 租约表(区→路径→线程会话)住座位贴,任一列变或线程轮换即重写,为唯一记录。
-- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名;`lanes/l2-review.md` 席规不及它。
-- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head;信箱只留跨账号或跨项目。
+- L1 线程每 3 活跃区一条,新开名 `L1-a`、`L1-b`…,在跑留原名。
+- 请 L1 审或 delta 发线程消息,只取区在 PR 评论宣布的定稿绿 head。
 - ⛔ 不入区:大卡(`dispatch-runbook.md` 卡线程节)与队列值守(只照 `lanes/queue.md`,含其无席兜底)。
 
 ## 开席
 
 1. 席位会话坐席:座位贴存根、自有信箱(`project-forms.md`)、租约表。
    - 信箱一步恒不省;重坐、换号或移座恒开新信箱。
-2. 每区一条项目线程,由协调者开(`coordinator.md`);L1 线程照上节 L1 线程行。
+2. 每区一条项目线程,由协调者开(`coordinator.md`);L1 线程照上节。
+   - 开场消息逐字带:「照 `execution-duties.md`〈定档〉:认领 Container & model 行写档位与 effort,派 `os-dev` 显式传 model、effort 并贴该行」
 3. 维护者在每条新席线程亲写一句授权行:auto mode 只认本线程维护者原话,转述与点选不算。
    - 席线程:「审批人批准后的 Tier H PR 你可以自主落地」
    - 授权行只解 auto mode 的拦截,⛔ 不改 AGENTS.md 第 14 条的落地档;区线程无授权行。
 4. W0:各区首小时交席位一份关/并/改级/呈裁清单,同时即开首张卡(p0/p1 先)。
-   - 清单经维护者过目后落笔:定级照 SKILL.md 域车道(自分诊例外住 `triage-duties.md`)。
+   - 清单经维护者过目后落笔:定级照 `filing-gate.md`(自分诊例外住 `triage-duties.md`)。
 
 ## 区内规则
 
-- 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥读法照 `seat-lifecycle.md`。
+- 区会话署本席签名,签名第三位与 `Session:` 皆填区会话 ID;开轮互斥照 `seat-lifecycle.md`,现读 `round-open.mjs`。
 - 认领前重读标签、assignee 与末条评论:他人 assignee、他人 `Claim:` 或他区 `Area:` 行 ⇒ 不碰。
 - 认领前三查必过,各写认领评论一行;任一不过或遇大卡 ⇒ 不认领、不派 dev,当即交席位:
-  - `Pre-claim lane:` 修复所改路径属哪条车道,点名依据路径(碰他道路径照下文留道行)。
+  - `Pre-claim lane:` 修复所改路径的 `domain:*`(只记文件归属),点名依据路径;交出只照留道行闭集。
   - `Pre-claim deps:` 卡点名的 `Blocked-by:`、「after #N」逐个已合;热文件照下文重叠检查。
-  - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin
-    测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
-- 重叠检查:认领前与每次推前跑 `scripts/pm/overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
-- 认领照 `execution-duties.md` 派发原子对,`Claim:` 带 `Area: <区>` 行;`Branch:` 照 AGENTS.md 命名。
+  - `Prior rulings read:` 照 `decision-analysis.md`;grep `docs/adr/**`、链卡(⛔ 行在内)与反向 pin 测试;记录冲突,或路线改门的可见行为超出本卡裁决,同作不过。
+- 重叠检查:认领前与每次推前跑 `overlap-check.mjs`;exit 1 排所列 PR 后,3 补前提重跑。
+- 认领照 `execution-duties.md` 派发原子对与〈定档〉,`Claim:` 带 `Area: <区>` 行。
 - 认领后回读(SKILL.md 标签写四步)只查 `pm:dispatched` 与 assignee,缺即重挂;首推即开 draft PR。
 - 认领前照 `dispatch-runbook.md` 派发前置核前提;开线程请求交席位攒批(`coordinator.md` 三)。
 - 写码与开发期读码全经 `os-dev` 等子代理(一卡或一组耦合卡,文件面不相交)。
-- 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,
-  AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
-- 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。
-  所落 PR 欠的红检查读日志(`readings-ci.md`)派子代理读,一读兼守本条与该文。
+- 同系列卡可从前卡分支起步(AGENTS.md §2 主干形,⛔ 不叠 PR);新测试建按卡命名的新文件,AGENTS.md 共享 harness 规则适用时除外,由重叠检查定排队。
+- 席线程只协调,⛔ 不读 diff 与日志;ACCEPT 欠的自读(`contract-review.md`、〈路径分叉〉)除外。所落 PR 欠的红检查读日志(`readings-ci.md`)派子代理读,一读兼守本条与该文。
 - 每区 dev 位空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
-- 席每轮逐区查;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
+- 席每轮逐区查,核认领 Container & model 行;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
 - 认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行;额度墙亦照该文。
-- 留道:修法已清的卡碰 `ui/**`、`packages/spec/**` 仍在本道开发、本席 L1/L2;他道席在线只通知;
-  本条先于条款②行(`execution-duties.md`)、移道的 `lanes/spec.md` 与 `--tier` 提示;
-  交出闭集:他道在线席已认领、cloud 路由、安全、ADR。
-- 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md`
-  自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
+- 留道:域席已退役,修法已清的卡碰哪个域的路径都在本席开发、本席 L1/L2,先于 `domains/spec.md` 的移道与 `--tier` 提示;交出闭集:他席已认领、cloud 路由、披露纪律卡、ADR。
+- 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md` 自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
@@ -58,11 +53,10 @@
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
 - 性能卡与 PR 的提速数字只引已过 L1 的 bench PR 读数;⛔ 不引估算或未过 L1 的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。
-- 仅呈维护者选项组过独立 `CONTRACT_REVIEW_TIER` 评审,多卡一批;席自裁 ⛔ 不起评审,自读码。
-  均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途。
+- 仅呈维护者选项组过独立评审,多卡一批;席自裁 ⛔ 不起评审,自读码。均带 `Prior rulings read:` 行,开工前呈 ⛔ 不在施工中途。
 - 席信箱只收:待裁、待落地受管 PR、跨区冲突、阻塞、交接完成;安全照 `security-findings.md`。
 - 线程约 150k 即在干净点轮换,⛔ 不在 L1/L2 中途;交接写 `/mnt/project-files/<席>/handover-<区>.md`。
-- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;线程 effort high;⛔ 不减 dev。
+- 省耗:dev 推前照 os-dev.md〈本地验证范围〉;跨线程只传指针;⛔ 不减 dev。
 - 每读一次用量,在座位贴评论记一行:用量 %、关卡数、合并 PR 数。
 
 ## 交接与换号

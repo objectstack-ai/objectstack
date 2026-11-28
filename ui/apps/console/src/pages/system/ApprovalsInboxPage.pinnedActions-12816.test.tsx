@@ -2,7 +2,7 @@
 
 /**
  * Approvals Inbox — the Approve / Reject column is pinned right and a long
- * record title truncates (objectui#12816).
+ * record title is clamped (objectui#12816).
  *
  * Measured at 1024 px (HotCRM, three account approvals titled like
  * "ACC-000011 - Contoso Pharmaceuticals and Life Sciences Group"): the table
@@ -12,7 +12,8 @@
  * past the card's right edge.
  *
  * - The Record cells are `max-w-0`: the title no longer sizes its column, so
- *   it truncates, its full text in `title`. The header keeps a floor.
+ *   it wraps to two lines and is then clamped, its full text in `title`. The
+ *   header keeps a floor.
  * - The Approve / Reject cells are pinned right in the header and every row,
  *   with the shared seam shadow (`PINNED_RIGHT_SEAM_SHADOW_CLASSES`), inside
  *   the overflow box's `seam="pinned"` mode.
@@ -184,14 +185,16 @@ describe('Approvals Inbox — pinned Approve / Reject, truncating Record (object
     }
   });
 
-  it('truncates a 60-character record title instead of letting it size the column', async () => {
+  it('clamps a 60-character record title instead of letting it size the column', async () => {
     const box = await renderAt718();
     expect(LONG).toHaveLength(60);
     const link = screen.getByRole('link', { name: LONG });
     // The link is still the whole title, and carries it in full.
     expect(link).toHaveAttribute('title', LONG);
     expect(link).toHaveTextContent(LONG);
-    expect(link.querySelector('span')).toHaveClass('truncate');
+    // objectstack#37534: two lines, then clamped (the geometry is measured in
+    // `e2e/approvals-inbox-desktop-columns-37534.spec.ts`).
+    expect(link.querySelector('span')).toHaveClass('line-clamp-2');
     // The cell takes the title's unbreakable width out of the table's column
     // sizing, so the table does not widen for it; the header keeps a floor.
     expect(link.closest('td')).toHaveClass('max-w-0');

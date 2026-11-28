@@ -77,8 +77,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "이 객체의 필드 이름을 중요한 순서대로 나열합니다. 하나만 들어갈 자리에서는 첫 항목이 우선합니다(ADR-0085). 기본 목록 열과 관련 목록 열, 카드, 하위 레코드 미리보기, 레코드 호버 카드, 레코드 선택기를 결정합니다. 이 객체의 필드가 아닌 이름은 게시할 때 거부됩니다."
       },
       relatedLists: {
-        label: "관련 목록",
-        helpText: "레코드 페이지에서 이 객체의 관련 목록이 표시되는 업무 순서로, 중요한 것부터 나열합니다. 각 항목은 하위 객체 이름(예: task)이며, 그 하위 객체가 이 객체와 관계를 둘 이상 가지면 object.field입니다. 나열된 목록이 먼저 오고 나머지는 도출된 순서로 이어집니다. 이 객체를 가리키는 관계와 일치하지 않는 이름은 아무것도 배치하지 않으므로, 객체를 저장하거나 검증할 때 거부됩니다."
+        label: "레코드 페이지 탭",
+        helpText: "개요 뒤에 표시되는 레코드 페이지 탭을 순서대로 나열합니다. 각 항목은 하위 객체 이름(예: task), 그 하위 객체가 이 객체와 관계가 둘 이상이면 object.field, 기본 제공 탭(sys_attachment, sys_approval_request, sys_activity), 또는 Studio의 객체 설정에서 자체 제목과 열을 지정한 항목입니다. 하나라도 나열하면 어떤 항목에도 없는 관련 목록은 탭이 표시되지 않으며(다른 패키지가 추가한 목록 포함), 이 객체가 그것을 나열할 때까지 표시되지 않습니다. 첨부 파일은 나열된 경우에만 표시됩니다. 비어 있으면 모든 목록이 기본 순서로 표시됩니다. 이 객체를 가리키는 관계와 일치하지 않는 이름은 객체를 저장할 때 거부됩니다."
       },
       searchableFields: {
         label: "검색 가능 필드",
@@ -114,7 +114,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "접기",
-        helpText: "입력 양식과 레코드 상세 페이지에서 섹션을 접을 수 있는지 여부입니다. 설정하지 않으면 없음입니다."
+        helpText: "섹션을 접을 수 있는지 여부입니다. 입력 양식은 설정을 그대로 따릅니다. 기본 레코드 페이지에서는 읽는 사람이 제목이 있는 모든 그룹을 접을 수 있으므로, 거기서는 초기 상태만 정합니다. Collapsed는 접힌 상태로, 나머지는 펼친 상태로 시작합니다. 설정하지 않으면 없음입니다.",
+        options: {
+          none: "없음 — 입력 양식에서 항상 열림, 토글 없음",
+          expanded: "펼침 — 접을 수 있음, 열린 상태로 시작",
+          collapsed: "접힘 — 접을 수 있음, 닫힌 상태로 시작"
+        }
       },
       "fieldGroups.visibleWhen": {
         label: "표시 조건",
@@ -134,7 +139,56 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.type": {
         label: "유형",
-        helpText: "필드 유형"
+        helpText: "필드 유형",
+        options: {
+          text: "텍스트",
+          textarea: "텍스트 영역",
+          email: "이메일",
+          url: "URL 주소",
+          phone: "전화",
+          password: "비밀번호",
+          markdown: "Markdown 텍스트",
+          html: "HTML 콘텐츠",
+          richtext: "서식 있는 텍스트",
+          number: "숫자",
+          currency: "통화",
+          percent: "백분율",
+          date: "날짜",
+          datetime: "날짜 및 시간",
+          time: "시간",
+          boolean: "불리언",
+          toggle: "토글",
+          select: "선택",
+          multiselect: "다중 선택",
+          radio: "라디오 버튼",
+          checkboxes: "체크박스",
+          lookup: "조회(참조)",
+          master_detail: "마스터–디테일",
+          tree: "트리",
+          image: "이미지",
+          file: "파일",
+          avatar: "아바타",
+          video: "동영상",
+          audio: "오디오",
+          formula: "수식(계산됨)",
+          summary: "요약(롤업)",
+          autonumber: "자동 번호",
+          composite: "복합(임베디드)",
+          repeater: "반복(임베디드 배열)",
+          record: "레코드(키 맵)",
+          location: "위치(GPS)",
+          address: "주소",
+          code: "코드",
+          json: "JSON 데이터",
+          color: "색상",
+          rating: "평점",
+          slider: "슬라이더",
+          signature: "서명",
+          qrcode: "QR / 바코드",
+          progress: "진행률",
+          tags: "태그",
+          vector: "벡터 임베딩"
+        }
       },
       "fields.description": {
         label: "설명",
@@ -186,7 +240,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.valueDomain": {
         label: "값 도메인",
-        helpText: "기록되는 값이 속해야 하는 표준입니다. 이에 속하지 않는 값을 쓰면 거부됩니다"
+        helpText: "기록되는 값이 속해야 하는 표준입니다. 이에 속하지 않는 값을 쓰면 거부됩니다",
+        options: {
+          iana_time_zone: "IANA 시간대",
+          iso_4217_currency: "ISO 4217 통화 코드",
+          iso_3166_alpha2: "ISO 3166-1 alpha-2 국가 코드"
+        }
       },
       "fields.rows": {
         label: "행 수",
@@ -226,7 +285,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.options.kind": {
         label: "유형",
-        helpText: "수명 주기 범주(단일 값 선택 / 라디오 전용): 진행 중인 단계, 성공 종료, 실패 종료 중 하나입니다. 단계 필드의 모든 옵션에 필수입니다."
+        helpText: "수명 주기 범주(단일 값 선택 / 라디오 전용): 진행 중인 단계, 성공 종료, 실패 종료 중 하나입니다. 단계 필드의 모든 옵션에 필수입니다.",
+        options: {
+          open: "진행 중",
+          won: "성공",
+          lost: "실패"
+        }
       },
       "fields.reference": {
         label: "참조",
@@ -238,7 +302,20 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.deleteBehavior": {
         label: "삭제 동작",
-        helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+        helpText: "참조된 레코드가 삭제될 때 일어나는 일",
+        options: {
+          set_null: "null로 설정",
+          cascade: "연쇄(하위 레코드 삭제)",
+          restrict: "제한(삭제 차단)"
+        }
+      },
+      "fields.transferBehavior": {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부",
+        options: {
+          none: "없음(소유자에게 유지)",
+          cascade: "연쇄(참조된 레코드와 함께 이동하도록 제안)"
+        }
       },
       "fields.multiple": {
         label: "다중",
@@ -250,7 +327,15 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.returnType": {
         label: "반환 유형",
-        helpText: "수식의 결과 유형"
+        helpText: "수식의 결과 유형",
+        options: {
+          text: "텍스트",
+          number: "숫자",
+          boolean: "불리언",
+          date: "날짜",
+          currency: "통화",
+          percent: "백분율"
+        }
       },
       "fields.summaryOperations": {
         label: "요약 연산",
@@ -266,7 +351,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.summaryOperations.function": {
         label: "함수",
-        helpText: "집계 함수"
+        helpText: "집계 함수",
+        options: {
+          count: "개수",
+          sum: "합계",
+          avg: "평균",
+          min: "최소",
+          max: "최대"
+        }
       },
       "fields.autonumberFormat": {
         label: "자동 번호 형식",
@@ -276,9 +368,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "언어",
         helpText: "편집기 언어(예: sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
+      },
       "fields.trackHistory": {
         label: "기록 추적",
-        helpText: "레코드 활동 타임라인에 이 필드를 요약합니다"
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       "fields.visibleWhen": {
         label: "표시 조건",
@@ -298,6 +394,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "기록 추적"
+      },
+      "enable.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 기본값은 켜짐입니다. 끄면 필드 설정과 관계없이 객체 전체에서 값이 표시되지 않습니다."
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -363,15 +463,31 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "indexes.unique": {
         label: "고유",
-        helpText: "고유성 범위(ADR-0120)입니다. 설정하지 않으면 고유하지 않습니다. 사용 중단된 단순 true(전역을 의미)는 제공되지 않으며, 이를 가진 색인은 범위를 고를 때까지 그 값을 유지합니다."
+        helpText: "고유성 범위(ADR-0120)입니다. 설정하지 않으면 고유하지 않습니다. 사용 중단된 단순 true(전역을 의미)는 제공되지 않으며, 이를 가진 색인은 범위를 고를 때까지 그 값을 유지합니다.",
+        options: {
+          global: "전역 — 설치 전체에서 하나의 보유자, 정확히 이 열들에 대해",
+          organization: "조직 — 조직당 하나의 보유자(드라이버가 조직 열을 앞에 추가)"
+        }
       },
       ownership: {
         label: "소유권",
-        helpText: "레코드 소유권 모델입니다. 없으면 user로 해석됩니다."
+        helpText: "레코드 소유권 모델입니다. 없으면 user로 해석됩니다.",
+        options: {
+          user: "사용자 — 재할당 가능한 owner_id와 owning_business_unit_id",
+          business_unit: "사업 단위 — owning_business_unit_id만, owner_id 없음",
+          org: "조직",
+          none: "없음 — 레코드별 소유자 없음, 두 기준 모두 없음"
+        }
       },
       sharingModel: {
         label: "공유 모델",
-        helpText: "내부 사용자에 대한 조직 전체 기본 레코드 가시성입니다. 이를 생략한 사용자 지정 객체는 런타임에 private로 해석됩니다(ADR-0090 D1)."
+        helpText: "내부 사용자에 대한 조직 전체 기본 레코드 가시성입니다. 이를 생략한 사용자 지정 객체는 런타임에 private로 해석됩니다(ADR-0090 D1).",
+        options: {
+          private: "비공개 — 소유자만",
+          public_read: "공개 읽기 — 모두 읽기, 소유자만 쓰기",
+          public_read_write: "공개 읽기/쓰기 — 모두 읽고 쓰기",
+          controlled_by_parent: "상위 항목이 제어 — 마스터 레코드에서 파생"
+        }
       },
       sharing: {
         label: "공유",
@@ -395,7 +511,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "access.default": {
         label: "기본값",
-        helpText: "public: '*' 와일드카드 부여에 포함됩니다. private: 명시적인 객체별 부여가 필요하며, 와일드카드 행 수준 보안에서 제외됩니다."
+        helpText: "public: '*' 와일드카드 부여에 포함됩니다. private: 명시적인 객체별 부여가 필요하며, 와일드카드 행 수준 보안에서 제외됩니다.",
+        options: {
+          public: "공개 — 와일드카드(*) 부여에 포함",
+          private: "비공개 — 객체별 명시적 부여 필요"
+        }
       },
       requiredPermissions: {
         label: "필요한 권한",
@@ -411,11 +531,22 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "publicSharing.allowedAudiences": {
         label: "허용 대상",
-        helpText: "새 링크가 지정할 수 있는 대상이며, 그 외는 거부됩니다. 설정하지 않으면 링크만 허용됩니다. 모든 대상에는 링크 자체가 필요합니다. 로그인 대상은 로그인한 사용자도 필요하고, 이메일 대상은 받는 사람의 주소가 링크 목록에 있어야 합니다."
+        helpText: "새 링크가 지정할 수 있는 대상이며, 그 외는 거부됩니다. 설정하지 않으면 링크만 허용됩니다. 모든 대상에는 링크 자체가 필요합니다. 로그인 대상은 로그인한 사용자도 필요하고, 이메일 대상은 받는 사람의 주소가 링크 목록에 있어야 합니다.",
+        options: {
+          public: "공개",
+          link_only: "링크만 — 링크가 있는 누구나",
+          signed_in: "로그인됨 — 링크가 있는 로그인한 사용자",
+          email: "이메일 — 링크가 있는 지정된 수신자"
+        }
       },
       "publicSharing.allowedPermissions": {
         label: "허용 권한",
-        helpText: "새 링크가 부여할 수 있는 권한 수준이며, 그 외는 거부됩니다. 설정하지 않으면 보기만 허용됩니다."
+        helpText: "새 링크가 부여할 수 있는 권한 수준이며, 그 외는 거부됩니다. 설정하지 않으면 보기만 허용됩니다.",
+        options: {
+          view: "보기",
+          comment: "댓글",
+          edit: "편집"
+        }
       },
       "publicSharing.maxExpiryDays": {
         label: "최대 만료 일수",
@@ -461,9 +592,25 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "소유자 변경",
         helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
       },
+      actionLayout: {
+        label: "작업 배치",
+        helpText: "이 객체 작업의 순서와 버튼으로 표시할 작업을 범위별로 지정합니다: pinned(버튼 최대 3개, 순서대로)와 more(「더 보기」 메뉴의 순서. 둘 다에 없는 작업은 기본 순서로 뒤에 이어집니다). 설정하지 않으면 각 화면이 이전처럼 작업의 order로 버튼을 고릅니다."
+      },
+      "actionLayout.list": {
+        label: "목록",
+        helpText: "목록 페이지 도구 모음, {\"pinned\": [...], \"more\": [...]} 형식: 목록 도구 모음에 배치된 작업 이름; $import / $export는 pinned에만 씁니다. 고정은 최대 3개. 고정하지 않아도 페이지는 자체 가져오기 / 내보내기 메뉴를 표시합니다. os validate는 이 객체의 작업이 아니거나 목록 도구 모음에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
+      },
+      "actionLayout.record": {
+        label: "레코드",
+        helpText: "레코드 헤더(레코드 페이지, 측면 미리보기, 휴대폰 하단 바), {\"pinned\": [...], \"more\": [...]} 형식: 레코드 헤더나 그 「더 보기」 메뉴에 배치된 작업 이름. 고정은 최대 3개. os validate는 이 객체의 작업이 아니거나 레코드 페이지에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
+      },
       editMode: {
         label: "편집 모드",
-        helpText: "이 객체 레코드의 편집 상호 작용 의도입니다. 없으면 렌더러가 자체 기본값을 고릅니다. 스타일이 아니라 렌더러 간 공통 의도입니다."
+        helpText: "이 객체 레코드의 편집 상호 작용 의도입니다. 없으면 렌더러가 자체 기본값을 고릅니다. 스타일이 아니라 렌더러 간 공통 의도입니다.",
+        options: {
+          modal: "모달 — 현재 보기 위에 대화 상자로 편집 양식 표시",
+          page: "페이지 — 전용 전체 페이지 편집 경로로 이동"
+        }
       },
       fileAccessDelegate: {
         label: "파일 액세스 위임",
@@ -475,7 +622,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.class": {
         label: "클래스",
-        helpText: "이 객체 행의 영속성 계약"
+        helpText: "이 객체 행의 영속성 계약",
+        options: {
+          record: "레코드(업무상 사실 — 영구)",
+          audit: "감사(컴플라이언스 원장 — 보존 → 보관 → 삭제)",
+          telemetry: "원격 측정(고빈도 로그 — 짧은 보존)",
+          transient: "임시(일시적 상태 — TTL 만료)",
+          event: "이벤트(버스 메시지 — 매우 짧은 TTL)"
+        }
       },
       "lifecycle.retention": {
         label: "보존",
@@ -503,7 +657,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.strategy": {
         label: "전략",
-        helpText: "저장 전략"
+        helpText: "저장 전략",
+        options: {
+          rotation: "로테이션(시간 샤드 + 가장 오래된 것 삭제)"
+        }
       },
       "lifecycle.storage.shards": {
         label: "샤드",
@@ -511,7 +668,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "lifecycle.storage.unit": {
         label: "단위",
-        helpText: "샤드 하나의 시간 폭"
+        helpText: "샤드 하나의 시간 폭",
+        options: {
+          day: "일",
+          week: "주",
+          month: "월"
+        }
       },
       "lifecycle.archive": {
         label: "보관",
@@ -642,7 +804,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       percentDisplay: {
         label: "백분율 표시",
-        helpText: "목록 셀과 레코드 페이지에서 값을 읽기 전용으로 표시하는 방식입니다. 설정하지 않으면 백분율 옆에 진행률 막대가 표시됩니다. 막대: 진행률용으로 항상 진행률 막대를 표시합니다. 일반: 비율이나 확률용으로 백분율만 표시합니다."
+        helpText: "목록 셀과 레코드 페이지에서 값을 읽기 전용으로 표시하는 방식입니다. 설정하지 않으면 백분율 옆에 진행률 막대가 표시됩니다. 막대: 진행률용으로 항상 진행률 막대를 표시합니다. 일반: 비율이나 확률용으로 백분율만 표시합니다.",
+        options: {
+          bar: "막대",
+          plain: "일반"
+        }
       },
       currencyConfig: {
         label: "통화 구성",
@@ -650,7 +816,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyMode": {
         label: "통화 모드",
-        helpText: "dynamic(기본값): 필드에 자체 통화가 없으며 금액은 테넌트 기본 통화(localization.currency 설정)로 표시됩니다. fixed: 필드에 하나의 통화 defaultCurrency가 있습니다. record: 각 레코드에 자체 통화가 있으며 currencyField가 지정한 필드에 저장됩니다."
+        helpText: "dynamic(기본값): 필드에 자체 통화가 없으며 금액은 테넌트 기본 통화(localization.currency 설정)로 표시됩니다. fixed: 필드에 하나의 통화 defaultCurrency가 있습니다. record: 각 레코드에 자체 통화가 있으며 currencyField가 지정한 필드에 저장됩니다.",
+        options: {
+          dynamic: "동적 — 테넌트 기본 통화",
+          fixed: "고정 — 이 필드에 하나의 통화",
+          record: "레코드 — 각 레코드가 통화를 지정"
+        }
       },
       "currencyConfig.currencyField": {
         label: "통화 필드",
@@ -747,7 +918,19 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       deleteBehavior: {
         label: "삭제 동작",
-        helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+        helpText: "참조된 레코드가 삭제될 때 일어나는 일",
+        options: {
+          cascade: "연쇄(하위 레코드 삭제)",
+          restrict: "제한(삭제 차단)"
+        }
+      },
+      transferBehavior: {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부",
+        options: {
+          none: "없음(소유자에게 유지)",
+          cascade: "연쇄(참조된 레코드와 함께 이동하도록 제안)"
+        }
       },
       relatedListFilter: {
         label: "관련 목록 필터",
@@ -789,6 +972,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "관련 목록 열",
         helpText: "상위 레코드 상세 페이지에서 이 관계의 관련 목록 열로, 이(하위) 객체의 필드 이름입니다(예: name, status). 설정하지 않으면 하위 객체에서 도출됩니다. 이름만 지정하며, 레이블, 셀 유형, 서식은 하위 객체의 필드 정의에서 가져옵니다."
       },
+      inlineEdit: {
+        label: "Inline Edit",
+        helpText: "How the parent's form edits this child's rows when a field group of the parent names this child (fieldGroups[].relatedList). Unset: picked from this object's fields.",
+        options: {
+          grid: "그리드(표에서 행 편집)",
+          form: "양식(각 행을 전체 양식으로 열기)"
+        }
+      },
       inlineTitle: {
         label: "인라인 제목",
         helpText: "상위 레코드의 인라인 마스터-세부 그리드 제목입니다."
@@ -823,7 +1014,15 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       returnType: {
         label: "반환 유형",
-        helpText: "추론된 CEL 유형에서 기록되는 수식의 선언된 값 유형입니다. 소비자는 식을 다시 구문 분석하는 대신 이 값을 읽습니다. 통화: 이 필드의 통화 구성이 선언한 통화의 금액입니다(설정하지 않으면 dynamic)."
+        helpText: "추론된 CEL 유형에서 기록되는 수식의 선언된 값 유형입니다. 소비자는 식을 다시 구문 분석하는 대신 이 값을 읽습니다. 통화: 이 필드의 통화 구성이 선언한 통화의 금액입니다(설정하지 않으면 dynamic).",
+        options: {
+          text: "텍스트",
+          number: "숫자",
+          boolean: "불리언",
+          date: "날짜",
+          currency: "통화",
+          percent: "백분율"
+        }
       },
       summaryOperations: {
         label: "요약 연산",
@@ -835,7 +1034,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "summaryOperations.function": {
         label: "함수",
-        helpText: "집계 함수"
+        helpText: "집계 함수",
+        options: {
+          count: "개수",
+          sum: "합계",
+          min: "최소",
+          max: "최대",
+          avg: "평균"
+        }
       },
       "summaryOperations.field": {
         label: "필드",
@@ -861,9 +1067,17 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "읽기 전용",
         helpText: "양식에서 필드가 읽기 전용임"
       },
+      uiReadonly: {
+        label: "화면에서 읽기 전용",
+        helpText: "콘솔에서는 이 필드를 직접 편집할 수 없습니다(대화 상자, 레코드 페이지, 그리드, 칸반·캘린더·간트 끌기, 작업 시간표). 작업, 가져오기, API, 플로우는 계속 기록할 수 있으며 각 기록은 개체의 유효성 검사로 판정됩니다. 읽기 전용이 켜져 있으면 끈 상태로 두세요. 읽기 전용이 이미 모든 클라이언트 기록을 막습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이를 따르지 않습니다."
+      },
       hidden: {
         label: "숨김",
         helpText: "기본 UI 뷰에서 필드 숨김"
+      },
+      showOnCreate: {
+        label: "생성 시 표시",
+        helpText: "레코드를 생성할 때 이 필드를 입력받습니다. 끄면 생성 대화상자, 전체 페이지 생성, 액션으로 여는 생성에서 표시되지 않으며, 편집·레코드 페이지·목록에는 계속 표시됩니다. 필수 필드는 생성 시 항상 입력받으므로 끌 수 없습니다."
       },
       searchable: {
         label: "검색 가능",
@@ -881,6 +1095,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "읽기 전용 조건",
         helpText: "레코드에 대한 CEL 조건식(예: record.status == 'paid')입니다. TRUE인 동안 필드가 읽기 전용이며 서버에서 강제됩니다. 업데이트가 잠긴 필드를 바꾸면 그 변경은 버려지고 저장된 값이 유지됩니다. 레코드 자체의 열을 읽으며, objectstack validate는 참조 필드를 통한 읽기를 거부합니다."
       },
+      uiReadonlyWhen: {
+        label: "화면에서 읽기 전용 조건",
+        helpText: "레코드에 대한 CEL 조건식(예: record.status != 'draft') — TRUE인 동안 기존 레코드의 이 필드는 콘솔에서 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반·캘린더·간트 드래그, 작업 시간표). 새 레코드의 생성 대화상자는 판단하지 않습니다. 작업, 가져오기, API 및 흐름은 계속 기록하며, 객체의 유효성 검사가 판단합니다. '읽기 전용 조건'처럼 레코드 자체의 열을 읽습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이를 따르지 않습니다."
+      },
       requiredWhen: {
         label: "필수 조건",
         helpText: "레코드에 대한 CEL 조건식입니다. TRUE인 동안 필드가 필수이며 서버에서 전이 관문으로 강제됩니다. 레코드가 이전에 조건을 충족했는데 값이 빠진 채로 쓰면 거부되므로, 이미 값이 빠진 행은 관련 없는 편집을 계속 통과합니다. 모든 쓰기가 충족해야 하는 규칙에는 validations 스크립트 규칙을 사용하세요. storage.notNull과 함께 쓰면 거부됩니다."
@@ -897,9 +1115,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "내부",
         helpText: "일반 데이터 경로에서 이 필드의 값을 절대 반환하지 않습니다. 엔진은 기본 투영과 클라이언트가 ?select=에서 필드를 지정한 경우 모두, find/findOne 결과와 create, update 응답 본문에서 키를 생략합니다. 저장, 필터링, 색인에는 영향이 없습니다."
       },
+      fieldHistory: {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
+      },
       trackHistory: {
         label: "기록 추적",
-        helpText: "이 필드의 값 변경을 레코드 활동 타임라인의 항목으로 렌더링합니다(ADR-0052 §5b). 필드별로 선택합니다."
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       widget: {
         label: "위젯",
@@ -959,7 +1181,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "언어",
-        helpText: "expression = 순수 수식, js = 샌드박스 JavaScript"
+        helpText: "expression = 순수 수식, js = 샌드박스 JavaScript",
+        options: {
+          expression: "표현식(L1)",
+          js: "JavaScript(L2 샌드박스)"
+        }
       },
       "body.source": {
         label: "출처",
@@ -1022,7 +1248,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "백그라운드에서 실행하며 트랜잭션을 차단하지 않음"
       },
       onError: {
-        label: "오류 시"
+        label: "오류 시",
+        options: {
+          abort: "중단",
+          log: "로그 기록"
+        }
       },
       timeoutMs: {
         label: "시간 제한(ms)",
@@ -1030,7 +1260,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       runAs: {
         label: "실행 주체",
-        helpText: "ctx.api 데이터 작업의 ID: 트리거한 쓰기 상속(기본값), system(권한 상승), 또는 user(트리거한 사용자)"
+        helpText: "ctx.api 데이터 작업의 ID: 트리거한 쓰기 상속(기본값), system(권한 상승), 또는 user(트리거한 사용자)",
+        options: {
+          inherit: "상속(트리거한 쓰기)",
+          system: "시스템(권한 상승)",
+          user: "사용자(트리거한 사용자)"
+        }
       },
       condition: {
         label: "조건",
@@ -1052,15 +1287,54 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "시드 데이터",
-    description: "게시할 때 적용되는 픽스처 / 초기화 데이터"
+    description: "게시할 때 적용되는 픽스처 / 초기화 데이터",
+    fields: {
+      object: {
+        label: "객체"
+      },
+      mode: {
+        label: "모드"
+      }
+    }
   },
   picklist: {
     label: "선택 목록",
-    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록"
+    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      options: {
+        label: "옵션"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   mapping: {
     label: "가져오기 매핑",
-    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)"
+    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      targetObject: {
+        label: "대상 객체"
+      },
+      mode: {
+        label: "모드"
+      },
+      sourceFormat: {
+        label: "원본 형식"
+      }
+    }
   },
   view: {
     label: "뷰",
@@ -1203,7 +1477,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "간소한 도구 모음",
-        helpText: "그룹/색상/밀도/필드 숨기기를 하나의 뷰 설정 팝오버로 접기"
+        helpText: "그룹/색상/밀도/필드 숨기기를 하나의 '보기 설정' 팝오버로 접기. 기본값은 켜짐: 생략하거나 `true`이면 렌더러가 이 간소한 도구 모음을 그리고, `false`이면 컨트롤마다 버튼이 하나씩 있는 넓은 도구 모음을 그립니다. 간소한 도구 모음에는 새로고침 버튼이 없으므로 `userActions.refresh`는 넓은 도구 모음에만 적용됩니다. 당겨서 새로고침은 두 키 모두의 영향을 받지 않습니다."
       },
       rowHeight: {
         label: "행 높이",
@@ -1355,11 +1629,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       navigation: {
         label: "탐색",
-        helpText: "항목 클릭 탐색 구성(기본값 drawer, page, new_window 또는 none)"
+        helpText: "항목 클릭 탐색 구성: 드로어 크기, 그리고 행이 아무것도 열지 않는 목록을 위한 `preventNavigation`(`mode`는 사용 중단됨 — 레코드 이름은 페이지를, 마우스를 올리면 나타나는 아이콘은 사이드 패널을 엽니다)"
       },
       "navigation.mode": {
         label: "모드",
-        helpText: "[DEPRECATED] No longer picks how an object's list opens a record: in the console the record name opens the full page and the hover icon beside it opens the side panel, for every reader. There `drawer`, `page` and `new_window` still parse and change nothing; `none` still means rows open nothing — prefer `preventNavigation: true`. Omit the key."
+        helpText: "[사용 중단] 객체의 목록(목록 보기, 객체의 `listViews`)에서는 더 이상 레코드를 여는 방식을 정하지 않습니다. 콘솔에서는 모든 사용자에게 레코드 이름이 전체 페이지를 열고, 이름 옆에 마우스를 올리면 나타나는 아이콘이 사이드 패널을 엽니다. 여기서 `drawer`, `page`, `new_window`는 계속 구문 분석되지만 아무것도 바꾸지 않으므로 이 키는 생략하세요. `none`은 여전히 행이 아무것도 열지 않음을 의미합니다 — `preventNavigation: true`를 권장합니다. `navigation`을 지닌 페이지 블록(목록 블록, 타임라인, 포함된 보기)은 여전히 모든 값을 따릅니다."
       },
       "navigation.preventNavigation": {
         label: "탐색 방지",
@@ -1371,7 +1645,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "크기",
-        helpText: "드로어 세부 정보의 오버레이 크기 구간: 'auto'(기본값, 렌더러가 필드 수 + 뷰포트에서 도출하며 AI는 아무것도 쓰지 않음) 또는 대략적인 재정의 sm/md/lg/xl/full입니다. 픽셀 `width`보다 이 값을 권장하며, page 모드에서는 무시됩니다."
+        helpText: "레코드 드로어의 너비 구간: 'auto'(기본값)는 호스트의 고정 기본 너비를 유지하며, 필드 수와 관계없이 모든 객체에서 같습니다(콘솔의 레코드 사이드 패널은 460px로 열림). 또는 대략적인 재정의 sm/md/lg/xl/full(각각 480/720/960/1200/1600px 상한, 항상 뷰포트 안으로 제한)입니다. 읽는 사람이 드래그한 너비가 둘 다보다 우선합니다. 픽셀 `width`보다 이 값을 권장합니다. 레코드가 페이지로 열리는 곳(콘솔에서는 휴대폰의 모든 레코드)과 드로어가 화면을 가득 채우는 휴대폰 너비 화면에서는 효과가 없습니다."
       },
       "navigation.width": {
         label: "너비",
@@ -1384,8 +1658,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "잠근 작업자",
         helpText: "뷰 구성을 잠근 사용자"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
+      },
+      object: {
+        label: "객체"
       }
     }
+  },
+  form: {
+    label: "양식"
   },
   page: {
     label: "페이지",
@@ -1426,7 +1710,14 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "유형",
-        helpText: "페이지 종류입니다. \"목록 / 인터페이스\"는 원본 뷰를 선별된 화면에 바인딩합니다. 표시 방식(그리드 / 칸반 / 캘린더 / …)은 페이지 유형이 아니라 인터페이스 아래에서 설정하는 시각화입니다."
+        helpText: "페이지 종류입니다. \"목록 / 인터페이스\"는 원본 뷰를 선별된 화면에 바인딩합니다. 표시 방식(그리드 / 칸반 / 캘린더 / …)은 페이지 유형이 아니라 인터페이스 아래에서 설정하는 시각화입니다.",
+        options: {
+          list: "목록 / 인터페이스 페이지",
+          record: "레코드 페이지",
+          home: "홈 페이지",
+          app: "앱 페이지",
+          utility: "유틸리티 패널"
+        }
       },
       template: {
         label: "템플릿",
@@ -1539,7 +1830,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "interfaceConfig.recordAction": {
         label: "레코드 작업",
-        helpText: "레코드를 클릭할 때 상세 정보를 여는 방식"
+        helpText: "레코드를 클릭할 때 상세 정보를 여는 방식",
+        options: {
+          drawer: "서랍(오른쪽 미리보기)",
+          page: "전체 페이지",
+          none: "클릭할 수 없음"
+        }
       },
       "interfaceConfig.showRecordCount": {
         label: "레코드 수 표시",
@@ -1582,6 +1878,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "필터",
         description: "위젯 전체에 적용되는 기본 필터와 전역 필터."
       },
+      access: {
+        label: "Access",
+        description: "Who can see this dashboard."
+      },
       advanced: {
         label: "고급",
         description: "접근성과 성능 조정."
@@ -1590,30 +1890,30 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "이름",
-        helpText: "snake_case 고유 식별자"
+        helpText: "이 대시보드의 고유한 내부 이름입니다. 영문 소문자, 숫자, 밑줄을 사용하며 영문자로 시작합니다(예: sales_overview)."
       },
       label: {
         label: "레이블",
-        helpText: "표시 이름"
+        helpText: "사용자에게 보이는 대시보드 제목입니다."
       },
       description: {
         label: "설명"
       },
       columns: {
         label: "열",
-        helpText: "그리드 열 수(기본값 12)"
+        helpText: "위젯을 배치할 열 수로, 1부터 24까지입니다. 비워 두면 대시보드가 위젯 너비에 맞는 폭을 고릅니다."
       },
       gap: {
         label: "간격",
-        helpText: "위젯 사이의 간격으로, 0.25rem 단위입니다(4 = 1rem)"
+        helpText: "위젯 사이에 둘 간격입니다. 숫자가 클수록 더 넓게 벌어지며, 비워 두면 기본 간격을 사용합니다."
       },
       refreshIntervalSeconds: {
         label: "새로 고침 간격(초)",
-        helpText: "자동 새로 고침(초)"
+        helpText: "대시보드가 데이터를 다시 불러오는 주기(초)입니다. 비워 두거나 0을 입력하면 자동으로 다시 불러오지 않습니다."
       },
       header: {
         label: "헤더",
-        helpText: "대시보드 헤더 구성(제목, 부제목, 작업)"
+        helpText: "대시보드 상단에 표시할 내용으로, 제목, 설명, 작업 버튼입니다."
       },
       "header.showTitle": {
         label: "제목 표시",
@@ -1641,7 +1941,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "위젯",
-        helpText: "위치와 크기가 지정된 대시보드 위젯"
+        helpText: "이 대시보드의 차트, 숫자, 표와 각각의 위치입니다."
       },
       "widgets.id": {
         label: "위젯 ID"
@@ -1696,11 +1996,42 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "날짜 범위",
-        helpText: "기본 날짜 범위 선택기"
+        helpText: "대시보드를 열 때 적용되는 기간과 보는 사람이 직접 날짜를 고를 수 있는지 여부입니다."
+      },
+      "dateRange.field": {
+        label: "Date Field",
+        helpText: "The date field the period filters on. Leave it empty to use the creation date."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the dashboard opens with.",
+        options: {
+          today: "오늘",
+          yesterday: "어제",
+          this_week: "이번 주",
+          last_week: "지난주",
+          this_month: "이번 달",
+          last_month: "지난달",
+          next_month: "다음 달",
+          this_quarter: "이번 분기",
+          last_quarter: "지난 분기",
+          next_quarter: "다음 분기",
+          this_year: "올해",
+          last_year: "작년",
+          last_7_days: "최근 7일",
+          last_30_days: "최근 30일",
+          last_90_days: "최근 90일",
+          next_30_days: "향후 30일",
+          custom: "사용자 지정…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let viewers pick their own start and end dates."
       },
       globalFilters: {
         label: "전역 필터",
-        helpText: "모든 위젯에 적용되는 필터"
+        helpText: "보는 사람이 모든 위젯을 한 번에, 또는 지정한 위젯만 좁혀 볼 수 있는 필터입니다."
       },
       "globalFilters.name": {
         label: "이름"
@@ -1731,6 +2062,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "globalFilters.targetWidgets": {
         label: "대상 위젯"
+      },
+      requiredPermissions: {
+        label: "Required Permissions",
+        helpText: "Who sees this dashboard: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone sees this dashboard. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the dashboard in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this dashboard either."
       }
     }
   },
@@ -1868,7 +2203,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       mode: {
         label: "모드",
-        helpText: "작업의 의미 모드입니다. 현재는 AI 사람 개입 휴리스틱만 읽으며, 이에 따라 분기하는 렌더러는 없습니다."
+        helpText: "작업의 의미 모드입니다. 현재는 AI 사람 개입 휴리스틱만 읽으며, 이에 따라 분기하는 렌더러는 없습니다.",
+        options: {
+          create: "생성",
+          edit: "편집",
+          delete: "삭제",
+          custom: "사용자 지정"
+        }
       },
       order: {
         label: "순서",
@@ -1888,7 +2229,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "body.language": {
         label: "언어",
-        helpText: "expression = 순수 수식, js = 샌드박스 JavaScript"
+        helpText: "expression = 순수 수식, js = 샌드박스 JavaScript",
+        options: {
+          expression: "표현식(L1)",
+          js: "JavaScript(L2 샌드박스)"
+        }
       },
       "body.source": {
         label: "출처",
@@ -2005,7 +2350,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       operation: {
         label: "작업",
-        helpText: "선언적 단일 레코드 필드 쓰기: 'update'는 수집된 `params` 아래에 병합된 `patch`를 현재 레코드에 호출자로서 적용합니다. 시스템 권한으로 상승하지 않으므로 호출자의 권한, 객체의 훅과 유효성 검사가 사용자 편집과 똑같이 실행됩니다."
+        helpText: "선언적 단일 레코드 필드 쓰기: 'update'는 수집된 `params` 아래에 병합된 `patch`를 현재 레코드에 호출자로서 적용합니다. 시스템 권한으로 상승하지 않으므로 호출자의 권한, 객체의 훅과 유효성 검사가 사용자 편집과 똑같이 실행됩니다.",
+        options: {
+          update: "현재 레코드 업데이트"
+        }
       },
       patch: {
         label: "패치",
@@ -2162,7 +2510,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "레이블"
       },
       description: {
-        label: "설명"
+        label: "설명",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "유형",
@@ -2244,9 +2593,52 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "날짜 범위",
         helpText: "기본 기간과 사용자 지정 범위 전환입니다. 차원은 데이터 세트의 날짜 차원이어야 하며, 데이터 세트에 날짜 차원이 정확히 하나이면 비워 두세요."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with.",
+        options: {
+          today: "오늘",
+          yesterday: "어제",
+          this_week: "이번 주",
+          last_week: "지난주",
+          this_month: "이번 달",
+          last_month: "지난달",
+          next_month: "다음 달",
+          this_quarter: "이번 분기",
+          last_quarter: "지난 분기",
+          next_quarter: "다음 분기",
+          this_year: "올해",
+          last_year: "작년",
+          last_7_days: "최근 7일",
+          last_30_days: "최근 30일",
+          last_90_days: "최근 90일",
+          next_30_days: "향후 30일",
+          custom: "사용자 지정…"
+        }
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "내보내기 옵션",
         helpText: "다운로드 형식(csv, xlsx)과 파일 이름입니다. 다운로드할 수 있는 사람은 데이터 세트 객체의 내보내기 권한이 결정합니다."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2515,7 +2907,24 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "백그라운드 작업"
+    label: "백그라운드 작업",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      schedule: {
+        label: "일정"
+      },
+      enabled: {
+        label: "사용"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   datasource: {
     label: "데이터 소스"
@@ -2525,10 +2934,41 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API 엔드포인트",
-    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL"
+    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      method: {
+        label: "메서드"
+      },
+      path: {
+        label: "경로"
+      },
+      type: {
+        label: "유형"
+      },
+      "objectParams.object": {
+        label: "객체"
+      },
+      "objectParams.operation": {
+        label: "작업"
+      }
+    }
   },
   translation: {
-    label: "번역"
+    label: "번역",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      locale: {
+        label: "로캘"
+      }
+    }
   },
   email_template: {
     label: "이메일 템플릿",
@@ -2605,11 +3045,45 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "문서",
-    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지"
+    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      group: {
+        label: "그룹"
+      },
+      tags: {
+        label: "태그"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   book: {
     label: "문서 책",
-    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차"
+    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      audience: {
+        label: "대상"
+      },
+      groups: {
+        label: "그룹"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   permission: {
     label: "권한 세트",
@@ -2713,15 +3187,66 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "공유 규칙",
-    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다"
+    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      sharedWith: {
+        label: "공유 대상"
+      },
+      accessLevel: {
+        label: "액세스 수준"
+      }
+    }
   },
   queue: {
     label: "대기열",
-    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다"
+    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      members: {
+        label: "구성원"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   assignment_rule: {
     label: "배정 규칙",
-    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙"
+    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      entries: {
+        label: "항목"
+      },
+      active: {
+        label: "활성"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   agent: {
     label: "AI 에이전트",
@@ -2766,7 +3291,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "화면",
-        helpText: "이 에이전트가 바인딩되는 제품 화면입니다(ADR-0063 §1). 자체 화면이 일치하거나 'both'인 스킬만 연결되며, 에이전트의 도구 세트는 그 스킬들의 도구를 합친 것입니다. 기본값 'ask'."
+        helpText: "이 에이전트가 바인딩되는 제품 화면입니다(ADR-0063 §1). 자체 화면이 일치하거나 'both'인 스킬만 연결되며, 에이전트의 도구 세트는 그 스킬들의 도구를 합친 것입니다. 기본값 'ask'.",
+        options: {
+          ask: "Ask(대화형 화면)",
+          build: "Build(작성 화면)"
+        }
       },
       instructions: {
         label: "지침",
@@ -2774,11 +3303,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       model: {
         label: "모델",
-        helpText: "AI 모델 구성(공급자, 모델 이름, 온도 등)"
+        helpText: "AI 모델 구성(모델 이름, 온도 등)"
       },
       planning: {
         label: "계획",
-        helpText: "자율 추론 구성: 에이전트가 멈추기 전의 최대 추론 반복 횟수(1–100, 기본값 10)."
+        helpText: "자율 추론 구성: 모델 호출 횟수(호출 한 번과 그에 따른 도구 일괄 실행)로 세는 폭주 방지 퓨즈로, 이 횟수에 이르면 에이전트가 멈춥니다(1–1000, 기본값 10)."
       },
       memory: {
         label: "메모리",
@@ -2803,6 +3332,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "보호 장치",
         helpText: "안전 규칙과 콘텐츠 정책"
+      },
+      "model.model": {
+        label: "모델"
       }
     }
   },
@@ -2880,7 +3412,12 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       surface: {
         label: "화면",
-        helpText: "이 스킬이 바인딩되는 에이전트 화면입니다(ADR-0063 §3). 화면이 다른 에이전트에 바인딩하면 확인 시점에 조용히 건너뛰지 않고 명확히 실패합니다. 기본값 'ask'."
+        helpText: "이 스킬이 바인딩되는 에이전트 화면입니다(ADR-0063 §3). 화면이 다른 에이전트에 바인딩하면 확인 시점에 조용히 건너뛰지 않고 명확히 실패합니다. 기본값 'ask'.",
+        options: {
+          ask: "Ask(대화형 화면)",
+          build: "Build(작성 화면)",
+          both: "둘 다"
+        }
       },
       instructions: {
         label: "지침",
@@ -2889,6 +3426,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       tools: {
         label: "도구",
         helpText: "도구 이름(와일드카드 지원: action_*)"
+      },
+      context: {
+        label: "컨텍스트 팩",
+        helpText: "이 스킬이 사용하는 컨텍스트 팩(이름). 도구에 get_record_context가 필요합니다. MCP에서는 프롬프트가 선택적 레코드 ID를 받습니다"
       },
       triggerConditions: {
         label: "트리거 조건",
@@ -2904,5 +3445,51 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "값"
       }
     }
+  },
+  ai_context: {
+    label: "AI 컨텍스트 팩",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The pack's identity and the object whose records it reads."
+      },
+      material: {
+        label: "Material",
+        description: "What of the record is handed to the model. Each picker offers the fields of the root object, or of the related list's own object."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). A skill's context key and the get_record_context tool name the pack by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, the header of the tool answer. A pack has no description: write its purpose here."
+      },
+      object: {
+        label: "Root object",
+        helpText: "The root object: the pack reads one record of it."
+      },
+      fields: {
+        label: "Fields",
+        helpText: "The root object's fields handed to the model, in order (at most 30). A lookup among them is answered with the name of the record it points at."
+      },
+      related: {
+        label: "Related lists",
+        helpText: "Child lists that point at the record, one level deep (at most 3). Each list names its child object, the reference field that points at the root, and the columns read for each row (at most 10); with no columns a row is read by its name."
+      },
+      body: {
+        label: "Body",
+        helpText: "The one long-text field read as the record's body."
+      },
+      "body.field": {
+        label: "Body field",
+        helpText: "A long-text field of the root object (textarea, markdown, html, richtext). Any other field is reported when the pack is saved, and the pack then carries no body."
+      }
+    }
+  },
+  knowledge_source: {
+    label: "지식 소스"
   }
 };
