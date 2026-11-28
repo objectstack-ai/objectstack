@@ -1170,14 +1170,14 @@ export const CHANGE_KIND_ROWS = [
     ],
   },
   {
-    kind: 'edits a file the ui/scripts/__tests__ suite reads (ui package source, the ui apps, the objectui skill bundle, or ui/scripts itself)',
+    kind: 'edits a file the ui/scripts/__tests__ suite reads (anywhere in the ui tree, or the objectui skill bundle)',
     matches: 'ui-scripts-suite-input',
     gates: [
       {
         name: 'pnpm --dir ui exec vitest run scripts/',
         ciJob: 'Test UI',
         ciRunner: 'pnpm --dir ui exec vitest run',
-        why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change under ui package source, the ui apps, skills/objectui or ui/scripts moves. The whole suite, never a subset: measured at about five minutes on a 4-vCPU container (284 s and 286 s, 178 files passing, import-bound), against the CI round trip of about 25 minutes it saves. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
+        why: "the 178 test files under ui/scripts/__tests__ belong to no package and run only in CI's 16 Test UI shards, where the affected-test selector adds them to every run, so no package suite and no check family covers them: they pin turbo build inputs, the skill-examples floor, the SchemaRenderer channel keys and the other facts a change anywhere in the ui tree or under skills/objectui moves. The whole suite, never a subset: measured at about five minutes on a 4-vCPU container (284 s and 286 s, 178 files passing, import-bound), against the CI round trip of about 25 minutes it saves. It needs the seven @objectstack packages Test UI builds first, or about twenty files red on an import of a missing dist — build them exactly as the job does: pnpm exec turbo run build --filter=@objectstack/spec... --filter=@objectstack/client... --filter=@objectstack/core... --filter=@objectstack/formula... --filter=@objectstack/lint... --filter=@objectstack/sdui-parser... --filter=@objectstack/types... . Positional filter, no bare `--`, from the repo root: ui/scripts/vitest-invocation-guard.mjs refuses every other spelling",
       },
     ],
   },
@@ -1408,20 +1408,23 @@ export const CHANGE_KIND_ROWS = [
 ];
 
 /**
- * The roots whose change the `ui/scripts/__tests__` suite can see (#26318), in CI's own `paths:` language
- * — the engine matches them with `triggerListCovers`, the reader of every workflow trigger. They are the
- * card's four, as written there: ui package SOURCE (any depth below `ui/packages`, so a nested package
- * counts), the ui apps, the objectui skill bundle the suite reads through `ui/scripts/skill-bundle-root.mjs`,
- * and the suite's own tree. The bare `src` directory form is listed beside its subtree because a dispatch
- * surface is often given as that directory, and the trigger language reads a directory only through a
- * pattern's literal prefix.
+ * The roots whose change the `ui/scripts/__tests__` suite can see, in CI's own `paths:` language — the engine
+ * matches them with `triggerListCovers`, the reader of every workflow trigger. They are the WHOLE ui tree and the
+ * objectui skill bundle the suite reads through `ui/scripts/skill-bundle-root.mjs`, because the suite reads the
+ * whole ui tree: `check-ui-root-lookups` scans every source under `ui/scripts`, `ui/packages` and `ui/apps` (a
+ * package's own `scripts/` directory included), and the rest of the suite reads every other top-level ui
+ * directory (`docs`, `e2e`, `examples`, `eslint-rules`, `patches`) and the ui root's manifests and configs
+ * (`package.json`, `vitest.config.mts`, the tsconfigs, `eslint.config.js`, `.changeset`). A narrower list was
+ * measured missing a new `ui/packages/<pkg>/scripts/*.mjs`, which reds `check-ui-root-lookups.test.ts`.
+ * ⛔ Never narrow it back to the sub-trees a reader names today: the next reader of a ui path is one more
+ * silent miss, and the cost of the width is one suite run on a card that touches ui at all. The bare `ui`
+ * directory is listed beside its subtree because a dispatch surface is often given as that directory, and the
+ * trigger language reads a directory only through a pattern's literal prefix.
  */
 export const UI_SCRIPTS_SUITE_ROOTS = Object.freeze([
-  'ui/packages/**/src',
-  'ui/packages/**/src/**',
-  'ui/apps/**',
+  'ui',
+  'ui/**',
   'skills/objectui/**',
-  'ui/scripts/**',
 ]);
 
 /**
