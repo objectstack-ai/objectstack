@@ -2440,7 +2440,29 @@ const fr = {
           availableObjects: "Liste les objets de données disponibles.",
           recentActivity: "Résume mon activité récente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Résumer cet enregistrement',
+            related: "Qu'est-ce qui est lié à cet enregistrement ?",
+          },
+          list: {
+            summarize: 'Résumer les enregistrements de cette liste',
+            recent: 'Quels enregistrements ont été ajoutés cette semaine ?',
+          },
+          dashboard: {
+            explain: 'Que montre ce tableau de bord ?',
+            standOut: "Qu'est-ce qui ressort de ce tableau de bord ?",
+          },
+          report: {
+            summarize: 'Résumer ce rapport',
+            takeaways: 'Quels sont les points clés de ce rapport ?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Questions suggérées',
       discussing: "Affiché : {{target}}",
       focus: {
         pin: "Continuer à poser des questions sur cet enregistrement",
@@ -3576,6 +3598,7 @@ const fr = {
     recent: "Récent",
     starred: "Étoilés",
     removeFromFavorites: "Retirer {{name}} des favoris",
+    conversationUnavailable: "Cette conversation n’est plus disponible",
     allReports: "Tous les rapports",
     collapse: 'Réduire la barre latérale',
     expand: 'Développer la barre latérale',
@@ -4216,10 +4239,12 @@ const fr = {
       slugTaken: 'Ce slug est déjà utilisé.',
       notAllowedToCreate: "Vous n'êtes pas autorisé à créer une nouvelle organisation.",
       organizationLimitReached: "Vous avez atteint le nombre maximal d'organisations que vous pouvez créer. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
+      unpaidOrganizationLimitReached: "Vous possédez déjà autant d'organisations gratuites qu'un compte le permet. Pour en créer une autre, passez l'une d'elles à une offre payante ou contactez le support. Les organisations auxquelles vous avez été invité ne sont pas comptées.",
       notTheRecipient: "Vous n'êtes pas le destinataire de cette invitation.",
       invitationNotFound: "Cette invitation a déjà été utilisée, a expiré ou a été révoquée. Si vous l'avez acceptée, vous trouverez l'organisation dans votre liste d'organisations.",
       unknown: 'Une erreur est survenue. Veuillez réessayer.',
     },
+    viewPlans: 'Voir les offres et passer à une offre supérieure',
     backToList: "Retour aux organisations",
     notFound: "Organisation introuvable",
     notFoundDescription: "Cette organisation n'existe pas ou vous n'y avez pas accès.",
@@ -5616,6 +5641,7 @@ const fr = {
       toggleFailed: "Échec du changement d'état de l'application : {{reason}}",
       setDefaultDone: "{{name}} définie par défaut",
       setDefaultFailed: "Échec de la définition de l'application par défaut : {{reason}}",
+      restoreDefaultFailed: "Impossible de rétablir {{name}} comme application par défaut ; elle n'est donc plus l'application par défaut : {{reason}}",
       appDeleted: "{{name}} supprimée",
       deleteFailed: "Échec de la suppression de l'application : {{reason}}",
       nothingToDelete: "Rien à supprimer pour {{name}} : {{reason}}",

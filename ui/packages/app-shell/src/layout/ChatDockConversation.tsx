@@ -326,6 +326,14 @@ export function ChatDockConversation({
     [apiBase],
   );
   const publicShareBase = React.useMemo(() => resolvePublicShareBase(), []);
+  const emptyConversation = React.useMemo(
+    () => ({
+      size: presentation === 'full' ? ('large' as const) : ('compact' as const),
+      userId,
+      onOpenConversation: openConversation,
+    }),
+    [presentation, userId, openConversation],
+  );
   const inert = !isLoading && agents.length === 0;
   React.useEffect(() => {
     onActionsChange?.(
@@ -337,9 +345,10 @@ export function ChatDockConversation({
             label: paneConversationId ? headerLabel : undefined,
             labelPending,
             startNew,
+            agent: activeAgentRoute,
           },
     );
-  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew]);
+  }, [onActionsChange, inert, conversationId, paneConversationId, headerLabel, labelPending, startNew, activeAgentRoute]);
 
   // OSS / no AI seat → the whole dock body is inert (the robot is gated too).
   if (inert) return null;
@@ -387,6 +396,10 @@ export function ChatDockConversation({
             onSent={handleSent}
             onShare={() => setShareOpen(true)}
             actionsInHost={actionsInHost}
+            // objectstack#37862 — the shared empty conversation: large where
+            // the drawer fills the window, compact in the rail and the sheet;
+            // a recent conversation opens here, as a history row does.
+            emptyConversation={emptyConversation}
           />
         </div>
         {/* Rail and sheet: the history covers the chat while open; the pane

@@ -1022,7 +1022,10 @@ describe('useChatConversation — clears chat cache on logout / user switch', ()
 
   it('purgeChatCaches removes only the ai-chat keys', () => {
     seedChatCache();
+    // The question card's skip marks, one key per conversation.
+    localStorage.setItem('objectstack:ai-chat-question-skip:conv-1', JSON.stringify(['call_1']));
     purgeChatCaches();
+    expect(localStorage.getItem('objectstack:ai-chat-question-skip:conv-1')).toBeNull();
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBeNull();
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1:app:crm:build`)).toBeNull();
     expect(localStorage.getItem(`${MESSAGE_PREFIX}:conv-1`)).toBeNull();

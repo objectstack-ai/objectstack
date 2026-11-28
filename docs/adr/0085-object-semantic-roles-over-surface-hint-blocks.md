@@ -140,6 +140,37 @@ Keys that merely hide/re-arrange correct information (`hideRelatedTab`, `showRef
 > [#36629](https://github.com/objectstack-ai/objectstack/pull/36629); the row menus by
 > [#36815](https://github.com/objectstack-ai/objectstack/pull/36815).
 
+> **Note (2026-11-27, [#37800](https://github.com/objectstack-ai/objectstack/issues/37800), ruling
+> recorded on #37800 and [#37792](https://github.com/objectstack-ai/objectstack/issues/37792)).** The
+> 2026-11-23 note counts two places where §2's "keys that merely hide/re-arrange correct information
+> are rejected at this layer" yields, `relatedLists` (2026-11-20) and its own `actionLayout`. There
+> are now three. The third is one ruling that carries two object keys, `pinOverview` and `fieldTabs`,
+> and both are **ruled exceptions**. This note does not claim that either key passes the admission
+> test: each only re-arranges one surface, the synthesized (default) record page. The maintainer
+> (Jack) asked for them in the seat thread on 2026-11-27,
+> 「我觉得这个应该是一个元数据的配置项吧，这种应该是常见需求。」 (03:36Z) and
+> 「我能够具体配置每一个页签显示哪些分组吗？然后还有一个开关控制第一个页面要不要pin到左侧」 (03:40Z), and
+> chose 「例外 + 新键 fieldTabs」 on the 04:07Z decision card (records
+> [`7209632085`](https://github.com/objectstack-ai/objectstack/issues/37800#issuecomment-7209632085)
+> on #37800 and
+> [`7209608089`](https://github.com/objectstack-ai/objectstack/issues/37792#issuecomment-7209608089)
+> on #37792; the card bodies quote him). His 「是否建议保留 relatedList 这个语法」 (03:51Z) ended with
+> `relatedLists` kept, unrenamed and unchanged: field tabs are a sibling key, not entries in it.
+> `pinOverview` says whether the overview (the 概览 tab, the record's own fields) pins to the left
+> column, on the wide (desktop) full page only, where pinning is otherwise derived
+> (`ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails`); the side
+> preview and a phone never pin. `fieldTabs` names field groups that leave the overview and are drawn
+> as tabs right after it, in declared order, ahead of every other tab. An object that declares
+> neither key draws as before. Neither key is in the spec yet: `ObjectSchema` is strict and refuses
+> both until [#37792](https://github.com/objectstack-ai/objectstack/issues/37792) lands `pinOverview`
+> and [#37802](https://github.com/objectstack-ai/objectstack/issues/37802) lands `fieldTabs`. This
+> object-level `fieldTabs` is not the form-level `FormSchema.fieldTabs` that the `@object-ui` form
+> renderer reads (`ui/packages/types/src/form.ts`, beside `defaultFieldTab` and `fieldTabsPosition`),
+> which spreads one form's fields across tab panels. It is the same word at a different layer, and
+> this note rules only the object key. The guard keeps its force for every other key: any other
+> object key that only hides or only re-arranges still needs its own ruling, above all per-page
+> show/hide switches.
+
 ### 3. Deletions (all evidenced zero-author)
 
 - **`detail` block removed from `ObjectSchema`** — all three typed keys. `renderViaSchema` retires *together with* the legacy monolith renderer path in objectui (separate execution PR; the key is only that path's steering wheel, deleting it alone saves nothing). `hideReferenceRail`/`hideRelatedTab` are removed outright (the former is a proven no-op for spec authors; the latter's raison d'être — overriding rail/tab dedup — died with the rail).

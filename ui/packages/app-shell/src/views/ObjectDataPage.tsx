@@ -107,6 +107,7 @@ import { mayManageViews } from './objectViewViewSharing.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
+import { RECORD_PREVIEW_DEFAULT_WIDTH, RECORD_PREVIEW_WIDTH_KEY } from './recordDrawerContext.js';
 import {
   RECORD_FORM_LINK_PARAM,
   RECORD_FORM_OBJECT_PARAM,
@@ -627,8 +628,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       `/apps/${appName}/${objectName}/record/${encodeURIComponent(String(id))}`,
     [appName, objectName],
   );
+  // The side drawer opens at the `auto` default the `navigation.size` help
+  // text states, the side preview's 460, and remembers a dragged width under
+  // the preview's shared key, as the object list's drawer does
+  // (objectstack#36149). This page has no view, so nothing authors a size.
   const navOverlay = useNavigationOverlay({
-    navigation: { mode: 'drawer' },
+    navigation: { mode: 'drawer', width: RECORD_PREVIEW_DEFAULT_WIDTH },
     objectName: objectName ?? '',
     onNavigate: (id) => navigate(recordUrl(id)),
   });
@@ -1232,6 +1237,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       {navOverlay.isOverlay && (
         <NavigationOverlay
           {...navOverlay}
+          storageKey={RECORD_PREVIEW_WIDTH_KEY}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
           onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
           toggles={openedRecordId && dock ? (

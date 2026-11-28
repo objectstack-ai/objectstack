@@ -1,34 +1,42 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PIN — `os db orphans --delete` and `os secret orphans --delete`, run without
- * their confirmation, delete nothing, write no export, exit 1 and name `--yes`.
+ * PIN — every command outside `os migrate` whose writing mode waits for a
+ * `--yes` confirmation (`os db orphans --delete`, `os secret orphans --delete`,
+ * `os secret rewrap --apply`), run without it, writes nothing, exits 1 and
+ * names `--yes`.
  *
  * The sibling of `migrate-confirmation-exit.pin.test.ts`, whose population is
- * read from `src/commands/migrate/**` only. These two commands delete rows
- * behind the same `[y/N]` prompt and follow the same rule: a run that did not
- * get its confirmation (stdin is no terminal, no `--yes`) is a refused run and
- * exits 1, so a script, CI job or cron reading `$?` never takes it for a
- * delete. Before the fix the text face printed `Aborted — …` and exited 0;
- * the `--json` face already exited 1 with `confirmation_required`.
+ * read from `src/commands/migrate/**` only. These commands delete or re-write
+ * rows behind the same `[y/N]` prompt and follow the same rule: a run that did
+ * not get its confirmation (stdin is no terminal, no `--yes`) is a refused run
+ * and exits 1, so a script, CI job or cron reading `$?` never takes it for a
+ * run that did its work. Before the fix the text face printed `Aborted — …`
+ * and exited 0; the `--json` face already exited 1 with
+ * `confirmation_required`.
  *
  * An operator who answers `n` at the prompt declined on purpose: that run keeps
  * exit 0, as the migrate family's decline does.
  *
  * ## The population
  *
- * {@link ROSTER} names the command modules outside `src/commands/migrate` whose
- * `--delete` mode is gated by a `--yes` confirmation. The first case holds the
- * roster to the modules, read off the command classes' flags (a `delete` flag
- * and a `yes` flag), so a third such command fails here until it has a row.
+ * {@link ROSTER} names the command modules outside `src/commands/migrate` that
+ * declare a boolean `yes` flag, whatever the mode flag it confirms is called
+ * (`--delete`, `--apply`). The walk reads every module under `src/commands`, at
+ * any depth and top-level commands included, and only `migrate` is left to its
+ * own pin. The first case holds the roster to the modules, read off the loaded
+ * command classes' flags, so the next such command fails here until it has a
+ * row that names how its confirmation gate is reached.
  *
  * ## What runs for real, and what is replaced
  *
  * Each command runs through oclif in-process: its parse, its gate, `emitJson`
  * and `this.exit`. Replaced: the stack boot (a fake engine and driver whose
- * delete is observed), the orphan-detail plan's audit read, the secret
- * reference union, and the prompt's readline. `process.stdin.isTTY` is set by
- * each run, never inherited from the runner.
+ * delete or write is observed), the orphan-detail plan's audit read, the
+ * secret reference union for `secret orphans` (`secret rewrap` runs the real
+ * one over the fake engine, with its real planner, executor and local crypto
+ * provider), and the prompt's readline. `process.stdin.isTTY` is set by each
+ * run, never inherited from the runner.
  *
  * ## Tier
  *
@@ -36,8 +44,9 @@
  * is replaced through `vi.mock` and never value-imported here.
  */
 
-import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import { createCipheriv, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,13 +59,22 @@ import '@objectstack/objectql';
 import '@objectstack/service-settings';
 import '../src/utils/sys-secret-orphan-sweep.js';
 import '../src/utils/sys-secret-holder-report.js';
+import '../src/utils/sys-secret-rewrap.js';
+// …and what `os secret rewrap`'s one-shot crypto composition reaches through
+// dynamic `import()`s (the host config reader and `serve.ts`).
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/runtime';
+import '@objectstack/service-datasource';
 
 const seams = vi.hoisted(() => ({
   bootSchemaStack: vi.fn(),
   planOrphanDetailSweep: vi.fn(),
   collectSecretReferenceUnion: vi.fn(),
-  /** Every delete either command's fake reached, as `object/id`. */
-  deleted: [] as string[],
+  /** Every delete or write a command's fake reached, as `object/id`. */
+  written: [] as string[],
   prompts: [] as string[],
   answer: { value: 'n' },
 }));
@@ -75,8 +93,12 @@ vi.mock('../src/utils/secret-reference-union.js', async (importOriginal) => ({
 }));
 // The settings plugins `os secret orphans` composes into its boot: handed to
 // the (replaced) boot and never used, and the real ones reach the serve
-// command's crypto provider, a load no case here should pay.
-vi.mock('../src/utils/one-shot-settings.js', () => ({ oneShotSettingsPlugins: async () => [] }));
+// command's crypto provider, a load no case here should pay. `oneShotCrypto`
+// stays real: `os secret rewrap` seals and opens with the provider it chooses.
+vi.mock('../src/utils/one-shot-settings.js', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  oneShotSettingsPlugins: async () => [],
+}));
 // Constructed and handed to the (replaced) boot, never used.
 vi.mock('@objectstack/platform-objects/plugin', () => ({ PlatformObjectsPlugin: class {} }));
 // The `[y/N]` prompt. Reached only on a terminal: each `confirm()` answers
@@ -103,31 +125,42 @@ const COMMANDS_DIR = resolve(HERE, '../src/commands');
 
 type Runnable = { flags?: Record<string, { type?: unknown }>; run(argv: string[], opts?: Config): Promise<unknown> };
 
-/** Every non-migrate command module with a `--delete` mode behind `--yes`, keyed `topic name`. */
+/** Every non-migrate command module declaring a boolean `--yes`, keyed by its command id (`topic name`). */
 const POPULATION: string[] = [];
 const COMMANDS = new Map<string, Runnable>();
-for (const topic of readdirSync(COMMANDS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-  if (!topic.isDirectory() || topic.name === 'migrate') continue;
-  for (const name of readdirSync(join(COMMANDS_DIR, topic.name)).sort()) {
+/** Every command module the walk loaded, as a path under `src/commands`, member or not. */
+const WALKED: string[] = [];
+// Every command module is read, at any depth: a top-level command (`deploy.ts`
+// is `os deploy`) and a topic's subcommand one or more directories down
+// (`plugin/trust/add.ts` is `os plugin trust add`; a topic's `index.ts` is the
+// topic's own command). Only `src/commands/migrate` is left out: the migrate
+// pin owns it. Membership is read off the loaded class's flags, never off its
+// source text, so a quoted key or a flag taken from a shared flag set counts.
+async function collect(dir: string, prefix: string[]): Promise<void> {
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) {
+      if (prefix.length === 0 && entry.name === 'migrate') continue;
+      await collect(join(dir, entry.name), [...prefix, entry.name]);
+      continue;
+    }
+    const name = entry.name;
     if (!name.endsWith('.ts') || /\.(test|spec)\.ts$/.test(name) || name.endsWith('.d.ts')) continue;
-    // Membership is decided by flags, never source text, but only modules that
-    // mention both flags are imported: oclif loads lazily and so does this.
-    const file = join(COMMANDS_DIR, topic.name, name);
-    const src = readFileSync(file, 'utf8');
-    if (!/\bdelete:\s*Flags\.boolean/.test(src) || !/\byes:\s*Flags\.boolean/.test(src)) continue;
-    const mod = (await import(file)) as { default?: unknown };
+    const mod = (await import(join(dir, name))) as { default?: unknown };
+    WALKED.push([...prefix, name].join('/'));
     if (typeof mod.default !== 'function') continue;
     const cls = mod.default as unknown as Runnable;
-    if (cls.flags?.delete?.type === 'boolean' && cls.flags?.yes?.type === 'boolean') {
-      const id = `${topic.name} ${basename(name, '.ts')}`;
-      POPULATION.push(id);
-      COMMANDS.set(id, cls);
-    }
+    if (cls.flags?.yes?.type !== 'boolean') continue;
+    const id = [...prefix, ...(name === 'index.ts' && prefix.length > 0 ? [] : [basename(name, '.ts')])].join(' ');
+    POPULATION.push(id);
+    COMMANDS.set(id, cls);
   }
 }
+await collect(COMMANDS_DIR, []);
 POPULATION.sort();
 
 const config = await Config.load({ root: PKG_ROOT });
+const { collectSecretReferenceUnion: realReferenceUnion } =
+  await vi.importActual<typeof import('../src/utils/secret-reference-union.js')>('../src/utils/secret-reference-union.js');
 
 const SCRATCH = mkdtempSync(join(tmpdir(), 'os-orphans-confirm-'));
 afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }));
@@ -135,7 +168,7 @@ let exportSeq = 0;
 const freshExport = (): string => join(SCRATCH, `export-${++exportSeq}.json`);
 
 // ---------------------------------------------------------------------------
-// Fixtures: one deletable row for each command
+// Fixtures: one deletable or re-wrappable row for each command
 // ---------------------------------------------------------------------------
 
 function stackWith(objectql: unknown, settings?: unknown) {
@@ -165,7 +198,7 @@ function arrangeDbOrphans(): void {
       findOne: async (object: string, q: { where: { id: string } }) => stored.get(`${object}/${q.where.id}`) ?? null,
     }),
     delete: async (object: string, q: { where: { id: string } }) => {
-      seams.deleted.push(`${object}/${q.where.id}`);
+      seams.written.push(`${object}/${q.where.id}`);
       stored.delete(`${object}/${q.where.id}`);
     },
   };
@@ -195,7 +228,7 @@ function arrangeSecretOrphans(): void {
     getDriverForObject: (object: string) => (object === 'sys_secret'
       ? {
         find: async () => [{ ...row }],
-        delete: async (o: string, id: string) => { seams.deleted.push(`${o}/${id}`); return true; },
+        delete: async (o: string, id: string) => { seams.written.push(`${o}/${id}`); return true; },
       }
       : { find: async () => [] }),
   };
@@ -204,16 +237,102 @@ function arrangeSecretOrphans(): void {
   }));
 }
 
+/** The data key `os secret rewrap` seals and opens with, handed in as `OS_SECRET_KEY`. */
+const KEY_HEX = '404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f';
+const KEY_ENV = ['OS_SECRET_KEY', 'OS_DEV_CRYPTO_KEY', 'OBJECTSTACK_DEV_CRYPTO_KEY', 'OS_HOME', 'OBJECTSTACK_HOME', 'OS_CRYPTO_AUTOKEY'] as const;
+const savedKeyEnv: Record<string, string | undefined> = {};
+for (const k of KEY_ENV) savedKeyEnv[k] = process.env[k];
+afterEach(() => {
+  for (const k of KEY_ENV) {
+    if (savedKeyEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedKeyEnv[k];
+  }
+});
+
+/** A ciphertext sealed under the version-1 AAD, `(namespace, key)` alone: a row `rewrap` re-wraps. */
+function sealVersion1(plain: string, namespace: string, key: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', Buffer.from(KEY_HEX, 'hex'), iv);
+  cipher.setAAD(Buffer.from([namespace, key].join('|'), 'utf8'));
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return Buffer.concat([iv, cipher.getAuthTag(), enc]).toString('base64');
+}
+
+/**
+ * What the replaced boot still does for `rewrap`'s crypto: the host's
+ * crypto-provider seam (`os serve`'s) is initialized and its `kernel:ready`
+ * hook fired, with no plugin registering a provider, so the run's provider is
+ * the local one over `OS_SECRET_KEY`.
+ */
+async function driveHostCrypto(plugins: readonly unknown[]): Promise<void> {
+  const host = plugins.find((p) => (p as { name?: unknown }).name === 'com.objectstack.cli.host-crypto-provider') as
+    { init(ctx: unknown): Promise<void> } | undefined;
+  if (!host) throw new Error('the run composed no host crypto-provider seam');
+  const ready: Array<() => unknown> = [];
+  await host.init({ getServices: () => new Map(), hook: (_name: string, handler: () => unknown) => ready.push(handler) });
+  for (const handler of ready) await handler();
+}
+
+/** `os secret rewrap`: one version-1 `sys_secret` row its settings holder references, so the plan has one attempt. */
+function arrangeSecretRewrap(): void {
+  for (const k of KEY_ENV) delete process.env[k];
+  process.env.OS_HOME = mkdtempSync(join(SCRATCH, 'home-'));
+  process.env.OS_SECRET_KEY = KEY_HEX;
+  seams.collectSecretReferenceUnion.mockImplementation(realReferenceUnion);
+  let secrets: Array<Record<string, unknown>> = [{
+    id: 'sec_v1', namespace: 'smtp', key: 'password', kms_key_id: 'local:v1', alg: 'aes-256-gcm',
+    version: 1, ciphertext: sealVersion1('pin-plaintext', 'smtp', 'password'),
+  }];
+  const settings = [{ id: 'set_1', namespace: 'smtp', key: 'password', scope: 'tenant', user_id: null, value_enc: 'sec_v1' }];
+  const secretDriver = {
+    find: async () => secrets.map((r) => ({ ...r })),
+    updateMany: async (object: string, query: { where: Record<string, unknown> }, data: Record<string, unknown>) => {
+      seams.written.push(`${object}/${String(query.where.id)}`);
+      let changed = 0;
+      secrets = secrets.map((r) => {
+        if (r.id !== query.where.id || r.ciphertext !== query.where.ciphertext) return r;
+        changed += 1;
+        return { ...r, ...data };
+      });
+      return changed;
+    },
+  };
+  const engine = {
+    getConfigs: () => ({}),
+    listDatasourceDefs: () => [],
+    getDriverForObject: (object: string) => {
+      if (object === 'sys_secret') return secretDriver;
+      if (object === 'sys_setting') return { find: async () => settings.map((r) => ({ ...r })) };
+      if (object === 'sys_platform_setting' || object === 'sys_metadata') return { find: async () => [] };
+      return undefined;
+    },
+  };
+  seams.bootSchemaStack.mockImplementation(async (opts: { extraPlugins?: unknown[] }) => {
+    await driveHostCrypto(opts.extraPlugins ?? []);
+    return stackWith(engine);
+  });
+}
+
 interface Member {
-  /** The `--delete` run, without its confirmation; the export path is appended. */
+  /** The writing run, without its confirmation. */
   argv: string[];
+  /** The mode writes an export first (`--export PATH` is appended), and the refusal must leave none. */
+  exports: boolean;
   arrange: () => void;
 }
 
 const ROSTER: Record<string, Member> = {
-  'db orphans': { argv: ['--delete'], arrange: arrangeDbOrphans },
-  'secret orphans': { argv: ['--delete', '--no-declared-datasources'], arrange: arrangeSecretOrphans },
+  'db orphans': { argv: ['--delete'], exports: true, arrange: arrangeDbOrphans },
+  'secret orphans': { argv: ['--delete', '--no-declared-datasources'], exports: true, arrange: arrangeSecretOrphans },
+  'secret rewrap': { argv: ['--apply', '--no-declared-datasources'], exports: false, arrange: arrangeSecretRewrap },
 };
+
+/** The member's argv, with a fresh export path when its mode writes one; that path, or null. */
+function argvOf(member: Member, ...extra: string[]): { argv: string[]; exportPath: string | null } {
+  const exportPath = member.exports ? freshExport() : null;
+  return { argv: [...member.argv, ...(exportPath ? ['--export', exportPath] : []), ...extra], exportPath };
+}
+const exported = (exportPath: string | null): boolean => exportPath !== null && existsSync(exportPath);
 
 // ---------------------------------------------------------------------------
 // Driving one run
@@ -261,7 +380,7 @@ async function drive(id: string, argv: string[], opts: { tty: boolean }): Promis
 
 beforeEach(() => {
   for (const seam of [seams.bootSchemaStack, seams.planOrphanDetailSweep, seams.collectSecretReferenceUnion]) seam.mockReset();
-  seams.deleted.length = 0;
+  seams.written.length = 0;
   seams.prompts.length = 0;
   seams.answer.value = 'n';
 });
@@ -273,60 +392,75 @@ const RUN_TIMEOUT = 60_000;
 // The pin
 // ---------------------------------------------------------------------------
 
-describe('the population: every non-migrate --delete mode behind --yes', () => {
+describe('the population: every non-migrate command that declares --yes', () => {
+  it('the walk loaded every command module outside migrate, at every depth', () => {
+    // Counted independently of the walk: a recursive listing of the same tree.
+    const onDisk = (readdirSync(COMMANDS_DIR, { recursive: true }) as string[])
+      .map((p) => p.split('\\').join('/'))
+      .filter((p) => !p.startsWith('migrate/') && p.endsWith('.ts') && !/\.(test|spec)\.ts$/.test(p) && !p.endsWith('.d.ts'))
+      .sort();
+    expect([...WALKED].sort(), 'every module under src/commands but migrate/').toEqual(onDisk);
+    expect(WALKED, 'a top-level command is read').toContain('deploy.ts');
+    expect(WALKED, 'a subcommand two directories down is read').toContain('plugin/trust/revoke.ts');
+  });
+
   it('is exactly the roster — a new member names how its gate is reached before it can pass', () => {
     expect(POPULATION, 'discovered from the command classes\' flags').toEqual(Object.keys(ROSTER).sort());
   });
+
+  it('the census today: three commands outside migrate declare --yes', () => {
+    expect(POPULATION).toEqual(['db orphans', 'secret orphans', 'secret rewrap']);
+  });
 });
 
-describe('a non-interactive --delete without --yes deletes nothing, writes no export, and exits 1', () => {
+describe('a non-interactive run without --yes writes nothing, writes no export, and exits 1', () => {
   it.each(Object.entries(ROSTER))('%s — text face: exit 1, names --yes', async (id, member) => {
     member.arrange();
-    const exportPath = freshExport();
+    const { argv, exportPath } = argvOf(member);
 
-    const run = await drive(id, [...member.argv, '--export', exportPath], { tty: false });
+    const run = await drive(id, argv, { tty: false });
 
     expect(run.exit, run.output).toBe(1);
     expect(run.output).toContain('--yes');
-    expect(seams.deleted).toEqual([]);
-    expect(existsSync(exportPath), 'no export is written').toBe(false);
+    expect(seams.written).toEqual([]);
+    expect(exported(exportPath), 'no export is written').toBe(false);
     expect(seams.prompts, 'a non-interactive run never prompts').toEqual([]);
   }, RUN_TIMEOUT);
 
   it.each(Object.entries(ROSTER))('%s — --json face: exit 1, confirmation_required', async (id, member) => {
     member.arrange();
-    const exportPath = freshExport();
+    const { argv, exportPath } = argvOf(member, '--json');
 
-    const run = await drive(id, [...member.argv, '--export', exportPath, '--json'], { tty: false });
+    const run = await drive(id, argv, { tty: false });
 
     expect(run.exit, run.output).toBe(1);
     expect(run.output).toContain('confirmation_required');
-    expect(seams.deleted).toEqual([]);
-    expect(existsSync(exportPath)).toBe(false);
+    expect(seams.written).toEqual([]);
+    expect(exported(exportPath)).toBe(false);
   }, RUN_TIMEOUT);
 });
 
 describe('controls', () => {
-  it.each(Object.entries(ROSTER))('%s — with --yes the run deletes and exits 0, so the harness tells a refusal from a run', async (id, member) => {
+  it.each(Object.entries(ROSTER))('%s — with --yes the run writes and exits 0, so the harness tells a refusal from a run', async (id, member) => {
     member.arrange();
-    const exportPath = freshExport();
+    const { argv, exportPath } = argvOf(member, '--yes');
 
-    const run = await drive(id, [...member.argv, '--export', exportPath, '--yes'], { tty: false });
+    const run = await drive(id, argv, { tty: false });
 
     expect(run.exit, run.output).toBe(0);
-    expect(seams.deleted).toHaveLength(1);
-    expect(existsSync(exportPath)).toBe(true);
+    expect(seams.written).toHaveLength(1);
+    expect(exported(exportPath)).toBe(member.exports);
   }, RUN_TIMEOUT);
 
-  it.each(Object.entries(ROSTER))('%s — a terminal answered n: prompted, nothing deleted, exit 0 — a decline keeps its code', async (id, member) => {
+  it.each(Object.entries(ROSTER))('%s — a terminal answered n: prompted, nothing written, exit 0 — a decline keeps its code', async (id, member) => {
     member.arrange();
-    const exportPath = freshExport();
+    const { argv, exportPath } = argvOf(member);
 
-    const run = await drive(id, [...member.argv, '--export', exportPath], { tty: true });
+    const run = await drive(id, argv, { tty: true });
 
     expect(seams.prompts).toHaveLength(1);
     expect(run.exit, run.output).toBe(0);
-    expect(seams.deleted).toEqual([]);
-    expect(existsSync(exportPath)).toBe(false);
+    expect(seams.written).toEqual([]);
+    expect(exported(exportPath)).toBe(false);
   }, RUN_TIMEOUT);
 });

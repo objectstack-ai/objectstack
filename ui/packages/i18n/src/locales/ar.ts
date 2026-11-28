@@ -2646,7 +2646,29 @@ const ar = {
           availableObjects: "اذكر كائنات البيانات المتاحة.",
           recentActivity: "لخّص نشاطي الأخير.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'لخّص هذا السجل',
+            related: 'ما المرتبط بهذا السجل؟',
+          },
+          list: {
+            summarize: 'لخّص السجلات في هذه القائمة',
+            recent: 'ما السجلات التي أُضيفت هذا الأسبوع؟',
+          },
+          dashboard: {
+            explain: 'ماذا تعرض لوحة المعلومات هذه؟',
+            standOut: 'ما اللافت في لوحة المعلومات هذه؟',
+          },
+          report: {
+            summarize: 'لخّص هذا التقرير',
+            takeaways: 'ما أبرز النقاط في هذا التقرير؟',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'أسئلة مقترحة',
       discussing: "قيد العرض: {{target}}",
       focus: {
         pin: "مواصلة السؤال عن هذا السجل",
@@ -3815,6 +3837,7 @@ const ar = {
     recent: "الأخيرة",
     starred: "المميزة",
     removeFromFavorites: "إزالة {{name}} من المفضلة",
+    conversationUnavailable: "لم تعد هذه المحادثة متاحة",
     allReports: "كل التقارير",
     collapse: 'طي الشريط الجانبي',
     expand: 'توسيع الشريط الجانبي',
@@ -4482,10 +4505,12 @@ const ar = {
       slugTaken: 'هذا المُعرِّف مستخدَم بالفعل.',
       notAllowedToCreate: 'لا يُسمح لك بإنشاء مؤسسة جديدة.',
       organizationLimitReached: 'لقد بلغت الحد الأقصى لعدد المؤسسات التي يمكنك إنشاؤها. لا تُحتسب المؤسسات التي دُعيت إليها ضمن هذا الحد.',
+      unpaidOrganizationLimitReached: 'أنت تملك بالفعل الحد الأقصى من المؤسسات المجانية المسموح به لكل حساب. لإنشاء مؤسسة أخرى، قم بترقية إحداها إلى خطة مدفوعة أو تواصل مع الدعم. لا تُحتسب المؤسسات التي دُعيت إليها.',
       notTheRecipient: 'لست المستلم المقصود بهذه الدعوة.',
       invitationNotFound: 'تم استخدام هذه الدعوة بالفعل أو انتهت صلاحيتها أو تم إلغاؤها. إذا كنت قد قبلتها، فستجد المؤسسة في قائمة مؤسساتك.',
       unknown: 'حدث خطأ ما. يرجى المحاولة مرة أخرى.',
     },
+    viewPlans: 'عرض الخطط والترقية',
     backToList: "العودة إلى المؤسسات",
     notFound: "المؤسسة غير موجودة",
     notFoundDescription: "هذه المؤسسة غير موجودة أو ليس لديك صلاحية الوصول إليها.",
@@ -6076,6 +6101,7 @@ const ar = {
       toggleFailed: "فشل تغيير حالة التطبيق: {{reason}}",
       setDefaultDone: "تم تعيين {{name}} كافتراضي",
       setDefaultFailed: "فشل تعيين التطبيق الافتراضي: {{reason}}",
+      restoreDefaultFailed: "تعذرت استعادة {{name}} كتطبيق افتراضي، لذا لم يعد هو الافتراضي: {{reason}}",
       appDeleted: "تم حذف {{name}}",
       deleteFailed: "فشل حذف التطبيق: {{reason}}",
       nothingToDelete: "لا يوجد ما يُحذف لـ {{name}}: {{reason}}",
