@@ -3991,6 +3991,22 @@ export function h13AreaWithoutPmState(issue, nowMs = Date.now()) {
  */
 const BLOCKED_BY_REF = /(?<![A-Za-z0-9._\/-])([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)?)?#(\d+)/gu;
 
+/**
+ * A value whose FIRST token is `none` (any case, before any `#N`) names no
+ * target: the author stated there is no blocker, and every `#N` after it is
+ * context. The one exception to 「every ref is a target」 above, and the
+ * author's own words rather than an ambiguity — the measured
+ * 「Blocked-by: none. Order: independent of #36987's ruling.」 (#37445, #37446)
+ * otherwise read as blocked by the very card the line says it is
+ * independent of, and card-pick held a p1 out of every seat's picks.
+ *
+ * Token, not prefix: 「nonesuch#5」 or 「none-of-these」 is not the word.
+ * A leading code or emphasis marker the per-directive strip left behind
+ * (「`none` — …」) is read through. H4's presence test is untouched: a
+ * `none` line still tells the machine something, which is all H4 asks.
+ */
+const BLOCKED_BY_NONE = /^[`*_]*none(?![\p{L}\p{N}_#-])/iu;
+
 export function blockedByTargets(body) {
   const out = [];
   // The shared decorated-directive reader: ONE value per directive, trimmed
@@ -3999,6 +4015,7 @@ export function blockedByTargets(body) {
   // code. A qualifier must TOUCH its `#` and no match may START inside a
   // path-like token, so a URL fragment in a value names no target.
   for (const value of directiveValues(body, 'Blocked-by')) {
+    if (BLOCKED_BY_NONE.test(value)) continue;
     for (const ref of value.matchAll(BLOCKED_BY_REF)) {
       out.push({ repo: ref[1] ?? null, number: Number(ref[2]) });
     }
@@ -28457,6 +28474,25 @@ async function selfTest() {
   t('blockedByTargets: ONE directive still yields exactly one target', numbersOf(blockedByTargets('`Blocked-by: #4242`')), '4242');
   t('blockedByTargets: prose naming `#n` OUTSIDE any directive invents nothing', numbersOf(blockedByTargets('We will wait for #9 and #10 before starting.')), '');
   t('blockedByTargets: a URL fragment inside a value is not a target', numbersOf(blockedByTargets('Blocked-by: #12 (trail: https://example.test/issues/8347#40)')), '12');
+  // A `none` value names no target, whatever it names after (#38086). The
+  // first pin is the MEASURED line on #37445/#37446, verbatim; the controls
+  // keep a ref run, a bulleted and a bolded directive reading as before.
+  t('blockedByTargets: the #38086 line — `none. … #N` is ZERO targets', numbersOf(blockedByTargets("Blocked-by: none. Order: independent of #36987's ruling.")), '');
+  t('blockedByTargets: …any case, any decoration around the directive', [
+    'Blocked-by: None — the ADR can land beside #36806',
+    '- `Blocked-by: NONE (see #1)`',
+    '**Blocked-by:** none; #2 is context',
+    'Blocked-by: `none` — #3 is context',
+  ].map((b) => numbersOf(blockedByTargets(b))).join('|'), '|||');
+  t('blockedByTargets: …and only that directive: a sibling on the line still counts', numbersOf(blockedByTargets('`Blocked-by: none (#5)` · `Blocked-by: #6`')), '6');
+  t('blockedByTargets: `none` AFTER a ref is prose, the ref still counts', numbersOf(blockedByTargets('Blocked-by: #7 (none of #8 matters)')), '7,8');
+  t('blockedByTargets: a word that merely starts with `none` is not the token', numbersOf(blockedByTargets('Blocked-by: nonesuch#9, none-of-them #10')), '9,10');
+  t('blockedByTargets: …and the `#A, #B` run, bulleted and bolded lines read as before', [
+    'Blocked-by: #6234, #6245',
+    '- Blocked-by: #9823',
+    '**Blocked-by:** #9823',
+  ].map((b) => numbersOf(blockedByTargets(b))).join('|'), '6234,6245|9823|9823');
+  t('hasBlockedByLine: a `none` line is still a line (H4 asks presence, not targets)', hasBlockedByLine('Blocked-by: none. Order: independent of #36987.'), true);
   // The whole directive family reads through `directiveValues`, so all of it
   // gains the multiplicity — pinned on a NON-`Blocked-by:` key, beside the pin
   // that a key after a WORD is still prose and invents nothing.

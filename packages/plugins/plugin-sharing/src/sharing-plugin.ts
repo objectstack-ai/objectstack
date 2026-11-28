@@ -1648,9 +1648,10 @@ export function buildSharingMiddleware(
         // the method, a throwing probe — leaves the refusal below untouched,
         // byte for byte.
         //
-        // By-id only, and deliberately: the bulk path composes a FILTER
-        // rather than a verdict and is tracked separately (#6736). Nothing
-        // here touches it.
+        // By-id here. The bulk path composes a FILTER rather than a verdict:
+        // its twin, the authored policies' own scope ORed into the bulk write
+        // scope, sits in the bulk branch below (#37535, ruling record
+        // 7190344023 (2a), which replaced the #6736 deferral).
         if (!(await service.admitsByIdWrite(ctx.object, String(id), verb, exec ?? {}))) {
           // [ADR-0111 D10] A fail-closed delete denial gets a specific,
           // greppable reason so the "edit-share does not grant delete"
@@ -1751,6 +1752,24 @@ export function buildSharingMiddleware(
         // `buildReadFilter`) IS marked `'policy'`; that difference is the ruled
         // read/write boundary, not drift between two copies of one pattern.
         writeFilter = composeAnd(writeFilter, delFilter);
+      }
+      // [#37535, ruling record 7190344023 (2a)] The bulk half of the by-id
+      // deferral above: a row an APP-AUTHORED update / delete policy admits is
+      // written by id (`admitsByIdWrite` → `probeAuthoredRowWrite`), so the
+      // predicate write reaches it too. The scope becomes sharing scope OR the
+      // authored policies' own scope (floor taken out, tenant wall kept),
+      // verb for verb, then is ANDed into the write as before.
+      // `plugin-security`'s own layers — the tenant wall, floor OR authored
+      // policies, the caller's readable rows — are untouched and still decide.
+      // ⛔ Not for a delegated write, where the by-id probe abstains too; and a
+      // scope that is already `null` (no narrowing) has nothing to widen. No
+      // authored `using` policy, an absent member or any failure answers
+      // `null`, which leaves the scope byte for byte. `buildWriteFilter`,
+      // `checkEdit` and `checkDelete` are not widened: this composition is the
+      // middleware's, as the by-id deferral is.
+      if (writeFilter && !exec?.onBehalfOf?.userId) {
+        const authoredScope = await service.probeAuthoredRowWriteFilter(ctx.object, verb, exec ?? {});
+        if (authoredScope) writeFilter = { $or: [writeFilter, authoredScope] };
       }
       if (writeFilter) {
         const ast: any = ctx.ast ?? {};

@@ -13,7 +13,7 @@
 - 拆分触发预登记:单轮逼近 fire 周期,或某仓在全序下持续断粮 ⇒ 按仓拆回多席。
 - seam 卡单一归属:归修复落地仓的席,双仓皆动 objectstack 侧主导;涉 cloud 者归 cloud PM(域表)。
 - `scripts/pm/**` 等住 objectstack 的全板工具链单写手恒为 objectstack 侧席,他侧上游立卡回链。
-- 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上那张卡的仓。
+- 工装只答被告知的仓,缺 `--repo`/`PM_SWEEP_REPO` 即答 objectstack;⛔ 不答手上卡的仓。
 - 规则 1:issue 住在修复落地的仓,分诊时按判据严格执行。
 - 判据:正文抽掉 objectstack 还成立 ⇒ 当场转仓(UI 缺陷不转,归 `domain:ui`);不成立才是缝卡。
 - 转仓走 `issue-transfer.mjs`;名册外或平台拒才重建:出处头 + 裸 `#N` 改全名 + 关源单为 moved。
@@ -25,8 +25,8 @@
 - 规则 2:跨层功能点或 `ui/` 消费的 `Seam:` 卡恒由分诊立父单 + 逐层子单,spec/后端先行。
 - `main` 有 `ui/` 起,新 spec 键不再先行、取代上句次序:与首个读者同 PR,hotcrm 读者同合并批。
 - 下游带 `Blocked-by: <owner/repo>#<n>`;`Blocked-by` 未关闭/未合并的不派发,对 GitHub 现验。
-- cloud 探针 `git merge-base --is-ancestor <合入sha> <pin sha>`;不过 `Blocked-by:` 改指 pin-bump 卡。
-- 探针在 objectstack 检出跑;合入sha = `main` 的 squash 合并;pin sha = cloud `.objectstack-sha` 里的 sha。
+- cloud 探针 `git-history.mjs ancestor --commit=<合入sha> --ref=<pin sha>`;不过 `Blocked-by:` 改指 pin-bump 卡。
+- 探针在 objectstack 检出跑;合入sha 取 `main` 的 squash 合并,pin sha 取 cloud `.objectstack-sha`。
 - 被链接或同父的两单永不同批;`ui/` 起的新键与首个读者除外,⛔ `planned` 行不单独进 main。
 - 规则 3:联动杂事立单,不靠记忆。
 - 已验收 PR 的产物流向另一仓,接受该 PR 的执行席立即在消费仓立后续单,带 `Blocked-by:`。

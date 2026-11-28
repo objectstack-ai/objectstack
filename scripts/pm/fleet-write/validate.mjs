@@ -166,6 +166,7 @@
  *      `client_payload`). Nothing was judged.
  */
 
+import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -204,7 +205,7 @@ import {
   MAX_DEQUEUE_REASON_BYTES,
   RERUN_FAILED_RERUN_STATES,
   RERUN_FAILED_STATUS,
-  RERUN_FAILED_WORKFLOWS,
+  RERUN_FAILED_WORKFLOWS_BY_REPO,
   SESSION_SHAPE,
   SHA_SHAPE,
   STROKE_SCOPED_PERMISSIONS,
@@ -380,6 +381,7 @@ import {
   failedJobNames,
   governedReviewRequests,
   rerunFailedFenceFailures,
+  rerunFailedWorkflows,
   rerunFailedFenceText,
   rerunFailedLandedText,
   rerunFailedPullNumber,
@@ -1785,13 +1787,17 @@ export async function selfTest() {
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-actions:\s*\$\{\{\s*steps\.validate\.outputs\.permission_actions\s*\}\}\s*$/gm)].length;
     t('⭐ ruling 3, no workflow edit: fleet-write.yml mints permission-actions from the validator\'s permission_actions output — the one input this row rides — and names neither this op nor its path', [mintsFromOutput, workflowText.includes('run_rerun_failed'), workflowText.includes('rerun-failed-jobs')], [1, false, false]);
     // The five fences on the run and its pull — the closed values, then each accepted and refused on the run's and the pull's own answers.
-    t('the fences on the run: the reviewed workflow list is exactly ci.yml and check-links.yml, frozen; the event pull_request; the attempt 1; completed with failure; and the read-back accepts queued and in_progress alone', [[...RERUN_FAILED_WORKFLOWS], Object.isFrozen(RERUN_FAILED_WORKFLOWS), RERUN_FAILED_EVENT, RERUN_FAILED_ATTEMPT, RERUN_FAILED_STATUS, RERUN_FAILED_CONCLUSION, [...RERUN_FAILED_RERUN_STATES], RERUN_FAILED_FENCES.map((f) => f.fence)], [['.github/workflows/ci.yml', '.github/workflows/check-links.yml'], true, 'pull_request', 1, 'completed', 'failure', ['queued', 'in_progress'], ['workflow', 'event', 'once', 'failed', 'head']]);
-    t('every listed workflow is a file on disk that runs on pull_request — so the list names a run the fences can accept', RERUN_FAILED_WORKFLOWS.map((p) => [p, existsSync(resolve(repoRoot, p)) && /^ {2}pull_request:/m.test(readFileSync(resolve(repoRoot, p), 'utf8'))]), RERUN_FAILED_WORKFLOWS.map((p) => [p, true]));
+    const HOTCRM = `${TARGET_OWNER}/hotcrm`;
+    t('the fences on the run: the reviewed workflow table is exactly objectstack ci.yml and check-links.yml and hotcrm link-check.yml, frozen at every level; the event pull_request; the attempt 1; completed with failure; and the read-back accepts queued and in_progress alone', [Object.entries(RERUN_FAILED_WORKFLOWS_BY_REPO).map(([r, ps]) => [r, [...ps]]), Object.isFrozen(RERUN_FAILED_WORKFLOWS_BY_REPO) && Object.values(RERUN_FAILED_WORKFLOWS_BY_REPO).every(Object.isFrozen), RERUN_FAILED_EVENT, RERUN_FAILED_ATTEMPT, RERUN_FAILED_STATUS, RERUN_FAILED_CONCLUSION, [...RERUN_FAILED_RERUN_STATES], RERUN_FAILED_FENCES.map((f) => f.fence)], [[[REPO, ['.github/workflows/ci.yml', '.github/workflows/check-links.yml']], [HOTCRM, ['.github/workflows/link-check.yml']]], true, 'pull_request', 1, 'completed', 'failure', ['queued', 'in_progress'], ['workflow', 'event', 'once', 'failed', 'head']]);
+    t('every repository the table keys is in the governed-repository roster, and one it does not key lists nothing', [Object.keys(RERUN_FAILED_WORKFLOWS_BY_REPO).filter((r) => !GOVERNED_REPOS.some((g) => g.slug === r)), [...rerunFailedWorkflows(`${TARGET_OWNER}/objectui`)], [...rerunFailedWorkflows(undefined)], [...rerunFailedWorkflows('__proto__')]], [[], [], [], []]);
+    const OWN_WORKFLOWS = rerunFailedWorkflows(REPO);
+    const runsOnPull = (text) => /^ {2}pull_request:/m.test(text);
+    t('every workflow this repository lists is a file on its disk that runs on pull_request — so the list names a run the fences can accept', OWN_WORKFLOWS.map((p) => [p, existsSync(resolve(repoRoot, p)) && runsOnPull(readFileSync(resolve(repoRoot, p), 'utf8'))]), OWN_WORKFLOWS.map((p) => [p, true]));
     // The read-only definition, read from each file after ci.yml (the op's own workflow): no secret but GITHUB_TOKEN, no
     // environment (no deploy), and a token that is read-only for every job — a top-level permissions block or one on each
     // job, and no write scope anywhere. Full-line comments are dropped first, so prose naming a scope is not read as one.
-    const readOnlyBreaches = (p) => {
-      const lines = readFileSync(resolve(repoRoot, p), 'utf8').split('\n').filter((l) => !/^\s*#/.test(l));
+    const readOnlyBreachesOf = (source) => {
+      const lines = source.split('\n').filter((l) => !/^\s*#/.test(l));
       const text = lines.join('\n');
       const jobsAt = lines.findIndex((l) => /^jobs:\s*$/.test(l));
       const jobLines = jobsAt < 0 ? [] : lines.slice(jobsAt + 1);
@@ -1804,7 +1810,28 @@ export async function selfTest() {
         !(/^permissions:/m.test(text) || (jobs > 0 && jobPermissions === jobs)) && 'a job whose token no permissions block covers',
       ].filter(Boolean);
     };
-    t('every listed workflow after ci.yml is READ-ONLY by its own file: no secret but GITHUB_TOKEN, no environment, a permissions block covering every job, no write scope', RERUN_FAILED_WORKFLOWS.slice(1).map((p) => [p, readOnlyBreaches(p)]), RERUN_FAILED_WORKFLOWS.slice(1).map((p) => [p, []]));
+    const readOnlyBreaches = (p) => readOnlyBreachesOf(readFileSync(resolve(repoRoot, p), 'utf8'));
+    t('every workflow this repository lists after ci.yml is READ-ONLY by its own file: no secret but GITHUB_TOKEN, no environment, a permissions block covering every job, no write scope', OWN_WORKFLOWS.slice(1).map((p) => [p, readOnlyBreaches(p)]), OWN_WORKFLOWS.slice(1).map((p) => [p, []]));
+    // Another repository's workflow is not on this disk. Its entry is admitted on a RECORDED copy of the file, vendored
+    // under scripts/fixtures/rerun-failed/ (a .txt, so no workflow or yml scanner reads it as this repository's), whose git blob id must equal the one read on that repository when it was admitted (the
+    // ops.mjs table names it). The copy is judged by the same definition. This proves the file AS ADMITTED — a later
+    // edit on that repository changes its blob and is not seen here; re-reading it is the reviewer's, on the next PR
+    // that touches the entry.
+    const RECORDED = {
+      [HOTCRM]: { '.github/workflows/link-check.yml': { copy: 'scripts/fixtures/rerun-failed/hotcrm.link-check.yml.txt', blob: 'f1e13112314af2d768ac9918915bf355a483704e' } },
+    };
+    const gitBlobId = (buf) => createHash('sha1').update(`blob ${buf.length}\0`).update(buf).digest('hex');
+    const recordedRead = (repo, p) => {
+      const rec = RECORDED[repo]?.[p];
+      if (!rec) return { path: p, recorded: false };
+      const buf = readFileSync(resolve(repoRoot, rec.copy));
+      const text = buf.toString('utf8');
+      return { path: p, recorded: true, blob: gitBlobId(buf) === rec.blob, pullRequest: runsOnPull(text), breaches: readOnlyBreachesOf(text) };
+    };
+    const otherRepos = Object.keys(RERUN_FAILED_WORKFLOWS_BY_REPO).filter((r) => r !== REPO);
+    t("every workflow another repository lists has a recorded copy whose git blob id is the one admitted, runs on pull_request, and is READ-ONLY by the same definition", otherRepos.map((r) => [r, rerunFailedWorkflows(r).map((p) => recordedRead(r, p))]), otherRepos.map((r) => [r, rerunFailedWorkflows(r).map((p) => ({ path: p, recorded: true, blob: true, pullRequest: true, breaches: [] }))]));
+    t('…the recorded copy can fail: its blob id moves with one byte, and the definition reads a write scope or a secret into it', [gitBlobId(Buffer.concat([readFileSync(resolve(repoRoot, RECORDED[HOTCRM]['.github/workflows/link-check.yml'].copy)), Buffer.from(' ')])) === RECORDED[HOTCRM]['.github/workflows/link-check.yml'].blob, readOnlyBreachesOf(readFileSync(resolve(repoRoot, RECORDED[HOTCRM]['.github/workflows/link-check.yml'].copy), 'utf8').replace('contents: read', 'contents: write')), readOnlyBreachesOf(readFileSync(resolve(repoRoot, RECORDED[HOTCRM]['.github/workflows/link-check.yml'].copy), 'utf8').replace("base-branch: 'main'", "base-branch: ${{ secrets.PAT }}"))], [false, ['a write scope'], ['secrets.PAT']]);
+    t('…the blob id is git\'s: the empty blob reads as git hash-object answers it', gitBlobId(Buffer.alloc(0)), 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
     t('…the definition can fail: ci.yml (turbo cache secrets), validate-deps.yml (issues write) and release.yml each breach it', ['.github/workflows/ci.yml', '.github/workflows/validate-deps.yml', '.github/workflows/release.yml'].map((p) => readOnlyBreaches(p).length > 0), [true, true, true]);
     // The measured run as its attempt 1 read before the maintainer re-ran it (run 39713789453; fields as the run endpoint answers them).
     // It ran on pull #25155's head; PULL is that pull's OWN answer (GET /pulls/25155), which the head fence reads — never the copy the run embeds.
@@ -1813,13 +1840,17 @@ export async function selfTest() {
     const MEASURED = { id: RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: HEAD, pull_requests: [{ number: 25155, head: { sha: HEAD } }] };
     const PULL = { number: 25155, state: 'open', head: { sha: HEAD } };
     // `fenced` takes ONE argument — it is passed to Array.map, whose index would otherwise land in the pull's place.
-    const fencedWith = (patch, pull) => rerunFailedFenceFailures({ ...MEASURED, ...patch }, pull).map((f) => f.fence);
+    const fencedOn = (repo, patch, pull) => rerunFailedFenceFailures({ ...MEASURED, ...patch }, pull, repo).map((f) => f.fence);
+    const fencedWith = (patch, pull) => fencedOn(REPO, patch, pull);
     const fenced = (patch) => fencedWith(patch, PULL);
-    t('accepted: the measured run passes all five fences — its head_sha is the current head of the pull it names, by that pull\'s own answer', [rerunFailedPullNumber(MEASURED), rerunFailedFenceFailures(MEASURED, PULL)], [25155, []]);
+    t('accepted: the measured run passes all five fences — its head_sha is the current head of the pull it names, by that pull\'s own answer', [rerunFailedPullNumber(MEASURED), rerunFailedFenceFailures(MEASURED, PULL, REPO)], [25155, []]);
     t('⛔ fence head, refused: a stale head (the pull was pushed to since), an answer for another pull, a run with no head_sha, and no pull answer at all — each naming the head fence alone', [fencedWith({}, { ...PULL, head: { sha: MOVED } }), fencedWith({}, { ...PULL, number: 25156 }), fenced({ head_sha: undefined }), fencedWith({}, null)], [['head'], ['head'], ['head'], ['head']]);
     t("⛔ fence head, refused: the run's EMBEDDED copy of the pull is never read — it agrees with head_sha, and the pull's own answer that moved on still refuses", [MEASURED.pull_requests[0].head.sha === MEASURED.head_sha, fencedWith({}, { ...PULL, head: { sha: MOVED } })], [true, ['head']]);
     t("⛔ fence head, refused by name: a run naming no pull request — pull_requests empty (a fork pull request's run), absent, or an entry with no number — and the sentence says so", [[], undefined, [{ head: { sha: HEAD } }]].map((pull_requests) => [rerunFailedPullNumber({ ...MEASURED, pull_requests }), fencedWith({ pull_requests }, null)]).concat([rerunFailedFenceText(rerunFailedFenceFailures({ ...MEASURED, pull_requests: [] }, null)).includes('fence `head`: the run reads "no pull_requests entry')]), [[null, ['head']], [null, ['head']], [null, ['head']], true]);
-    t('accepted: a run of each listed workflow passes all five fences — the list names runs the relay re-runs, check-links.yml among them', RERUN_FAILED_WORKFLOWS.map((path) => [path, rerunFailedFenceFailures({ ...MEASURED, path }, PULL)]), RERUN_FAILED_WORKFLOWS.map((path) => [path, []]));
+    const LISTED = Object.entries(RERUN_FAILED_WORKFLOWS_BY_REPO).flatMap(([repo, paths]) => paths.map((path) => [repo, path]));
+    t('accepted: a run of each listed workflow passes all five fences on the repository that lists it — check-links.yml and hotcrm link-check.yml among them', LISTED.map(([repo, path]) => [repo, path, rerunFailedFenceFailures({ ...MEASURED, path }, PULL, repo)]), LISTED.map(([repo, path]) => [repo, path, []]));
+    t('⛔ fence workflow, refused across repositories: objectstack\'s ci.yml and check-links.yml on hotcrm, hotcrm\'s link-check.yml on objectstack, ci.yml on a repository with no entry, and a run judged with no repository — each naming the workflow fence alone', [fencedOn(HOTCRM, { path: '.github/workflows/ci.yml' }, PULL), fencedOn(HOTCRM, { path: '.github/workflows/check-links.yml' }, PULL), fencedOn(REPO, { path: '.github/workflows/link-check.yml' }, PULL), fencedOn(`${TARGET_OWNER}/objectui`, {}, PULL), fencedOn(undefined, {}, PULL)], [['workflow'], ['workflow'], ['workflow'], ['workflow'], ['workflow']]);
+    t('…the workflow refusal quotes the path and the repository it was read on, and names the per-repository lists', [rerunFailedFenceText(rerunFailedFenceFailures({ ...MEASURED }, PULL, HOTCRM)).includes('".github/workflows/ci.yml on objectstack-ai/hotcrm"'), rerunFailedFenceText(rerunFailedFenceFailures({ ...MEASURED }, PULL, HOTCRM)).includes('objectstack-ai/hotcrm: .github/workflows/link-check.yml')], [true, true]);
     t('⛔ fence workflow, refused: another workflow, the bare file name, a ref-suffixed path, a missing path — each naming the workflow fence alone', [{ path: '.github/workflows/lint.yml' }, { path: 'ci.yml' }, { path: '.github/workflows/ci.yml@refs/heads/main' }, { path: undefined }].map(fenced), [['workflow'], ['workflow'], ['workflow'], ['workflow']]);
     t('⛔ fence event, refused: push, merge_group, schedule, release, workflow_dispatch and pull_request_target runs — each naming the event fence alone', ['push', 'merge_group', 'schedule', 'release', 'workflow_dispatch', 'pull_request_target'].map((event) => fenced({ event })), [['event'], ['event'], ['event'], ['event'], ['event'], ['event']]);
     t('⛔ fence once, refused: attempt 2, attempt 3, the string "1" and a missing attempt — each naming the once fence alone', [{ run_attempt: 2 }, { run_attempt: 3 }, { run_attempt: '1' }, { run_attempt: undefined }].map(fenced), [['once'], ['once'], ['once'], ['once']]);

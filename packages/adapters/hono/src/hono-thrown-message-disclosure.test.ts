@@ -43,8 +43,8 @@
  * `packages/qa/http-conformance/src/hono-declared-envelope.conformance.test.ts`.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import { INTERNAL_ERROR_MESSAGE, LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 
 const mockDispatcher = {
   getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', routes: {} }),
@@ -150,5 +150,67 @@ describe('[#23532] the auth-mount arm', () => {
     expect(answer.status, answer.text).toBe(500);
     expect(answer.body).toEqual(withheld);
     expectNoDiagnostic(answer);
+  });
+});
+
+/**
+ * [#37828] `thrownJson`'s declared arm answers a throw that carries a
+ * `userMessage` in the caller's language, so its answer says it varies by
+ * `Accept-Language`, appended to whatever `Vary` the host already writes.
+ *
+ * The throw is the shape `recordNotFoundError` (`@objectstack/core`) builds for
+ * a by-id read of an id that names no row, written out here because this
+ * package does not depend on core: status `404`, code `RECORD_NOT_FOUND`, and
+ * the zh-CN `record_not_found` sentence as its `userMessage`.
+ */
+describe('[#37828] thrownJson: a declared userMessage varies by Accept-Language', () => {
+  const ORIG_CORS_ORIGIN = process.env.OS_CORS_ORIGIN;
+  afterAll(() => {
+    if (ORIG_CORS_ORIGIN === undefined) delete process.env.OS_CORS_ORIGIN;
+    else process.env.OS_CORS_ORIGIN = ORIG_CORS_ORIGIN;
+  });
+
+  const localizedNotFound = () => Object.assign(new Error('Record r_nowhere not found in ledger'), {
+    status: 404,
+    code: 'RECORD_NOT_FOUND',
+    userMessage: '该记录不存在，或您无权访问它。',
+  });
+  const varyTokens = (res: Response): string[] =>
+    (res.headers.get('vary') ?? '').split(',').map((token) => token.trim()).filter(Boolean);
+
+  it('the catch-all arm: 404 RECORD_NOT_FOUND, the userMessage on the wire, and Vary names Accept-Language', async () => {
+    mockDispatcher.dispatch.mockRejectedValueOnce(localizedNotFound());
+    const app = createHonoApp({ kernel: { name: 'test-kernel' } as any, prefix: PREFIX, cors: false });
+    const res = await app.request(`http://localhost${PREFIX}/data/ledger/r_nowhere`, { headers: { 'Accept-Language': 'zh-CN' } });
+    const body = await res.json() as any;
+    expect(res.status, JSON.stringify(body)).toBe(404);
+    expect(body.error.code).toBe('RECORD_NOT_FOUND');
+    expect(body.error.userMessage).toBe('该记录不存在，或您无权访问它。');
+    expect(varyTokens(res)).toEqual([LOCALIZED_ANSWER_VARY]);
+  });
+
+  it('the auth-mount arm answers through the same thrownJson', async () => {
+    const app = createHonoApp({ kernel: kernelWithThrowingAuth(localizedNotFound()) as any, prefix: PREFIX, cors: false });
+    const res = await app.request(`http://localhost${PREFIX}/auth/get-session`);
+    expect(res.status).toBe(404);
+    expect(varyTokens(res)).toEqual([LOCALIZED_ANSWER_VARY]);
+  });
+
+  it('appended, not set: with CORS on, Origin keeps its place beside Accept-Language', async () => {
+    process.env.OS_CORS_ORIGIN = 'https://app.example.com';
+    mockDispatcher.dispatch.mockRejectedValueOnce(localizedNotFound());
+    const app = createHonoApp({ kernel: { name: 'test-kernel' } as any, prefix: PREFIX });
+    const res = await app.request(`http://localhost${PREFIX}/data/ledger/r_nowhere`, { headers: { Origin: 'https://app.example.com' } });
+    expect(res.status).toBe(404);
+    expect(varyTokens(res)).toContain(LOCALIZED_ANSWER_VARY);
+    expect(varyTokens(res)).toContain('Origin');
+  });
+
+  it('CONTROL a declared refusal with no userMessage gets no Vary from thrownJson', async () => {
+    mockDispatcher.dispatch.mockRejectedValueOnce(Object.assign(new Error('Record r_nowhere not found in ledger'), { status: 404, code: 'RECORD_NOT_FOUND' }));
+    const app = createHonoApp({ kernel: { name: 'test-kernel' } as any, prefix: PREFIX, cors: false });
+    const res = await app.request(`http://localhost${PREFIX}/data/ledger/r_nowhere`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get('vary')).toBeNull();
   });
 });

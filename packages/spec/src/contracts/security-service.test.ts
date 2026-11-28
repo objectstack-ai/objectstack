@@ -164,6 +164,9 @@ describe('Security Service Contract', () => {
     // @ts-expect-error `checkAuthoredRowWrite` is OPTIONAL — not a required member
     const notRequired: RequiredMember = 'checkAuthoredRowWrite';
     expect(notRequired).toBe('checkAuthoredRowWrite');
+    // @ts-expect-error `getAuthoredRowWriteFilter` is OPTIONAL — not a required member
+    const alsoNotRequired: RequiredMember = 'getAuthoredRowWriteFilter';
+    expect(alsoNotRequired).toBe('getAuthoredRowWriteFilter');
   });
 
   it('canExport: an access-narrowing answer — false denies, and absence is feature-detectable', async () => {
@@ -602,6 +605,35 @@ describe('Security Service Contract', () => {
     const absent = makeService();
     const verdict = (await absent.checkAuthoredRowWrite?.('deal', 'r_open', 'update', {})) ?? 'abstain';
     expect(verdict).toBe('abstain');
+  });
+
+  it('getAuthoredRowWriteFilter is OPTIONAL, verb-typed, and its absence widens nothing', async () => {
+    // [#37535] The filter-shaped twin of `checkAuthoredRowWrite`. Optional for
+    // the same reason: a security service that predates it still satisfies the
+    // contract, and a consumer must feature-detect before calling it.
+    const withoutIt: ISecurityService = makeService();
+    expect(typeof withoutIt.getAuthoredRowWriteFilter).toBe('undefined');
+    const mustNotCompileWithoutAGuard = () =>
+      // @ts-expect-error possibly undefined — a consumer must feature-detect first
+      withoutIt.getAuthoredRowWriteFilter('deal', 'update', {});
+    expect(typeof mustNotCompileWithoutAGuard).toBe('function');
+    // Absence and `undefined` are one instruction: no scope is added.
+    expect(await withoutIt.getAuthoredRowWriteFilter?.('deal', 'update', {})).toBeUndefined();
+
+    // The operation axis is the verdict's own: the two RLS write classes.
+    type Operation = Parameters<NonNullable<ISecurityService['getAuthoredRowWriteFilter']>>[1];
+    expectTypeOf<Operation>().toEqualTypeOf<AuthoredRowWriteOperation>();
+    // @ts-expect-error `select` is a read class — this surface answers writes only
+    const notAWrite: Operation = 'select';
+    expect(notAWrite).toBe('select');
+
+    // An implementation answers a filter for the verb it is asked about.
+    const serving = makeService({
+      getAuthoredRowWriteFilter: async (_object, operation) =>
+        operation === 'update' ? { stage: 'open' } : undefined,
+    });
+    expect(await serving.getAuthoredRowWriteFilter?.('deal', 'update', { userId: 'u1' })).toEqual({ stage: 'open' });
+    expect(await serving.getAuthoredRowWriteFilter?.('deal', 'delete', { userId: 'u1' })).toBeUndefined();
   });
 
   it('explain accepts a record-scoped request and an explicit target user', async () => {

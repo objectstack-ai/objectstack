@@ -531,6 +531,23 @@ export interface SharingSecurityProbe {
     context?: unknown,
   ): Promise<AuthoredRowWriteVerdict>;
   /**
+   * [#37535, ruling record 7190344023 (2a)] `ISecurityService.getAuthoredRowWriteFilter`
+   * — the filter-shaped twin of the verdict above: the rows the caller's
+   * APP-AUTHORED row-level policies admit for a write operation, the platform
+   * ownership floor taken out. Read by
+   * {@link SharingService.probeAuthoredRowWriteFilter} so the bulk write scope
+   * can be WIDENED by OR, verb for verb, to the rows the by-id deferral above
+   * reaches. Structural on purpose, as the verdict is.
+   *
+   * Evidence, never authorization; every answer that is not a filter (none, an
+   * absent method or service, a throw) is one instruction: keep today's scope.
+   */
+  getAuthoredRowWriteFilter?(
+    object: string,
+    operation: AuthoredRowWriteOperation,
+    context?: unknown,
+  ): Promise<unknown>;
+  /**
    * [ADR-0111 D1 DEPTH] The caller's effective WRITE scope on `object`
    * (`own` / `own_and_reports` / `unit` / `unit_and_below` / `org`), resolved
    * from their permission sets exactly as the CRUD middleware resolves it.
@@ -1633,6 +1650,56 @@ export class SharingService implements ISharingService {
         err instanceof Error ? err : new Error(String(err)),
       );
       return 'abstain';
+    }
+  }
+
+  /**
+   * [#37535, ruling record 7190344023 (2a)] The bulk counterpart of
+   * {@link probeAuthoredRowWrite}: ask the OTHER row-level write authority for
+   * the FILTER its app-authored policies admit for `operation`, so the sharing
+   * middleware can OR it into its bulk write scope and a predicate write
+   * reaches the rows a by-id write of each reaches through that deferral.
+   *
+   * **Not a sharing scope, and it never becomes one** — for the reasons
+   * {@link probeAuthoredRowWrite} gives. Nothing here feeds
+   * {@link buildWriteFilter} / {@link checkEdit} / {@link checkDelete}; only the
+   * middleware's bulk branch composes it, beside `buildWriteFilter`'s answer.
+   * A PASSTHROUGH, so it has no logic of its own to drift from the verdict.
+   *
+   * **Fail-closed in the no-widening direction**: an absent security service, a
+   * service that predates the member, a principal-less context, a delegated
+   * (on-behalf-of) identity — where the by-id probe abstains too — a probe that
+   * throws, and any answer that is not a filter object all return `null`,
+   * byte-for-byte the scope of a deployment that never asked.
+   */
+  async probeAuthoredRowWriteFilter(
+    object: string,
+    operation: AuthoredRowWriteOperation,
+    context: ExecutionContext,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      if (!context?.userId) return null;
+      // [ADR-0090 D10] As {@link probeAuthoredRowWrite}: a delegated identity
+      // is not measurable by one answer, so it widens nothing.
+      if ((context as { onBehalfOf?: { userId?: string } }).onBehalfOf?.userId) return null;
+
+      const probe = this.securityService?.();
+      if (!probe || typeof probe.getAuthoredRowWriteFilter !== 'function') return null;
+
+      const filter = await probe.getAuthoredRowWriteFilter(object, operation, context);
+      // Only a filter object widens. Anything else is an unmeasured answer.
+      return filter != null && typeof filter === 'object' && !Array.isArray(filter)
+        ? (filter as Record<string, unknown>)
+        : null;
+    } catch (err) {
+      this.logger?.warn?.(
+        `[sharing] the authored-row-write scope for '${object}' (${operation}, user `
+        + `${context?.userId ?? 'unknown'}) could not be resolved — the predicate write keeps the sharing `
+        + 'scope alone (fail-closed: only an app-authored row-level policy that positively admits rows '
+        + 'may widen it)',
+        err instanceof Error ? err : new Error(String(err)),
+      );
+      return null;
     }
   }
 

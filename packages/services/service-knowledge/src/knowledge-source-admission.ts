@@ -27,8 +27,10 @@
  *    `@objectstack/core` — the one the data route and the analytics door ask).
  * 2. **API exposure.** `canServeApiOperation(enable, 'search')` — the decision
  *    and operation the cross-object search asks: a knowledge search is a search
- *    over the object's rows. `apiEnabled: false` and an `apiMethods` whitelist
- *    that does not grant `search` both refuse.
+ *    over the object's rows. `apiEnabled: false` refuses, and so does an
+ *    `apiMethods` whitelist that does not grant `list` (search derives from
+ *    `list`; `search` itself is a retired list value the parse strips) or that
+ *    grants `list` beside `enable.searchable: false`.
  * 3. **System objects.** A `sys_*` object is served only when it opts into AI
  *    reads by its one reading, `isAiReadExposed` (`enable.aiReadable: true`,
  *    the stored-metadata family never) — the posture the MCP record tools take.

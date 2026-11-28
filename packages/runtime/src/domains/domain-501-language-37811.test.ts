@@ -18,17 +18,26 @@
  *  1. the doors that had no `501` fixture: `/auth`, `/mcp`, the `/meta`
  *     layered read and save, `/share-links`, the `/security` reopen, and the
  *     `/automation` run list, resume and flow clone;
- *  2. a source walk over `src/domains/`: no `deps.error(…, 501)` is left
- *     outside the two modules that build one on purpose, so a new fixed-English
- *     `501` fails here and is written through the catalog instead.
+ *  2. a source walk over `src/domains/`: no `501` is written in code outside
+ *     the one module that builds one on purpose, except the reasoned
+ *     exemptions it names, so a new fixed-English `501` fails here and is
+ *     written through the catalog instead (#37864 widened it from a literal
+ *     `deps.error(…, 501)` to every `501` in code, strings and comments
+ *     stripped);
+ *  3. [#37864] `capabilityUnavailable`, the mounted-but-unimplemented `501`
+ *     of `/ai`, `/automation`, `/notifications` and `/ui`, in the request's
+ *     language, its English held equal to discovery's
+ *     `serviceUnavailableMessage(slot)` for every slot; and the `/mcp/skill`
+ *     door's own language case.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 // [#37811] Paid at collection: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
 import '@objectstack/metadata';
 import { readFileSync, readdirSync } from 'node:fs';
-import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
+import { BUILTIN_OPERATION_MESSAGES, CoreServiceName, serviceUnavailableMessage } from '@objectstack/spec/system';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { capabilityUnavailableMessage } from './unavailable.js';
 
 const LANGS = [
     ['en', {}],
@@ -144,46 +153,217 @@ describe('#37811 · 1 · the doors with no 501 fixture of their own', () => {
     });
 });
 
-/** Every `deps.error(` call in `source` whose status argument is the literal `501`. */
-function literal501Calls(source: string): string[] {
-    const out: string[] = [];
-    let from = 0;
-    for (;;) {
-        const at = source.indexOf('deps.error(', from);
-        if (at < 0) return out;
-        let depth = 0;
-        let end = at + 'deps.error'.length;
-        for (; end < source.length; end++) {
-            const c = source[end];
-            if (c === '(') depth++;
-            else if (c === ')' && --depth === 0) break;
+/**
+ * `source` with every comment and string literal blanked out (each character
+ * replaced by a space, newlines kept), so what is left is code: a `501` in a
+ * message or a comment is not a status, and a parenthesis inside a string
+ * cannot unbalance anything. Template literals are blanked too, their `${…}`
+ * holes kept as code.
+ *
+ * Two limits, by design: regex literals are not lexed (a quote, `//` or
+ * backtick inside one would blank code after it; no domain module has such a
+ * regex today, and the exactly-one-site exemption tests would trip if one
+ * hid a site), and only `src/domains/` is walked, so a `501` reached through
+ * a helper outside it is not seen.
+ */
+function codeOnly(source: string): string {
+    const out = source.split('');
+    const blank = (from: number, to: number): void => {
+        for (let k = from; k < to; k++) if (out[k] !== '\n') out[k] = ' ';
+    };
+    // A stack of open template literals: each entry is the brace depth of the
+    // `${` hole the scan is in (0 = in the template's text).
+    const templates: number[] = [];
+    let i = 0;
+    while (i < source.length) {
+        const c = source[i];
+        const next = source[i + 1];
+        const inTemplateText = templates.length > 0 && templates[templates.length - 1] === 0;
+        if (inTemplateText) {
+            if (c === '\\') { blank(i, i + 2); i += 2; continue; }
+            if (c === '`') { templates.pop(); blank(i, i + 1); i++; continue; }
+            if (c === '$' && next === '{') { templates[templates.length - 1] = 1; i += 2; continue; }
+            blank(i, i + 1); i++; continue;
         }
-        const call = source.slice(at, end + 1);
-        if (/,\s*501\s*[,)]/.test(call)) out.push(call.replace(/\s+/g, ' ').slice(0, 160));
-        from = end + 1;
+        if (c === '/' && next === '/') {
+            const end = source.indexOf('\n', i);
+            const stop = end < 0 ? source.length : end;
+            blank(i, stop); i = stop; continue;
+        }
+        if (c === '/' && next === '*') {
+            const end = source.indexOf('*/', i + 2);
+            const stop = end < 0 ? source.length : end + 2;
+            blank(i, stop); i = stop; continue;
+        }
+        if (c === '\'' || c === '"') {
+            let j = i + 1;
+            while (j < source.length && source[j] !== c && source[j] !== '\n') j += source[j] === '\\' ? 2 : 1;
+            blank(i, j + 1); i = j + 1; continue;
+        }
+        if (c === '`') { templates.push(0); blank(i, i + 1); i++; continue; }
+        if (templates.length > 0) {
+            if (c === '{') templates[templates.length - 1]++;
+            else if (c === '}' && --templates[templates.length - 1] === 0) { i++; continue; }
+        }
+        i++;
     }
+    return out.join('');
+}
+
+/** Every `501` written in code in `source`, each with the last 160 characters of code up to it (whitespace collapsed). */
+function code501Sites(source: string): string[] {
+    const code = codeOnly(source);
+    const out: string[] = [];
+    for (const m of code.matchAll(/(?<![\w.])501(?![\w.])/g)) {
+        const before = code.slice(0, m.index! + 3).replace(/\s+/g, ' ');
+        out.push(before.slice(-160).trim());
+    }
+    return out;
 }
 
 describe('#37811 · 2 · no fixed-English 501 is left in the domain modules', () => {
-    // The two modules that build a 501 from `deps.error` on purpose:
-    //  - `own-door-bridge.ts` is `localizedNotImplemented`, the builder every
-    //    localized 501 goes through;
-    //  - `unavailable.ts` is `capabilityUnavailable`, whose sentence is the
-    //    discovery remedy (`serviceUnavailableMessage`, `services.<slot>.message`)
-    //    by contract, byte for byte: it stays English while discovery is English.
-    // The MCP resume door's `501` (`mcp.ts`, `resumeDoorError`) is not a
-    // `deps.error` call either: it is thrown into the resume tool's error
-    // mapping, read by the calling agent beside the door's other English
-    // refusals, and it stays English.
-    const BUILDERS = new Set(['own-door-bridge.ts', 'unavailable.ts']);
+    // The one module that builds a 501 from `deps.error` on purpose:
+    // `own-door-bridge.ts` is `localizedNotImplemented`, the builder every
+    // localized 501 goes through. [#37864] `unavailable.ts` is no longer one:
+    // `capabilityUnavailable` answers through `catalogNotImplemented` too.
+    const BUILDERS = new Set(['own-door-bridge.ts']);
+    // [#37864] The `501`s in code that are not a fixed English sentence of a
+    // domain's own, each matched by the code just before it and each with its
+    // reason. A site that matches none of these fails; an exemption that
+    // matches nothing fails too, so the list cannot outlive its sites.
+    const EXEMPT: ReadonlyArray<{ file: string; before: RegExp; reason: string }> = [
+        {
+            file: 'meta.ts',
+            before: /deps\.errorFromThrown\(e, 501$/,
+            reason: 'the metadata service threw: the message is that error\'s own, 501 only its fallback status',
+        },
+        {
+            file: 'mcp.ts',
+            before: /throw resumeDoorError\( deps,[ +,]*501$/,
+            reason: 'thrown into the resume tool\'s error mapping and read by the calling agent beside the door\'s other English refusals: it stays English',
+        },
+        {
+            file: 'permission-set-clone.ts',
+            before: /\{ statusCode: 501$/,
+            reason: 'a catalog messageKey (PAIR_UNSUPPORTED_KEY), rendered in the request\'s language where it is answered',
+        },
+        {
+            file: 'permission-set-clone.ts',
+            before: /thrown\?\.statusCode === 501$/,
+            reason: 'reads that same throw back, it answers nothing',
+        },
+    ];
     const dir = new URL('./', import.meta.url);
     const modules = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !BUILDERS.has(f));
+    const sitesOf = (file: string): string[] => code501Sites(readFileSync(new URL(file, dir), 'utf8'));
 
     it('walks the domain modules (a guard against an empty walk)', () => {
-        expect(modules).toEqual(expect.arrayContaining(['auth.ts', 'meta.ts', 'packages.ts', 'automation.ts', 'security.ts']));
+        expect(modules).toEqual(expect.arrayContaining(['auth.ts', 'meta.ts', 'packages.ts', 'automation.ts', 'security.ts', 'unavailable.ts']));
     });
 
-    it.each(modules)('%s answers no deps.error(…, 501): its 501s go through catalogNotImplemented', (file) => {
-        expect(literal501Calls(readFileSync(new URL(file, dir), 'utf8'))).toEqual([]);
+    it('sees a 501 through any call, and none inside a string or a comment (the walker itself)', () => {
+        expect(code501Sites('return deps.error(\'a (b\', 501);')).toHaveLength(1);
+        expect(code501Sites('return deps.errorFromThrown(e, 501);')).toHaveLength(1);
+        expect(code501Sites('return respond501(ctx, 501);')).toHaveLength(1);
+        expect(code501Sites('const s = `${x ? 501 : 0}`;')).toHaveLength(1);
+        expect(code501Sites('const s = \'501 Not Implemented\'; // 501\n/* 501 */ const t = "(501"; const u = `501 ${y}`;')).toEqual([]);
+        expect(code501Sites('const v = 5010; const w = x.501;')).toEqual([]);
+    });
+
+    it.each(modules)('%s writes no 501 in code but the exempted ones: its 501s go through catalogNotImplemented', (file) => {
+        const unexplained = sitesOf(file).filter((site) => !EXEMPT.some((e) => e.file === file && e.before.test(site)));
+        expect(unexplained).toEqual([]);
+    });
+
+    it.each(EXEMPT.map((e) => [e.file, e.before.source, e] as const))('the exemption in %s (%s) still names exactly one site', (_file, _src, e) => {
+        expect(sitesOf(e.file).filter((site) => e.before.test(site))).toHaveLength(1);
+    });
+});
+
+/** The catalog sentence for `key` in `locale`, its `{{params}}` filled. */
+const rendered = (locale: string, key: string, params: Record<string, string> = {}): string =>
+    BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+
+describe('#37864 · 3 · capabilityUnavailable follows the request\'s language; its English stays discovery\'s', () => {
+    const CAPABILITY_KEYS = Object.keys(BUILTIN_OPERATION_MESSAGES.en).filter((key) => key.startsWith('capability_unavailable_'));
+    const placeholders = (template: string): string[] => [...template.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
+
+    it('the English of every CoreServiceName slot is serviceUnavailableMessage(slot), byte for byte', () => {
+        // The drift half: discovery stays English (`services.<slot>.message`),
+        // the 501 renders the catalog, and the two must name the same remedy.
+        // A slot given a sentence of its own in `core-services.zod.ts` fails
+        // here until `unavailable.ts` maps it to a key.
+        expect(CoreServiceName.options.length).toBeGreaterThan(10);
+        for (const slot of [...CoreServiceName.options, 'not-a-real-slot']) {
+            expect(capabilityUnavailableMessage(slot), slot).toBe(serviceUnavailableMessage(slot));
+            expect(capabilityUnavailableMessage(slot, 'en-US'), slot).toBe(serviceUnavailableMessage(slot));
+        }
+    });
+
+    it('names the five keys, each translated in every locale with the English placeholders kept', () => {
+        expect(CAPABILITY_KEYS.sort()).toEqual([
+            'capability_unavailable_ai',
+            'capability_unavailable_install',
+            'capability_unavailable_search',
+            'capability_unavailable_ui',
+            'capability_unavailable_unshipped',
+        ]);
+        for (const key of CAPABILITY_KEYS) {
+            const en = BUILTIN_OPERATION_MESSAGES.en[key];
+            for (const locale of ['zh-CN', 'ja-JP', 'es-ES']) {
+                const text = BUILTIN_OPERATION_MESSAGES[locale][key];
+                expect(text, `${locale} ${key}`).toBeTruthy();
+                expect(text, `${locale} ${key}`).not.toBe(en);
+                expect(placeholders(text), `${locale} ${key}`).toEqual(placeholders(en));
+            }
+        }
+    });
+
+    it('every slot renders a non-English sentence in each catalog locale, its package and slot names untranslated', () => {
+        for (const slot of CoreServiceName.options) {
+            for (const locale of ['zh-CN', 'ja-JP', 'es-ES']) {
+                const text = capabilityUnavailableMessage(slot, locale);
+                expect(text, `${locale} ${slot}`).not.toBe(serviceUnavailableMessage(slot));
+                expect(text, `${locale} ${slot}`).not.toMatch(/\{\{/);
+            }
+        }
+        expect(capabilityUnavailableMessage('notification', 'zh-CN')).toContain('@objectstack/service-messaging');
+        expect(capabilityUnavailableMessage('not-a-real-slot', 'ja-JP')).toContain('not-a-real-slot');
+    });
+
+    const LANGS3 = [
+        ['en', {}],
+        ['ja-JP', { 'accept-language': 'ja-JP,ja;q=0.9' }],
+        ['zh-CN', { 'accept-language': 'zh-CN' }],
+    ] as const;
+    // Each door with nothing behind it, as the dispatcher reaches it.
+    const DOORS: ReadonlyArray<readonly [string, string, (d: HttpDispatcher, ctx: any) => Promise<{ response?: any }>]> = [
+        ['/ai', 'ai', (d, ctx) => d.handleAI('/ai/models', 'GET', undefined, {}, ctx)],
+        ['/automation', 'automation', (d, ctx) => d.handleAutomation('', 'GET', undefined, ctx, {})],
+        ['/notifications', 'notification', (d, ctx) => d.handleNotification('', 'GET', undefined, {}, ctx)],
+        ['/ui', 'ui', (d, ctx) => d.handleUi('/view/account', {}, ctx)],
+    ];
+
+    it.each(DOORS)('%s with no %s service: 501, NOT_IMPLEMENTED, the slot\'s sentence in the request\'s language, Vary', async (_door, slot, call) => {
+        for (const [locale, headers] of LANGS3) {
+            const result = await call(dispatcherWith({}), ADMIN(headers));
+            expect(result.response?.status, locale).toBe(501);
+            expect(result.response?.body?.error?.code, locale).toBe('NOT_IMPLEMENTED');
+            expect(result.response?.body?.error?.message, locale).toBe(capabilityUnavailableMessage(slot, locale));
+            expect(result.response?.headers?.Vary, locale).toBe('Accept-Language');
+        }
+        // No header: the English discovery reports, byte for byte.
+        const plain = await call(dispatcherWith({}), ADMIN({}));
+        expect(plain.response?.body?.error?.message).toBe(serviceUnavailableMessage(slot));
+    });
+
+    it('/mcp/skill with no MCP server registered: mcp_server_unavailable in the request\'s language (N2)', async () => {
+        for (const [locale, headers] of LANGS3) {
+            const result = await dispatcherWith({}).handleMcpSkill('GET', ADMIN(headers));
+            expect(result.response?.status, locale).toBe(501);
+            expect(result.response?.body?.error?.code, locale).toBe('NOT_IMPLEMENTED');
+            expect(result.response?.body?.error?.message, locale).toBe(rendered(locale, 'mcp_server_unavailable'));
+            expect(result.response?.headers?.Vary, locale).toBe('Accept-Language');
+        }
     });
 });

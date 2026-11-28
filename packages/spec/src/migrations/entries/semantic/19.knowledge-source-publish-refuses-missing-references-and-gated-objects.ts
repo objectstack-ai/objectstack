@@ -13,8 +13,9 @@ export const entry: SemanticMigration = {
   surface:
     'Four author-time errors on a knowledge source (`knowledgeSources`, the `knowledge_source` type), run by the '
     + 'runtime publish gate and by `os validate` / `lint` / `compile` / `build`: `source.object` names an object that '
-    + 'does not exist (`knowledge-source-object-unknown`; a warning for a platform-prefixed name no known package '
-    + 'registers, and on the CLI while the manifest declares a dependency the artifact does not carry); a `source.content` or `source.metadataFields` member names no field of the object, declared or '
+    + 'does not exist (`knowledge-source-object-unknown`; on the CLI a warning for a platform-prefixed name no known '
+    + 'package registers, and while the manifest declares a dependency the artifact does not carry); a '
+    + '`source.content` or `source.metadataFields` member names no field of the object, declared or '
     + 'injected (`knowledge-source-field-unknown`); the object\'s API exposure does not serve `search` '
     + '(`knowledge-source-object-not-searchable`); the object is a system object without `enable.aiReadable: true` '
     + '(`knowledge-source-system-object-not-ai-readable`). And one warning: a member names a credential-class or '
@@ -38,4 +39,9 @@ export const entry: SemanticMigration = {
     + 'fix named.',
   acceptanceCriteria:
     'os validate reports none of the four errors; a publish of every knowledge source the package carries succeeds.',
+  // The surface is the `knowledgeSources` collection alone (a source registered
+  // in code is not judged by this rule), so a stack that declares none is proven
+  // clear of it. The sibling knowledge-source entries also name code
+  // registrations or host calls, which no stack key can prove absent.
+  relevantWhen: { kind: 'stack-declares', keys: ['knowledgeSources'] },
 };
