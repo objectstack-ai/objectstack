@@ -541,9 +541,23 @@ export function useObjectGridRowLoad({
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))
               : [];
+            // objectstack#37891 — the object's `highlightFields` (ADR-0085).
+            // A phone draws each row as a card whose amount and subtitle are
+            // those fields, in that order, whether or not a column shows them,
+            // so a list showing `unit_price` but not `total_price` still has
+            // the total to put in the amount slot. Asked whatever the viewport,
+            // like the name field: a width change must not refetch. Fetched,
+            // never drawn as columns. The same two gates as the name field.
+            const declaredHighlights = (resolvedSchema as { highlightFields?: unknown } | undefined)?.highlightFields;
+            const highlightFields = declared && Array.isArray(declaredHighlights)
+              ? declaredHighlights
+                  .filter((f): f is string => typeof f === 'string' && f !== '')
+                  .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
+                  .filter((f) => passesProjectionGate(f))
+              : [];
             // A UNION, never an append: a grouping field that IS also a column
             // must not produce a duplicate `$select` entry.
-            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...lockOperandFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...recordCurrencyFields, ...quantityUnitFields];
+            const extraFields = [...predicateFields, ...groupingFields, ...concurrencyFields, ...rowColorFields, ...deadlineFields, ...lockOperandFields, ...referenceViaFields, ...dependsOnFields, ...nameFields, ...highlightFields, ...recordCurrencyFields, ...quantityUnitFields];
             const withHarvestedFields = (list: any[]): any[] => {
               if (extraFields.length === 0) return list;
               const names = new Set(list.map((f: any) => columnIdentity(f)));

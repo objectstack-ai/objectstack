@@ -155,7 +155,7 @@ write instead, and `os migrate meta --from 18` converts the mechanical ones:
 
 | Before 19 | Now |
 |:--|:--|
-| `id` | `name` (the value is unchanged, so the index is found again) |
+| `id` | `name` (the value is unchanged, so the index is found again). One exception: `name` refuses a leading underscore, so a source whose `id` began with one takes a new name and is built again from nothing under it; the adapter still holds the index under the old id, which nothing searches or drops, so call `dropSource({ source })` on that adapter (`IKnowledgeService.getAdapter`) with the source's `name` set to the old id once the new build completes. An adapter without `dropSource`, or one whose store does not outlive the process (memory), has nothing to drop or keeps it until removed in its own store |
 | `source.contentFields` | `source.content` (a `'*'` member is replaced by hand with the field names) |
 | `embedding`, `vectorStore` | removed: the embedder and the store are the deployment's, never a source's |
 | `adapterConfig` | removed: an adapter takes its settings as options of the plugin that mounts it |
@@ -166,8 +166,12 @@ A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
 `'memory'`), resolved at run time to the plugin that registered itself under
 that name (ADR-0161 K4):
 
-- **Named** — that adapter. One that is not mounted is refused at index and
-  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Named** — that adapter. One that is not mounted is refused at its save
+  (the `/meta` and MCP save doors), `VALIDATION_ERROR` (400), naming the
+  source, the adapter and the adapters that are. A package install, a source
+  registered in code and `os validate` are not judged there; such a source is
+  named at boot at `error` and refused at index and search,
+  `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
 - **Omitted** — the deployment's adapter: the store the runtime mounted beside
   the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
   `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
@@ -235,7 +239,8 @@ and the MCP draft door:
    as the author: an object of a disabled package, an object the API does not
    serve for `search`, a system object without `enable.aiReadable`, or a field
    the author may not query refuses the save `403`, naming the object or the
-   field. The fields judged are the ones the source serves (`content`,
+   field; an `adapter` naming no mounted store refuses it `400`, naming the
+   source, the adapter and the mounted ones. The fields judged are the ones the source serves (`content`,
    `metadataFields`, the title field) and the ones its `where` reads. A
    verdict that cannot be reached, or a knowledge service that is registered
    and cannot be resolved, refuses `503`; nothing is written.
@@ -316,7 +321,15 @@ re-check name fewer than `topK` records (several passages of one record
 count once), every source that answered as many hits as it was
 asked is asked once more, for `topK × 20`. That is the cap: a caller who may
 read fewer than `topK` of the rows within the cap gets fewer than `topK`
-hits. An
+hits. So before the first round the service reads, as the caller, the ids of
+the source's records they may read (under the source's `where`, ids only, at
+most 501). When there are 500 or fewer, the source is handed them as a
+`record` term of the [record scope](#record-scope) — intersected with the
+caller's own scope, never added to it — and the adapter ranks only those
+rows, so a caller who may read 20 of 1,000 records is answered from their 20
+wherever they rank. More than 500, a scope with a parent term, a read that
+fails, or no readable record in scope, and the source is searched as above.
+Every hit is still re-checked, and the organization filter is unchanged. An
 adapter that answers fewer than it was asked (one that caps `topK`) is not
 asked again. For the system identity every source is asked for `topK`
 once. The answer is at most `topK` hits.
@@ -693,7 +706,10 @@ an exact scan.
   `organization_id` column, which every search filters on before ranking.
 - **Where the tables are.** In their own schema, `os_knowledge` (option
   `schema`): `knowledge_generation`, one row per source and generation, and
-  one passage table per vector width, `knowledge_vec_d<width>`. Object
+  one passage table per vector width, `knowledge_vec_d<width>`, indexed on
+  each passage's record so a search narrowed to a caller's few readable
+  records reads only their passages (made with the table, or on the first
+  write after an upgrade for a table made before). Object
   tables live in the connection's own schema, and the platform's drift
   checks read only that one — so no store table can collide with an object
   table or be reported as drift.
@@ -753,7 +769,8 @@ an exact scan.
 libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
 store for local development and for a deployment not on PostgreSQL. It takes
 the service's passages, embeds them with the kernel's `embedder` service (or
-the `embedder` it is given), and answers a search by an exact scan.
+the `embedder` it is given), and answers a search by an exact scan, or, for a
+large source of one organization, through an approximate index.
 
 - **Which database.** The `url` option (`file:`, `:memory:` or a
   `libsql://` Turso URL), else `knowledge.db` under the project's
@@ -769,19 +786,41 @@ the `embedder` it is given), and answers a search by an exact scan.
   way when its fingerprint is the same, and replaces it otherwise, so the
   first builder's writes are then refused), and one passage table per source and generation,
   `knowledge_<source>_g<n>`, its vector column sized for that generation
-  (`<source>` is the source's index key). A key that is not snake_case is
+  (`<source>` is the source's index key) and indexed on `source_record_id`, so
+  a search narrowed to a caller's few readable records reads only their
+  passages; a generation made before carries the index from its next build. A key that is not snake_case is
   refused before any SQL.
 - **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
-  at most `topK`) before the service's re-check: an exact scan by cosine
-  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  at most `topK`) before the service's re-check: a vector leg by cosine
+  distance (an exact scan, or the approximate index below), and a keyword leg in a contentless FTS5 trigram index beside each
   passage table (kept in step by triggers), a term of three characters or
   more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
   the [record scope](#record-scope) and the metadata `filter` (JSON equality
-  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
-  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
-  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
-  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
-  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+  per key) are one `WHERE`, run in both legs. Without the approximate index
+  the vector leg reads every row in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
+  5 ms; 10,000 take 82 MB and about 50 ms.
+- **Approximate index.** A complete build that completes on a generation of
+  `vectorIndexThreshold` passages or more (default 20,000), all of one
+  organization, makes its approximate index: each passage's vector quantized
+  to one bit a dimension, in a side table kept in step by triggers, copied in
+  2,048 rows to a transaction before the switch, never on a search (200,000
+  passages: 3 s, 54 MB). The vector leg then takes the
+  `topK × vectorIndexOverfetch` passages nearest by that index (default 40 a
+  hit), runs the same `WHERE` over them, ranks those in scope by their stored
+  vector, and feeds the fusion as the exact leg does; a leg the filter leaves
+  with fewer than 8 × `topK` candidates in scope, or short of `topK` hits,
+  runs again as the exact scan, so a narrow scope keeps its recall and a
+  search never answers fewer hits than the exact scan. A database that
+  refuses the one-bit vectors or the index's DDL gets no index, its builds
+  complete, and the adapter's health check names the source and the reason. The candidates are ranked before the
+  filter, so the index is never made, or used, over the passages of two
+  organizations (passages of none count as one): each search reads the
+  organization index and takes the exact scan once a second organization's
+  passage is written. At 200,000 passages of 1,536
+  dimensions a search whose keyword leg matched nothing took 81 ms at p95
+  (the exact scan 1,054 ms), with a recall@10 against the exact scan of 0.998. libSQL's own DiskANN index (`vector_top_k`)
+  is not used: on the same 200,000 passages it took 24 minutes and 2.2 GB to
+  build and answered a recall@10 of 0.39.
 - **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
   under a new fingerprint builds a new generation table beside the active
   one, which keeps answering its own fingerprint, and switches at the end of
@@ -1329,7 +1368,7 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; a vector leg (an exact scan, or a one-bit approximate index for a large source of one organization) and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

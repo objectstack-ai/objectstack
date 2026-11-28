@@ -2953,6 +2953,26 @@ export class ProtocolSaveFacet {
                 ...echoNotices,
             ];
 
+            // ADR-0160 D7, seventh amendment: the chain yields no item of the
+            // row — a stored `action` row of the retired action type IS the
+            // action the conversion deletes. The reads serve and register
+            // nothing for it already; this pass lists it on a preview and an
+            // apply run alike and deletes no row, because deleting it is the
+            // operator's, by name, through the metadata API's delete door.
+            if (!flowResult && item === undefined) {
+                record({
+                    ...base,
+                    notices: flattened,
+                    todos: flattenedTodos,
+                    outcome: 'skipped',
+                    reason: 'the conversion chain leaves nothing of this row: the row is itself the item a '
+                        + 'conversion removes, so the reads serve and register nothing for it and there is no '
+                        + 'body to re-save. Delete the row by name through the metadata API (DELETE '
+                        + `/api/v1/meta/${singular}/${base.name}) once nothing needs it.`,
+                });
+                continue;
+            }
+
             if (!apply) {
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'pending' });
                 continue;

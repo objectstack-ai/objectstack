@@ -1575,8 +1575,8 @@ export const SERVED_KEY_SET_PINS = Object.freeze({
  *     `CONTRACT_REVIEW_TIER` — in-seat when the seat's served tier is that
  *     tier, otherwise by the at-tier review subagent the seat spawns — and
  *     the declaration alone ⇒ `TIER_DEFAULT`, the lane seat's own review of
- *     record. A clause-② hit outside the spec lane is lane ROUTING as well:
- *     the work is the spec lane's, whichever seat found it, and moves there.
+ *     record. A clause-② hit no longer moves the card to another lane:
+ *     build and review stay with the seat that claimed it, as `--tier` says.
  *     Clause ② itself is judged
  *     from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking

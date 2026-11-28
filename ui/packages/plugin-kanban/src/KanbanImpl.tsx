@@ -291,6 +291,18 @@ export interface KanbanBoardProps {
    */
   laneCounts?: Readonly<Record<string, number>> | null
   /**
+   * objectstack#37844 — each swimlane row's whole record count, by the key
+   * `laneKeyOf` gives the swimlane value (the no-value swimlane under `''`),
+   * on a board drawn in swimlanes that holds a window of its query.
+   * `ObjectKanban` reads it off one grouped read on the lane field and the
+   * swimlane field (`readLaneCounts` folded by the swimlane key). Absent: the
+   * row counts its cards, marked `+` where `swimlaneCountIsWhole` says the
+   * board holds part of its query. `null`: the read has not answered or cannot
+   * (no door, a refusal, a cut answer), so the row stays marked. A PROP, never
+   * a schema key.
+   */
+  swimlaneCounts?: Readonly<Record<string, number>> | null
+  /**
    * Whether the cards may be dragged at all (default `true`). `ObjectKanban`
    * passes `false` when the caller may not make the move its `onCardMove`
    * writes — the `kanbanCardMove` row of the affordance-to-grant map
@@ -888,6 +900,26 @@ function swimlaneCountIsWhole(
 }
 
 /**
+ * objectstack#37844 — a swimlane row's whole count from the swimlane read
+ * (`KanbanBoardProps.swimlaneCounts`), or `null` where it gives none and the
+ * row falls back to its cards (`swimlaneCountIsWhole`). The no-value row
+ * (`UNCATEGORIZED_LANE`) reads the read's no-value group (`''`); a row keyed
+ * `''` (a stored empty text) shares that group with it, so it reads none. A
+ * row the whole answer names no group for holds no record of the query when it
+ * draws no card, and is a floor when it draws some (a write landed between the
+ * two reads).
+ */
+function swimlaneRowCount(
+  swimlaneCounts: Readonly<Record<string, number>> | null | undefined,
+  lane: string,
+  cards: number,
+): { count: number; atLeast: boolean } | null {
+  if (!swimlaneCounts) return null
+  if (lane === '') return null
+  return wholeLaneCount(swimlaneCounts, lane === UNCATEGORIZED_LANE ? '' : lane, cards)
+}
+
+/**
  * What a lane header shows IN PLACE OF its count while the board's records
  * have not settled (objectstack#30431).
  *
@@ -1222,7 +1254,11 @@ function KanbanColumnView({
   // objectstack#37327 — a lane of a board handed one page of its query writes
   // the grouped read's whole count, and its page count marked `+` while the
   // read has not answered or cannot (see `KanbanBoardProps.laneCounts`).
-  const hostCount = pagedCount ? null : wholeLaneCount(laneCounts, String(column.id), safeCards.length)
+  // Read beside a lane page too (objectstack#37517): that board's lanes carry
+  // a page for their "Load more", and a lane none of whose records is on the
+  // board still says so. `laneCounts` is set only on a board handed one page,
+  // which never pages its lanes itself, so a self-paged lane reads `null` here.
+  const hostCount = wholeLaneCount(laneCounts, String(column.id), safeCards.length)
   const laneCountOf = pagedCount ?? hostCount
   // A lane that holds records none of which is on the page draws that, never
   // "No cards" under a count above zero.
@@ -1404,7 +1440,7 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, laneCounts, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, laneCounts, swimlaneCounts, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
@@ -1412,7 +1448,7 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
       <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
         <DndBridge>
-          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} laneCounts={laneCounts} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
+          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} laneCounts={laneCounts} swimlaneCounts={swimlaneCounts} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
         </DndBridge>
       </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
@@ -1422,13 +1458,13 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
-      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} laneCounts={laneCounts} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
+      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} laneCounts={laneCounts} swimlaneCounts={swimlaneCounts} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
     </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
   )
 }
 
-function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, laneCounts, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
+function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, laneCounts, swimlaneCounts, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
   const { t } = useKanbanT()
   // The prefix of each swimlane cell's drop-reason element id (#27099).
   const dropReasonIdBase = React.useId()
@@ -2242,7 +2278,10 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                   <span className={cn("transition-transform text-xs", isCollapsed ? "" : "rotate-90")}>▶</span>
                   <span className=" text-xs font-medium text-muted-foreground uppercase tracking-wider">{laneLabel}</span>
                   <span className=" text-xs text-muted-foreground">
-                    {recordsSettled ? `(${laneCountLabel(laneCardCount, !swimlaneCountIsWhole(laneCounts, boardColumns, countsAreWindowed))})` : <LaneCountPending />}
+                    {recordsSettled
+                      ? `(${countText(swimlaneRowCount(swimlaneCounts, lane, laneCardCount)
+                          ?? { count: laneCardCount, atLeast: !swimlaneCountIsWhole(laneCounts, boardColumns, countsAreWindowed) })})`
+                      : <LaneCountPending />}
                   </span>
                 </button>
 

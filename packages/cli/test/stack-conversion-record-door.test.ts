@@ -168,8 +168,8 @@ const flow = (ns: string, nodeType: NodeType) => `{
 
 const stackBody = (ns: string, nodeType: NodeType | null, requires?: string) => `{
   manifest: ${manifest(ns)},
-  objects: [{ name: '${ns}_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
-  apps: [{ name: '${ns}_app', label: 'App' }],${nodeType ? `\n  flows: [${flow(ns, nodeType)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
+  objects: [{ name: '${ns}_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } }, listViews: { all: { type: 'grid', columns: ['title'] } } }],
+  apps: [{ name: '${ns}_app', label: 'App', navigation: [{ id: 'nav_thing', type: 'object', objectName: '${ns}_thing', label: 'Things' }] }],${nodeType ? `\n  flows: [${flow(ns, nodeType)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
 }`;
 
 const IMPORT = `import { composeStacks, defineStack } from '@objectstack/spec';\n\n`;

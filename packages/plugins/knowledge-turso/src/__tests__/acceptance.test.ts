@@ -426,6 +426,44 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect((await adapter.search('long name', { source: long, topK: 1 })).length).toBe(1);
       await expect(adapter.search('x', { source: bad, topK: 1 })).rejects.toThrow(/cannot name a table/);
     });
+
+    it('a search narrowed to a few records reads them through the source_record_id index, never by scanning the table', async () => {
+      // Every statement the adapter runs, so the search's own SQL is planned below.
+      const client = store.client();
+      const ran: Array<{ sql: string; args: unknown }> = [];
+      const recording = new Proxy(client, {
+        get(target, prop) {
+          const value: unknown = Reflect.get(target, prop, target);
+          if (prop === 'execute') {
+            return (stmt: { sql: string; args?: unknown }) => {
+              ran.push({ sql: stmt.sql, args: stmt.args });
+              return target.execute(stmt as never);
+            };
+          }
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: recording, embedder: new FakeEmbedder() });
+      const s = source('narrowed');
+      await adapter.upsert(
+        Array.from({ length: 40 }, (_, i) => doc(s, `r${i}`, `harbour crane passage ${i}`)),
+        ctx(s),
+      );
+      ran.length = 0;
+      const hits = await adapter.search('harbour crane', {
+        source: s, topK: 5, organizationIds: ['org_a'], scope: [{ kind: 'record', ids: ['r3', 'r7'] }],
+      });
+      expect(hits).toEqual([]); // no passage carries org_a: the organization filter still applies
+      const search = ran.find((r) => r.sql.trimStart().startsWith('WITH'));
+      expect(search).toBeDefined();
+      const plan = await client.execute({ sql: `EXPLAIN QUERY PLAN ${search!.sql}`, args: search!.args as never });
+      const details = plan.rows.map((r) => String(r.detail));
+      const table = `knowledge_${s.name}_g1`;
+      expect(details.some((d) => d.includes(`USING INDEX ${table}_record`))).toBe(true);
+      // Neither leg nor the keyword statistics reads the passage table whole (its
+      // keyword index, `<table>-fts`, is searched by MATCH, a virtual table's own plan).
+      expect(details.filter((d) => new RegExp(`^SCAN (${table}|p)(\\s|$)`).test(d))).toEqual([]);
+    });
   });
 }
 
@@ -1040,3 +1078,586 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
     });
   });
 }
+
+/**
+ * A client whose every statement's SQL is recorded, the transaction's too, so
+ * a test reads which path a search took: the approximate vector leg ranks
+ * the one-bit side table (`vector1bit`), the exact one does not.
+ */
+function recording(client: Client): { client: Client; sql: string[]; args: unknown[][] } {
+  const sql: string[] = [];
+  const args: unknown[][] = [];
+  const note = (statement: unknown) => {
+    sql.push(typeof statement === 'string' ? statement : String((statement as { sql: unknown }).sql));
+    const bound = typeof statement === 'string' ? undefined : (statement as { args?: unknown }).args;
+    args.push(Array.isArray(bound) ? bound : []);
+  };
+  const watch = <T extends object>(target: T, onTransaction: boolean): T =>
+    new Proxy(target, {
+      get(t, key) {
+        const value = Reflect.get(t, key, t) as unknown;
+        if (typeof value !== 'function') return value;
+        const fn = (value as (...a: unknown[]) => unknown).bind(t);
+        if (key === 'execute') return (statement: unknown, ...rest: unknown[]) => (note(statement), fn(statement, ...rest));
+        if (key === 'batch') return (statements: unknown[], ...rest: unknown[]) => (statements.forEach(note), fn(statements, ...rest));
+        if (key === 'transaction' && onTransaction) {
+          return async (...a: unknown[]) => watch((await fn(...a)) as object, false);
+        }
+        return fn;
+      },
+    });
+  return { client: watch(client, true), sql, args };
+}
+
+/** The catalog reads of a vector index recorded since `from`: the shape reads that name a `-vec` side table. */
+function vectorCatalogReads(watched: { sql: string[]; args: unknown[][] }, from = 0): number {
+  return watched.sql
+    .slice(from)
+    .filter((sql, i) => /sqlite_master|pragma_table_info/.test(sql) && watched.args[from + i].some((a) => String(a).endsWith('-vec'))).length;
+}
+
+/** The vector-leg statements recorded since `from`, each with the highest `?N` its SQL reads and the values bound. */
+function vectorStatements(watched: { sql: string[]; args: unknown[][] }, from = 0): Array<{ approximate: boolean; reads: number; bound: number }> {
+  return watched.sql.flatMap((sql, i) =>
+    i < from || !sql.includes('vec AS (')
+      ? []
+      : [{ approximate: sql.includes('vector1bit('), reads: Math.max(...[...sql.matchAll(/\?(\d+)/g)].map((m) => Number(m[1]))), bound: watched.args[i].length }],
+  );
+}
+
+/** A fake embedder that gives a query of no letters or digits, which has no keyword term, the vector of two words. */
+class TermlessQueryEmbedder extends FakeEmbedder {
+  override async embed(texts: string[]): Promise<number[][]> {
+    return super.embed(texts.map((t) => (/[a-z0-9]/i.test(t) ? t : 'w1x w2x')));
+  }
+}
+
+/**
+ * A recorded client that refuses, as a database that does not know them
+ * would, the statements whose SQL matches `pattern`, the transaction's too.
+ */
+function refusing(
+  watched: { client: Client; sql: string[]; args: unknown[][] },
+  pattern: RegExp,
+): { client: Client; sql: string[]; args: unknown[][]; refused: string[] } {
+  const refused: string[] = [];
+  const sqlOf = (statement: unknown) => (typeof statement === 'string' ? statement : String((statement as { sql: unknown }).sql));
+  const guard = <T extends object>(target: T, onTransaction: boolean): T =>
+    new Proxy(target, {
+      get(t, key) {
+        const value = Reflect.get(t, key, t) as unknown;
+        if (typeof value !== 'function') return value;
+        const fn = (value as (...a: unknown[]) => unknown).bind(t);
+        if (key === 'execute') {
+          return async (statement: unknown, ...rest: unknown[]) => {
+            if (pattern.test(sqlOf(statement))) {
+              refused.push(sqlOf(statement));
+              throw new Error(`SQL_PARSE_ERROR: refused by this database: ${pattern.source}`);
+            }
+            return fn(statement, ...rest);
+          };
+        }
+        if (key === 'transaction' && onTransaction) return async (...a: unknown[]) => guard((await fn(...a)) as object, false);
+        return fn;
+      },
+    });
+  return { client: guard(watched.client, true), sql: watched.sql, args: watched.args, refused };
+}
+
+/** The vector legs of the searches recorded since `from`: how many were approximate, how many exact. */
+function vectorLegs(sql: string[], from = 0): { approximate: number; exact: number } {
+  const legs = sql.slice(from).filter((s) => s.includes('vec AS ('));
+  const approximate = legs.filter((s) => s.includes('vector1bit(')).length;
+  return { approximate, exact: legs.length - approximate };
+}
+
+/** The vector-index objects (side table, organization index, triggers) of a passage table. */
+async function vectorObjects(client: Client, table: string): Promise<string[]> {
+  const names = [`${table}-vec`, `${table}-org`, `${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`];
+  const found = await client.execute({
+    sql: `SELECT name FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')}) ORDER BY name`,
+    args: names,
+  });
+  return found.rows.map((r) => String(r.name));
+}
+
+/** Deterministic passages of four words from a vocabulary of 60, so their fake vectors overlap. */
+function wordsOf(n: number, seed: number): string[] {
+  const vocabulary = Array.from({ length: 60 }, (_, i) => `w${i.toString(36)}x`);
+  let x = seed;
+  const next = () => ((x = (x * 1103515245 + 12345) % 2147483648) / 2147483648);
+  return Array.from({ length: n }, () => Array.from({ length: 4 }, () => vocabulary[Math.floor(next() * vocabulary.length)]).join(' '));
+}
+
+for (const kind of ['memory', 'file'] as StoreKind[]) {
+  describe(`knowledge-turso approximate vector index on ${kind === 'memory' ? ':memory:' : 'a file: URL'}`, () => {
+    const store = storeOf(kind);
+    afterAll(() => store.closeAll());
+    const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
+    const THRESHOLD = 40;
+
+    /** An adapter on a recorded client, and a complete build of `docs` under `fp`. */
+    async function built(
+      s: KnowledgeSource,
+      docs: KnowledgeDocument[],
+      opts: { vectorIndexThreshold?: number; vectorIndexOverfetch?: number } = {},
+    ) {
+      const watched = recording(store.client());
+      const adapter = new TursoKnowledgeAdapter({
+        id: 'under_test',
+        client: watched.client,
+        embedder: new FakeEmbedder(),
+        vectorIndexThreshold: THRESHOLD,
+        ...opts,
+      });
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(docs, ctx(s));
+      await adapter.completeBuild(ctx(s));
+      return { adapter, ...watched };
+    }
+
+    const corpus = (s: KnowledgeSource, n: number, extra: (i: number) => Partial<KnowledgeDocument> = () => ({})) =>
+      wordsOf(n, 7).map((text, i) => doc(s, String(i).padStart(3, '0'), text, extra(i)));
+
+    it('a source at or above the threshold is searched through its approximate index; below it, or at Infinity, by the exact scan', async () => {
+      const s = source('ann_switch');
+      const above = await built(s, corpus(s, 60));
+      expect(await vectorObjects(above.client, `knowledge_${s.name}_g1`)).toHaveLength(5);
+      const from = above.sql.length;
+      const hits = await above.adapter.search('w1x w2x w3x', { source: s, topK: 5, index: { fingerprint: FP_A.fingerprint } });
+      expect(hits).toHaveLength(5);
+      expect(vectorLegs(above.sql, from)).toEqual({ approximate: 1, exact: 0 });
+
+      for (const vectorIndexThreshold of [61, Infinity]) {
+        const t = source(`ann_off_${vectorIndexThreshold === Infinity ? 'inf' : 'n'}`);
+        const below = await built(t, corpus(t, 60), { vectorIndexThreshold });
+        expect(await vectorObjects(below.client, `knowledge_${t.name}_g1`)).toEqual([]);
+        const at = below.sql.length;
+        await below.adapter.search('w1x w2x w3x', { source: t, topK: 5 });
+        expect(vectorLegs(below.sql, at)).toEqual({ approximate: 0, exact: 1 });
+      }
+    });
+
+    it('a store holding passages of two organizations never takes the approximate path, built or not', async () => {
+      const s = source('ann_two_orgs');
+      const two = await built(s, corpus(s, 60, (i) => ({ organizationId: i % 2 === 0 ? 'org_a' : 'org_b' })));
+      // No index for a table of two organizations: only its organization index is made.
+      expect(await vectorObjects(two.client, `knowledge_${s.name}_g1`)).toEqual([`knowledge_${s.name}_g1-org`]);
+      let from = two.sql.length;
+      await two.adapter.search('w1x w2x', { source: s, topK: 5, organizationIds: ['org_a'] });
+      expect(vectorLegs(two.sql, from)).toEqual({ approximate: 0, exact: 1 });
+
+      // Built for one organization; a second one written after turns it back to the exact scan at once.
+      const t = source('ann_second_org');
+      const one = await built(t, corpus(t, 60, () => ({ organizationId: 'org_a' })));
+      from = one.sql.length;
+      await one.adapter.search('w1x w2x', { source: t, topK: 5, organizationIds: ['org_a'] });
+      expect(vectorLegs(one.sql, from)).toEqual({ approximate: 1, exact: 0 });
+      await one.adapter.upsert([doc(t, 'other', 'w1x w2x', { organizationId: 'org_b' })], ctx(t));
+      from = one.sql.length;
+      const asB = await one.adapter.search('w1x w2x', { source: t, topK: 5, organizationIds: ['org_b'] });
+      expect(asB.map((h) => h.documentId)).toEqual([`${t.name}:other`]);
+      expect(vectorLegs(one.sql, from)).toEqual({ approximate: 0, exact: 1 });
+      // A passage of no organization beside one organization's is a second one too.
+      const u = source('ann_anonymous');
+      const mixed = await built(u, corpus(u, 60, (i) => (i === 0 ? {} : { organizationId: 'org_a' })));
+      from = mixed.sql.length;
+      await mixed.adapter.search('w1x w2x', { source: u, topK: 5 });
+      expect(vectorLegs(mixed.sql, from)).toEqual({ approximate: 0, exact: 1 });
+    });
+
+    it('the filter runs on the over-fetched candidates; a leg it leaves under 8 × topK in scope is run again exactly', async () => {
+      const s = source('ann_scope');
+      const QUERY = 'w1x w2x w3x w4x';
+      // 56 passages near the query, published; 4 far from it, drafts.
+      const docs = [
+        ...Array.from({ length: 56 }, (_, i) => doc(s, `near_${String(i).padStart(2, '0')}`, `${QUERY} w${(i % 9) + 5}x`)),
+        ...['a', 'b', 'c', 'd'].map((n) => doc(s, `far_${n}`, `w1x wqx wrx ws${n}x`, { metadata: { status: 'draft' } })),
+      ];
+      // Eight candidates a hit, so the candidates are not every row of this small table.
+      const { adapter, sql } = await built(s, docs, { vectorIndexOverfetch: 8 });
+      // A filter only the far passages pass: none is among the candidates, so the exact scan answers.
+      let from = sql.length;
+      const drafts = await adapter.search(QUERY, { source: s, topK: 3, filter: { status: 'draft' } });
+      expect(drafts).toHaveLength(3);
+      for (const hit of drafts) expect(hit.metadata).toMatchObject({ status: 'draft' });
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
+      const t = source('ann_overfetch');
+      const tiers = [
+        ...['best_1', 'best_2'].map((n) => doc(t, n, QUERY)),
+        ...Array.from({ length: 6 }, (_, i) => doc(t, `second_${i}`, `${QUERY} w${i + 5}x`)),
+        ...wordsOf(52, 11).map((text, i) => doc(t, `rest_${String(i).padStart(2, '0')}`, `w1x ${text}`)),
+      ];
+      const over = await built(t, tiers, { vectorIndexOverfetch: 10 });
+      // Every passage but the two best in scope: 18 or more of the 2 × 10 candidates are left, 8 × topK
+      // and more, so the candidates answer, without the exact scan.
+      from = over.sql.length;
+      const allButBest = tiers.flatMap((d) => d.sourceRecordId ?? []).filter((id) => !id.startsWith('best_'));
+      const wide = await over.adapter.search(QUERY, { source: t, topK: 2, scope: [{ kind: 'record', ids: allButBest }] });
+      expect(wide).toHaveLength(2);
+      for (const hit of wide) expect(hit.sourceRecordId).toMatch(/^second_/);
+      expect(vectorLegs(over.sql, from)).toEqual({ approximate: 1, exact: 0 });
+      // Two passages in scope: at most 2 of the 20 candidates, fewer than 8 × topK, so the exact scan answers.
+      from = over.sql.length;
+      const scoped = ['second_1', 'second_4'];
+      const narrow = await over.adapter.search(QUERY, { source: t, topK: 2, scope: [{ kind: 'record', ids: scoped }] });
+      expect(narrow.map((h) => h.sourceRecordId).sort()).toEqual(scoped);
+      expect(vectorLegs(over.sql, from)).toEqual({ approximate: 1, exact: 1 });
+    });
+
+    it('a leg under 8 × topK in scope tries 10 × the candidates once before the exact scan, unless its pool is too thin or its scope is of records alone', async () => {
+      const QUERY = 'w1x w2x w3x w4x';
+      // Two best passages, 30 next to them and 368 further away, each with a list of tags a parent
+      // (metadata) scope term matches: 'wide' holds the two best and half the far ones, 'short' the two
+      // best and 3 next ones, 'thin' one far passage.
+      const corpus = (s: KnowledgeSource) => [
+        ...['best_1', 'best_2'].map((n) => doc(s, n, QUERY, { metadata: { tags: ['wide', 'short'] } })),
+        ...Array.from({ length: 30 }, (_, i) =>
+          doc(s, `mid_${String(i).padStart(2, '0')}`, `${QUERY} w${(i % 20) + 5}x w${(i % 7) + 30}x`, { metadata: { tags: [i < 3 ? 'short' : 'out'] } }),
+        ),
+        ...wordsOf(368, 23).map((text, i) =>
+          doc(s, `rest_${String(i).padStart(3, '0')}`, `w1x ${text}`, { metadata: { tags: i % 2 === 0 ? ['wide'] : i === 1 ? ['out', 'thin'] : ['out'] } }),
+        ),
+      ];
+      const s = source('ann_retry');
+      // topK 2 and 8 candidates a hit: 16 candidates, a floor of 16, and 160 for the second pass.
+      const { adapter, sql, args } = await built(s, corpus(s), { vectorIndexOverfetch: 8 });
+      const t = source('ann_retry_exact');
+      const exact = await built(t, corpus(t), { vectorIndexThreshold: Infinity });
+      const ids = (hits: Array<{ sourceRecordId?: string }>) => hits.map((h) => h.sourceRecordId);
+      const tagged = (tag: string) => [{ kind: 'metadata' as const, field: 'tags', ids: [tag] }];
+      const search = async (scope: NonNullable<Parameters<TursoKnowledgeAdapter['search']>[1]['scope']>) => {
+        const from = sql.length;
+        const hits = await adapter.search(QUERY, { source: s, topK: 2, scope });
+        expect(ids(hits), JSON.stringify(scope).slice(0, 60)).toEqual(ids(await exact.adapter.search(QUERY, { source: t, topK: 2, scope })));
+        return { hits, from };
+      };
+
+      // 'wide': the first pass keeps the 2 best of its 16 candidates; 10 × a pool of 2 can reach 16, and the
+      // second pass keeps far more than 16 of its 160, so it answers, as the exact scan would, without it.
+      let { hits, from } = await search(tagged('wide'));
+      expect(ids(hits)).toEqual(['best_1', 'best_2']);
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 0 });
+      expect(sql.flatMap((q, i) => (i >= from && q.includes('vector1bit(') ? [args[i][args[i].length - 1]] : []))).toEqual([16, 160]);
+      // Each pass binds exactly the values it reads, its candidate count last.
+      for (const st of vectorStatements({ sql, args }, from)) expect(st).toMatchObject({ reads: st.bound });
+
+      // 'short': five passages in scope, so both passes keep at most 5, and the exact scan answers after both.
+      ({ from } = await search(tagged('short')));
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 1 });
+
+      // 'thin': one far passage, no candidate of the first pass; 10 × 0 cannot reach 16, so there is no
+      // second pass.
+      ({ hits, from } = await search(tagged('thin')));
+      expect(ids(hits)).toEqual(['rest_001']);
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
+
+      // The 'wide' passages as a scope of records alone: the record index serves the exact scan from the
+      // rows in scope, so there is no second pass, whatever the first pool.
+      const records = corpus(s)
+        .filter((d) => (d.metadata?.tags as string[] | undefined)?.includes('wide'))
+        .flatMap((d) => d.sourceRecordId ?? []);
+      ({ hits, from } = await search([{ kind: 'record', ids: records }]));
+      expect(ids(hits)).toEqual(['best_1', 'best_2']);
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
+      // Two builds of 400 passages on each store kind: past vitest's 5 s default on a loaded CI box.
+    }, 30_000);
+
+    it('keeps the index in step with every write and removal; a generation swap and dropSource drop it whole', async () => {
+      const s = source('ann_life');
+      const { adapter, client, sql } = await built(s, corpus(s, 60));
+      const g1 = `knowledge_${s.name}_g1`;
+      const counts = async (table: string) =>
+        (await client.execute(`SELECT (SELECT count(*) FROM "${table}") AS n, (SELECT count(*) FROM "${table}-vec") AS v`)).rows[0];
+      expect(await counts(g1)).toMatchObject({ n: 60, v: 60 });
+      // A new passage is found through the index; a removed one is not.
+      await adapter.upsert([doc(s, 'fresh', 'wzzx wyyx wxxx')], ctx(s));
+      let from = sql.length;
+      expect((await adapter.search('wzzx wyyx wxxx', { source: s, topK: 1 })).map((h) => h.sourceRecordId)).toEqual(['fresh']);
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 0 });
+      await adapter.upsert([doc(s, 'fresh', 'wqqx wppx wnnx')], ctx(s));
+      expect((await adapter.search('wqqx wppx wnnx', { source: s, topK: 1 })).map((h) => h.sourceRecordId)).toEqual(['fresh']);
+      await adapter.delete([`${s.name}:fresh`, `${s.name}:000`], ctx(s));
+      expect(await counts(g1)).toMatchObject({ n: 59, v: 59 });
+
+      // A rebuild under another fingerprint: the new generation gets its own index, the old one's goes with it.
+      await adapter.beginBuild(ctx(s, FP_B));
+      await adapter.upsert(corpus(s, 60), ctx(s, FP_B));
+      await adapter.completeBuild(ctx(s, FP_B));
+      const g2 = `knowledge_${s.name}_g2`;
+      expect(await vectorObjects(client, g1)).toEqual([]);
+      expect(await vectorObjects(client, g2)).toHaveLength(5);
+      expect(await counts(g2)).toMatchObject({ n: 60, v: 60 });
+      from = sql.length;
+      await adapter.search('w1x w2x', { source: s, topK: 5, index: { fingerprint: FP_B.fingerprint } });
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 0 });
+
+      await adapter.dropSource(ctx(s, FP_B));
+      expect(await vectorObjects(client, g2)).toEqual([]);
+      const left = await client.execute("SELECT name FROM sqlite_master WHERE name LIKE '%-vec%' OR name LIKE '%-org'");
+      expect(left.rows).toEqual([]);
+    });
+
+    it('a source that grew past the threshold gets its index at its next complete build, inside its generation', async () => {
+      const s = source('ann_grew');
+      const watched = recording(store.client());
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold: THRESHOLD });
+      await adapter.upsert(corpus(s, 60), ctx(s));
+      expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toEqual([]);
+      // A complete build under the same fingerprint rebuilds inside generation 1, and makes its index.
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(corpus(s, 60), ctx(s));
+      await adapter.completeBuild(ctx(s));
+      expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toHaveLength(5);
+      const from = watched.sql.length;
+      await adapter.search('w1x w2x', { source: s, topK: 5 });
+      expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 1, exact: 0 });
+    });
+
+    it('a database that refuses the one-bit vectors or the index DDL keeps the exact scan, the build completes, and the health check names it', async () => {
+      for (const [name, refused] of [
+        // A host whose libSQL lacks the one-bit vectors: like SQLite, it creates a column of any type and a
+        // trigger naming an unknown function, and refuses each statement that computes `vector1bit`.
+        ['ann_no_1bit', /^(?!\s*CREATE\s)[\s\S]*vector1bit\(/i],
+        // A host that refuses the side table's column type.
+        ['ann_no_ddl', /F1BIT_BLOB/],
+        // A host that makes the index and refuses the copy of the passages into it.
+        ['ann_no_copy', /^\s*INSERT INTO "[^"]+-vec"/],
+      ] as const) {
+        const s = source(name);
+        const watched = refusing(recording(store.client()), refused);
+        const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold: THRESHOLD });
+        await adapter.beginBuild(ctx(s));
+        await adapter.upsert(corpus(s, 60), ctx(s));
+        await adapter.completeBuild(ctx(s));
+        expect(watched.refused.length).toBeGreaterThan(0);
+        // Refused before the copy: nothing of the index is left. Refused at the copy: the index is there, short of
+        // its passage table, and never searched.
+        expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toHaveLength(name === 'ann_no_copy' ? 5 : 0);
+        // The build switched to its generation, and writes and searches go on through the exact scan.
+        await adapter.upsert([doc(s, 'late', 'wzzx wyyx wxxx')], ctx(s));
+        const from = watched.sql.length;
+        expect((await adapter.search('wzzx wyyx wxxx', { source: s, topK: 1 })).map((h) => h.sourceRecordId)).toEqual(['late']);
+        expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 1 });
+        // The refusal is named to the operator, through the health check the boot line and the health endpoint
+        // read; the store stays ready.
+        const health = await adapter.healthCheck();
+        expect(health.ok).toBe(true);
+        expect(health.message).toContain(`the approximate vector index of source '${s.name}' was not made`);
+        const noOneBit = 'this database does not compute one-bit vectors (vector1bit), so no source gets an approximate vector index';
+        if (name === 'ann_no_1bit') expect(health.message).toContain(noOneBit);
+        else if (name === 'ann_no_ddl') expect(health.message).toContain('the database refused its DDL');
+        else expect(health.message).toContain('the database refused its copy');
+        // A dropped source is no longer named.
+        await adapter.dropSource(ctx(s));
+        const after = await adapter.healthCheck();
+        expect(after.message).not.toContain(`source '${s.name}'`);
+        if (name !== 'ann_no_1bit') expect(after).toEqual({ ok: true, message: 'libSQL vectors ready' });
+      }
+    });
+
+    it('a search under the threshold, or at Infinity, reads no catalog for an index; another process reads it once', async () => {
+      for (const vectorIndexThreshold of [61, Infinity]) {
+        const s = source(`ann_reads_${vectorIndexThreshold === Infinity ? 'inf' : 'n'}`);
+        const watched = recording(store.client());
+        const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold });
+        await adapter.beginBuild(ctx(s));
+        await adapter.upsert(corpus(s, 60), ctx(s));
+        await adapter.completeBuild(ctx(s));
+        const from = watched.sql.length;
+        for (const query of ['w1x w2x', 'w3x w4x', 'w5x']) await adapter.search(query, { source: s, topK: 5 });
+        expect(vectorCatalogReads(watched, from)).toBe(0);
+        expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 3 });
+        if (vectorIndexThreshold === Infinity) {
+          // An adapter that did not build the source reads no catalog for an index either.
+          const other = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold });
+          const at = watched.sql.length;
+          for (const query of ['w1x w2x', 'w3x w4x']) await other.search(query, { source: s, topK: 5 });
+          expect(vectorCatalogReads(watched, at)).toBe(0);
+        }
+      }
+    });
+
+    it('a query without a keyword term binds exactly the values each vector statement reads', async () => {
+      const s = source('ann_termless');
+      const watched = recording(store.client());
+      const adapter = new TursoKnowledgeAdapter({
+        id: 'under_test',
+        client: watched.client,
+        embedder: new TermlessQueryEmbedder(),
+        vectorIndexThreshold: THRESHOLD,
+      });
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(corpus(s, 60), ctx(s));
+      await adapter.completeBuild(ctx(s));
+      expect(keywordTerms('?! …')).toEqual([]);
+      const from = watched.sql.length;
+      // Answered through the index; then a scope of its two hits, under the floor, runs both statements.
+      const hits = await adapter.search('?! …', { source: s, topK: 2 });
+      expect(hits).toHaveLength(2);
+      const ids = hits.flatMap((h) => h.sourceRecordId ?? []);
+      expect(await adapter.search('?! …', { source: s, topK: 2, scope: [{ kind: 'record', ids }] })).toHaveLength(2);
+      const statements = vectorStatements(watched, from);
+      expect(statements.map((st) => st.approximate)).toEqual([true, true, false]);
+      for (const st of statements) expect(st).toMatchObject({ reads: st.bound });
+    });
+
+    it('an object it did not make under a vector-index name is never dropped; the build and dropSource are refused', async () => {
+      const s = source('ann_taken');
+      const watched = recording(store.client());
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold: THRESHOLD });
+      await adapter.upsert(corpus(s, 60), ctx(s));
+      const side = `knowledge_${s.name}_g1-vec`;
+      await watched.client.execute(`CREATE TABLE "${side}" (id TEXT PRIMARY KEY, note TEXT)`);
+      await watched.client.execute(`INSERT INTO "${side}" VALUES ('r1', 'kept')`);
+      for (const call of [
+        async () => {
+          await adapter.beginBuild(ctx(s));
+          await adapter.completeBuild(ctx(s));
+        },
+        () => adapter.dropSource(ctx(s)),
+      ]) {
+        const refused = await refusal(call());
+        expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+        expect(String(refused.remedy)).toContain(side);
+      }
+      expect((await watched.client.execute(`SELECT note FROM "${side}"`)).rows.map((r) => r.note)).toEqual(['kept']);
+      expect(await tables(watched.client, `knowledge_${s.name}_g%`)).toEqual([`knowledge_${s.name}_g1`]);
+      // The exact scan still answers it.
+      const from = watched.sql.length;
+      expect(await adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+      expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 1 });
+    });
+  });
+}
+
+describe('knowledge-turso approximate vector index: two processes on one file store', () => {
+  const store = storeOf('file');
+  afterAll(() => store.closeAll());
+  const corpus = (s: KnowledgeSource, n: number) => wordsOf(n, 7).map((text, i) => doc(s, String(i).padStart(3, '0'), text));
+  const processes = () => {
+    const at = store.url();
+    const one = () => {
+      const watched = recording(store.client(at));
+      return { ...watched, adapter: new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold: 40 }) };
+    };
+    return { a: one(), b: one(), raw: store.client(at) };
+  };
+  const build = async (adapter: TursoKnowledgeAdapter, s: KnowledgeSource, n: number) => {
+    await adapter.beginBuild(ctx(s));
+    await adapter.upsert(corpus(s, n), ctx(s));
+    await adapter.completeBuild(ctx(s));
+  };
+
+  it('the index memory is keyed per generation instance', async () => {
+    const s = source('ann_two_procs');
+    const { a, b } = processes();
+    await build(a.adapter, s, 60);
+    let from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 1, exact: 0 });
+    // A new instance of generation 1, under the threshold.
+    await a.adapter.dropSource(ctx(s));
+    await build(a.adapter, s, 30);
+    expect(await vectorObjects(a.client, `knowledge_${s.name}_g1`)).toEqual([]);
+    from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 0, exact: 1 });
+  });
+
+  it('a failed approximate statement is answered by the exact scan, and its memory forgotten', async () => {
+    const s = source('ann_gone');
+    const { a, b, raw } = processes();
+    await build(a.adapter, s, 60);
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    const table = `knowledge_${s.name}_g1`;
+    for (const name of [`${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`]) await raw.execute(`DROP TRIGGER "${name}"`);
+    await raw.execute(`DROP TABLE "${table}-vec"`);
+    let from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 1, exact: 1 });
+    from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 0, exact: 1 });
+  });
+
+  it('another process reads the catalog of a source under the threshold once, then remembers it', async () => {
+    const s = source('ann_reads_once');
+    const { a, b } = processes();
+    await build(a.adapter, s, 30);
+    const from = b.sql.length;
+    for (const query of ['w1x w2x', 'w3x w4x', 'w5x']) await b.adapter.search(query, { source: s, topK: 5 });
+    expect(vectorCatalogReads(b, from)).toBe(2);
+  });
+});
+
+describe('knowledge-turso approximate vector index: recall and options', () => {
+  const store = storeOf('memory');
+  afterAll(() => store.closeAll());
+
+  it('recall@10 of the approximate search against the exact-scan search is 0.95 or more on a sample of 40 queries', async () => {
+    const s = source('ann_recall');
+    const docs = wordsOf(2000, 3).map((text, i) => doc(s, String(i).padStart(3, '0'), text));
+    const make = async (vectorIndexThreshold: number) => {
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: store.client(), embedder: new FakeEmbedder(), vectorIndexThreshold });
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(docs, ctx(s));
+      await adapter.completeBuild(ctx(s));
+      return adapter;
+    };
+    const approximate = await make(100);
+    const exact = await make(Infinity);
+    let found = 0;
+    let wanted = 0;
+    for (const query of wordsOf(40, 99)) {
+      const want = (await exact.search(query, { source: s, topK: 10 })).map((h) => h.chunkId);
+      const got = new Set((await approximate.search(query, { source: s, topK: 10 })).map((h) => h.chunkId));
+      wanted += want.length;
+      found += want.filter((id) => got.has(id)).length;
+    }
+    expect(wanted).toBe(400);
+    expect(found / wanted).toBeGreaterThanOrEqual(0.95);
+    // Two builds of 2,000 passages: 1,017 ms locally, the same shape as the scoped case below (5,971 ms on CI).
+  }, 30_000);
+
+  it('recall@10 stays 0.95 or more under a record scope that keeps 10%, 5% or 3% of the passages', async () => {
+    const s = source('ann_scoped_recall');
+    const docs = wordsOf(2000, 5).map((text, i) => doc(s, String(i).padStart(4, '0'), text));
+    const make = async (vectorIndexThreshold: number) => {
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: store.client(), embedder: new FakeEmbedder(), vectorIndexThreshold });
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(docs, ctx(s));
+      await adapter.completeBuild(ctx(s));
+      return adapter;
+    };
+    const approximate = await make(100);
+    const exact = await make(Infinity);
+    let x = 17;
+    const next = () => ((x = (x * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (const share of [0.1, 0.05, 0.03]) {
+      const ids = docs.flatMap((d) => d.sourceRecordId ?? []).filter(() => next() < share);
+      const scope = [{ kind: 'record' as const, ids }];
+      let found = 0;
+      let wanted = 0;
+      for (const query of wordsOf(30, 31)) {
+        const want = (await exact.search(query, { source: s, topK: 10, scope })).map((h) => h.chunkId);
+        const got = new Set((await approximate.search(query, { source: s, topK: 10, scope })).map((h) => h.chunkId));
+        wanted += want.length;
+        found += want.filter((id) => got.has(id)).length;
+      }
+      expect(wanted, `hits wanted at a share of ${share}`).toBeGreaterThan(200);
+      console.info(`scoped recall@10, ${share * 100}% in scope (${ids.length} passages): ${(found / wanted).toFixed(3)}`);
+      expect(found / wanted, `recall@10 at a share of ${share}`).toBeGreaterThanOrEqual(0.95);
+    }
+    // Two builds of 2,000 passages: 1,384 ms locally, 5,971 ms on CI (Test Core), past the 5 s default.
+  }, 30_000);
+
+  it('refuses a threshold below 1 and an over-fetch that is not a whole number of 8 or more', () => {
+    const client = store.client();
+    const embedder = new FakeEmbedder();
+    for (const bad of [{ vectorIndexThreshold: 0 }, { vectorIndexThreshold: Number.NaN }, { vectorIndexOverfetch: 7 }, { vectorIndexOverfetch: 8.5 }]) {
+      expect(() => new TursoKnowledgeAdapter({ client, embedder, ...bad })).toThrow(RangeError);
+    }
+    expect(() => new TursoKnowledgeAdapter({ client, embedder, vectorIndexThreshold: Infinity, vectorIndexOverfetch: 8 })).not.toThrow();
+  });
+});
