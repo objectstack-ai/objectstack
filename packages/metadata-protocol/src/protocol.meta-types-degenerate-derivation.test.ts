@@ -107,7 +107,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 // [#17502] The emitter's OWN strip and its predicate — the baseline below is
 // stripped with the same code the server runs, so this pin can never drift
 // into measuring a second, hand-written idea of "admits nothing".
-import { acceptsNothing, stripUnauthorableProperties } from './unauthorable-nodes.js';
+import { acceptsNothing, isPlatformStampedKey, stripUnauthorableProperties } from './unauthorable-nodes.js';
 // [#19295] The emitter's OWN erased-authoring hook, for the same reason: the
 // baseline is derived with the code the server derives with, so the only
 // difference left to find is the degeneracy retry's.
@@ -182,7 +182,10 @@ function preFixServedBaseline(type: string): Record<string, unknown> | undefined
 
 /**
  * [#17502] How many TOP-LEVEL properties the strip removes from this type's
- * served document.
+ * served document. [#35879] That is the ones no instance satisfies AND the
+ * ADR-0010 keys the platform stamps: both are declared on the type and
+ * withheld from the served offer, so both are added back to reach the declared
+ * total each count below pins.
  *
  * Counted on whichever derivation the server can actually use: `action` has no
  * properties at all on the default arm, so its three tombstones are visible
@@ -200,7 +203,7 @@ function retiredTopLevelCount(type: string): number {
         }
         const properties = json.properties as Record<string, unknown> | undefined;
         if (properties && Object.keys(properties).length > 0) {
-            return Object.values(properties).filter(acceptsNothing).length;
+            return Object.entries(properties).filter(([key, node]) => acceptsNothing(node) || isPlatformStampedKey(key)).length;
         }
     }
     return 0;

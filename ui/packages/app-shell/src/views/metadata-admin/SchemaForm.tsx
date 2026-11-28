@@ -58,6 +58,7 @@ import {
 import { usePredicateScope } from '@object-ui/react';
 import { resolveSectionGroupReferences } from '@object-ui/plugin-form/core';
 import { evaluatePredicate, buildPredicateCtx, visibleOptions } from './predicate.js';
+import { isUnsetFieldValue } from './storedValue.js';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
 import {
   WIDGETS,
@@ -1077,6 +1078,59 @@ function readVisibility(
   return node?.visibleWhen;
 }
 
+/**
+ * How a row's `visibleWhen` gates it under the draft.
+ *
+ *  - `shown` — no predicate, or the predicate is true;
+ *  - `hidden` — the predicate is false and the row's key holds no value of
+ *    the author's: unset, or equal to the row schema's declared `default`;
+ *  - `retained` — the predicate is false but the key holds a value. The row
+ *    stays drawn, marked as not in effect, with a one-click clear.
+ *
+ * ⛔ A row that holds a value is never hidden, and its value is never dropped
+ * on hide or on save. A value the author entered must not vanish unseen: the
+ * author sees it and clears it deliberately (objectui#6499, Option C — the
+ * stored-value re-show rule the flow node inspector's `isFieldVisible` keeps).
+ * A hidden row that held a value is what made a save refused at a key the
+ * form no longer drew (objectstack#38121).
+ *
+ * "Unset" is {@link isUnsetFieldValue}'s definition, shared with that
+ * inspector, so the two editors call a key unset in the same words. A value
+ * equal to the declared `default` is the one the parse fills in on every
+ * stored item that omits the key (e.g. `FieldSchema.multiple` is `false` on
+ * every field of a built object), so it is not the author's and the row is
+ * hidden as it would be with the key absent.
+ */
+type RowGate = 'shown' | 'retained' | 'hidden';
+
+function rowGate(
+  visibility: VisibilityPredicate | undefined,
+  data: Record<string, unknown>,
+  hostScope: ReturnType<typeof usePredicateScope>,
+  stored: unknown,
+  rowSchema: JsonSchema | undefined,
+): RowGate {
+  if (!visibility || evaluatePredicate(visibility, buildPredicateCtx(data, hostScope))) return 'shown';
+  if (isUnsetFieldValue(stored)) return 'hidden';
+  if (rowSchema && 'default' in rowSchema && sameJsonValue(stored, rowSchema.default)) return 'hidden';
+  return 'retained';
+}
+
+/** Structural equality over JSON values (a stored value against a schema `default`). */
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bs = b as unknown[];
+    return a.length === bs.length && a.every((v, i) => sameJsonValue(v, bs[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const keys = Object.keys(ao);
+  return keys.length === Object.keys(bo).length && keys.every((k) => k in bo && sameJsonValue(ao[k], bo[k]));
+}
+
 export interface SchemaFormIssue {
   path: string;
   message: string;
@@ -1337,6 +1391,15 @@ function SchemaFormBody({
           // flat auto-form can use rich pickers, not just type inference.
           fieldSpec={(props[key] as any)?.widget ? { field: key, widget: (props[key] as any).widget } : undefined}
           formData={v as Record<string, unknown>}
+          inactiveRetained={
+            rowGate(
+              readVisibility(props[key] as { visibleWhen?: VisibilityPredicate }),
+              predicateData,
+              hostScope,
+              predicateData[key],
+              props[key],
+            ) === 'retained'
+          }
           onChange={(val) => setField(key, val)}
         />
       ))}
@@ -1639,11 +1702,7 @@ function SectionedSchemaForm({
       .filter((f) => {
         if (f.hidden) return false;
         if (hiddenFields.includes(f.field)) return false;
-        const visibility = readVisibility(f);
-        if (visibility && !evaluatePredicate(visibility, buildPredicateCtx(value, hostScope))) {
-          return false;
-        }
-        return true;
+        return rowGate(readVisibility(f), value, hostScope, value[f.field], props[f.field]) !== 'hidden';
       });
   const rowReadOnly = (f: FormFieldSpec): boolean =>
     Boolean(readOnly || f.readonly || (f.immutable && !createMode));
@@ -1725,6 +1784,7 @@ function SectionedSchemaForm({
                   fieldSpec={f}
                   widgetContext={widgetContext}
                   formData={value}
+                  inactiveRetained={rowGate(readVisibility(f), value, hostScope, value[f.field], propSchema) === 'retained'}
                   onChange={(val) => onChange(f.field, val)}
                 />
               </div>
@@ -1869,6 +1929,7 @@ function FieldRow({
   fieldSpec,
   widgetContext,
   formData,
+  inactiveRetained,
   onChange,
 }: {
   name: string;
@@ -1897,6 +1958,13 @@ function FieldRow({
   fieldSpec?: FormFieldSpec;
   widgetContext?: WidgetContext;
   formData?: Record<string, unknown>;
+  /**
+   * The row's `visibleWhen` is false but its key holds a value
+   * ({@link rowGate} `retained`): the row says the value is not in effect and
+   * offers to clear it. The control stays editable — the author must be able
+   * to read what is kept before clearing it.
+   */
+  inactiveRetained?: boolean;
   onChange: (v: unknown) => void;
 }) {
   const locale = useMetadataLocale();
@@ -2079,6 +2147,30 @@ function FieldRow({
       fieldControl
     );
 
+  // Clearing is an ordinary commit of `undefined`, which removes the key.
+  const retainedNotice = inactiveRetained ? (
+    <div
+      role="note"
+      data-testid="schema-form-inactive-retained"
+      className="flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5"
+    >
+      <p className="flex-1 text-xs leading-snug text-amber-700 dark:text-amber-400">
+        {t('engine.form.inactiveRetained', locale)}
+      </p>
+      {!readOnly && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 shrink-0 px-2 text-xs text-amber-700 dark:text-amber-400"
+          onClick={() => handleChange(undefined)}
+        >
+          {t('engine.form.inactiveRetainedClear', locale)}
+        </Button>
+      )}
+    </div>
+  ) : null;
+
   // Booleans render inline (label · description · switch) on one row to
   // save vertical space and feel like a real settings panel.
   if (isBoolean) {
@@ -2102,6 +2194,7 @@ function FieldRow({
           {visibleIssues?.map((m, i) => (
             <div key={i} data-testid="schema-form-issue" className="text-xs text-destructive mt-0.5">{m}</div>
           ))}
+          {retainedNotice}
         </div>
         {control}
       </div>
@@ -2123,6 +2216,7 @@ function FieldRow({
           )}
         </Label>
       </div>
+      {retainedNotice}
       {control}
       {description && (
         <div className="text-xs text-muted-foreground">{description}</div>
@@ -3496,9 +3590,9 @@ function RecordField({
                   />
                 )}
                 {specs.map((s) => {
-                  const visibility = readVisibility(s);
-                  if (visibility && !evaluatePredicate(visibility, buildPredicateCtx(row, hostScope))) return null;
                   const sub = pickSubSchema(schema, 'record', s.field);
+                  const gate = rowGate(readVisibility(s), row, hostScope, row?.[s.field], sub);
+                  if (gate === 'hidden') return null;
                   return (
                     <FieldRow
                       key={s.field}
@@ -3511,6 +3605,7 @@ function RecordField({
                       fieldSpec={s}
                       widgetContext={widgetContext}
                       formData={row}
+                      inactiveRetained={gate === 'retained'}
                       onChange={(v) => updateItem(key, { [s.field]: v })}
                     />
                   );
@@ -3691,7 +3786,8 @@ function orderKeys(keys: string[], preferred: string[]): string[] {
 
 /**
  * The keys a FLAT form body renders a row for, in order: ordered, not hidden,
- * and visible under the draft. One function for the body that renders the rows
+ * and not hidden by its predicate under the draft ({@link rowGate}: a key that
+ * holds a value stays). One function for the body that renders the rows
  * and for a nested-form host row that must know which of its issues those rows
  * will draw (objectstack#35499), so the two can never disagree.
  */
@@ -3704,10 +3800,11 @@ function flatFormRowKeys(
 ): string[] {
   return orderKeys(Object.keys(props), fieldOrder)
     .filter((k) => !hiddenFields.includes(k))
-    .filter((k) => {
-      const visibility = readVisibility(props[k] as any);
-      return !visibility || evaluatePredicate(visibility, buildPredicateCtx(predicateData, hostScope));
-    });
+    .filter(
+      (k) =>
+        rowGate(readVisibility(props[k] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[k], props[k]) !==
+        'hidden',
+    );
 }
 
 /**

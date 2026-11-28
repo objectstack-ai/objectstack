@@ -71,7 +71,33 @@
  * also how a property named `required` or `default` buys its whole subtree an
  * exemption from the walk. Both directions are pinned in
  * `unauthorable-nodes.test.ts`.
+ *
+ * ## [#35879] The second class: the keys the platform stamps
+ *
+ * Every metadata type spreads the ADR-0010 protection envelope
+ * (`MetadataProtectionFields`: `_lock`, `_lockReason`, `_lockSource`,
+ * `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl`), and so does
+ * every schema embedded in one (an object's `fields` entries, a view
+ * container's arms). The keys are declared so a SERVED body keeps its
+ * provenance when it is re-parsed; none of them is an author's to write: a
+ * package's loader and the registration stamp them (ADR-0010; an author
+ * declares a lock through `protection`, which the loader translates). So they
+ * derive to perfectly satisfiable nodes and are still not part of the surface
+ * this payload describes, which is what
+ * an author MAY write: Studio's panels and the MCP draft door's contract
+ * ("write only keys these show") read the key set as the offer.
+ *
+ * The key set is read off the envelope's own declaration, the same spelling
+ * the registration and clone paths strip as loader-stamped state, so this
+ * file keeps no list of its own. The drop obeys the same position rule and
+ * the same `required` veto as the tombstones above: no envelope key is
+ * required anywhere today, and one that some day is stays served rather than
+ * turn a refusing node into an admitting one. What a client SENDS is
+ * unchanged — dropping a key from a description refuses nothing a save
+ * accepted before; a body echoed from a read keeps passing the save door the
+ * way it always did.
  */
+import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 
 /** JSON Schema keywords whose values are DATA, not subschemas — never walked. */
 const NON_SCHEMA_KEYS: ReadonlySet<string> = new Set([
@@ -108,8 +134,30 @@ export function acceptsNothing(node: unknown): boolean {
 }
 
 /**
- * Return `json` with every unsatisfiable, non-required property removed, at
- * every depth. Pure and copy-on-write: a document with nothing to drop is
+ * [#35879] The ADR-0010 keys the platform stamps onto a metadata item, read off
+ * `MetadataProtectionFields` itself. Frozen: a caller cannot widen or narrow
+ * what the served payload withholds.
+ */
+export const PLATFORM_STAMPED_KEYS: ReadonlySet<string> = Object.freeze(new Set(Object.keys(MetadataProtectionFields)));
+
+/** [#35879] Is `key` one of {@link PLATFORM_STAMPED_KEYS}? */
+export function isPlatformStampedKey(key: string): boolean {
+    return PLATFORM_STAMPED_KEYS.has(key);
+}
+
+/**
+ * Is the property `key`, whose subschema is `node`, outside what an author
+ * may write? The two classes this module withholds: a node no instance
+ * satisfies, and a key the platform stamps.
+ */
+function isUnauthorableProperty(key: string, node: unknown): boolean {
+    return acceptsNothing(node) || isPlatformStampedKey(key);
+}
+
+/**
+ * Return `json` with every unauthorable, non-required property removed, at
+ * every depth: each unsatisfiable node, and [#35879] each key the platform
+ * stamps. Pure and copy-on-write: a document with nothing to drop is
  * returned by reference, so an untouched type's served payload stays
  * byte-identical (and reference-identical) to its derivation.
  */
@@ -149,7 +197,7 @@ function walkSchema(node: unknown): unknown {
         );
         let kept: Record<string, unknown> | undefined;
         for (const [key, value] of Object.entries(properties as Record<string, unknown>)) {
-            if (acceptsNothing(value) && !required.has(key)) {
+            if (isUnauthorableProperty(key, value) && !required.has(key)) {
                 kept ??= { ...(properties as Record<string, unknown>) };
                 delete kept[key];
             }

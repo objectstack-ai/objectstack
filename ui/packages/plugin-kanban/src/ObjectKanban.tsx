@@ -77,6 +77,7 @@ import { KanbanLaneMenuContext, type KanbanLaneMenu, type KanbanLaneMenuRequest 
 import {
   KANBAN_LANE_PAGE_SIZE,
   KanbanLanePagingContext,
+  emptyLaneQueryFilter,
   laneQueryFilter,
   readLanePage,
   uncolumnedQueryFilter,
@@ -86,7 +87,7 @@ import {
 } from './KanbanLanePaging';
 import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
 import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
-import { lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
+import { laneKeyOf, lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
 import {
   compileLaneReadQuery,
   isLaneAggregate,
@@ -1149,13 +1150,48 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       });
   }, [dataSource]);
 
-  const lanePagingChannel = useMemo<KanbanLanePaging | null>(
-    () => (lanePages ? { pages: lanePages, loadMore: loadMoreLane } : null),
-    [lanePages, loadMoreLane],
+  /**
+   * objectstack#37517 — the cards a lane of a board its host hands ONE page to
+   * loaded past that page ("Load more" at the lane's foot, `loadMoreHostLane`
+   * below), held under the question the page answers. The host's page is the
+   * first page of the view's query, in the view's order (the list pages only
+   * its grid), so the cards of one lane on it are that lane's first records in
+   * the same order: the lane's next records start right after them. Appended
+   * to the host's rows, never replacing them; a new page from the host (a
+   * refetch, a refresh, another filter, search or sort) starts every lane over.
+   */
+  type HostLaneRows = {
+    question: string;
+    rows: any[];
+    /** The lanes with a read on its way. */
+    loading: Record<string, true>;
+    /** The lanes whose last read answered no more records. */
+    done: Record<string, true>;
+  };
+  const [hostLaneRows, setHostLaneRows] = useState<HostLaneRows | null>(null);
+  const hostPageIdsKey = useMemo(
+    () => (hasExternalData ? JSON.stringify((externalData as any[]).map((row) => String(row?.id ?? row?._id))) : ''),
+    [hasExternalData, externalData],
   );
+  const hostPageQuestion = hasExternalData
+    ? JSON.stringify([schemaKey, schema.groupBy ?? null, queryFilterKey, sortKey, hostSearchKey, hostReloadKey, refreshKey, hostPageIdsKey])
+    : '';
+  const hostPageQuestionRef = React.useRef(hostPageQuestion);
+  hostPageQuestionRef.current = hostPageQuestion;
+  const hostLaneRowsHeld = hostLaneRows && hostLaneRows.question === hostPageQuestion && hostPageQuestion !== '' ? hostLaneRows : null;
 
   // Determine which data to use: external -> bound -> inline -> fetched
   const rawData = (hasExternalData ? externalData : undefined) || boundData || schema.data || fetchedData;
+  /**
+   * The records the board draws: `rawData`, and on the board handed one page,
+   * the host's rows followed by the ones its lanes loaded past it
+   * (`hostLaneRows`), each record once.
+   */
+  const boardData = useMemo(() => {
+    if (!hostLaneRowsHeld || hostLaneRowsHeld.rows.length === 0 || rawData !== externalData) return rawData;
+    const seen = new Set((rawData as any[]).map((row) => String(row?.id ?? row?._id)));
+    return [...(rawData as any[]), ...hostLaneRowsHeld.rows.filter((row) => !seen.has(String(row?.id ?? row?._id)))];
+  }, [rawData, externalData, hostLaneRowsHeld]);
 
   /**
    * Are the lane counts about to be drawn counts of a WINDOW (`5591f03bd`)?
@@ -1218,7 +1254,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // (objectui#11815).
   const predicateScope = usePredicateScope();
   const effectiveData = useMemo(() => {
-    if (!Array.isArray(rawData)) return [];
+    if (!Array.isArray(boardData)) return [];
 
     // The author's card-title choice — `cardTitle`, else the legacy
     // `titleField`, and `''` on either counts as unset. Resolved by the shared
@@ -1273,7 +1309,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     // if the second rung is ever added here.
     const nameFieldKey: string | undefined = resolveNameField(objectDef);
 
-    return rawData.map(item => {
+    return boardData.map(item => {
       let resolvedTitle: any = undefined;
 
       // 1. The explicit title field (`resolveKanbanTitleField`).
@@ -1603,7 +1639,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         ...(cardOwner ? { cardOwner } : {}),
       };
     });
-  }, [rawData, schema, objectDef, ownerField, ownerReadable, ownerPersonObject, perms, predicateScope]);
+  }, [boardData, schema, objectDef, ownerField, ownerReadable, ownerPersonObject, perms, predicateScope]);
 
   // Generate columns if missing but groupBy is present
   const effectiveColumns = useMemo(() => {
@@ -1883,9 +1919,123 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    * lanes past the page take. A partial or refused read answers no counts
    * (`hostLaneCounts` null), and no lane is drawn from it.
    */
-  const keepUncolumned =
-    hostLaneRead && flatLanes && lanesFromData && !!laneTargetObject
-    && (hostLaneCounts?.[KANBAN_UNCOLUMNED_ID] ?? 0) > 0;
+  const pastPageLanes = hostLaneRead && flatLanes && lanesFromData && !!laneTargetObject;
+  const keepUncolumned = pastPageLanes && (hostLaneCounts?.[KANBAN_UNCOLUMNED_ID] ?? 0) > 0;
+  /**
+   * objectstack#37517 — "Load more" on a lane of the board handed one page:
+   * every lane whose cards on the board are fewer than the lane read counts,
+   * the lanes past the page and the trailing "Uncategorized" lane included,
+   * under the gate those lanes are drawn under. A partial or refused read
+   * answers no counts, so no lane offers more than the read answered.
+   *
+   * `loaded` is the lane's cards on the board: the host page's cards in it
+   * (the lane's first records, see `hostLaneRows`) and the ones read since,
+   * so it is the `$skip` of the lane's next read.
+   */
+  const hostLanePagingOn = pastPageLanes && !!hostLaneCounts;
+  const hostLanePages = useMemo((): Record<string, KanbanLanePage> | null => {
+    if (!hostLanePagingOn || !hostLaneCounts || !schema.groupBy || !Array.isArray(boardData)) return null;
+    const groupBy = schema.groupBy;
+    const onBoard: Record<string, number> = Object.create(null);
+    for (const row of boardData as any[]) {
+      const key = laneKeyOf(row?.[groupBy]);
+      const laneId = key === '' ? KANBAN_UNCOLUMNED_ID : key;
+      onBoard[laneId] = (onBoard[laneId] ?? 0) + 1;
+    }
+    const pages: Record<string, KanbanLanePage> = {};
+    for (const [laneId, total] of Object.entries(hostLaneCounts)) {
+      const loaded = onBoard[laneId] ?? 0;
+      const loading = hostLaneRowsHeld?.loading[laneId] === true;
+      const hasMore = loaded < total && hostLaneRowsHeld?.done[laneId] !== true;
+      if (hasMore || loading) pages[laneId] = { total, loaded, hasMore, loading };
+    }
+    return pages;
+  }, [hostLanePagingOn, hostLaneCounts, schema.groupBy, boardData, hostLaneRowsHeld]);
+  // Read by `loadMoreHostLane`, which must not change on every render.
+  const hostLaneReadRef = React.useRef<{
+    question: string;
+    pages: Record<string, KanbanLanePage> | null;
+    objectName: string;
+    groupBy: string;
+    filter: unknown;
+    params: Record<string, unknown>;
+  } | null>(null);
+  {
+    // The lane's next records, under the query the host's page answers: its
+    // filter, sort, search and expansion (FLS-gated as the board's own query
+    // is, objectui#7429), with the lane's count beside them.
+    const expandable = buildExpandFields(objectDef?.fields);
+    const expand = !perms?.isLoaded || !schema.objectName
+      ? expandable
+      : expandable.filter((f) => perms.checkField(schema.objectName as string, f, 'read'));
+    hostLaneReadRef.current = hostLanePages && schema.objectName && schema.groupBy
+      ? {
+          question: hostPageQuestion,
+          pages: hostLanePages,
+          objectName: schema.objectName,
+          groupBy: schema.groupBy,
+          filter: queryFilter,
+          params: {
+            $orderby: convertSortToQueryParams(schema.sort),
+            ...(expand.length > 0 ? { $expand: expand } : {}),
+            ...(JSON.parse(hostSearchKey) as Record<string, unknown>),
+            $count: true,
+          },
+        }
+      : null;
+  }
+  const loadMoreHostLane = React.useCallback((laneId: string) => {
+    const held = hostLaneReadRef.current;
+    const page = held?.pages?.[laneId];
+    if (!held || !page || !page.hasMore || page.loading) return;
+    if (!dataSource || typeof dataSource.find !== 'function') return;
+    const { question } = held;
+    const mark = (update: (prev: HostLaneRows) => HostLaneRows) =>
+      setHostLaneRows((prev) => {
+        const base = prev && prev.question === question ? prev : { question, rows: [], loading: {}, done: {} };
+        return update(base);
+      });
+    const settle = (prev: HostLaneRows): Record<string, true> => {
+      const { [laneId]: _settled, ...loading } = prev.loading;
+      return loading;
+    };
+    mark((prev) => ({ ...prev, loading: { ...prev.loading, [laneId]: true } }));
+    const filter = laneId === KANBAN_UNCOLUMNED_ID
+      ? emptyLaneQueryFilter(held.filter, held.groupBy)
+      : laneQueryFilter(held.filter, held.groupBy, laneId);
+    dataSource
+      .find(held.objectName, { ...held.params, $filter: filter, $skip: page.loaded, $top: KANBAN_LANE_PAGE_SIZE } as any)
+      .then((result) => {
+        // A page answering an older question is dropped with it.
+        if (hostPageQuestionRef.current !== question) return;
+        const next = readLanePage(result, page.loaded, KANBAN_LANE_PAGE_SIZE);
+        mark((prev) => {
+          const seen = new Set(prev.rows.map((row) => String(row?.id ?? row?._id)));
+          return {
+            ...prev,
+            rows: [...prev.rows, ...next.rows.filter((row) => !seen.has(String(row?.id ?? row?._id)))],
+            loading: settle(prev),
+            // A read that answers no more stops the lane offering more, so a
+            // count the records moved away from cannot ask the same page forever.
+            done: next.page.hasMore && next.rows.length > 0 ? prev.done : { ...prev.done, [laneId]: true },
+          };
+        });
+      })
+      .catch((err) => {
+        if (hostPageQuestionRef.current !== question) return;
+        console.error('[ObjectKanban] Load more failed:', err);
+        // The lane keeps what it holds, and its "Load more" stays to retry.
+        mark((prev) => ({ ...prev, loading: settle(prev) }));
+      });
+  }, [dataSource]);
+  const lanePagingChannel = useMemo<KanbanLanePaging | null>(
+    () => (lanePages
+      ? { pages: lanePages, loadMore: loadMoreLane }
+      : hostLanePages
+        ? { pages: hostLanePages, loadMore: loadMoreHostLane }
+        : null),
+    [lanePages, loadMoreLane, hostLanePages, loadMoreHostLane],
+  );
   const extraLaneIdsKey = JSON.stringify(extraLaneIds);
   const [extraLaneTitles, setExtraLaneTitles] = useState<{ key: string; titles: Record<string, string> } | null>(null);
   useEffect(() => {
@@ -2143,7 +2293,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       // foreign key, and that is what the write sends; the record held locally
       // keeps the referenced record expanded, as a refetch would return it, so
       // the card goes on naming it (and the rollback restores what it held).
-      const loaded: Array<Record<string, unknown>> = Array.isArray(rawData) ? rawData : [];
+      const loaded: Array<Record<string, unknown>> = Array.isArray(boardData) ? boardData : [];
       const priorValue = loaded.find((r) => String(r?.id ?? r?._id) === String(cardId))?.[groupBy];
       const movedValue = laneValueOf(loaded, groupBy, toColumnId);
 
@@ -2239,7 +2389,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         return { kind: 'refused', message: refusal };
       }
     },
-    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, rawData],
+    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, boardData],
   );
 
   /**
@@ -2348,7 +2498,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       // The record as stored, not the card-shaped projection: `effectiveData`
       // overlays a derived `title`/`badges`, and the predicates must see the
       // record's own field values.
-      const record = (Array.isArray(rawData) ? rawData : []).find(
+      const record = (Array.isArray(boardData) ? boardData : []).find(
         (r) => String(r?.id ?? r?._id) === String(cardId),
       );
       // The lane field's conditional lock over THIS record (`readonlyWhen`, the
@@ -2376,7 +2526,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
       return persistCardMove(cardId, fromColumnId, toColumnId);
     },
-    [schema.groupBy, rawData, objectDef, persistCardMove, tt, predicateScope],
+    [schema.groupBy, boardData, objectDef, persistCardMove, tt, predicateScope],
   );
 
   // Label + localized options for each prompted field, resolved with the same
