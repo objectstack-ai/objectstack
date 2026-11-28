@@ -17,6 +17,7 @@ The console no longer saves a new item naming no package. Where a create's packa
 - A new view or report in an app: saved into the app's writable package or its customization package, as before; where neither can be had the person is asked. In a system app the create is refused with the reason (a view: save it to My views or add it in a business app; a report: create it in a business app). Where the customization package's door refuses the caller (`403`), the create is refused with the door's reason. The "saved outside this app" notice no longer runs.
 - The console's create-app route asks for the package, then saves the wizard's app as a draft there and publishes it. `CreateAppPage` (plugin-designer) takes an optional `saveApp(name, app)` that replaces its own save; answering `false` keeps the wizard open with nothing done.
 - Datasource Sync lands each object through the server's import door (`POST /api/v1/datasources/:name/external/tables/:remote/import`), which places it in the datasource's package, instead of a client save naming none.
+- Setup → Access control → Positions and permissions reads its own sub-path at the address the shell serves Setup at (`/apps/com.objectstack.setup/...`) as well as at the `setup` alias, so New on a position or a permission set opens the editor in Studio instead of a blank page, and a list gets the environment scope on both addresses (objectstack#38206).
 - New `studio` catalogue keys `engine.packageAsk.*` (English and Chinese).
 
 Nothing to migrate. No server route, spec key or stored row changes.
