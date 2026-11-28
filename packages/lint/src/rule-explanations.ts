@@ -3955,6 +3955,38 @@ const FIELD_MISSING_VALUE_DOMAIN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FIELD_OPTION_COLOR_RENDERS_NEUTRAL_EXPLANATION: RuleExplanation = {
+  rule: 'field/option-color-renders-neutral',
+  covers: 'which option colours a badge paints',
+  paragraphs: [
+    'A select option is coloured if and only if its author declares `color`; no colour is derived from ' +
+      'the option\'s value. The option badge (a select value in a list cell, a record page, a kanban ' +
+      'card, a grid group header, a filter chip) paints exactly two spellings: one of the nine palette ' +
+      'families `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink`, ' +
+      'lowercase as written; or a hex of three or six digits after a `#` (`#a855f7`), which the badge ' +
+      'paints as that exact colour. Any other value renders the same neutral grey as an option with no ' +
+      'colour, and nothing on the page says the colour was not used.',
+    'Judged as not painted: other colour names (`teal`, `amber`, `sky`), a family in another case ' +
+      '(`Red`), a hex with no `#` or with alpha digits (`#a855f7cc`), and `rgb(…)` / `hsl(…)`. Other ' +
+      'surfaces read the same value differently: a chart series, a gantt bar and a timeline marker hand ' +
+      'it to the browser as a CSS colour, so `teal` paints there; a calendar event paints a family, a ' +
+      'hex (alpha included) and `rgb(…)` / `hsl(…)`, and its default colour for any other name. The ' +
+      'badge is where an option\'s colour is seen most, so this rule judges the badge\'s reading.',
+    'The fix line names the spelling the value already points at when there is one (the lowercase ' +
+      'family, the hex with its `#`, the hex without its alpha digits); otherwise it names the families ' +
+      'and the hex form. It never picks a family for a colour name: choosing the colour is the author\'s ' +
+      'decision.',
+    'Judged: the inline `options` of every object field and of the fields object extensions add, and ' +
+      'the options of picklists and picklist extensions. An empty or blank `color` declares nothing and ' +
+      'is not judged.',
+    'A warning, never an error: `SelectOption.color` stays a free string. It runs on `os validate`, ' +
+      '`os build` and `os lint`, and at the metadata save door on `object` and `object_extension` ' +
+      'writes, where it rides back with the saved response as an advisory and refuses nothing; a write ' +
+      'is charged only with a colour it declares. Picklists are not saved through that door, so they ' +
+      'are judged on the CLI alone. `os lint --strict` fails on every warning, this one included.',
+  ],
+};
+
 const RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION: RuleExplanation = {
   rule: 'relationship/delete-behavior',
   covers: 'what deleting a master does to its details',
@@ -7278,6 +7310,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
   [FIELD_MISSING_VALUE_DOMAIN_EXPLANATION.rule]: FIELD_MISSING_VALUE_DOMAIN_EXPLANATION,
+  [FIELD_OPTION_COLOR_RENDERS_NEUTRAL_EXPLANATION.rule]: FIELD_OPTION_COLOR_RENDERS_NEUTRAL_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,
   [DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION.rule]: DEFAULT_AGENT_OUTSIDE_ROSTER_EXPLANATION,
   [AGENT_AUTHORING_WITHDRAWN_EXPLANATION.rule]: AGENT_AUTHORING_WITHDRAWN_EXPLANATION,

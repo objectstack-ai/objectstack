@@ -151,8 +151,18 @@ export type HandlerKeyDisposition =
  * @param disposition what the TypeScript twin does — see {@link HandlerKeyDisposition}
  * @param label       the human label the site carried before (`'Click handler'`),
  *                    kept as the message's lead so docs surfaces keep their noun
+ * @param retirement  a `'retired'` key's own remedy — what replaced it, FROM →
+ *                    TO, and what to do with the value — in place of the
+ *                    node-type remedy. That remedy fits a handler whose
+ *                    behaviour an author can declare as a node; a key retired
+ *                    with a host-supplied save path is pointed at its
+ *                    successor instead. Omitted, the message is unchanged. A
+ *                    runtime slot takes none: its remedy is the node type.
  */
-export function handlerKeyRefusal(key: string, disposition: HandlerKeyDisposition, label?: string) {
+export function handlerKeyRefusal(key: string, disposition: HandlerKeyDisposition, label?: string, retirement?: string) {
+  if (retirement !== undefined && disposition !== 'retired') {
+    throw new Error(`handlerKeyRefusal('${key}'): a retirement remedy is for a 'retired' key, not a '${disposition}' one.`);
+  }
   const what =
     disposition === 'runtime-slot'
       ? `\`${key}\` is a RUNTIME SLOT for a host-supplied function, not authorable metadata ` +
@@ -161,7 +171,7 @@ export function handlerKeyRefusal(key: string, disposition: HandlerKeyDispositio
         'through this validator, which refuses it by name.'
       : `\`${key}\` is RETIRED (objectui#6124, ADR-0049): JSON has no function value, and no ` +
         'renderer reads this key, so nothing could ever run it.';
-  const remedy =
+  const remedy = retirement ??
     'Author behaviour as a NODE TYPE instead — e.g. { "type": "toast", ... } or an action:button ' +
     'node with a declared action, the spelling PR #6498 established.';
   const guidance = `${label ? `${label} — ` : ''}${what} ${remedy}`;

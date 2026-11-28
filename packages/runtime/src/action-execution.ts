@@ -23,7 +23,7 @@ import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objects
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
-import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
+import { standardErrorCodeForHttpStatus, type MetadataProtocol, type ValidateDataIssue } from '@objectstack/spec/api';
 import { renderOperationMessage } from '@objectstack/spec/system';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -4892,6 +4892,56 @@ export function actionSelectionIdsOrRefuse(objectName: string, params: Record<st
 }
 
 /**
+ * Is the declaration a call resolved to bound to no object? Judged on the
+ * DECLARATION, never on the object the call was routed under: an object-less
+ * declaration is reachable under any object's name, and is no more bound to
+ * that object for it.
+ *
+ * `ownerKey` is the owner key of the row the resolution picked
+ * ({@link RouteActionDeclaration.ownerKey}), and when given it alone decides:
+ * an addressed resolution may pick one holder's object-less action under an
+ * object that declares another holder's action of the same name. Without it,
+ * an action the routed object declares in its own `actions` is that object's
+ * (by reference or by name: the bare rungs resolve the object's own first),
+ * and any other declaration is bound to its own owner key
+ * ({@link standaloneActionOwnerKey}).
+ */
+export function isObjectLessActionDeclaration(action: any, routedObject: any, ownerKey?: string): boolean {
+    if (ownerKey !== undefined) return isObjectLessActionKey(ownerKey);
+    const declaredByRouted = Array.isArray(routedObject?.actions)
+        && routedObject.actions.some((a: any) => a === action || (a && a.name === action?.name));
+    return !declaredByRouted && isObjectLessActionKey(standaloneActionOwnerKey(action));
+}
+
+/**
+ * An action not bound to an object accepts no record: the record key a call
+ * to one carries — its `recordId`, or a selection in `params._selectedIds` —
+ * is answered with the located `400` failure this returns, on every door and
+ * for every caller, whatever object the call was routed under, before any
+ * record is read or any body runs. `undefined` when the call may go on: the
+ * action is bound to an object, or the call carries neither key (absent,
+ * `null` and `''` carry none, as for `recordId`).
+ */
+export function objectLessActionRecordKeyFailure(
+    action: any,
+    routedObject: any,
+    actionName: string,
+    recordId: unknown,
+    params: Record<string, unknown>,
+    /** The owner key of the row the resolution picked ({@link RouteActionDeclaration.ownerKey}). */
+    ownerKey?: string,
+): { field: string; code: 'invalid_value'; message: string } | undefined {
+    if (!isObjectLessActionDeclaration(action, routedObject, ownerKey)) return undefined;
+    const carries = (value: unknown) => value !== undefined && value !== null && value !== '';
+    const field = carries(recordId) ? 'recordId' : carries(params[ACTION_SELECTION_PARAM]) ? ACTION_SELECTION_PARAM : undefined;
+    if (field === undefined) return undefined;
+    const name = typeof action?.name === 'string' && action.name ? action.name : actionName;
+    const message = `Action '${name}' is not bound to an object, so it accepts no record: `
+        + `the record key \`${field}\` must be left out. To act on records, call an action declared on their object.`;
+    return { field, code: 'invalid_value', message };
+}
+
+/**
  * Read a selection IN THE CALLER'S OWN SCOPE, with the per-record door's own
  * read: every distinct id through {@link loadActionSubjectRecord} and
  * `readRecord` (the door's caller-scope `get` of one row of `objectName`), a
@@ -4972,6 +5022,26 @@ export interface DeclarativeUpdateResult {
     record: Record<string, unknown>;
     /** Present only when the action declares `undoable: true`. */
     undo?: DeclarativeUpdateUndo;
+    /**
+     * [#37867] The advisory validation-rule hits (`severity: 'warning' | 'info'`)
+     * of THIS write, exactly as the data-plane update answered them — the
+     * element is `ValidateDataIssue`, the data door's own `warnings` vocabulary.
+     * Present only when the write raised one: the same rule on the same write
+     * answers the same warnings whichever door the person used.
+     */
+    warnings?: ValidateDataIssue[];
+}
+
+/**
+ * [#37867] The `warnings` a data-plane write answer carries, or `undefined`
+ * when it carries none. The protocol's `updateData` sets the member only when
+ * the write raised an advisory rule hit, so an empty or absent member answers
+ * the same: no warnings. Only the protocol arm of `callData` produces it; the
+ * ObjectQL fallback arm answers none, and this reads none from it.
+ */
+function writeAnswerWarnings(written: unknown): ValidateDataIssue[] | undefined {
+    const warnings = (written as { warnings?: unknown } | null | undefined)?.warnings;
+    return Array.isArray(warnings) && warnings.length > 0 ? (warnings as ValidateDataIssue[]) : undefined;
 }
 
 /**
@@ -5225,12 +5295,19 @@ export async function executeDeclarativeUpdateAction(
         };
     }
 
+    // [#37867] The write's advisory rule hits ride the answer. A warning rule
+    // lets the save through and tells the person; the data door answers it as
+    // `warnings`, and a button that performs the same write owes the same
+    // answer, or the warning holds only for people who edit the form.
+    const warnings = writeAnswerWarnings(written);
+
     const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
         object: objectName,
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
+        ...(warnings ? { warnings } : {}),
     };
     if (stale) throw withEarnedAnswer(stale, { ...result });
     return result;
@@ -5382,7 +5459,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         door: 'mcp',
         objectName,
         actionName: name,
-        declaration: { action, obj, ...(packageId !== undefined ? { packageId } : {}) },
+        declaration: {
+            action, obj, ...(packageId !== undefined ? { packageId } : {}),
+            // The row the name resolved to: its own owner key, kept when the
+            // call's object replaces the subject above.
+            ...(resolved ? { ownerKey: resolved.objectName } : {}),
+        },
         // [ADR-0106 D1] This door's answer for a name nothing declares, where
         // it is not the shared undeclared `404`: an action the caller is not
         // shown is answered with it.
@@ -6720,6 +6802,23 @@ export interface RouteActionDeclaration {
      * dispatch runs is that package's (`executeRegisteredAction`).
      */
     packageId?: string;
+    /**
+     * The owner key of the declaration the resolution picked: the object it
+     * is declared on, or {@link GLOBAL_ACTION_OBJECT_KEY} for an object-less
+     * one ({@link isObjectLessActionDeclaration} reads it). Set with
+     * `action`; absent when no declaration was picked.
+     */
+    ownerKey?: string;
+}
+
+/**
+ * A resolution's answer with its declaration's owner key: the key the
+ * resolution already named, else the declaration's own standalone owner key
+ * ({@link standaloneActionOwnerKey}), for an arm that answers a standalone item.
+ */
+function withDeclarationOwnerKey(declaration: RouteActionDeclaration): RouteActionDeclaration {
+    if (declaration.action === undefined || declaration.action === null || declaration.ownerKey !== undefined) return declaration;
+    return { ...declaration, ownerKey: standaloneActionOwnerKey(declaration.action) };
 }
 
 /**
@@ -6866,7 +6965,7 @@ async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
     try {
         const store = environmentStoredActionNames(await deps.getObjectQL(requestContext, envId).catch(() => null));
         const picked = pickActionHolder(hits, actionName, false, await packagelessOriginOf(hits, store));
-        return { action: picked.action, obj };
+        return { action: picked.action, obj, ownerKey: picked.objectName };
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
         return degraded(err);
@@ -6920,6 +7019,14 @@ function listingNotServed(err: unknown): boolean {
  */
 export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
+    args: Parameters<typeof resolveRouteActionDeclarationOnRungs>[2],
+): Promise<RouteActionDeclaration> {
+    return withDeclarationOwnerKey(await resolveRouteActionDeclarationOnRungs(deps, requestContext, args));
+}
+
+/** {@link resolveRouteActionDeclaration}'s rungs, before the owner key is stamped on a standalone answer. */
+async function resolveRouteActionDeclarationOnRungs(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
     args: {
         ql: any; objectName: string; actionName: string; envId?: string;
         /**
@@ -6964,7 +7071,7 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     const embedded = Array.isArray(obj?.actions)
         ? obj.actions.find((a: any) => a?.name === actionName)
         : undefined;
-    if (embedded) return { action: embedded, obj };
+    if (embedded) return { action: embedded, obj, ownerKey: objectName };
 
     const ownsRoute = (action: any): boolean => {
         const owner = standaloneActionObjectName(deps, action);
@@ -7522,6 +7629,9 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             action: resolved.action,
             obj: obj ?? resolved.obj,
             ...(resolved.packageId !== undefined ? { packageId: resolved.packageId } : {}),
+            // The row the address picked: its own owner key, never the routed
+            // object's, which may declare another holder's action of the name.
+            ownerKey: resolved.objectName,
         };
     } catch (err: any) {
         if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
@@ -7531,7 +7641,7 @@ export async function resolveAddressedRouteActionDeclaration(deps: ActionExecuti
             const own = 'environment' in qualifier
                 ? await environmentItemAtOwnAddress({ ql, objectName, actionName, obj })
                 : undefined;
-            if (own !== undefined) return own;
+            if (own !== undefined) return withDeclarationOwnerKey(own);
             throw err;
         }
         return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };

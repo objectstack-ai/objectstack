@@ -22,6 +22,8 @@
  *   costs one queue row per source;
  * - a delete leaves the index once processed, and no search answers the
  *   record in between;
+ * - a recycle-bin restore publishes one message for the restored row, on
+ *   either trigger, and the row is searchable again without a rebuild;
  * - messages published before a restart are processed after it;
  * - a source unregistered before its message is processed: completed, no
  *   write, no retry;
@@ -42,6 +44,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { QueueServicePlugin, type DbQueueAdapter } from '@objectstack/service-queue';
+import { SysRecycleBin } from '@objectstack/platform-objects';
 import type {
   IKnowledgeAdapter,
   IRealtimeService,
@@ -166,6 +169,7 @@ function hostPlugin(
   realtime: IRealtimeService | undefined,
   adapter: IKnowledgeAdapter,
   others: Record<string, IKnowledgeAdapter> = {},
+  recycleBin = false,
 ): Plugin {
   return {
     name: 'test.knowledge-queue-host',
@@ -177,6 +181,7 @@ function hostPlugin(
       await driver.connect();
       ctx.registerService('driver.default', driver);
       ctx.getService<ObjectQL>('objectql').registry.registerObject(KB_ARTICLE as never, 'test.knowledge-queue-host');
+      if (recycleBin) ctx.getService<ObjectQL>('objectql').registry.registerObject(SysRecycleBin as never, 'test.knowledge-queue-host');
       if (realtime) ctx.registerService('realtime', realtime);
     },
     async start(ctx: PluginContext) {
@@ -230,6 +235,8 @@ interface BootOptions {
   knowledge?: KnowledgeServicePluginOptions;
   /** Further stores, registered beside `memory`. */
   adapters?: Record<string, IKnowledgeAdapter>;
+  /** Register the recycle bin, so a delete takes an entry a restore writes back. */
+  recycleBin?: boolean;
 }
 
 async function boot(opts: BootOptions = {}) {
@@ -240,7 +247,7 @@ async function boot(opts: BootOptions = {}) {
   const kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
   kernels.push(kernel);
   await kernel.use(new ObjectQLPlugin());
-  await kernel.use(hostPlugin(file, realtime, memory.adapter, opts.adapters));
+  await kernel.use(hostPlugin(file, realtime, memory.adapter, opts.adapters, opts.recycleBin));
   if (opts.queue !== false) {
     await kernel.use(new QueueServicePlugin({ adapter: 'db', db: { pollIntervalMs: 10, maxIdleIntervalMs: 20 } }));
   }
@@ -446,6 +453,24 @@ describe.each(TRIGGERS)('record sync through the queue — %s', (_label, realtim
     t.queue.start();
     await t.drained(2);
     expect(t.docs.size).toBe(0);
+  });
+
+  it('a recycle-bin restore publishes one message for the restored row; it is searchable again without a rebuild', async () => {
+    const t = await boot({ realtime, recycleBin: true });
+    const row = await t.insert({ title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' });
+    await t.drained(1);
+    await t.remove(row.id);
+    await t.drained(2);
+    expect(t.docs.size).toBe(0);
+    const [entry] = (await t.ql.find('sys_recycle_bin', { where: { record_id: String(row.id) }, context: SYSTEM } as never)) as Row[];
+    expect(entry).toBeDefined();
+
+    const restored = await t.ql.restore(entry.id as string, { context: SYSTEM });
+    expect(restored?.rows).toEqual([{ object: 'kb_article', id: String(row.id) }]);
+    await t.drained(3);
+
+    expect(await t.queueRows()).toHaveLength(3);
+    expect(await t.found('paid leave')).toEqual([String(row.id)]);
   });
 
   it("a source that names no adapter syncs through the queue to the deployment's store", async () => {

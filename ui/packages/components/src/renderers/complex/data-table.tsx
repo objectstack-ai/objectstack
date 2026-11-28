@@ -4065,7 +4065,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // its first control, once it has drawn one (a lazily loaded picker draws it
   // a few frames late). Before this the caret stayed on the cell.
   useEffect(() => {
-    if (!selectFirst || !editingCell) return undefined;
+    if (!editingCell) return undefined;
     let frame = 0;
     let frames = 0;
     const place = () => {
@@ -4079,7 +4079,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     };
     place();
     return () => cancelAnimationFrame(frame);
-  }, [editingCell, selectFirst]);
+  }, [editingCell]);
 
   // Commit a host-injected widget editor on click-outside (objectui#2321).
   //
@@ -5076,7 +5076,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const cellValue = hasPendingChange ? rowChanges[col.accessorKey] : originalValue;
                         const isEditing = editingCell !== null && editingCell.rowKey === rowKey && editingCell.columnKey === col.accessorKey;
                         // objectstack#36023 — a picker's panel opens under the cell, which keeps its value drawn.
-                        const editsBelow = isEditing && selectFirst && editorBelow;
+                        const editsBelow = isEditing && editorBelow;
                         // The reason the last refusal gave for THIS cell, if it
                         // named it (objectstack-ai/objectstack#27520).
                         const cellError = rowCellErrors?.[col.accessorKey];
@@ -5390,7 +5390,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // objectstack#35688 — a pick that commits hands the
                                     // focus back to the selected cell, as Enter does.
                                     commit: (v?: any) => {
-                                      focusSelectionRef.current = selectFirst;
+                                      focusSelectionRef.current = true;
                                       if (!saveEdit(true, v)) focusSelectionRef.current = false;
                                     },
                                     cancel: cancelEdit,
@@ -5413,17 +5413,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // textarea it's left alone so Enter opens the
                                     // dropdown / inserts a newline as usual.
                                     //
-                                    // Outside the select-first model, Tab is
-                                    // deliberately NOT in that list, and
-                                    // tabbing out therefore does not leave edit
-                                    // mode — measured, `64d937c53`. It costs
-                                    // nothing: the widget has already staged
-                                    // every keystroke into `pendingChanges` (or,
-                                    // reading its input on blur, staged on the
-                                    // Tab's own blur — objectui#12664), so
-                                    // the value is safe; the cell simply stays
-                                    // open until Enter, Escape, or a pointer
-                                    // press outside closes it.
+                                    // An editor opens only in the select-first
+                                    // model (`startEdit` refuses a table that is
+                                    // not `editable`, and `editable` needs that
+                                    // model), so its keys are always the model's.
                                     return (
                                       <div
                                         ref={(n) => { injectedEditorElRef.current = n; }}
@@ -5435,19 +5428,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                           const tag = (e.target as HTMLElement).tagName;
                                           // The select-first model (objectstack#35687): in a
                                           // multi-line editor Ctrl/Cmd+Enter commits, and Tab
-                                          // commits and moves, superseding the Tab-stays rule.
+                                          // commits and moves.
                                           const commits = (e.key === 'Enter' && (tag === 'INPUT'
-                                            || (selectFirst && tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
-                                            || (selectFirst && e.key === 'Tab');
+                                            || (tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
+                                            || e.key === 'Tab';
                                           if (commits) {
                                             e.preventDefault();
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
-                                            if (saveEdit(true) && selectFirst) commitMoves(e);
+                                            if (saveEdit(true)) commitMoves(e);
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
-                                            focusSelectionRef.current = selectFirst;
+                                            focusSelectionRef.current = true;
                                             exitEdit(true);
                                           }
                                         }}

@@ -904,9 +904,8 @@ const WRITE_SITES: Record<string, WriteSite> = {
     ...mapped(['listImport'], CONSOLE_LIST, 'packages/app-shell/src/views/importTargetFields.ts'),
     note: "the console list's Import reads the row where it offers Import; HOST_GATED below holds every mount of the wizard to this list",
   } as WriteSite,
-  // The inline-edit saves (objectui#12292): `defaultRowSave` and
-  // `defaultBatchSave` both write through `writeRowGuarded`, the `If-Match`
-  // write; `resolveRowConflict` is the same save's Overwrite after a 409, re-keyed
+  // The inline-edit save (objectui#12292): `defaultRowSave` writes through
+  // `writeRowGuarded`, the `If-Match` write; `resolveRowConflict` is the same save's Overwrite after a 409, re-keyed
   // to the server's version. One affordance, the grid's `listInlineEdit` row.
   'packages/plugin-grid/src/ObjectGrid.tsx :: ObjectGrid > writeRowGuarded :: update': mapped(['listInlineEdit'], OBJECT_GRID),
   'packages/plugin-grid/src/ObjectGrid.tsx :: ObjectGrid > resolveRowConflict :: update': mapped(['listInlineEdit'], OBJECT_GRID),

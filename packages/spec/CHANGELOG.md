@@ -1,5 +1,156 @@
 # @objectstack/spec
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- ab04434: feat(spec): a package's display name per locale — the translation bundle's `packages` group, read by Setup's package list and Studio's package switcher
+  
+  Clause-②: yes (widening) — the translation bundle (`TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema`, `TranslationItemSchema`) accepts a new group `packages`, keyed by `manifest.id`, each row `{ name?, description? }`; a bundle that wrote `packages` was refused as an unknown key before. `@object-ui/i18n` `useObjectLabel()` gains `packageName` and `packageDescription`.
+  Metadata-protocol: added — a new translation group `packages.MANIFEST_ID.name` / `.description`
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A package had one name, the plain-string `manifest.name`, so a zh-CN administrator read every package in Setup's package list, and every package with no app of its own in Studio's package switcher, in English, beside a launcher that already named the same apps in Chinese.
+  
+  A package now names itself per locale in the translation bundle it already ships:
+  
+  ```ts
+  export const zhCN: TranslationData = {
+    packages: { 'com.acme.reporting': { name: '报表', description: '经营报表' } },
+  };
+  ```
+  
+  - The key is the package's `manifest.id`. A key that is not a manifest id — a namespace like `crm`, or a display name — is refused at parse, naming the rule, because a row keyed by one would never render. `package`, and the leaf spellings `label`, `title` and `displayName`, are answered with the declared spelling.
+  - The console draws the translated name where a reader sees a package — Setup's package list (row, detail title, description, search, the installed-apps group) and Studio's package switcher for a package that ships no app — and falls back to `manifest.name`. A package that publishes an app is still named by the app's label in the switcher.
+  - `manifest.name` stays exactly as authored on every wire and in every editor: the translation is a display overlay, so the edit dialog that prefills from the listed manifest never saves a translated name back.
+  - A disabled package keeps its translated name: its bundle is loaded at boot whether or not the package is enabled.
+  - `os i18n extract` scaffolds `packages.MANIFEST_ID.name` / `.description` from the manifest, and `os i18n check` / `os lint` report a locale that leaves them out as `i18n/missing-package` — a warning, like every other missing translation. A stack that declares a non-default locale and has never named its package in it sees two new warnings per locale on upgrade; the ObjectStack examples now name theirs.
+  
+  `MANIFEST_ID_PATTERN` is now declared in `kernel/address-grammar.ts` beside `NAMESPACE_PATTERN`; `kernel/manifest.zod.ts` re-exports it, so every existing import keeps working.
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+- 0b87f12: fix(metadata-protocol)!: refuse the per-item publish and rollback naming no package of a name only disabled packages hold, with or without a package-less row stored
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a per-item publish or rollback naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
+  
+  <!-- adr-0087: not-required (already-registered disabled-holder-package-less-row-bare-write-refused) the entry the six other writes of this narrowing registered now names these three cells too -->
+  
+  **BREAKING** for a deployment that publishes or rolls back one metadata item, with no package named, at a name whose every holder is disabled and no package-less row is stored for it: the write is now refused where it answered `200`. Fix: send the same publish or rollback naming the package (`?package=ID`, in process `packageId`) where the refusal says "Name the package this publish is for" or "Name the package this rollback is for"; enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`) where it says "Enable the package that holds …".
+  
+  The bare save of such an item already answers `409 RESOURCE_CONFLICT` and writes nothing (a disabled package holds no name). The per-item publish and rollback naming no package asked that judgment only where a package-less row or draft was stored, so they still wrote the disabled package's own row, or stored the package-less row again from its history, and enabling the package again served a body no read had shown.
+  
+  Every moved answer, before → after, for a type the registry reads by package, while every holder of the name is disabled, where the ADR-0146 D11 close leaves the write open:
+  
+  - `POST /api/v1/meta/:type/:name/publish` whose draft address is the disabled package's own draft (beside a package-less row or with none stored): `200` (the draft promoted into that package's active row) → `409 RESOURCE_CONFLICT`, "Name the package this publish is for, then send it again …", nothing written. The publish naming the package still promotes it.
+  - `POST /api/v1/meta/:type/:name/rollback` that restores the disabled package's own row: `200` (that row rewritten to the version's body) → `409 RESOURCE_CONFLICT`, "Name the package this rollback is for, then send it again …", nothing written. The rollback naming the package still restores it.
+  - `POST /api/v1/meta/:type/:name/rollback` with the package-less row's history but no package-less row stored: `200` (a package-less row inserted with the version's body) → `409 RESOURCE_CONFLICT`, "Enable the package that holds …", nothing written.
+  - The same three through the in-process `publishMetaItem` / `rollbackMetaItem` with no `packageId`.
+  
+  Once a holder is enabled again the same publish or rollback answers as before the disable.
+  
+  Not moved: a publish or rollback naming a package, with the package enabled or disabled; a publish with no draft at its address, which keeps its `404 NO_DRAFT`; an item the ADR-0146 D11 close covers, which keeps that close's `403 NOT_OVERRIDABLE`; a name no package holds; a name an enabled package holds; every read. Correction to the note `37608-disabled-holder-publish-rollback-refused`, released in `19.0.0-next.1` and left as released: its "Not moved" list says that a rollback of a package-bound row is not moved, and that two writes on an item only disabled packages hold still land, left open for a separate decision (#37851): a publish whose draft address is the disabled package's own draft, and a rollback with no package-less row stored. From this release on, all three are refused as listed above, while the same publish or rollback naming the package, or sent once a holder is enabled again, answers as before. Migration entry `disabled-holder-package-less-row-bare-write-refused` (`@objectstack/spec`) now carries them for the upgrade guide.
+- b316afa: feat(spec): the ask-question envelope a question tool's result carries, and `parseAskQuestionEnvelope`
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  
+  - New in `@objectstack/spec/ai`: `AskQuestionEnvelopeSchema` (`{ success: true, status: 'asked', reply, preface?, questions }`), `AskQuestionSchema` and `AskQuestionOptionSchema`, with the `AskQuestionEnvelope` / `AskQuestion` / `AskQuestionOption` types and their `…Parsed` pairs. One or two questions, two to four mutually exclusive options per question, labels unique within a question, at most one option `recommended`; the length limits are exported as `ASK_QUESTION_LIMITS`. Every level is closed: an unknown key is refused, never dropped.
+  - `parseAskQuestionEnvelope(value)` takes an already-unwrapped tool result and answers the parsed envelope, or `null` for anything that is not one; a `null` means the console shows the result as text. It also reads the legacy `ask_which` result `{ success: true, status: 'asked_which', question, readings, reply }` as one question whose options are the readings, held to the same limits.
+  - Nothing produces the new envelope yet; the console's question card and the question tool's new output build on it.
+
+### Patch Changes
+
+- 34f7078: List the cloud `service-ai-studio` tool `ask_which` in `PLATFORM_TOOLS_BY_PACKAGE`, and give it a `chatbot.tool.ask_which` label in every locale pack, so the chat step reads "Clarify the question" (「确认问题含义」) instead of the raw tool name.
+- 0b539b6: feat(app-shell): 「Who sees this view」 — pick a shared view's or a dashboard's audience from the known capabilities, and see which positions will see it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audience gate is the existing, server-enforced `requiredPermissions` (all of the capabilities listed are required). The console now sets it from a closed list and shows who it reaches; no key, value or gate changes, and nothing is granted from the view (granting stays in Setup).
+  
+  - **`@object-ui/app-shell`.** The view switcher's in-place create card offers 「Who sees this view」 for a shared view: the capabilities the environment knows (declared, or granted by a permission set), each with the permission sets granting it, and a read-only preview of the positions whose permission sets grant every capability picked. The preview reads each position's sets from the server (`GET /meta/position?include=grants`, the sets the resolver grants its holders), never from a position's raw definition; a list served without them leaves the positions unknown. While a gate is picked, the card says it applies to its creator too. It starts from the open view's gate, which a new shared view used to inherit silently, and the pick replaces it; an empty pick writes no gate. A failed catalog read offers nothing to type. The shared hint no longer says every shared view is seen by everyone who can see the list. In Studio, the view panel's and the dashboard settings' audience row is the new `ref-multi:capability` picker: a closed list (no typed-name box when the catalog is unread, empty or failed), each option with its granting sets, and the same preview under it. The picker reads the catalog once its row is on screen, so an editor whose audience section stays closed sends no request.
+  - **`@objectstack/spec`.** The view and dashboard forms' `requiredPermissions` rows declare `widget: 'ref-multi:capability'` (the list is closed: a host with no catalog offers nothing to add). The view hint's last sentence now says only what holds on every carrier: the person setting the gate no longer sees the view in the list either.
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the narrowed view hint (zh-CN, ja-JP and es-ES translated; the other locales the English source).
+  - **`@object-ui/i18n`.** The create card's new strings and the corrected shared hint, in all eleven console locales.
+  
+  Nothing to migrate.
+- c23e556: fix(metadata-protocol): a `422 INVALID_METADATA` issue entry carries the registered refusal on `params`, so a client of the save door can read the code
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A spec rule that owns a registered error code stamps it on its zod issue as `params.code`, next to the fields that say which fix applies: `CONTROLLED_BY_PARENT_MASTER_INVALID` with `shape` (an object save), and `PLUGIN_UI_REQUIRED_KEY_MISSING` with `key` (`PluginSchema`, which no save-door type parses today). zod reports every such rule with its own issue code `'custom'`. The metadata save door's `422 INVALID_METADATA` built each `issues[]` entry from `path`, `message` and that `'custom'` only, so a client of the door (anything that does not parse locally the way Studio does) could not tell which rule refused the body except by its English message.
+  
+  - **`@objectstack/metadata-protocol`.** The save door's 422 entry gains an optional `params` member: the registered refusal the issue carries, present only when the issue's `params.code` is a registered error code, and holding only its string, finite-number and boolean members. An object save refused for a `controlled_by_parent` master now answers `{ path: 'fields', code: 'custom', message, params: { code: 'CONTROLLED_BY_PARENT_MASTER_INVALID', shape: 'master-not-writable' } }`. Read the registered code from `params.code`. `zodIssuesToMetadataIssues` takes a new option, `refusalParams`, which only the save door sets. The read path's `_diagnostics.errors[]` and the seed refusal's `seedApplied.issues[]` keep exactly `path`, `message` and `code`, the shape their spec schemas publish.
+  - **`@objectstack/spec`.** The `CONTROLLED_BY_PARENT_MASTER_INVALID` docblock and its ledger note now say the save door's 422 carries the code on `params.code`.
+  
+  Nothing to migrate. The entry's `code` is unchanged (still zod's issue code, `'custom'` for these rules), and an entry that carries no registered refusal gets no `params` member, so a client that matches `code` or compares whole entries for other issues reads exactly what it read before.
+- b4c99b8: fix(spec): a hook's or action's refusal code and reason are read as literal at save only when the quoted value closes the value
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The save doors of `HookSchema` and `ActionSchema` read the refusal codes and reasons a body throws literally (`hookRefusalCodesThrownIn`, `hookRefusalReasonsThrownIn`) and refuse one that `refusals` does not declare. The four readers stopped at the closing quote, so a value built from a literal — `throw { code: 'OVER' + suffix }`, `e.code = 'OVER' + suffix`, `reason: 'too' + suffix`, `e.reason = 'too' + suffix`, or a member access such as `'OVER'.concat(suffix)` — was read as the literal `OVER` or `too` and refused at save, though the body would run correctly once the built value is declared. The published reading already left a computed value to the run-time refusal; the save now agrees with it.
+  
+  A property value is literal now only when its closing quote is followed by `,` or `}`, after optional whitespace. An assigned value is literal only when its closing quote is followed by `;`, `,`, `}` or `)`, by the end of the source, or by a line end whose next line does not continue the expression (a next line opening with an operator, a member access, a bracket or a template continues it). Every literal code or reason the save refused before is still refused, in the same words: `throw { code: 'X' }`, `throw Object.assign(new Error(), { code: 'X' })`, `e.code = 'X';`, `e.code = 'X'` at a line end, and the same for a reason, a listed reason included. A value built from a literal is refused when the hook or action runs, naming the code or reason, as any other computed value is. No author action is needed.
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- 3c53b85: fix(spec): the `knowledge_source` tombstones say what the author of a registration in code does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Text only. No schema shape changes, and nothing that parsed is refused.
+  
+  - **The prescriptions.** Each prescription of a renamed or removed `knowledge_source` key that ends with `os migrate meta --from 18` (`id`, `source.contentFields`, `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron`, and the `'*'` member of `source.content`) now first says what to do with a source registered in code (`KnowledgeServicePlugin({ sources })`, `registerSource`): it is in no stack collection, so the command lists no edit for it, and the edit is made in the registration itself. Every source written for 18 is such a registration, because a stack could not hold `knowledgeSources` before 19.
+  - **The upgrade entry.** `knowledge-source-registration-governed`, which `os migrate meta --from 18` prints, now covers a source whose 18 `id` began with an underscore. A `name` starts with a letter, so that source is renamed, and an adapter keys what it holds by the source's name: the source is built again under the new name, and the adapter keeps the index it built under the old id. Nothing drops that index for you. Call `dropSource({ source })` on the adapter (`IKnowledgeService.getAdapter`) with the old id as the source's `name`; an adapter without `dropSource` keeps it until it is removed in the adapter's own store.
+- 8b47659: fix(spec): a legacy `ask_which` reading up to 60 characters reads as a question-card option
+  
+  Clause-②: yes (widening) — widened: `parseAskQuestionEnvelope` now accepts a legacy `ask_which` result whose readings run up to 60 characters (it refused any reading over the envelope's 24-character label), and `ASK_QUESTION_LIMITS` gains `legacyReadingMaxLength: 60`.
+  Metadata-protocol: none
+  
+  Real `ask_which` readings are short phrases, most of them longer than the new envelope's 24-character label, so holding them to that label left most of today's questions as plain text. A legacy reading now has its own limit, 60 characters (the envelope's description length), and becomes an option label with no description. Every other rule still applies to the legacy result: one question of at most 120 characters, two to four readings, no duplicate or blank reading, a non-empty reply. The new `asked` envelope keeps its 24-character label.
+- a145e24: docs: the retired agent keys are refused as unknown keys, not tombstones
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `agent.tools` and `agent.knowledge` were removed in protocol 17, and their tombstones left the shape at protocol 18. Since then the strict `AgentSchema` refuses each as an unknown key, and the refusal names https://objectstack.ai/docs/protocol-upgrade. Three texts still described the older behaviour and now say what happens today:
+  
+  - **`@objectstack/skills`.** In the `objectstack-ai` skill's `skills-tools-knowledge` evals, case 5's `expected_output` no longer calls the two keys protocol-17 tombstones. The case's prompt and assertions are unchanged.
+  - **`@objectstack/spec`.** The comment in `src/ai/agent.zod.ts` on the removed `AIKnowledgeSchema` no longer says `agent.knowledge` is tombstoned below it. No schema, type or export changes.
+  
+  The `ai/agents` docs page says the same in its `tools` and `knowledge` rows: the key is not on the type, so there is no `never` member for `tsc` to refuse by name. Nothing to migrate.
+- 6e2a8f2: docs(spec): the note where `AIKnowledgeSchema` used to live no longer says the protocol-17 `agent-knowledge-topics-to-sources` conversion is still in the chain. That rename was absorbed before release into the removal of the whole `agent.knowledge` block, so no registry or entry module carries the id and `retired-after.census.json` has no row for it. Comment only: no schema, type or export changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+
 ## 19.0.0-next.1
 
 ### Major Changes
