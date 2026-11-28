@@ -28,7 +28,7 @@
  * the harness.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -88,6 +88,7 @@ const WON = { stage: 'won' };
 
 interface Booted {
   driver: SqlDriver;
+  ql: ObjectQL;
   sharing: SharingService;
   rules: SharingRuleService;
   /** Every `sys_record_share` row, read straight off the driver. */
@@ -104,7 +105,7 @@ afterEach(async () => {
   }
 });
 
-async function boot(posture: 'single' | 'isolated'): Promise<Booted> {
+async function boot(posture: 'single' | 'isolated' | 'group'): Promise<Booted> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
   open.push(driver);
 
@@ -138,6 +139,7 @@ async function boot(posture: 'single' | 'isolated'): Promise<Booted> {
 
   return {
     driver,
+    ql,
     sharing,
     rules,
     shares: async () => (await driver.find('sys_record_share', {} as never)) as never,
@@ -220,6 +222,54 @@ describe('[#33912] a manual share to a user recipient that does not resolve is r
     const { sharing, shares } = await boot('single');
     await sharing.grant(share(MEMBER_B), OWNER_CTX);
     expect((await shares()).map((r) => r.recipient_id)).toEqual([MEMBER_B]);
+  });
+});
+
+describe('[#33912] under a wall, a grant whose organization does not resolve judges no recipient — every one gets the engine\'s answer', () => {
+  // `resolveDirectGrantOrganization` answers `null` when the record's
+  // organization read fails (and when the record carries none and the session
+  // has no active organization). The row cannot be stamped, so the engine
+  // refuses the insert for EVERY recipient (ADR-0131 D9). Asking the
+  // deployment-wide `sys_user` here would refuse an unknown id with 400 and let
+  // a real user of any organization through to that 500 — telling the caller
+  // the id exists in some tenant. So the check stands aside in this arm.
+  //
+  // The session shape is the one `record-share-organization-stamp.test.ts`
+  // uses to reach this arm: a `group` member of both organizations, active in
+  // the sibling one, whose record-organization read fails.
+  const GROUP_OWNER_ACTIVE_IN_B = {
+    userId: OWNER, tenantId: ORG_B, accessible_org_ids: [ORG_A, ORG_B], positions: [], permissions: [],
+  } as unknown as ExecutionContext;
+
+  function failOrganizationRead(ql: ObjectQL): void {
+    const original = ql.find.bind(ql);
+    vi.spyOn(ql, 'find').mockImplementation((async (object: string, options?: any) => {
+      if (object === OBJECT && Array.isArray(options?.fields) && options.fields.includes('organization_id')) {
+        throw new Error('simulated driver outage');
+      }
+      return original(object, options);
+    }) as never);
+  }
+
+  const answerOf = (call: Promise<unknown>) => call.then(
+    () => null,
+    (e: any) => ({ code: e?.code ?? /^([A-Z_]+):/.exec(String(e?.message))?.[1], status: e?.status, message: String(e?.message) }),
+  );
+
+  it('an unknown id and a user of another organization get the same status, code and sentence, and nothing is written', async () => {
+    const { ql, driver, sharing, shares } = await boot('group');
+    await driver.create('sys_member', { id: 'm_owner_b', user_id: OWNER, organization_id: ORG_B, role: 'member' } as never);
+    failOrganizationRead(ql);
+    const unknown = await answerOf(sharing.grant(share(UNKNOWN), GROUP_OWNER_ACTIVE_IN_B));
+    const foreign = await answerOf(sharing.grant(share(MEMBER_B), GROUP_OWNER_ACTIVE_IN_B));
+    const member = await answerOf(sharing.grant(share(MEMBER_A), GROUP_OWNER_ACTIVE_IN_B));
+    expect(unknown, 'the unknown recipient was granted').not.toBeNull();
+    expect(unknown).toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+    expect(foreign).toEqual(unknown);
+    // …and so does a member of the record's organization: the answer is the
+    // engine's, about the organization, never about who the recipient is.
+    expect(member).toEqual(unknown);
+    expect(await shares()).toEqual([]);
   });
 });
 

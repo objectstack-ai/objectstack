@@ -2260,17 +2260,27 @@ export class SharingService implements ISharingService {
    * "Resolves" is the scope the gates consult, never wider and never narrower:
    *
    * - **Behind a wall** (`group` / `isolated`, {@link organizationScopeRequired})
-   *   and with the grant's organization known: a `sys_member` of THAT
-   *   organization (`organizationMemberStanding`, the engine's one membership
-   *   predicate). The record's own wall admits nobody else, so a share to a
-   *   user of another organization is as inert as one to an id that does not
-   *   exist — and it is refused with the SAME sentence, byte for byte, so the
-   *   door is no oracle for who exists in another tenant. A banned member
-   *   resolves: the ban is a sign-in fact, and the share applies again the
-   *   moment it lapses.
-   * - **Otherwise** (`single`, a grant that carries no organization, or a
-   *   deployment that registers no membership table): a `sys_user` row with
-   *   that id. No wall stands between such a record and any user.
+   *   with the grant's organization known: a `sys_member` of THAT organization
+   *   (`organizationMemberStanding`, the engine's one membership predicate).
+   *   The record's own wall admits nobody else, so a share to a user of
+   *   another organization is as inert as one to an id that does not exist —
+   *   and it is refused with the SAME sentence, byte for byte, so the door is
+   *   no oracle for who exists in another tenant. A banned member resolves:
+   *   the ban is a sign-in fact, and the share applies again the moment it
+   *   lapses.
+   * - **Behind a wall with NO organization** (the record's organization read
+   *   failed, or the record carries none and the session has no active one):
+   *   nothing is judged, every recipient resolves. Such a row cannot be
+   *   stamped, so the engine refuses its insert for every recipient alike
+   *   (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, ADR-0131 D9) and nothing
+   *   inert is written. Asking the deployment-wide `sys_user` here would
+   *   refuse an unknown id with 400 and let a user of any organization through
+   *   to that 500 — telling the caller the id exists in some tenant.
+   * - **Behind a wall on a deployment that registers no membership table**:
+   *   there is no organization to be a member of, so a `sys_user` row with that
+   *   id.
+   * - **`single`**: a `sys_user` row with that id. No organization wall
+   *   stands between the record and any user of the deployment.
    *
    * A deployment that registers no `sys_user` at all has no directory to
    * resolve against, and the check stands aside rather than refuse every
@@ -2300,7 +2310,10 @@ export class SharingService implements ISharingService {
         return false;
       }
     };
-    if (organizationId && this.organizationScopeRequired()) {
+    if (this.organizationScopeRequired()) {
+      // No organization under a wall: the engine's refusal answers every
+      // recipient alike (see the jsdoc above), so nothing is asked here.
+      if (!organizationId) return true;
       const standing = await organizationMemberStanding(
         {
           hasObject: registered,

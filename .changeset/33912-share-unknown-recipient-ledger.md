@@ -9,4 +9,4 @@ Metadata-protocol: narrowed
 
 <!-- adr-0087: registered share-user-recipient-unresolved-refused -->
 
-A new semantic entry, `share-user-recipient-unresolved-refused`, under step 19: `objectstack migrate meta` and the upgrade guide now say that `POST /api/v1/data/OBJECT/ID/shares` and `POST /api/v1/sharing/rules` refuse a `user` recipient that names no existing user (on a walled deployment, no member of the record's or rule's organization) with 400 `VALIDATION_FAILED`, and how to find the inert shares stored before the refusal. No schema, key or export changes.
+A new semantic entry, `share-user-recipient-unresolved-refused`, under step 19: `objectstack migrate meta` and the upgrade guide now say that `POST /api/v1/data/OBJECT/ID/shares` and `POST /api/v1/sharing/rules` refuse a `user` recipient that names no existing user (on a walled deployment with the record's or rule's organization known, no member of that organization; where that organization does not resolve, the recipient is not judged) with 400 `VALIDATION_FAILED`, and how to find the inert shares stored before the refusal. No schema, key or export changes.
