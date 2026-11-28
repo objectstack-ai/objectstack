@@ -460,8 +460,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       const details = plan.rows.map((r) => String(r.detail));
       const table = `knowledge_${s.name}_g1`;
       expect(details.some((d) => d.includes(`USING INDEX ${table}_record`))).toBe(true);
-      // Neither leg nor the keyword statistics reads the passage table whole.
-      expect(details.filter((d) => new RegExp(`^SCAN (${table}|p)\\b`).test(d))).toEqual([]);
+      // Neither leg nor the keyword statistics reads the passage table whole (its
+      // keyword index, `<table>-fts`, is searched by MATCH, a virtual table's own plan).
+      expect(details.filter((d) => new RegExp(`^SCAN (${table}|p)(\\s|$)`).test(d))).toEqual([]);
     });
   });
 }
