@@ -1305,6 +1305,44 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(vectorLegs(over.sql, from)).toEqual({ approximate: 1, exact: 1 });
     });
 
+    it('a leg under 8 × topK in scope tries 10 × the candidates once before the exact scan, unless its pool is too thin for that', async () => {
+      const s = source('ann_retry');
+      const docs = corpus(s, 400);
+      // topK 2 and 8 candidates a hit: 16 candidates, a floor of 16, and 160 for the second pass.
+      const { adapter, sql, args } = await built(s, docs, { vectorIndexOverfetch: 8 });
+      const t = source('ann_retry_exact');
+      const exact = await built(t, corpus(t, 400), { vectorIndexThreshold: Infinity });
+      const QUERY = 'w1x w2x w3x';
+      const ids = (hits: Array<{ sourceRecordId?: string }>) => hits.map((h) => h.sourceRecordId);
+
+      // A quarter of the passages in scope: the first pass keeps about 4 of its 16, the second about 40 of
+      // its 160, which clears the floor, so the second pass answers, as the exact scan would, without it.
+      const quarter = [{ kind: 'record' as const, ids: docs.flatMap((d) => d.sourceRecordId ?? []).filter((_, i) => i % 4 === 0) }];
+      let from = sql.length;
+      const wide = await adapter.search(QUERY, { source: s, topK: 2, scope: quarter });
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 0 });
+      // Each pass binds exactly the values it reads, its candidate count last.
+      for (const st of vectorStatements({ sql, args }, from)) expect(st).toMatchObject({ reads: st.bound });
+      expect(
+        sql.flatMap((q, i) => (i >= from && q.includes('vector1bit(') ? [args[i][args[i].length - 1]] : [])),
+      ).toEqual([16, 160]);
+      expect(ids(wide)).toEqual(ids(await exact.adapter.search(QUERY, { source: t, topK: 2, scope: quarter })));
+
+      // The five nearest passages in scope: both passes keep at most 5, so the exact scan answers after both.
+      const nearest = ids(await adapter.search(QUERY, { source: s, topK: 5 })).flatMap((id) => id ?? []);
+      from = sql.length;
+      const five = await adapter.search(QUERY, { source: s, topK: 2, scope: [{ kind: 'record', ids: nearest }] });
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 1 });
+      expect(ids(five)).toEqual(nearest.slice(0, 2));
+
+      // One record in scope (a narrow caller's visible ids): 10 × a pool of 1 cannot reach 16, so there is no
+      // second pass, and the exact scan answers as it did before the second pass existed.
+      from = sql.length;
+      const one = await adapter.search(QUERY, { source: s, topK: 2, scope: [{ kind: 'record', ids: [nearest[3]] }] });
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
+      expect(ids(one)).toEqual([nearest[3]]);
+    });
+
     it('keeps the index in step with every write and removal; a generation swap and dropSource drop it whole', async () => {
       const s = source('ann_life');
       const { adapter, client, sql } = await built(s, corpus(s, 60));
