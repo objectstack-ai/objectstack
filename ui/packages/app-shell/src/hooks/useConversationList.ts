@@ -8,7 +8,7 @@
  * `req.user.userId` server-side so we just forward credentials.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { publishPlanApprovalPending } from '../assistant/assistantBus.js';
 import { isHitlContinuation } from '@object-ui/plugin-chatbot/core';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -51,7 +51,19 @@ export interface UseConversationListOptions {
   limit?: number;
   /** Bump to force a refetch (e.g. after creating/deleting a conversation). */
   refreshKey?: number | string;
+  /**
+   * The rows the caller actually shows, picked from the sorted list page. Only
+   * those rows have their missing title and preview read from each one's
+   * detail route, so a caller that lists a few rows of a long page never waits
+   * on detail reads for rows it does not draw. Absent: every listed row
+   * qualifies. Read when the list answers, never as an effect dependency, so
+   * pass `refreshKey` when what it selects by changes.
+   */
+  selectBackfillRows?: (rows: readonly ConversationListItem[]) => readonly ConversationListItem[];
 }
+
+/** The most detail reads one list read backfills previews with. */
+export const MAX_PREVIEW_BACKFILL = 20;
 
 export interface UseConversationListReturn {
   conversations: ConversationListItem[];
@@ -188,7 +200,9 @@ export async function readConversationRow(apiBase: string, id: string): Promise<
 export function useConversationList(
   options: UseConversationListOptions,
 ): UseConversationListReturn {
-  const { userId, apiBase, limit = 50, refreshKey } = options;
+  const { userId, apiBase, limit = 50, refreshKey, selectBackfillRows } = options;
+  const selectBackfillRowsRef = useRef(selectBackfillRows);
+  selectBackfillRowsRef.current = selectBackfillRows;
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(userId));
   const [error, setError] = useState<Error | undefined>(undefined);
@@ -265,9 +279,10 @@ export function useConversationList(
           .map(normalize)
           .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
         setConversations(sorted);
-        const needsPreview = sorted
+        const shown = selectBackfillRowsRef.current?.(sorted) ?? sorted;
+        const needsPreview = shown
           .filter((row) => !row.title && !row.preview)
-          .slice(0, 20);
+          .slice(0, MAX_PREVIEW_BACKFILL);
         if (needsPreview.length > 0) {
           const details = await Promise.all(
             needsPreview.map((row) => fetchConversationDetail(apiBase, row.id).catch(() => undefined)),

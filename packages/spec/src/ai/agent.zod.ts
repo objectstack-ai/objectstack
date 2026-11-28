@@ -82,7 +82,9 @@ export const AIModelConfigSchema = lazySchema(() => acceptRetiredDefaultResidue(
    * REMOVED (#37712, ADR-0049) — the provider is the deployment's choice, never
    * the agent's; see `MODEL_PROVIDER_RETIRED` above. A tombstone, not a bare
    * delete, so authoring it is a `tsc` error and a parse error that carries
-   * the prescription instead of an anonymous unrecognized-key refusal.
+   * the prescription instead of an anonymous unrecognized-key refusal. One
+   * value parses: the `'openai'` an 18.x toolchain wrote out is stripped
+   * (`MODEL_PROVIDER_RETIRED_KEY_RESIDUE` above); `tsc` refuses it all the same.
    */
   provider: retiredKey(MODEL_PROVIDER_RETIRED),
   model: z.string().optional().describe(

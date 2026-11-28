@@ -155,7 +155,7 @@ write instead, and `os migrate meta --from 18` converts the mechanical ones:
 
 | Before 19 | Now |
 |:--|:--|
-| `id` | `name` (the value is unchanged, so the index is found again) |
+| `id` | `name` (the value is unchanged, so the index is found again). One exception: `name` refuses a leading underscore, so a source whose `id` began with one takes a new name and is built again from nothing under it; the adapter still holds the index under the old id, which nothing searches or drops, so call `dropSource({ source })` on that adapter (`IKnowledgeService.getAdapter`) with the source's `name` set to the old id once the new build completes. An adapter without `dropSource`, or one whose store does not outlive the process (memory), has nothing to drop or keeps it until removed in its own store |
 | `source.contentFields` | `source.content` (a `'*'` member is replaced by hand with the field names) |
 | `embedding`, `vectorStore` | removed: the embedder and the store are the deployment's, never a source's |
 | `adapterConfig` | removed: an adapter takes its settings as options of the plugin that mounts it |

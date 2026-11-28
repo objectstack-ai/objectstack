@@ -50,7 +50,7 @@ export function describeUnservedKnowledgeSources(names: readonly string[], servi
   return (
     `[ObjectQLPlugin] this deployment holds ${count} knowledge_source ${count === 1 ? 'item' : 'items'} ` +
     `(${shown}${rest > 0 ? `, and ${rest} more` : ''}), but no '${KNOWLEDGE_SERVICE}' service is registered, so ` +
-    `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched. ${UNSERVED_REMEDY} or remove the ` +
+    `${count === 1 ? 'it is not' : 'none is'} loaded, indexed or searched. ${UNSERVED_REMEDY} or remove the ` +
     `${count === 1 ? 'item' : 'items'}.`
   );
 }

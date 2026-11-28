@@ -1881,6 +1881,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.form.noRows': 'No rows. Click + to add.',
   'engine.form.masterDetailSchemaError': 'master-detail widget requires items.properties on the JSON schema (or an anyOf branch that has them).',
   'engine.form.missingField': 'Field {field} declared in form layout but missing from schema. Skipping.',
+  'engine.form.inactiveRetained': 'Not in effect: this field does not apply to the current settings. Its value is still saved, and saving may be refused because of it. Clear it to remove it.',
+  'engine.form.inactiveRetainedClear': 'Clear value',
   'engine.form.fallbackJson': 'widget {widget} — falling back to JSON until a custom renderer is registered.',
   'engine.form.key': 'Key',
   'engine.form.keyRequired': 'Key is required',
@@ -3145,6 +3147,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.skillPreview.missingTitle': 'Required by SkillTriggerConditionSchema — this draft will be rejected on save.',
   'engine.toolPreview.openApiConsole': 'Open in API Console',
   'engine.toolPreview.openApiConsoleTitle': 'Open API Console to test invocation',
+  'engine.toolPreview.openApiConsoleNote':
+    'Runs the tool directly, outside a chat. On the hosted cloud a call that needs the server-side model is refused here: try it in a chat.',
   'engine.toolPreview.empty': 'Set name, description, and parameters to see the tool preview.',
   'engine.toolPreview.inputParameters': 'Input Parameters',
   'engine.toolPreview.noParameters': 'This tool takes no input parameters.',

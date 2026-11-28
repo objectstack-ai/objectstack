@@ -20,7 +20,8 @@
  * permission checks, and live datasource access that the preview
  * sandbox doesn't provide. Authors get an `Open in API Console` link
  * for end-to-end testing — see `ApiConsoleLink` below for where it points
- * and what it carries (objectui#10591).
+ * and what it carries (objectui#10591), and for the note beside it on calls
+ * that need the server model (objectstack#34193).
  *
  * NO FLAG PILLS — deliberate (objectstack#3715 / objectstack-ai/objectstack#3896, objectui#3236).
  * The header strip used to render `requiresConfirmation`, `active`,
@@ -136,6 +137,16 @@ const API_CONSOLE_REF = 'developer:api-console';
  * With no router above the preview (the designer gallery harness), or a route
  * that names no `:appName`, there is no app to open the console in, so no link
  * is drawn rather than one that goes nowhere.
+ *
+ * The note beside the link (objectstack#34193). The console runs the tool
+ * directly, outside a chat turn, and on the hosted cloud such a run gets no
+ * server-side model: a call that needs one is refused there. Whether a call
+ * needs the model is not a fact of the tool. Tool metadata carries no field for
+ * it, and for some tools it turns on the arguments (a call that brings its own
+ * rows needs no model to write them). So the preview cannot hide the link per
+ * tool, and it names no tool. It keeps the link for every tool and says, next
+ * to it and as the link's description, that a call needing the server model
+ * runs in a chat instead.
  */
 function ApiConsoleLink({ toolName, locale }: { toolName: string; locale?: string }) {
   // Rules-of-hooks safe: whether a router sits above is a fact about the
@@ -145,6 +156,7 @@ function ApiConsoleLink({ toolName, locale }: { toolName: string; locale?: strin
 
 function RoutedApiConsoleLink({ toolName, locale }: { toolName: string; locale?: string }) {
   const { appName } = useParams<{ appName?: string }>();
+  const noteId = React.useId();
   if (!appName) return null;
   const preset = new URLSearchParams({
     path: `/api/v1/ai/tools/${encodeURIComponent(toolName)}/execute`,
@@ -152,15 +164,21 @@ function RoutedApiConsoleLink({ toolName, locale }: { toolName: string; locale?:
   });
   const segments = componentRefToUrlSegments(API_CONSOLE_REF).join('/');
   return (
-    <Link
-      to={`/apps/${encodeURIComponent(appName)}/component/${segments}?${preset.toString()}`}
-      target="_blank"
-      rel="noreferrer"
-      className="text-xs inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-      title={tr('engine.toolPreview.openApiConsoleTitle', locale)}
-    >
-      {tr('engine.toolPreview.openApiConsole', locale)} <ExternalLink className="h-3 w-3" />
-    </Link>
+    <span className="inline-flex items-center gap-2 min-w-0">
+      <span id={noteId} className="text-[11px] text-muted-foreground text-right">
+        {tr('engine.toolPreview.openApiConsoleNote', locale)}
+      </span>
+      <Link
+        to={`/apps/${encodeURIComponent(appName)}/component/${segments}?${preset.toString()}`}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs inline-flex shrink-0 items-center gap-1 text-muted-foreground hover:text-foreground"
+        title={tr('engine.toolPreview.openApiConsoleTitle', locale)}
+        aria-describedby={noteId}
+      >
+        {tr('engine.toolPreview.openApiConsole', locale)} <ExternalLink className="h-3 w-3" />
+      </Link>
+    </span>
   );
 }
 

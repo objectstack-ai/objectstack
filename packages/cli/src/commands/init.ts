@@ -1060,28 +1060,15 @@ ${starterObjectExportsNote(['src/apps/main.app.ts', `src/views/${namespace}_item
 export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
-  // Field groups: the sections an item's form and detail page draw, top to
-  // bottom in this order. A field joins one by naming its \`key\` in \`group\`.
-  // That placement is what displays \`description\` and \`status\`.
-  // \`objectstack validate\` and \`objectstack lint\` report a field that
-  // nothing displays or reads (\`field-no-consumers\`) once the project holds
-  // a view, flow, dashboard or anything else that could read it, so give each
-  // field you add a \`group\` as well. Field groups versus a view's own form
-  // sections: https://objectstack.ai/docs/ui/field-grouping-and-order
-  fieldGroups: [
-    { key: 'details', label: 'Details' },
-  ],
   fields: {
     // Each field through a \`Field.*\` builder (Field.textarea, Field.select,
     // Field.lookup, …), the way \`objectstack generate object\` writes them.
     name: Field.text({
       label: 'Name',
       required: true,
-      group: 'details',
     }),
     description: Field.textarea({
       label: 'Description',
-      group: 'details',
     }),
     status: Field.select({
       label: 'Status',
@@ -1091,9 +1078,22 @@ export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
         { label: 'Archived', value: 'archived' },
       ],
       defaultValue: 'draft',
-      group: 'details',
     }),
   },
+
+  // Field groups: the Details sections of an item's record page and of its
+  // create and edit form, top to bottom in this order; a section's \`fields\`
+  // list names its fields in display order. That placement is what displays
+  // \`description\` and \`status\`. \`objectstack validate\` and
+  // \`objectstack lint\` report a field that nothing displays or reads
+  // (\`field-no-consumers\`) once the project holds a view, flow, dashboard or
+  // anything else that could read it, so list each field you add in a section
+  // too. Field groups versus a view's own form sections:
+  // https://objectstack.ai/docs/ui/field-grouping-and-order
+  fieldGroups: [
+    { key: 'details', label: 'Details', fields: ['name', 'description', 'status'] },
+  ],
+
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
   // rule. Declaring it is required, deliberately: \`objectstack build\`

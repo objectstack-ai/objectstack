@@ -38,6 +38,15 @@
  * `same-origin` credentials send the cookie alone just the same. Here the URL is
  * the only evidence the request is the server's, so it has to be written out.
  *
+ * Written out in any of these spellings (objectstack#37505): a literal or
+ * template, a `+` concatenation with such a part (`base + '/api/v1/x'`), or a
+ * `const` of this file bound to one of those (`const url = \`${base}/api/…\``).
+ * And the init's credentials are read through what it is built from: an
+ * explicit `credentials: 'same-origin'` is the default spelled out (the cookie
+ * alone), and a `{ ...COOKIE_INIT, method: 'POST' }` spread of a `const` of this
+ * file carries that const's credentials unless a later key overrides them. A
+ * spread of anything else (`{ ...init }`) is unknown, and unknown is not bare.
+ *
  * The renderer packages (`components`, `fields`, `plugin-*`, …) do not import
  * `@object-ui/auth`: their channel is the host's authenticated fetch, handed
  * down as `SchemaRendererProvider`'s `apiFetch` (the console's is
@@ -159,25 +168,77 @@ const ALLOWED: Readonly<Record<string, { count: number; reason: string }>> = {
   },
 };
 
+/**
+ * Calls that READ like a bare fetch and are not one, kept here so the reading
+ * travels with the code (objectstack#37505, objectstack#37507): each is a
+ * renderer package's injected channel with the global `fetch` as the fallback
+ * of a host that hands none, which the detector does not count (see the
+ * header). A row fails once its file no longer holds the spelling, or once the
+ * scan counts a call in that file: delete or move the row then.
+ */
+const REGISTERED_CHANNELS: ReadonlyArray<{ file: string; spelling: string; reason: string }> = [
+  {
+    file: 'packages/react/src/hooks/useDatasetDimensionLabels.ts',
+    spelling: 'const doFetch = apiFetch ?? fetch;',
+    reason: 'the host\'s `apiFetch` off `SchemaRendererContext` (the console\'s authenticated fetch); the global fetch only where no host mounts one.',
+  },
+  {
+    file: 'packages/react/src/element-data-source/useElementApiDataSource.ts',
+    spelling: 'const doFetch: ApiFetch = context?.apiFetch ?? fetch;',
+    reason: 'the host\'s `apiFetch` off `SchemaRendererContext` (the console\'s authenticated fetch); the global fetch only where no host mounts one.',
+  },
+  {
+    file: 'packages/auth/src/createAuthClient.ts',
+    spelling: 'const rawFetch = fetchFn || globalThis.fetch.bind(globalThis);',
+    reason:
+      'the stale-bearer self-heal: `get-session` retried once WITHOUT the stored bearer, on purpose, because an invalid ' +
+      'bearer shadows a valid cookie session; every other request of the client goes through `bearerFetch`.',
+  },
+];
+
 const GLOBAL_FETCH = new Set(['fetch', 'window.fetch', 'globalThis.fetch', 'self.fetch']);
 
-function carriesInclude(node: ts.Node | undefined): boolean {
-  return (
-    !!node &&
-    ts.isObjectLiteralExpression(node) &&
-    node.properties.some(
-      (p) =>
-        ts.isPropertyAssignment(p) &&
-        (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
-        p.name.text === 'credentials' &&
-        isIncludeLiteral(unwrap(p.initializer)),
-    )
-  );
-}
+/**
+ * What an init sends as `credentials`: a written value (`'include'`,
+ * `'same-origin'`, `'omit'`, also `as const`), `'none'` when it names none (the
+ * default `same-origin`: the cookie alone), or `'unknown'` when it cannot be read
+ * here (a parameter, a computed value, or a spread of anything but a `const` of
+ * this file with no value written before it). `consts` holds this file's
+ * `const NAME = { … }` inits, by name.
+ */
+type Credentials = string;
 
-/** `'include'`, also written `'include' as const`. */
-function isIncludeLiteral(node: ts.Expression): boolean {
-  return ts.isStringLiteralLike(node) && node.text === 'include';
+function credentialsOf(node: ts.Expression | undefined, consts: ReadonlyMap<string, ts.Expression>, seen = new Set<string>()): Credentials {
+  if (!node) return 'none';
+  const n = unwrap(node);
+  if (ts.isIdentifier(n)) {
+    const bound = consts.get(n.text);
+    if (!bound || seen.has(n.text)) return 'unknown';
+    return credentialsOf(bound, consts, new Set(seen).add(n.text));
+  }
+  if (!ts.isObjectLiteralExpression(n)) return 'unknown';
+  // Later keys win, as they do at run time. A spread this file cannot read
+  // (`...init`) does not erase a credentials value written before it: the
+  // caller's init seldom names one, so the written value is the reading.
+  let credentials: Credentials = 'none';
+  for (const p of n.properties) {
+    if (ts.isSpreadAssignment(p)) {
+      const spread = credentialsOf(p.expression, consts, seen);
+      if (spread === 'unknown') {
+        if (credentials === 'none') credentials = 'unknown';
+      } else if (spread !== 'none') {
+        credentials = spread;
+      }
+    } else if (
+      (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+      (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
+      p.name.text === 'credentials'
+    ) {
+      const value = ts.isPropertyAssignment(p) ? unwrap(p.initializer) : undefined;
+      credentials = value && ts.isStringLiteralLike(value) ? value.text : 'unknown';
+    }
+  }
+  return credentials;
 }
 
 function unwrap(node: ts.Expression): ts.Expression {
@@ -201,31 +262,31 @@ function isGlobalFetchCallee(callee: ts.Expression, sf: ts.SourceFile): boolean 
   return false;
 }
 
-/** A URL written out as a literal, read only for whether it names an `/api/` path. */
-function namesApiPath(node: ts.Expression | undefined): boolean {
+/**
+ * A URL written out, read only for whether it names an `/api/` path: a literal,
+ * a template, a `+` concatenation with such a part, or a `const` of this file
+ * bound to one of those (`urlConsts`, by name).
+ */
+function namesApiPath(node: ts.Expression | undefined, urlConsts: ReadonlyMap<string, ts.Expression> = new Map(), seen = new Set<string>()): boolean {
   if (!node) return false;
   const n = unwrap(node);
   if (ts.isStringLiteralLike(n)) return n.text.includes('/api/');
   if (ts.isTemplateExpression(n)) {
     return [n.head.text, ...n.templateSpans.map((span) => span.literal.text)].some((part) => part.includes('/api/'));
   }
+  if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return namesApiPath(n.left, urlConsts, seen) || namesApiPath(n.right, urlConsts, seen);
+  }
+  if (ts.isIdentifier(n)) {
+    const bound = urlConsts.get(n.text);
+    return !!bound && !seen.has(n.text) && namesApiPath(bound, urlConsts, new Set(seen).add(n.text));
+  }
   return false;
 }
 
-/** No init, or an inline one with no `credentials` key: the default `same-origin`, the cookie alone. */
-function defaultsCredentials(init: ts.Expression | undefined): boolean {
-  if (!init) return true;
-  const n = unwrap(init);
-  return (
-    ts.isObjectLiteralExpression(n) &&
-    !n.properties.some(
-      (p) =>
-        ts.isSpreadAssignment(p) ||
-        ((ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
-          (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
-          p.name.text === 'credentials'),
-    )
-  );
+/** The cookie alone: no `credentials` named (the default), or `same-origin` spelled out. */
+function sendsCookieAlone(credentials: Credentials): boolean {
+  return credentials === 'none' || credentials === 'same-origin';
 }
 
 /**
@@ -244,12 +305,23 @@ function bareCookieOnlyCalls(fileName: string, text: string, builds = true): str
     false,
     fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
-  // A `const NAME = { credentials: 'include', … }` anywhere in the file: an
-  // init handed to the call by name.
-  const includeConsts = new Set<string>();
+  // A `const NAME = { … }` anywhere in the file: an init handed to the call by
+  // name, or spread into one. A `const NAME = <string, template or +>`: a URL
+  // handed to the call by name (objectstack#37505).
+  const initConsts = new Map<string, ts.Expression>();
+  const urlConsts = new Map<string, ts.Expression>();
   const collect = (n: ts.Node): void => {
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && carriesInclude(unwrap(n.initializer))) {
-      includeConsts.add(n.name.text);
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      const bound = unwrap(n.initializer);
+      if (ts.isObjectLiteralExpression(bound)) initConsts.set(n.name.text, bound);
+      else if (
+        ts.isStringLiteralLike(bound) ||
+        ts.isTemplateExpression(bound) ||
+        (ts.isBinaryExpression(bound) && bound.operatorToken.kind === ts.SyntaxKind.PlusToken) ||
+        ts.isIdentifier(bound)
+      ) {
+        urlConsts.set(n.name.text, bound);
+      }
     }
     ts.forEachChild(n, collect);
   };
@@ -270,17 +342,15 @@ function bareCookieOnlyCalls(fileName: string, text: string, builds = true): str
     const c = unwrap(callee);
     return isGlobalFetchCallee(c, sf) || (ts.isIdentifier(c) && fetchAliases.has(c.text));
   };
-  const initIncludes = (arg: ts.Expression | undefined): boolean => {
-    if (!arg) return false;
-    const a = unwrap(arg);
-    return carriesInclude(a) || (ts.isIdentifier(a) && includeConsts.has(a.text));
-  };
+  const initIncludes = (arg: ts.Expression | undefined): boolean => !!arg && credentialsOf(arg, initConsts) === 'include';
   const out: string[] = [];
   const visit = (n: ts.Node): void => {
     if (ts.isCallExpression(n)) {
       const bare =
         (isBareTransport(n.expression) && initIncludes(n.arguments[1])) ||
-        (isBareTransport(n.expression) && namesApiPath(n.arguments[0]) && defaultsCredentials(n.arguments[1])) ||
+        (isBareTransport(n.expression) &&
+          namesApiPath(n.arguments[0], urlConsts) &&
+          sendsCookieAlone(credentialsOf(n.arguments[1], initConsts))) ||
         (unwrap(n.expression).getText(sf) === 'sharedGetJson' && n.arguments.length < 3 && initIncludes(n.arguments[1]));
       if (bare) {
         const line = sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -375,8 +445,26 @@ describe('cookie-only same-server fetch ratchet (every ui package + console)', (
       ["await fetch('/api/v1/x');", 1],
       ['await fetch(`/api/v1/objects/${name}/fields`);', 1],
       ["await window.fetch(`${base}/api/v1/x`, { method: 'POST', headers: h });", 1],
-      ["await fetch('/api/v1/x', { credentials: 'same-origin' });", 0],
+      // `same-origin` spelled out is the default: the cookie alone (objectstack#37505).
+      ["await fetch('/api/v1/x', { credentials: 'same-origin' });", 1],
+      ["const init = { credentials: 'same-origin' as const }; await fetch('/api/v1/x', init);", 1],
+      ["await fetch('/api/v1/x', { credentials: 'omit' });", 0],
+      // A spread init is unknown, unless it spreads a `const` of the file (objectstack#37505).
       ["await fetch('/api/v1/x', { ...init });", 0],
+      ["const COOKIE = { credentials: 'include' as const }; await fetch(u, { ...COOKIE, method: 'POST' });", 1],
+      ["const BASE_INIT = { method: 'POST' }; await fetch('/api/v1/x', { ...BASE_INIT });", 1],
+      ["const COOKIE = { credentials: 'include' as const }; await fetch(u, { ...COOKIE, credentials: 'omit' });", 0],
+      ["const COOKIE = { credentials: 'include' as const }; await authFetch(u, { ...COOKIE });", 0],
+      ["await (channel ?? fetch)(`${API_BASE}${path}`, { credentials: 'include', ...init });", 1],
+      // A URL written as a `+` concatenation or held in a `const` (objectstack#37505).
+      ["await fetch(base + '/api/v1/x');", 1],
+      ["await fetch(SERVER_URL + `/api/v1/objects/${name}`, { method: 'POST' });", 1],
+      ["const url = '/api/v1/x'; await fetch(url);", 1],
+      ['const url = `${this.baseUrl}/api/data/${encodeURIComponent(r)}/upload`; await fetch(url, { method: \'POST\', body });', 1],
+      ["const ROUTE = '/api/v1/x'; await window.fetch(origin + ROUTE);", 1],
+      ["const url = 'https://cdn.example.com/a.json'; await fetch(url);", 0],
+      ["await fetch(base + '/static/a.json');", 0],
+      ["const url = '/api/v1/x'; await createAuthenticatedFetch()(url);", 0],
       ["await fetch(url);", 0],
       ["await fetch('https://cdn.example.com/a.json');", 0],
       ["await authFetch('/api/v1/x');", 0],
@@ -419,6 +507,15 @@ describe('cookie-only same-server fetch ratchet (every ui package + console)', (
     // Route these through createAuthenticatedFetch (see the header).
     expect(unlisted).toEqual([]);
     expect(over).toEqual([]);
+  });
+
+  it('every registered channel still reads as written, and is still not counted', () => {
+    const found = scan();
+    const drifted = REGISTERED_CHANNELS.filter(({ file, spelling }) => {
+      const full = path.join(UI_ROOT, file);
+      return !existsSync(full) || !readFileSync(full, 'utf8').includes(spelling) || found.has(file);
+    }).map(({ file }) => file);
+    expect(drifted).toEqual([]);
   });
 
   it('every allow-list row is still exact (shrink the row when its file sheds a call)', () => {

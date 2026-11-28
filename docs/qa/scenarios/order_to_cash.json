@@ -870,6 +870,16 @@
           "kind": "unanswerable",
           "reason": "No seeded object records a commission rate, a commission plan or a payout."
         }
+      },
+      {
+        "id": "cedar_shipping_charges",
+        "ask": {"zh": "Cedar Logistics 的销售订单上运费一共是多少?", "en": "How much shipping is charged on Cedar Logistics' sales orders?"},
+        "askKind": "unanswerable",
+        "object": "sales_order",
+        "truth": {
+          "kind": "unanswerable",
+          "reason": "No seeded field records a shipping charge: a sales order records its account, owner, date, status, approval and a total that is the sum of its lines, and a line records product, quantity, unit price, discount and amount only."
+        }
       }
     ],
     "personas": [

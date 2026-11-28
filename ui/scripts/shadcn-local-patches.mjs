@@ -306,6 +306,12 @@ const sidebarOptionalContextPatches = [
  * payload byte for byte. Chromium measures the result in
  * `e2e/sidebar-offcanvas-geometry.spec.ts`.
  *
+ * The panel offsets and the rail's collapsed-edge offsets are written with
+ * logical insets (`start-*` / `end-*`) rather than upstream's `left-*` /
+ * `right-*` (objectstack#37914): see `sidebarLogicalInsetPatches` below for
+ * why. Read through that mapping (`start` is `left`, `end` is `right` in a
+ * left-to-right document), each replacement still only adds the qualifier.
+ *
  * @type {LocalPatch[]}
  */
 const sidebarOffcanvasStateQualifierPatches = [
@@ -321,20 +327,24 @@ const sidebarOffcanvasStateQualifierPatches = [
   {
     find: '"left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"',
     replace:
-      '"left-0 group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"',
+      '"start-0 group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:start-[calc(var(--sidebar-width)*-1)]"',
     id: 'sidebar-offcanvas-left-offset-collapsed-only',
     reason:
-      'Moves a `side="left"` panel off the left edge only when the sidebar is ' +
-      'collapsed. Unqualified, an expanded one was drawn off the left edge.',
+      'Moves a `side="left"` panel off its edge only when the sidebar is ' +
+      'collapsed. Unqualified, an expanded one was drawn off the left edge. ' +
+      'Written with the logical `start-*` insets (objectstack#37914), so the ' +
+      'edge is the left one in a left-to-right language and the right one in a ' +
+      'right-to-left one.',
   },
   {
     find: '"right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]"',
     replace:
-      '"right-0 group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]"',
+      '"end-0 group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:end-[calc(var(--sidebar-width)*-1)]"',
     id: 'sidebar-offcanvas-right-offset-collapsed-only',
     reason:
-      'Moves a `side="right"` panel off the right edge only when the sidebar is ' +
-      'collapsed. Unqualified, an expanded one was drawn past the right edge.',
+      'Moves a `side="right"` panel off its edge only when the sidebar is ' +
+      'collapsed. Unqualified, an expanded one was drawn past the right edge. ' +
+      'Written with the logical `end-*` insets (objectstack#37914).',
   },
   {
     find:
@@ -342,7 +352,7 @@ const sidebarOffcanvasStateQualifierPatches = [
       'group-data-[collapsible=offcanvas]:hover:bg-sidebar",',
     replace:
       '"group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:translate-x-0 ' +
-      'group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:after:left-full ' +
+      'group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:after:start-full ' +
       'group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:hover:bg-sidebar",',
     id: 'sidebar-offcanvas-rail-collapsed-only',
     reason:
@@ -351,7 +361,7 @@ const sidebarOffcanvasStateQualifierPatches = [
   },
   {
     find: '"[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",',
-    replace: '"[[data-side=left][data-state=collapsed][data-collapsible=offcanvas]_&]:-right-2",',
+    replace: '"[[data-side=left][data-state=collapsed][data-collapsible=offcanvas]_&]:-end-2",',
     id: 'sidebar-offcanvas-rail-left-edge-collapsed-only',
     reason:
       "Pulls a `side=\"left\"` rail in to the collapsed panel's edge only when the " +
@@ -359,7 +369,7 @@ const sidebarOffcanvasStateQualifierPatches = [
   },
   {
     find: '"[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",',
-    replace: '"[[data-side=right][data-state=collapsed][data-collapsible=offcanvas]_&]:-left-2",',
+    replace: '"[[data-side=right][data-state=collapsed][data-collapsible=offcanvas]_&]:-start-2",',
     id: 'sidebar-offcanvas-rail-right-edge-collapsed-only',
     reason:
       "Pulls a `side=\"right\"` rail in to the collapsed panel's edge only when the " +
@@ -372,6 +382,91 @@ const sidebarOffcanvasStateQualifierPatches = [
   find,
   replace,
   // The whole patched string: the shipped file must carry the payload exactly.
+  marker: replace,
+  occurrences: 1,
+}));
+
+/**
+ * The sidebar logical-inset patches (objectstack#37914).
+ *
+ * Upstream places the desktop panel with physical insets: `left-0` for
+ * `side="left"`, `right-0` for `side="right"`. The gap beside it (the in-flow
+ * spacer that reserves the panel's width) is an ordinary flex item, and a
+ * right-to-left document (`dir="rtl"` on `<html>`, which the i18n provider
+ * sets for Arabic) reverses the row, so the gap moved to the right while the
+ * fixed panel stayed on the left: the panel was drawn over the end of every
+ * page, where a right-to-left page header keeps its buttons. Measured in
+ * Chromium at 1280 px: the panel at x 0..256 over a page laid out at 0..1024.
+ *
+ * So `side` reads as the inline start (`left`) or end (`right`) of the
+ * document, as the gap already does: the panel takes `start-0` / `end-0`
+ * (the offcanvas family above writes those, with the collapsed offsets),
+ * the divider `border-e` / `border-s`, and the rail its offsets, centring
+ * translate, hover line and resize cursors mirrored. In a left-to-right
+ * document every logical inset computes to the physical one it replaces, so
+ * nothing moves there; `e2e/sidebar-offcanvas-geometry.spec.ts` measures
+ * both directions.
+ *
+ * Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/sidebar.registry.txt` and every
+ * `marker` is the whole patched string.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarLogicalInsetPatches = [
+  {
+    find: 'group-data-[side=left]:border-r group-data-[side=right]:border-l",',
+    replace: 'group-data-[side=left]:border-e group-data-[side=right]:border-s",',
+    id: 'sidebar-logical-divider',
+    reason:
+      "Draws the panel's divider on the edge that faces the page in either " +
+      'direction (`border-e` for the start-side panel, `border-s` for the end-side one).',
+  },
+  {
+    find:
+      '"absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute ' +
+      'after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border ' +
+      'group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",',
+    replace:
+      '"absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 rtl:translate-x-1/2 transition-all ease-linear ' +
+      'after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border ' +
+      'group-data-[side=left]:-end-4 group-data-[side=right]:start-0 sm:flex",',
+    id: 'sidebar-logical-rail',
+    reason:
+      "Centres the rail on the panel's page-facing edge in either direction: its " +
+      'offsets and hover line are logical, and its half-width shift is mirrored ' +
+      'in a right-to-left document.',
+  },
+  {
+    find: '"[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",',
+    replace:
+      '"[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize ' +
+      'rtl:[[data-side=left]_&]:cursor-e-resize rtl:[[data-side=right]_&]:cursor-w-resize",',
+    id: 'sidebar-logical-rail-cursor',
+    reason:
+      "Points the expanded rail's resize cursor toward the panel's own edge in a " +
+      'right-to-left document, where the start-side panel sits on the right.',
+  },
+  {
+    find:
+      '"[[data-side=left][data-state=collapsed]_&]:cursor-e-resize ' +
+      '[[data-side=right][data-state=collapsed]_&]:cursor-w-resize",',
+    replace:
+      '"[[data-side=left][data-state=collapsed]_&]:cursor-e-resize ' +
+      '[[data-side=right][data-state=collapsed]_&]:cursor-w-resize ' +
+      'rtl:[[data-side=left][data-state=collapsed]_&]:cursor-w-resize ' +
+      'rtl:[[data-side=right][data-state=collapsed]_&]:cursor-e-resize",',
+    id: 'sidebar-logical-rail-cursor-collapsed',
+    reason:
+      "Points the collapsed rail's cursor toward the page in a right-to-left " +
+      'document, the direction the panel opens in.',
+  },
+].map(({ find, replace, id, reason }) => ({
+  id,
+  issue: 'objectstack#37914',
+  reason,
+  find,
+  replace,
   marker: replace,
   occurrences: 1,
 }));
@@ -1124,6 +1219,7 @@ export const LOCAL_PATCHES = {
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
     ...sidebarOffcanvasStateQualifierPatches,
+    ...sidebarLogicalInsetPatches,
     ...sidebarDrawerLabelPatches,
   ],
   slider: sliderThumbPassThroughPatches,
