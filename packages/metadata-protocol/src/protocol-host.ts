@@ -96,7 +96,6 @@ export interface ProtocolHost {
     readonly credentialChannels: ObjectStackProtocolImplementation['credentialChannels'];
     readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
     readonly defaultRecordPageSaveRefusal: ObjectStackProtocolImplementation['defaultRecordPageSaveRefusal'];
-    readonly deleteMetaItem: ObjectStackProtocolImplementation['deleteMetaItem'];
     readonly deleteMetaItemUnaudited: ObjectStackProtocolImplementation['deleteMetaItemUnaudited'];
     readonly detachMetadataMutationPubSub: ObjectStackProtocolImplementation['detachMetadataMutationPubSub'];
     readonly diffMetaItem: ObjectStackProtocolImplementation['diffMetaItem'];

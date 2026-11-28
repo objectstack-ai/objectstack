@@ -70,7 +70,6 @@ import type {
 // body holds, what is copied, what is refused) lives beside this file.
 import type { MetadataCacheRequest, MetadataCacheResponse } from '@objectstack/spec/api';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
-import type { MoveIntoPackageResponseParsed } from '@objectstack/spec/api';
 // [#24395] The save's authoring surface.
 import {
     REFERENCE_VALUE_TYPES,
@@ -627,7 +626,6 @@ import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.j
 import type { RegistryQuestion } from './registry-question.js';
 // [#29985 codemod] Package revert, duplicate, import, orphans, commits, revertCommit, rollback: the members below delegate to its facet, `ProtocolPackageCommitsFacet`.
 import { ProtocolPackageCommitsFacet } from './protocol-package-commits.js';
-// [ADR-0084 amendment 2026-11-26] The move door's body: `moveIntoPackage` delegates to `ProtocolPackageMoveInFacet`.
 import { ProtocolPackageMoveInFacet, type MoveIntoPackageRequest } from './protocol-package-move-in.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the members below delegate to its facet, `ProtocolDiffDeleteLoadFacet`.
 import { ProtocolDiffDeleteLoadFacet } from './protocol-diff-delete-load.js';
@@ -1235,7 +1233,6 @@ export class ObjectStackProtocolImplementation implements
             get credentialChannels() { return protocol.credentialChannels; },
             declinesStoredRow: (...a) => protocol.declinesStoredRow(...a),
             defaultRecordPageSaveRefusal: (...a) => protocol.defaultRecordPageSaveRefusal(...a),
-            deleteMetaItem: (...a) => protocol.deleteMetaItem(...a),
             deleteMetaItemUnaudited: (...a) => protocol.deleteMetaItemUnaudited(...a),
             detachMetadataMutationPubSub: (...a) => protocol.detachMetadataMutationPubSub(...a),
             diffMetaItem: (...a) => protocol.diffMetaItem(...a),
@@ -10674,11 +10671,7 @@ export class ObjectStackProtocolImplementation implements
      *    target is refused with {@link permissionSetOwnerBindingRefusal}
      *    (`VALIDATION_ERROR` / 400, the save door's words).
      *
-     * The namespace-prefix judge is deliberately NOT asked here: every
-     * installed package declares a namespace, so it would refuse nearly every
-     * real orphan object, and whether an adoption refuses, renames or leaves
-     * the prefix unjudged is the maintainer's question (#28776's ruling). A
-     * draft is judged by both owner judges when it is promoted.
+     * The namespace-prefix judge is not asked here ({@link moveIntoPackage}, this door's replacement, asks it); a draft meets both owner judges when promoted.
      *
      * ## [#37604] The platform's own record is no orphan
      *
@@ -10701,25 +10694,7 @@ export class ObjectStackProtocolImplementation implements
         return ProtocolPackageCommitsFacet.reassignOrphanedMetadata(protocolHost(this), request);
     }
 
-    /**
-     * [ADR-0084 amendment of 2026-11-26] Move a SELECTION of loose
-     * (package-less) items into one installed, writable package — the door
-     * `POST /packages/:id/move-in` serves (`packages.moveIn`).
-     *
-     * Each item is removed from its package-less address by
-     * {@link deleteMetaItem} (storage kept) and written into the target by
-     * {@link saveMetaItem}, so it is refused with the save door's own code and
-     * every write leaves history and the registry write-through. The selection
-     * is judged as a set first (ADR-0150 D3 (a)): an item that names a loose
-     * item the selection leaves behind is refused `REFERENCE_LEFT_BEHIND`.
-     * Whole or nothing (ADR-0067 D2): one transaction, rolled back on any
-     * refusal; a runtime that cannot roll back undoes the steps already taken.
-     * `dryRun` answers the same judgement and writes nothing.
-     *
-     * Not a patch of {@link reassignOrphanedMetadata}, which this door replaces
-     * (ruled not to be patched in place).
-     */
-    async moveIntoPackage(request: MoveIntoPackageRequest): Promise<MoveIntoPackageResponseParsed> {
+    async moveIntoPackage(request: MoveIntoPackageRequest) {
         return ProtocolPackageMoveInFacet.moveIntoPackage(protocolHost(this), request);
     }
 
@@ -11369,7 +11344,6 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 33] The body moved to `protocol-sdui-manifest.ts`; it reads no member.
         return reportPageRequiresAbsentAtLoad(name, body, sduiManifest);
     }
-
 
     /**
      * [ADR-0131 D6, triage ruling Q1 → C] Say out loud which stored

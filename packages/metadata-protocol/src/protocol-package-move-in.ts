@@ -82,9 +82,9 @@ export interface MoveIntoPackageRequest {
 type MoveHost = Pick<ProtocolHost,
     | 'applyRegistryWriteThrough'
     | 'classifyObjectContribution'
-    | 'deleteMetaItem'
     | 'engine'
     | 'ensureOverlayIndex'
+    | 'facade'
     | 'findEnvironmentRows'
     | 'getOverlayRepo'
     | 'isArtifactBacked'
@@ -363,7 +363,7 @@ export class ProtocolPackageMoveInFacet {
                 const row = state === 'active' ? item.active : item.draft;
                 const body = bodyOf(row);
                 if (!row || !body) continue;
-                await host.deleteMetaItem({
+                await host.facade.deleteMetaItem({
                     type: item.type,
                     name: item.name,
                     state,
@@ -488,7 +488,7 @@ export class ProtocolPackageMoveInFacet {
             const body = bodyOf(row);
             try {
                 try {
-                    await host.deleteMetaItem({
+                    await host.facade.deleteMetaItem({
                         type: item.type, name: item.name, state, packageId: target, dropStorage: false,
                         ...(item.member ? { member: item.member } : {}),
                         ...(actor ? { actor } : {}),
