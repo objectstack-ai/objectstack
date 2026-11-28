@@ -33,6 +33,9 @@ import React from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer } from '@object-ui/react';
 import { safeValidateSchema, StrictAnyComponentSchema } from '@object-ui/types/zod';
+// The page renderer reaches `@object-ui/react-runtime` lazily; its first load is
+// paid here, during collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 import '../../renderers';
 
 afterEach(cleanup);
