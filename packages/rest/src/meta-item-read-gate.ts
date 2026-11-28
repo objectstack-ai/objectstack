@@ -3660,6 +3660,46 @@ export async function patchTranslationBundlesOf(
     return out.length > 0 ? out : undefined;
 }
 
+/**
+ * [#37622, ADR-0146 D10] The record-page tab titles the paired `.custom`
+ * package translates for object `name`, for `translateMetadataDocument`'s
+ * `pairBundle` — or `undefined`.
+ *
+ * An object is extended, never replaced, so {@link pairTranslationBundleOf}
+ * answers none for it (`servedOverrideBaseOf`, D10), and a tab title the pair's
+ * arrangement (`objectExtensions[].relatedLists`) sets or changes diverges from
+ * the packaged base it is judged against: without the pair's catalog such a
+ * title read nothing and kept its own text, though `os validate` accepts the
+ * key that translates it. The pair is the one the object's packaged base
+ * ships in (`packagedBase._packageId`, the base
+ * {@link withoutStaleObjectPlural} reads it for), its translations are read
+ * through the same `memo`, and only their
+ * `objects.<name>._relatedLists` subtree is handed on, per locale: every other
+ * string of the object keeps the ranking it has without a pair (D10), and an
+ * empty answer is `undefined`, never a catalog that answers nothing.
+ */
+async function objectPairRelatedListsBundleOf(
+    protocol: unknown,
+    type: string,
+    name: unknown,
+    packagedBase: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<unknown> {
+    if (type !== 'object' || typeof name !== 'string' || name === '') return undefined;
+    const base = packagedBase && typeof packagedBase === 'object'
+        ? (packagedBase as Record<string, unknown>)._packageId
+        : undefined;
+    const pair = await pairTranslationBundleOfBase(protocol, base, memo);
+    if (!pair || typeof pair !== 'object') return undefined;
+    const slice: Record<string, unknown> = {};
+    for (const [locale, data] of Object.entries(pair as Record<string, unknown>)) {
+        const lists = (data as any)?.objects?.[name]?._relatedLists;
+        if (!lists || typeof lists !== 'object' || Array.isArray(lists) || Object.keys(lists).length === 0) continue;
+        slice[locale] = { objects: { [name]: { _relatedLists: lists } } };
+    }
+    return Object.keys(slice).length > 0 ? slice : undefined;
+}
+
 /** A non-empty string, or `undefined`. */
 function nonEmptyText(value: unknown): string | undefined {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -3838,9 +3878,13 @@ export async function translateMetaList(
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
     const translated = await Promise.all(arr.map(async (item) => {
-        const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
-        const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, item?.name, packageBundles);
         const packagedBase = packagedObjectBaseOf(p, metaType, item?.name);
+        // [#37622] An object has no declared override; its pair's tab-title translations instead.
+        const pairBundle = p === undefined
+            ? undefined
+            : (await pairTranslationBundleOf(p, metaType, item, pairBundles))
+                ?? (await objectPairRelatedListsBundleOf(p, metaType, item?.name, packagedBase, pairBundles));
+        const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, item?.name, packageBundles);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
             packagedBase,
@@ -3915,7 +3959,11 @@ export async function translateMetaDocument(
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     const packagedBase = packagedObjectBaseOf(p, metaType, (document as any)?.name);
     // [#30062] A declared override's pair translations: the ruled order's first rank.
-    const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, document);
+    // [#37622] An object has no declared override; its pair's tab-title translations instead.
+    const pairBundle = p === undefined
+        ? undefined
+        : (await pairTranslationBundleOf(p, metaType, document))
+            ?? (await objectPairRelatedListsBundleOf(p, metaType, (document as any)?.name, packagedBase));
     // [#33952] Each patching package's own translations: a patched field slot's second rank.
     const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, (document as any)?.name);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {
