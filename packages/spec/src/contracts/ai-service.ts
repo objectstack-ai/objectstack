@@ -474,10 +474,12 @@ export interface ActionConfirmationRequiredDetails {
  *    `resume_run` tool for the candidate action it would run, and the in-app
  *    assistant's action tools (the actions-as-tools runtime of ADR-0011). Every
  *    caller acting for a person is covered, OAuth token, API key or a session
- *    to the app, a person or an agent acting for one (`onBehalfOf`). Rules 2
- *    to 4 below are the MCP doors' channel. The in-app door asks through its
- *    own channel, under "The in-app assistant door" below; rules 5 and 6 bind
- *    it as written.
+ *    to the app, a person or an agent acting for one (`onBehalfOf`). Every
+ *    door hands off to the same pending-confirmation service: rules 2 to 4
+ *    below are how the MCP doors ask, and the in-app door never elicits, it
+ *    hands the call off through that service, under "The in-app assistant
+ *    door" below; the deciding doors of rule 4, and rules 5 and 6, bind it as
+ *    written.
  * 2. **When the person is asked.** After EVERY admission gate has passed,
  *    the subject load and the caller-scope subject verdict included, so
  *    nobody is asked to confirm a call that is refused anyway, and before
@@ -757,7 +759,8 @@ export interface ActionConfirmationHandOff {
      * The tool whose call the item records, as the model called it: present on
      * an in-app item (`door: 'assistant'`), where approving it runs that tool
      * call with {@link params} as the person. Absent on an MCP hand-off, whose
-     * tool is the door itself.
+     * tool is the door itself (`run_action`, or `resume_run` with {@link run}),
+     * which is what the item's row names as its `tool_name`.
      */
     toolName?: string;
     /** The in-app conversation the call was made in, on an in-app item. */
@@ -831,6 +834,29 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * ({@link approve}, {@link reject}). An item's state is its
  * {@link PendingActionStatus}, and {@link PendingActionRow} is the row
  * {@link list} and {@link get} answer, whichever door handed the item off.
+ *
+ * How a hand-off becomes that row, for every door:
+ *
+ * - `tool_name` is the tool the call was made through: on an in-app item the
+ *   tool the model called ({@link ActionConfirmationHandOff.toolName}); on an
+ *   MCP item the door's own tool, `run_action`, or `resume_run` when the
+ *   hand-off carries a run ({@link ActionConfirmationHandOff.run}).
+ * - `tool_input` is that tool call's input, serialised as JSON: on an in-app
+ *   item the tool's input ({@link ActionConfirmationHandOff.params}); on a
+ *   `run_action` item `actionName`, `objectName`, `namespace`, `recordId` and
+ *   `params`; on a `resume_run` item the run's `runId`, `values` and
+ *   `screenNodeId`. So the record, the namespace and the run ride in
+ *   `tool_input`, and the row has no column of its own for them.
+ * - `object_name` is the action's object
+ *   ({@link ActionConfirmationHandOff.objectName}), and the empty string for
+ *   an action that runs on no object.
+ * - `action_name` is {@link ActionConfirmationHandOff.actionName};
+ *   `conversation_id` and `message_id` are the in-app item's
+ *   {@link ActionConfirmationHandOff.conversationId} and
+ *   {@link ActionConfirmationHandOff.messageId}, absent on an MCP item;
+ *   `proposed_by` is the person the call ran as.
+ * - The door is not on the row: the host keeps the hand-off it recorded and
+ *   runs the approval from it.
  *
  * The service shows the item to the person the call ran as in the app and
  * notifies them. Only that person decides the item: {@link approve} and

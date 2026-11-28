@@ -61,6 +61,7 @@ import {
   type ActionConfirmationRefusalReason,
   type ActionConfirmationRequiredDetails,
   type IActionConfirmationService,
+  type PendingActionRow,
 } from './ai-service';
 
 /** The refusal code the contract names. */
@@ -175,6 +176,15 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
   const CONTRACT_SOURCE = join(HERE, 'ai-service.ts');
 
   /** The capability constant's docblock, comment gutters folded into spaces. */
+  /** The pending-confirmation service's docblock, comment gutters folded into spaces. */
+  function serviceProse(): string {
+    const source = readFileSync(CONTRACT_SOURCE, 'utf8');
+    const at = source.indexOf('export interface IActionConfirmationService {');
+    expect(at, '`IActionConfirmationService` moved — re-anchor this pin').toBeGreaterThan(-1);
+    const open = source.lastIndexOf('/**', at);
+    return source.slice(open, at).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+  }
+
   function capabilityProse(): string {
     const source = readFileSync(CONTRACT_SOURCE, 'utf8');
     const at = source.indexOf('export const AI_ACTION_CONFIRMATION_CAPABILITY');
@@ -279,6 +289,30 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
       reject: async () => undefined,
     };
     await expect(service.submit(handOff, {} as never)).resolves.toEqual({ pendingId: 'pc_archive_account' });
+    // How an MCP hand-off becomes the row `list` and `get` answer: the door's
+    // own tool, its input as JSON, and the empty string for an object-less
+    // action. The row's required members always have a value.
+    const objectLess: ActionConfirmationHandOff = { actionName: 'rebuild_index', params: {}, door: 'mcp' };
+    const row: PendingActionRow = {
+      id: 'pc_rebuild_index',
+      object_name: objectLess.objectName ?? '',
+      action_name: objectLess.actionName,
+      tool_name: objectLess.run ? 'resume_run' : 'run_action',
+      tool_input: JSON.stringify({ actionName: objectLess.actionName, params: objectLess.params }),
+      status: 'pending',
+      proposed_at: '2026-11-28T00:00:00Z',
+    };
+    expect([row.tool_name, row.object_name]).toEqual(['run_action', '']);
+    const mapping = serviceProse();
+    expect(mapping, 'the contract no longer says what an MCP item names as its tool').toMatch(
+      /on an MCP item the door's own tool, `run_action`, or `resume_run` when the hand-off carries a run/,
+    );
+    expect(mapping, 'the contract no longer says where the record and the run go').toMatch(
+      /So the record, the namespace and the run ride in `tool_input`, and the row has no column of its own for them/,
+    );
+    expect(mapping, 'the contract no longer says what an object-less action stores as its object').toMatch(
+      /and the empty string for an action that runs on no object/,
+    );
     await expect(service.submit(resumeHandOff, {} as never)).resolves.toEqual({ pendingId: 'pc_resume_run_7' });
   });
 
@@ -384,6 +418,11 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(prose, 'rule 1 lost its DECLARED-flag predicate').toMatch(
       /`ai\.requiresConfirmation: true` \(the DECLARED flag, never the listing heuristic;/,
     );
+    expect(prose, 'rule 1 sends the in-app door down its own channel again').toMatch(
+      /Every door hands off to the same pending-confirmation service: rules 2 to 4 below are how the MCP doors ask, and the in-app door never elicits/,
+    );
+    // Control: the two-channel sentence of rule 1 is gone, not merely joined.
+    expect(prose, 'rule 1 still says the in-app door asks through its own channel').not.toMatch(/asks through its own channel/);
     expect(prose, 'the bounds no longer name one service for every AI door').toMatch(
       /Every AI door hands off to one pending-confirmation service/,
     );

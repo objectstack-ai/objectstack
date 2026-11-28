@@ -29,7 +29,10 @@ export const entry: SemanticMigration = {
     + 'conversations reads an old `pending_approval` answer with the same recogniser that reads '
     + '`pending_confirmation`, taking `pendingActionId` as the `pendingId`, never with a second reader; keep the '
     + 'ids of items you move from the old queue so those answers still name their item. `PendingActionRow`, '
-    + '`PendingActionStatus` and the `/api/v1/ai/pending-actions` routes keep their shape',
+    + '`PendingActionStatus` and the `/api/v1/ai/pending-actions` routes keep their shape; store an MCP hand-off '
+    + 'as a row the way the service\'s contract says: `tool_name` `run_action` or `resume_run`, `tool_input` the '
+    + 'call\'s input as JSON (record, namespace and run included), `object_name` the empty string for an action '
+    + 'on no object',
   reason:
     'One confirmation rule had two seams: the in-app queue on `IAIService` answering `pending_approval`, and the '
     + 'AI-door hand-off answering `pending_confirmation` with only a `submit` member. Every rule change was written '
