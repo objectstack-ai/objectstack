@@ -1447,7 +1447,7 @@ export async function rerunFailedPreflight(req, payload, api, t) {
     }
     pull = p.json;
   }
-  const failures = rerunFailedFenceFailures(run.json, pull);
+  const failures = rerunFailedFenceFailures(run.json, pull, payload.repo);
   if (failures.length) return { fail: `REFUSED at the relay's fence on run ${runId}, nothing sent — ${rerunFailedFenceText(failures)}` };
   if (baseline.fail) return { fail: `${baseline.fail.why}, so the read-back has no baseline — nothing sent` };
   const failed = failedJobNames(baseline.jobs);
@@ -3798,7 +3798,7 @@ export async function selfTest() {
         return [r.exit, writes(r.seen).length, r.seen.at(-1)?.call, r.rows[0]?.call, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
       };
       const refusedRow = [EXIT_ACTION_FAILED, 0, PULL_GET, RERUN, 'not sent', true];
-      t('⛔ fence workflow, refused HERE: a run of another workflow — zero writes, the POST row not sent, the pull read the last request', [await fenced({ path: '.github/workflows/lint.yml' }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ path: '.github/workflows/lint.yml' }) })).rows[0]?.result.includes('fence `workflow`: the run reads ".github/workflows/lint.yml"')], [refusedRow, true]);
+      t('⛔ fence workflow, refused HERE: a run of another workflow — zero writes, the POST row not sent, the pull read the last request', [await fenced({ path: '.github/workflows/lint.yml' }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ path: '.github/workflows/lint.yml' }) })).rows[0]?.result.includes('fence `workflow`: the run reads ".github/workflows/lint.yml on objectstack-ai/objectstack"')], [refusedRow, true]);
       t('⛔ fence event, refused HERE: a push run — zero writes, the POST not sent, the event fence named', [await fenced({ event: 'push' }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ event: 'push' }) })).rows[0]?.result.includes('fence `event`: the run reads "push"')], [refusedRow, true]);
       t('⛔ fence once, refused HERE: a run a person re-ran meanwhile (attempt 2) — zero writes, the POST not sent, the once fence named', [await fenced({ run_attempt: 2 }), (await run(stroke, { ...happy, [RUN_GET]: runAt({ run_attempt: 2 }) })).rows[0]?.result.includes('fence `once`: the run reads 2')], [refusedRow, true]);
       t('⛔ fence failed, refused HERE: a run that concluded success, and one still in progress — zero writes, the POST not sent, the failed fence named', [await fenced({ conclusion: 'success' }), await fenced({ status: 'in_progress', conclusion: null })], [refusedRow, refusedRow]);
