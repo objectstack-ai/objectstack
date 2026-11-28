@@ -15,3 +15,5 @@ They are the platform's to write: a package's loader and the registration stamp 
 - **What changes is the description only.** A client that built a form or a key list from the served schema no longer shows these seven keys.
 
 Nothing to migrate.
+
+<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the Zod schemas keep declaring the envelope and the save door is unchanged. What moves is the served JSON Schema description, which stops listing seven keys only the platform writes; there is nothing for a migration to rewrite. -->
