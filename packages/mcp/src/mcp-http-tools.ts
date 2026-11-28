@@ -4001,8 +4001,8 @@ export function registerObjectTools(
           + 'your write may still set it, judged by the validations), system, '
           + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
           + 'validations; the enabled features; and the object\'s uiReadonlyWhen where set (while it holds, a person '
-          + 'cannot edit any field of the record at the console except a field that lists its own uiReadonly / '
-          + 'uiReadonlyWhen, so reach for an action; your write may still set every field, judged by the validations). '
+          + 'cannot edit any field of the record at the console except a field that lists its own uiReadonlyWhen '
+          + '(a field listing uiReadonly: true is locked anyway), so reach for an action; your write may still set every field, judged by the validations). '
           + 'readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },

@@ -796,7 +796,9 @@ function describedHandLock(f: any): { uiReadonly?: true; uiReadonlyWhen?: string
  * caller is served it, authors a non-blank one, and nothing otherwise. On the
  * object it is the whole-record hand lock — the default of every field that
  * declares no hand lock of its own, which `describe_object` leaves for the
- * reader to apply: a field's own key, where listed, wins. Like the field key it
+ * reader to apply: a field's own `uiReadonlyWhen`, or `uiReadonly: true`, where
+ * listed, wins (`uiReadonly` is listed only when true, so a stored `false` —
+ * which follows the object lock — is never mistaken for an opt-out). Like the field key it
  * locks a person at the console only; an agent's write still sets every field,
  * judged by the validations.
  *

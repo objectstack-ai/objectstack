@@ -4753,10 +4753,11 @@ const ObjectSchemaBase = strictObject(
    * record that changes only through actions once it reaches a state, e.g. a
    * confirmed order: P`record.status in ['confirmed', 'done']`.
    *
-   * It is a DEFAULT for every field: a field that declares its own `uiReadonly`
-   * or `uiReadonlyWhen` is judged by its own declaration instead, so
-   * `uiReadonlyWhen: P\`false\`` on a field keeps it editable inside a locked
-   * record (notes, internal tags). The server lock of a field (`readonly`,
+   * It is a DEFAULT for every field: a field that declares a hand lock of its
+   * own — `uiReadonly: true` or a `uiReadonlyWhen` — is judged by that instead,
+   * so `uiReadonlyWhen: P\`false\`` on a field keeps it editable inside a
+   * locked record (notes, internal tags). `uiReadonly: false` is NOT such a
+   * declaration: it is that key's default, and the field follows the object lock. The server lock of a field (`readonly`,
    * `readonlyWhen`) is not a hand-lock declaration and still locks on its own.
    * A create is not judged, as at the field level.
    *
@@ -4770,7 +4771,7 @@ const ObjectSchemaBase = strictObject(
    * reports it. The engine never reads it: a TRUE predicate refuses no REST,
    * import, action or flow write, and drops nothing from one.
    */
-  uiReadonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — every field of an existing record is read-only BY HAND while TRUE: the console surfaces a field's own `uiReadonlyWhen` locks (the edit dialog, record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the Gantt, the timesheet cell, the line-item grid) do not let a person edit the record, while REST, import, action and flow writes keep every field, judged by the object's validations. e.g. P`record.status in ['confirmed', 'done']` on an order moved by Confirm / Cancel actions. A default for every field: a field that declares its own `uiReadonly` or `uiReadonlyWhen` is judged by that instead, so a field whose own `uiReadonlyWhen` is P`false` stays editable inside a locked record. A create is not judged. A predicate the console cannot evaluate locks every field that inherits it. Same scope as a field's `readonlyWhen`: the record's OWN columns. The engine never reads this key."),
+  uiReadonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — every field of an existing record is read-only BY HAND while TRUE: the console surfaces a field's own `uiReadonlyWhen` locks (the edit dialog, record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the Gantt, the timesheet cell, the line-item grid) do not let a person edit the record, while REST, import, action and flow writes keep every field, judged by the object's validations. e.g. P`record.status in ['confirmed', 'done']` on an order moved by Confirm / Cancel actions. A default for every field: a field that declares `uiReadonly: true` or its own `uiReadonlyWhen` is judged by that instead, so a field whose own `uiReadonlyWhen` is P`false` stays editable inside a locked record; `uiReadonly: false` is not such a declaration and the field follows the object lock. A create is not judged. A predicate the console cannot evaluate locks every field that inherits it. Same scope as a field's `readonlyWhen`: the record's OWN columns. The engine never reads this key."),
 
   /**
    * Display & UI Hints (Data-Layer)

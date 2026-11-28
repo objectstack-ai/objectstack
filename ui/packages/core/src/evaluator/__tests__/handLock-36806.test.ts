@@ -90,7 +90,8 @@ describe('resolveFieldRuleState folds the hand lock (#36806)', () => {
 /**
  * #37402 — the object level of the same model: an object's `uiReadonlyWhen`
  * is the hand lock of every field that declares none of its own, and a field's
- * own `uiReadonly` / `uiReadonlyWhen` wins over it in both directions.
+ * own `uiReadonly: true` / `uiReadonlyWhen` wins over it in both directions
+ * (`uiReadonly: false` is not a declaration of its own).
  */
 describe('the object-level hand lock folds into the one verdict (#37402)', () => {
   const ORDER = { uiReadonlyWhen: "record.status in ['confirmed', 'done']" };
@@ -117,8 +118,16 @@ describe('the object-level hand lock folds into the one verdict (#37402)', () =>
     expect(fieldReadOnlyByHand({ uiReadonly: true }, draft, { object: ORDER })).toBe(true);
   });
 
-  it('an explicit `uiReadonly: false` is a declaration of its own too', () => {
-    expect(fieldReadOnlyByHand({ uiReadonly: false }, confirmed, { object: ORDER })).toBe(false);
+  // Maintainer ruling on this card (Q1 = B): `uiReadonly: false` is the key's
+  // default — a Studio switch turned on and off stores it — so it is NOT the
+  // field's own declaration and the field follows the object lock.
+  it('an explicit `uiReadonly: false` is NOT a declaration of its own: the field follows the object lock', () => {
+    expect(fieldReadOnlyByHand({ uiReadonly: false }, confirmed, { object: ORDER })).toBe(true);
+    expect(fieldReadOnlyByHand({ uiReadonly: false }, draft, { object: ORDER })).toBe(false);
+    expect(effectiveUiReadonlyWhen({ uiReadonly: false }, ORDER)).toBe(ORDER.uiReadonlyWhen);
+    // CONTROL: the one opt-out spelling still opens the field inside the locked record.
+    expect(fieldReadOnlyByHand({ uiReadonly: false, uiReadonlyWhen: 'false' }, confirmed, { object: ORDER })).toBe(false);
+    expect(fieldReadOnlyByHand({ uiReadonlyWhen: 'false' }, confirmed, { object: ORDER })).toBe(false);
   });
 
   it('the server lock is not a hand-lock declaration: it does not cancel the object default', () => {

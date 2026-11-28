@@ -38,8 +38,11 @@
  *
  * Two levels (the object level of the same ruling): an object's own
  * `uiReadonlyWhen` is the hand-lock DEFAULT for every field of its records, and
- * a field that declares its own `uiReadonly` or `uiReadonlyWhen` is judged by
- * that declaration instead ({@link effectiveUiReadonlyWhen}). So every verdict
+ * a field that declares a hand lock of its own — `uiReadonly: true` or a
+ * `uiReadonlyWhen` — is judged by that declaration instead
+ * ({@link effectiveUiReadonlyWhen}). `uiReadonly: false` is NOT one: it reads as
+ * absent and the field follows the object lock (the only opt-out spelling is
+ * `uiReadonlyWhen: P\`false\``). So every verdict
  * here takes the object definition beside the field, as a REQUIRED context
  * key: a surface that forgot it would silently open a locked record, so the
  * compiler asks each caller for it (`null` where a surface has no object).
@@ -91,16 +94,23 @@ export interface FieldHandLockContext {
   fieldContext?: string;
 }
 
-/** True when the field declares a hand lock of its own (either key, either value). */
+/**
+ * True when the field declares a hand lock of its own: `uiReadonly: true` or a
+ * `uiReadonlyWhen`. ⛔ `uiReadonly: false` is not one (maintainer ruling on the
+ * object-level card): `false` is the key's default, and a Studio switch turned
+ * on and off again stores it, so counting it would silently open that field on
+ * every locked record.
+ */
 function declaresOwnHandLock(def: FieldHandLockDef | null | undefined): boolean {
-  return def?.uiReadonly !== undefined || def?.uiReadonlyWhen !== undefined;
+  return def?.uiReadonly === true || def?.uiReadonlyWhen != null;
 }
 
 /**
  * The field's EFFECTIVE hand-lock predicate: its own `uiReadonlyWhen` when the
- * field declares a hand lock of its own (`uiReadonly` or `uiReadonlyWhen`, any
- * value — `uiReadonlyWhen: P\`false\`` keeps a field editable inside a locked
- * record), else the object's `uiReadonlyWhen`. `undefined` when neither
+ * field declares a hand lock of its own (`uiReadonly: true`, or a
+ * `uiReadonlyWhen` — `uiReadonlyWhen: P\`false\`` keeps a field editable inside
+ * a locked record), else the object's `uiReadonlyWhen`; `uiReadonly: false`
+ * reads as absent. `undefined` when neither
  * applies. The server lock (`readonly` / `readonlyWhen`) is not a hand-lock
  * declaration: it never cancels the object's default, it locks on its own.
  */
