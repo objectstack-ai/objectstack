@@ -92,12 +92,12 @@ afterEach(() => {
 describe('createRuntimeMetadata saves a new view into the app it was made in (objectstack#35624)', () => {
   it('a read-only base: the pair the ensure door names, sent as ?package=', async () => {
     stubPageFetch([{ id: 'com.example.crm', writable: false }]);
-    const onSavedOutsideApp = vi.fn();
+    const askPackage = vi.fn(async () => null);
 
     await createRuntimeMetadata('view', env.name, env, {
       metadataClient: realClient(),
       objectName: 'crm_account',
-      app: { packageId: 'com.example.crm', onSavedOutsideApp },
+      app: { packageId: 'com.example.crm', askPackage },
     });
 
     expect(pageCalls).toEqual([
@@ -108,7 +108,7 @@ describe('createRuntimeMetadata saves a new view into the app it was made in (ob
     expect(writes[0]!.pathname).toBe('/api/v1/meta/view/crm_account.verified_domestic');
     expect(writes[0]!.searchParams.get('mode')).toBe('draft');
     expect(writes[0]!.searchParams.get('package')).toBe('com.example.crm.custom');
-    expect(onSavedOutsideApp).not.toHaveBeenCalled();
+    expect(askPackage).not.toHaveBeenCalled();
   });
 
   it('a writable app package: the app itself, and no pair is asked for', async () => {
@@ -116,20 +116,32 @@ describe('createRuntimeMetadata saves a new view into the app it was made in (ob
 
     await createRuntimeMetadata('view', env.name, env, {
       metadataClient: realClient(),
-      app: { packageId: 'com.acme.helpdesk' },
+      app: { packageId: 'com.acme.helpdesk', askPackage: async () => null },
     });
 
     expect(pageCalls).toEqual(['GET /api/v1/packages']);
     expect(writes[0]!.searchParams.get('package')).toBe('com.acme.helpdesk');
   });
 
-  it('outside any app: saved as before, naming no package, and no package door is asked', async () => {
+  // objectstack#38149: a create outside any app asks for its package; the
+  // package doors are not asked, there being no app to ask them about.
+  it('outside any app: the person is asked, and the create names the package they chose', async () => {
+    stubPageFetch([{ id: 'com.example.crm', writable: false }]);
+    const askPackage = vi.fn(async () => 'app.chosen');
+
+    await createRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: null, askPackage } });
+
+    expect(askPackage).toHaveBeenCalledTimes(1);
+    expect(pageCalls).toEqual([]);
+    expect(writes.map((u) => u.searchParams.get('package'))).toEqual(['app.chosen']);
+  });
+
+  it('control: with no app context (a write that creates nothing in an app), no package is named and none asked', async () => {
     stubPageFetch([{ id: 'com.example.crm', writable: false }]);
 
-    await createRuntimeMetadata('view', env.name, env, { metadataClient: realClient(), app: { packageId: null } });
     await createRuntimeMetadata('view', env.name, env, { metadataClient: realClient() });
 
     expect(pageCalls).toEqual([]);
-    expect(writes.map((u) => u.searchParams.has('package'))).toEqual([false, false]);
+    expect(writes.map((u) => u.searchParams.has('package'))).toEqual([false]);
   });
 });

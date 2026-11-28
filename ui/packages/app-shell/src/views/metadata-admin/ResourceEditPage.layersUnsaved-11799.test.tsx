@@ -237,6 +237,8 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
   });
 
   it('CREATE: the refresh after the save asks no /layers for the item just created', async () => {
+    // objectstack#38149 — the create's address names its package (else it asks first).
+    window.history.replaceState({}, '', '/?package=app.test');
     render(
       <MemoryRouter initialEntries={['/metadata/doc/new']}>
         <Routes>

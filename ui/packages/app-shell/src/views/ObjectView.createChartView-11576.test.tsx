@@ -53,7 +53,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   // The add-view button and the dialog are admin-only.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#38149 — the package list a create reads goes through the
+  // page's `fetch`, so the routed app's writable package answers it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
@@ -205,20 +207,26 @@ async function createChartViewThroughTheSwitcher() {
   await waitFor(() => expect(metadataClient.save).toHaveBeenCalledTimes(1));
   const [type, , body, opts] = metadataClient.save.mock.calls[0] as unknown as [string, string, any, any];
   expect(type).toBe('view');
-  expect(opts).toEqual({ mode: 'draft', ifNoneMatch: '*' });
+  expect(opts).toEqual({ mode: 'draft', packageId: 'demo', ifNoneMatch: '*' });
   return body;
 }
 
 beforeEach(() => {
   cleanup();
   capturedChartSchema = null;
+  // objectstack#38149 — the create reads the package list for where the app
+  // saves its views; the routed app `demo` is a writable package here.
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () =>
-      new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    vi.fn(async (input: RequestInfo | URL) =>
+      new Response(
+        JSON.stringify(
+          String(input) === '/api/v1/packages'
+            ? { success: true, data: { packages: [{ manifest: { id: 'demo', name: 'Demo' }, writable: true }] } }
+            : { data: [] },
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
     ),
   );
 });

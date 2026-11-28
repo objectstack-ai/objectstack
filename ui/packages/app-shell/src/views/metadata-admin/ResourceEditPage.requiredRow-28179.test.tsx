@@ -48,6 +48,10 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   const seg = meta[1].split('/').map(decodeURIComponent);
   if (seg[0] === '_drafts') return json(200, { drafts: [] });
   if (seg.length === 1) return json(200, { items: [] });
+  // objectstack#38149 — a create into a package is a draft and its publish.
+  if (method === 'POST' && seg[2] === 'publish') {
+    return json(200, { success: true, version: 'hmac-sha256:v1', seq: 2, state: 'active', message: `Published ${seg[0]}/${seg[1]}` });
+  }
   if (method === 'PUT') {
     server.puts.push({ name: seg[1]!, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
     return json(200, { success: true, version: 'hmac-sha256:v1', seq: 1, state: 'draft', message: `Saved ${seg[0]}/${seg[1]}` });
@@ -120,12 +124,16 @@ registerDefaultMetadataSchemas();
 registerBuiltinAnchors();
 
 beforeEach(() => {
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; this create's address names its package, as Setup's list now writes.
+  window.history.replaceState(null, '', '/?package=app.test');
   server.puts = [];
   served.form = SERVED_FORM;
   served.schema = PERMISSION_JSON_SCHEMA;
 });
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/');
 });
 
 const saveButton = () => screen.getByTestId('resource-save');

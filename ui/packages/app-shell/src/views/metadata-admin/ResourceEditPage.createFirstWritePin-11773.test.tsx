@@ -125,6 +125,9 @@ afterAll(() => {
 });
 
 beforeEach(() => {
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; this create's address names its package, as Setup's list now writes.
+  window.history.replaceState(null, '', '/?package=app.test');
   server.drafts.clear();
   server.active.clear();
   server.puts = [];
@@ -132,6 +135,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, '', '/');
 });
 
 function Where() {

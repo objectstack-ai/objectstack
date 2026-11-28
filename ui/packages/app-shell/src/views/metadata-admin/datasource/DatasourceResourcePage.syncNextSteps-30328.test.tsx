@@ -55,8 +55,9 @@ await loadStudioCatalogue('zh');
 
 beforeEach(() => {
   state.saved = [];
+  // A client save would name no package: recorded apart, so a test sees one.
   state.metadataClient.save = async (_type: string, name: string) => {
-    state.saved.push(name);
+    state.saved.push(`client-save:${name}`);
     return {};
   };
   vi.mocked(toast.error).mockClear();
@@ -78,7 +79,7 @@ function Where() {
 
 /**
  * Setup's Datasources page with one external row, `parts_db`, whose remote
- * tables are `tables`. A table in `refused` answers the draft with a 400.
+ * tables are `tables`. A table in `refused` answers the import with a 400.
  */
 function renderPage(tables: string[], refused: string[] = [], language = 'en') {
   state.fetch = (async (url: string, init?: RequestInit) => {
@@ -88,13 +89,18 @@ function renderPage(tables: string[], refused: string[] = [], language = 'en') {
     if (url === '/api/v1/datasources/parts_db/remote-tables') {
       return ok({ tables: tables.map((name) => ({ name, columnCount: 3 })) });
     }
-    if (url === '/api/v1/datasources/parts_db/object-draft' && init?.method === 'POST') {
-      const { table } = JSON.parse(String(init.body)) as { table: string };
+    // objectstack#38149 — Sync lands each object through the server's import
+    // door, which places it in the datasource's package (ruling B); the
+    // client never saves the object itself.
+    const imported = url.match(/^\/api\/v1\/datasources\/parts_db\/external\/tables\/([^/]+)\/import$/);
+    if (imported && init?.method === 'POST') {
+      const table = decodeURIComponent(imported[1]!);
       if (refused.includes(table)) {
-        return reply(400, { success: false, error: { code: 'EXTERNAL_DATASOURCE_ERROR', message: `cannot draft ${table}` } });
+        return reply(400, { success: false, error: { code: 'EXTERNAL_IMPORT_ERROR', message: `cannot draft ${table}` } });
       }
+      state.saved.push(table);
       const label = table.split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
-      return ok({ draft: { name: table, datasource: 'parts_db', definition: { name: table, label, fields: {} } } });
+      return reply(201, { success: true, data: { object: { name: table, definition: { name: table, label, fields: {} }, review: [] } } });
     }
     return reply(404, { success: false, error: { code: 'NOT_FOUND', message: `unexpected ${url}` } });
   }) as typeof state.fetch;

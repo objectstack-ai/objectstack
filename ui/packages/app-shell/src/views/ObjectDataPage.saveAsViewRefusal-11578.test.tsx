@@ -121,7 +121,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1', name: 'Ada' }, activeOrganization: null }),
   // "Save as view" and its dialog are for an admin holding `manage_metadata`.
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
-  createAuthenticatedFetch: () => vi.fn(),
+  // objectstack#38149 — the package list a create reads goes through the
+  // page's `fetch`, so the routed app's writable package answers it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => globalThis.fetch(input, init),
 }));
 // The list itself is orthogonal to the save door.
 vi.mock('@object-ui/plugin-list', async (importOriginal) => ({

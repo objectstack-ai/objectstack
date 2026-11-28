@@ -14,12 +14,17 @@
  * The REAL page over a REAL `MetadataClient`, its transport an in-memory server
  * that records each PUT's `mode` and pin, as in
  * `ResourceEditPage.createFirstWritePin-11773.test.tsx`.
+ *
+ * objectstack#38149 (decisions Q-a of topic objectstack#37424, answered A)
+ * supersedes the live create outside a package: such a create now asks for
+ * its package first, and is saved there as a draft and published
+ * (`ResourceEditPage.createAsk-38149.test.tsx`).
  */
 
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -72,6 +77,12 @@ vi.mock('./useMetadata', async (importOriginal) => {
   };
 });
 
+/** The package list the create ask reads (objectstack#38149). */
+vi.mock('../studio-design/packages-io', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  fetchPackages: async () => [{ id: 'app.alpha', name: 'Alpha', writable: true, namespace: 'alpha' }],
+}));
+
 import { MetadataResourceEditPage } from './ResourceEditPage';
 import { registerBuiltinAnchors } from './anchors';
 
@@ -121,10 +132,17 @@ async function createSet() {
 }
 
 describe('a permission set is created live (objectui#7611)', () => {
-  it('outside a package: one live PUT with the first-write pin, then the editor opens', async () => {
+  // objectstack#38149 (decisions Q-a of topic objectstack#37424, answered A)
+  // supersedes the live package-less create: a create whose address names no
+  // package asks for one first, and the live write is never sent.
+  it('outside a package: the create asks for its package, and no live PUT is sent', async () => {
     await createSet();
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/metadata/permission/qa_parity_set'), { timeout: 8000 });
-    expect(server.puts).toEqual([{ name: 'qa_parity_set', mode: null, packageId: null, ifNoneMatch: '*' }]);
+    const dialog = await screen.findByTestId('package-create-ask', {}, { timeout: 8000 });
+    expect(server.puts).toEqual([]);
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('package-create-ask')).toBeNull());
+    expect(server.puts).toEqual([]);
+    expect(screen.getByTestId('where')).toHaveTextContent('/metadata/permission/new');
   });
 
   it('under a package binding the create stays a package draft (control)', async () => {
