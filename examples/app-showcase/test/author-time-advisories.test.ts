@@ -76,6 +76,17 @@ const NESTED_FAN_OUT =
   + 'pinned by test/nested-fan-out-region-indices.test.ts. Wrapping the notify step in a try_catch puts a region '
   + 'between the parallel branch and the step whose (iteration, branch) tags the clause reads.';
 
+const DERIVED_LIST =
+  'Opened from the app\'s navigation on the console\'s own derived list ("All records": the name field and '
+  + 'highlightFields, or the first five fields). The showcase demonstrates designed lists on projects, tasks, '
+  + 'contacts and the field zoo; this object keeps the derived one, and declaring a list here would change what '
+  + 'the browser checklist items on it observe. #35143 made the advisory; designing the list is a separate change.';
+
+const OFF_NAVIGATION =
+  'Deliberately not in the app\'s navigation: the object exists to demonstrate a server-side contract (sharing '
+  + 'model, share links, a public form, federation, or served semantic roles) that its tests drive over REST, '
+  + 'and the app shell is not what it shows. The rule claims only that no navigation entry opens its list.';
+
 export const ALLOWED_ADVISORIES: readonly Allowed[] = [
   // ── Approval slates (info) ───────────────────────────────────────────────
   { rule: 'approval-approvers-may-resolve-empty', where: 'flow "showcase_expense_signoff" · node "dual_signoff"', reason: POSITION_SLATE },
@@ -147,6 +158,20 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
     reason: 'A junction row: every surface that lists it names it by its two masters (team and project), and it '
       + 'has no text field for nameField to point at. Records fall back to the stable Record #ID floor.',
   },
+
+  // ── App shell (#35143): the derived list, and objects kept off navigation (warning) ──
+  ...['showcase_account', 'showcase_cascade', 'showcase_category', 'showcase_expense_report', 'showcase_invoice',
+    'showcase_preference', 'showcase_product', 'showcase_team'].map((name): Allowed => ({
+    rule: 'object-without-view', where: `object "${name}"`, reason: DERIVED_LIST,
+  })),
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_announcement"', reason: OFF_NAVIGATION + ' Public-read OWD sibling of showcase_private_note.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_private_note"', reason: OFF_NAVIGATION + ' Owner-private OWD; the Capability Map page links to it by URL, which the rule does not read.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_client_brief"', reason: OFF_NAVIGATION + ' The share-link (publicSharing) object, opened by its capability token.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_inquiry"', reason: OFF_NAVIGATION + ' The public form\'s inbox; the Contact Form page submits into it.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_semantic_zoo"', reason: OFF_NAVIGATION + ' A served-pipeline fixture of the semantic-roles dogfood test.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_semantic_zoo_legacy"', reason: OFF_NAVIGATION + ' The legacy-spelling twin of showcase_semantic_zoo, same dogfood test.' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_ext_customer"', reason: OFF_NAVIGATION + ' Federated read-only from the external SQLite datasource (ADR-0015).' },
+  { rule: 'object-unreachable-from-navigation', where: 'object "showcase_ext_order"', reason: OFF_NAVIGATION + ' Federated read-only from the external SQLite datasource (ADR-0015).' },
 ];
 
 /**

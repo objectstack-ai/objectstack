@@ -36,6 +36,9 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#35143] A dashboard with no widgets: an error on the CLI, a warning at
+  // the runtime door, where Studio creates a dashboard empty.
+  DASHBOARD_WITHOUT_WIDGETS,
   // [#14275] The `include` clause on a DASHBOARD-level filter's effective
   // field, now that it is resolved on the object graph rather than skipped
   // whenever it was dotted.
@@ -719,6 +722,10 @@ export {
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
+  // [#35143] A board grouped by a field with no fixed lanes (advisory), and a
+  // filter keyed on a field computed on read (refused).
+  LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL,
+  LIST_VIEW_FILTER_FIELD_VIRTUAL,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
@@ -1159,6 +1166,14 @@ export {
 // the registry and are not exported.
 export { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
 export { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
+// [#35143] The Views, dashboards and app shell family's app-shell ids, all
+// advisory, exported for `os explain` as the two above; the rules run through
+// the registry and are not exported.
+export {
+  APP_NAVIGATION_EMPTY,
+  OBJECT_UNREACHABLE_FROM_NAVIGATION,
+  OBJECT_WITHOUT_VIEW,
+} from './validate-app-shell-reach.js';
 export type {
   ActionBodyCompileFinding,
   HostCompileFailure,
