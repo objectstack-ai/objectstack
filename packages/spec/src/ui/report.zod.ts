@@ -67,8 +67,9 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
    *
    * Only a dimension whose field declares its options is filled (a select or
    * similar); a free-text or lookup dimension has no known set of values. Not
-   * filled when the answer is truncated or ordered by a measure, where an added
-   * group would compete for a place it did not earn. A date axis needs no
+   * filled when the report's `order` reaches the chart: an added group has no
+   * place in an authored order, and under a measure order it would compete for
+   * a place it did not earn. A date axis needs no
    * switch: the executor already fills every bucket of the report's period.
    * Omitted = off, and the chart draws exactly the groups the query returned.
    */
