@@ -136,6 +136,8 @@ const READS: Record<string, Fn> = {
     getMetaItemsPerPackage: async (req: { type?: string }) => (req?.type === 'view' ? [FORM_VIEW] : []),
     // [ADR-0159 D6 rule 7] No stored body the projection cannot read.
     getUnreadableFormBodies: async () => [],
+    // [ADR-0159 D5, D6] The form doors' five reads run as one request reading.
+    readFormRequest: async (read: () => Promise<unknown>) => read(),
     getMetaItem: async () => SCHEMA,
     findData: async () => ({ records: [] }),
     getData: async () => ({ record: { id: 'r1' } }),
