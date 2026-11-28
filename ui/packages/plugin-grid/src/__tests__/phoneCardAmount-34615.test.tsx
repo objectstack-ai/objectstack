@@ -294,13 +294,13 @@ describe('the phone card follows the object\'s highlightFields (objectstack#3789
       type: 'formula',
       label: 'Total',
       returnType: 'currency',
-      expression: 'record.quantity * record.unit_price * (1 - record.discount / 100)',
+      expression: 'record.quantity * record.unit_price * (1 - record.discount)',
     },
     line_number: { type: 'number', label: 'Line #', scale: 0 },
     access_pin: { type: 'password', label: 'Access PIN' },
   };
   const LINE_ROWS = [
-    { id: 'l1', line_number: 1, product_title: 'Admin Training Workshop', crm_product: 'Training', quantity: 2, unit_price: 6000, discount: 10, total_price: 10800, access_pin: 's3cr3t-pin' },
+    { id: 'l1', line_number: 1, product_title: 'Admin Training Workshop', crm_product: 'Training', quantity: 2, unit_price: 6000, discount: 0.1, total_price: 10800, access_pin: 's3cr3t-pin' },
     { id: 'l2', line_number: 2, product_title: 'AI Agent Seat (Annual)', crm_product: 'Seat', quantity: 10, unit_price: 1000, discount: null, total_price: 10000, access_pin: 's3cr3t-pin' },
   ];
   /** HotCRM's `relatedListColumns` for the order's lines. */
@@ -352,7 +352,7 @@ describe('the phone card follows the object\'s highlightFields (objectstack#3789
     const [quantity, price, discount] = parts(first).map((p) => p.textContent);
     expect(quantity).toBe('Quantity 2');
     expect(price).toBe('Sales Price CN¥6,000.00');
-    expect(discount).toMatch(/^Discount % 10(\.00)?\s?%$/);
+    expect(discount).toMatch(/^Discount % 10\.00\s?%$/);
     // The line number the table shows first is no longer a subtitle part.
     expect(within(first).getByTestId('grid-card-subtitle').textContent).not.toMatch(/^1 ·/);
   });
