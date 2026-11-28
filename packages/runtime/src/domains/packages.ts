@@ -49,7 +49,8 @@ import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 // [ADR-0161 K4, guard two] Source admission, asked for each knowledge source a
 // duplicate would copy (`refuseDuplicatedKnowledgeSources`).
-import { KNOWLEDGE_SOURCE_ADMISSION_SERVICE, authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
+import { authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
+import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
 import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
@@ -612,7 +613,9 @@ async function knowledgeSourceInPackageReach(
  * before anything is copied, by the predicate the `/meta` save asks
  * (`authoredKnowledgeSourceRefusal`): the caller must themselves be allowed to
  * search what the source indexes. The first source refused refuses the whole
- * duplicate with the predicate's own status and sentence; nothing was copied.
+ * duplicate with the predicate's own status and sentence, worded for this
+ * door (`door: 'duplicate'`: duplicate the package again); nothing was copied,
+ * which the prefix says once.
  *
  * Asked of every caller but the engine's own call, a holder of
  * `manage_knowledge_sources` included: the capability says who may author a
@@ -655,8 +658,10 @@ async function refuseDuplicatedKnowledgeSources(
             type: KNOWLEDGE_SOURCE_PACKAGE_TYPE,
             item,
             executionContext: ec,
-            resolveKnowledgeService: () =>
-                deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+            resolveKnowledgeService: () => resolveKnowledgeServiceForSave(deps, context),
+            // This door's caller is told to duplicate the package again; the
+            // prefix below says once that nothing was copied.
+            door: 'duplicate',
         });
         if (refused) {
             return {
