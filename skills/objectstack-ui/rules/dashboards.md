@@ -19,7 +19,7 @@ A widget's `type` is its **chart type** (`ChartTypeSchema`; defaults to
 `metric`) — there are no separate `list` / `calendar` / `custom` widget kinds:
 
 | Family | `type` values |
-|:-------|:--------------|
+|:--|:--|
 | Single value | `metric`, `kpi`, `gauge`, `solid-gauge`, `bullet` (all render the number today; gauge variants gain a dial when a gauge renderer lands) |
 | Comparison | `bar`, `horizontal-bar`, `column` |
 | Trend | `line`, `area` |
@@ -152,21 +152,21 @@ export const SalesDashboard: Dashboard = {
   label: 'Sales Performance',
   columns: 12,
   gap: 4,
-  refreshIntervalSeconds: 180,             // auto-refresh cadence
+  refreshIntervalSeconds: 180, // auto-refresh cadence
 
   header: {
     showTitle: true,
     actions: [
-      { label: 'New Opportunity', icon: 'Plus',     actionType: 'modal',  actionUrl: 'crm_create_opportunity' },
-      { label: 'Forecast',        icon: 'TrendingUp', actionType: 'url',   actionUrl: '/reports/forecast' },
-      { label: 'Export',          icon: 'Download', actionType: 'script', actionUrl: 'crm_export_dashboard_pdf' },
+      { label: 'New Opportunity', icon: 'Plus', actionType: 'modal', actionUrl: 'crm_create_opportunity' },
+      { label: 'Forecast', icon: 'TrendingUp', actionType: 'url', actionUrl: '/reports/forecast' },
+      { label: 'Export', icon: 'Download', actionType: 'script', actionUrl: 'crm_export_dashboard_pdf' },
     ],
   },
 
   // Date-range scrubber bound to a field on the underlying objects:
   dateRange: { field: 'close_date', defaultRange: 'this_quarter', allowCustomRange: true },
 
-  // Filters applied to ALL widgets:
+  // Filters applied to ALL widgets
   globalFilters: [
     { field: 'owner', label: 'Sales Rep', type: 'lookup', scope: 'dashboard',
       optionsFrom: { object: 'user', valueField: 'id', labelField: 'name' } },
@@ -179,11 +179,10 @@ export const SalesDashboard: Dashboard = {
       dataset: 'crm_opportunity_metrics', values: ['total_amount'],
       filter: { stage: { $nin: ['closed_won', 'closed_lost'] } },
       layout: { x: 0, y: 0, w: 3, h: 2 },
-      colorVariant: 'success',   // the accent only
+      colorVariant: 'success', // the accent only
       compareTo: { kind: 'previousPeriod' },
     },
 
-    // Chart widget with comparison overlay.
     {
       id: 'revenue_vs_last_year', type: 'line',
       title: 'Revenue — This Year vs Last',
@@ -227,23 +226,14 @@ const widgets: DashboardWidget[] = [
 
 ### Period-over-period — `compareTo`
 
-Set `compareTo` on any data-bound widget to add a second query against a
-shifted time window.
-
-`compareTo` is `{ kind, dimension? }`.
+`compareTo: { kind, dimension? }` on any data-bound widget adds a second
+query against a shifted time window.
 
 | Key | Value | Behaviour |
 |:--|:--|:--|
 | `kind` | `'previousPeriod'` | The equal-length window immediately before the resolved one. |
 | `kind` | `'previousYear'` | The same window shifted back one calendar year. |
-| `dimension` | dimension name, **optional** | Which time dimension's window to shift. Omit it when the selection dates exactly one — the executor resolves it. With zero or several it errors, naming the candidates; it never guesses. |
-
-The two bare `compareTo:` lines are a fragment, so `check:skill-examples` skips them.
-
-```typescript
-compareTo: { kind: 'previousPeriod' }                            // one dated dimension
-compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
-```
+| `dimension` | dimension name, **optional** | Which time dimension's window to shift. Omit it when the selection dates exactly one — the executor resolves it. With zero or several it errors, naming the candidates; it never guesses: `{ kind: 'previousYear', dimension: 'close_date' }`. |
 
 * **Metric widgets** — a delta arrow plus a trend label from the kind (`vs
   previous period`). Its colour follows `polarity` (the measure's; an inline
@@ -258,8 +248,14 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 * **Requirements** — a comparison needs a **dated window** to shift. When the
   selection carries no time dimension with a date range (no resolvable date
   macro in the widget `filter`, no dashboard `dateRange`), the executor says so
-  rather than rendering a silently empty comparison column. The shifted query
+  rather than render an empty comparison column. The shifted query
   reuses the original `filter` shape and replaces only the date-bound clauses.
+* **Date key** — the window travels to the dataset query as a time dimension
+  named after the date-range field (`dateRange.field`, default `created_at`),
+  so the dataset must declare a date dimension with that name; else the query
+  is refused `400 INVALID_FIELD`, naming the remedy. For a related-record date
+  path, declare a date dimension over it (`field: 'account.signed_at'`)
+  under any name. No author-time check catches it yet.
 
 <!-- os:check -->
 ```typescript
@@ -403,9 +399,9 @@ export const PipelineCoverageReport = defineReport({
   label: 'Pipeline Coverage (Quarter)',
   type: 'matrix',
   dataset: 'crm_opportunity_metrics',
-  rows: ['forecast_category'],   // down axis
-  columns: ['close_date'],       // across axis — matrix pivots rows × columns
-  values: ['amount_sum'],        // measures placed in the cells
+  rows: ['forecast_category'], // down axis
+  columns: ['close_date'], // across axis — matrix pivots rows × columns
+  values: ['amount_sum'], // measures placed in the cells
   runtimeFilter: { stage: { $ne: 'closed_lost' } },
   // Period: ONE `type: 'date'` dataset dimension, not a dashboard-style raw `field`.
   dateRange: { dimension: 'close_date', defaultRange: 'this_year' },
@@ -454,18 +450,18 @@ import { defineCube } from '@objectstack/spec/data';
 export const opportunityCube = defineCube({
   name: 'crm_opportunity',
   title: 'Opportunities',
-  sql: 'opportunity',            // underlying object name (snake_case)
+  sql: 'opportunity', // underlying object name (snake_case)
   public: true,
   measures: {
-    count:  { label: 'Count',        type: 'count', sql: '*' },
-    amount: { label: 'Total Amount', type: 'sum',   sql: 'amount', format: 'currency' },
+    count: { label: 'Count', type: 'count', sql: '*' },
+    amount: { label: 'Total Amount', type: 'sum', sql: 'amount', format: 'currency' },
   },
   dimensions: {
-    stage:            { label: 'Stage',    type: 'string', sql: 'stage' },
-    close_date:       { label: 'Close',    type: 'time',   sql: 'close_date',
+    stage: { label: 'Stage', type: 'string', sql: 'stage' },
+    close_date: { label: 'Close', type: 'time', sql: 'close_date',
                         granularities: ['day', 'week', 'month', 'quarter', 'year'] },
     account_industry: { label: 'Industry', type: 'string', sql: 'account.industry' },
-    owner:            { label: 'Owner',    type: 'string', sql: 'owner' },
+    owner: { label: 'Owner', type: 'string', sql: 'owner' },
   },
 });
 ```

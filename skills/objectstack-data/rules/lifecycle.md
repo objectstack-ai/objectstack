@@ -17,8 +17,8 @@ expired rows under a system context, and reclaims driver space.
 ## Lifecycle Classes
 
 | Class | Contract | Typical use |
-|:------|:---------|:------------|
-| `record` | Business truth — permanent; policies FORBIDDEN | accounts, orders, invoices |
+|:-|:-|:-|
+| `record` | Business truth — permanent; policies FORBIDDEN | accounts, orders |
 | `audit` | Compliance ledger — retain → archive → delete | audit trails |
 | `telemetry` | High-frequency log — rotation / short retention | activity streams, run history |
 | `transient` | Ephemeral state — TTL auto-expire | receipts, codes, sessions |
@@ -34,58 +34,33 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 export const ApiCallLog = ObjectSchema.create({
   name: 'api_call_log',
   sharingModel: 'private',
-  lifecycle: {
-    class: 'telemetry',
-    retention: { maxAge: '14d' },                                // reap past 14 days (created_at)
-    storage: { strategy: 'rotation', shards: 14, unit: 'day' },
-  },
-  fields: {
-    endpoint: Field.text({}),
-    status: Field.number({}),
-  },
+  // reap past 14 days (created_at)
+  lifecycle: { class: 'telemetry', retention: { maxAge: '14d' }, storage: { strategy: 'rotation', shards: 14, unit: 'day' } },
+  fields: { endpoint: Field.text({}), status: Field.number({}) },
 });
 
 // ✅ Ephemeral token: TTL on its own expiry field
 export const ImportTicket = ObjectSchema.create({
   name: 'import_ticket',
   sharingModel: 'private',
-  lifecycle: {
-    class: 'transient',
-    ttl: { field: 'expires_at', expireAfter: '1d' },  // reap 1 day after expires_at
-  },
-  fields: {
-    expires_at: Field.datetime({}),
-  },
+  // reap 1 day after expires_at
+  lifecycle: { class: 'transient', ttl: { field: 'expires_at', expireAfter: '1d' } },
+  fields: { expires_at: Field.datetime({}) },
 });
 
 // ✅ Compliance ledger: hot window, then cold storage
 export const ConsentLog = ObjectSchema.create({
   name: 'consent_log',
   sharingModel: 'private',
-  lifecycle: {
-    class: 'audit',
-    retention: { maxAge: '90d' },
-    archive: { after: '90d', to: 'archive', keep: '7y' },
-  },
-  fields: {
-    subject: Field.text({}),
-  },
+  lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '90d', to: 'archive', keep: '7y' } },
+  fields: { subject: Field.text({}) },
 });
 
-// ✅ MIXED table: terminal history is telemetry, but paused rows are live
-// workflow state — `onlyWhen` scopes the age sweep to the declared filter
+// ✅ Mixed table: paused rows are live workflow state — `onlyWhen` scopes the age sweep
 export const AutomationRun = ObjectSchema.create({
   name: 'sys_automation_run',
-  lifecycle: {
-    class: 'telemetry',
-    retention: {
-      maxAge: '30d',
-      onlyWhen: { status: { $in: ['completed', 'failed'] } },
-    },
-  },
-  fields: {
-    status: Field.select(['running', 'paused', 'completed', 'failed'], {}),
-  },
+  lifecycle: { class: 'telemetry', retention: { maxAge: '30d', onlyWhen: { status: { $in: ['completed', 'failed'] } } } },
+  fields: { status: Field.select(['running', 'paused', 'completed', 'failed'], {}) },
 });
 ```
 
@@ -100,20 +75,15 @@ lifecycle: { class: 'telemetry' }
 // ❌ archive.after must equal retention.maxAge
 lifecycle: { class: 'audit', retention: { maxAge: '90d' }, archive: { after: '30d', to: 'archive' } }
 
-// ❌ onlyWhen + rotation/archive — shard DROPs and the Archiver act on age
-//    alone and would destroy/move rows the filter protects
-lifecycle: {
-  class: 'telemetry',
-  retention: { maxAge: '14d', onlyWhen: { status: 'done' } },
-  storage: { strategy: 'rotation', shards: 14, unit: 'day' },
-}
+// ❌ onlyWhen + rotation/archive: both act on age alone, destroying/moving rows the filter protects
+lifecycle: { class: 'telemetry', retention: { maxAge: '14d', onlyWhen: { status: 'done' } }, storage: { strategy: 'rotation', shards: 14, unit: 'day' } }
 ```
 
 ## Safety Semantics
 
 - **Archive-then-delete**: an object declaring `archive` is never
-  hot-deleted before the copy to the archive datasource succeeded. If no
-  datasource is registered under the `archive.to` name, rows are retained.
+  hot-deleted before the copy to the archive datasource succeeded. No
+  datasource registered under the `archive.to` name ⇒ rows are retained.
 - **Rotation** time-shards the table on SQLite (writes hit the
   current shard, reads go through a view under the object's name, expired
   shards are DROPped). Other dialects enforce the same window with an
@@ -123,39 +93,38 @@ lifecycle: {
 
 ## Sealing (`seal`)
 
-`seal` makes an `audit` ledger tamper-evident (ADR-0154): an edit, insert or
-delete outside the platform breaks its signed checkpoints. Ten minutes after each `created_at`
-hour, `@objectstack/plugin-audit` signs its rows into a chained checkpoint
-per organization (`tenant_id`; rows with none share a deployment chain); late
-rows get a `late` checkpoint. Columns enter in clear, `valueFields` as salted
-commitments.
+`seal` makes an `audit` ledger tamper-evident (ADR-0154): `os audit verify`
+exits 1 on a row edited, inserted or deleted outside the platform and on a
+chain fault (a link, a signature, a row `listed_twice`).
+
+Ten minutes after each `created_at` hour, `@objectstack/plugin-audit` signs
+its rows, per organization chain (plus one chain for rows about no
+organization), into one checkpoint, or consecutive checkpoints of at most
+10,000 rows; late rows get a `late` checkpoint. Columns enter in clear,
+`valueFields` as salted commitments.
+
+`chainField` (optional, default `tenant_id`) names the chain column: a text
+or lookup column holding the organization id, e.g. the injected
+`organization_id`. Fixed once checkpoints exist: a change reads `listed_twice`.
 
 <!-- os:check -->
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-// ✅ The sealer needs declared `id` and `tenant_id`
+// ✅ The sealer needs declared `id` and `tenant_id` (stamped on insert)
 export const PolicyChangeLog = ObjectSchema.create({
   name: 'policy_change_log',
   sharingModel: 'private',
   lifecycle: { class: 'audit', retention: { maxAge: '1y' }, seal: { valueFields: ['new_value'] } },
-  fields: {
-    id: Field.text({}),
-    tenant_id: Field.lookup('sys_organization', {}), // stamped on insert
-    new_value: Field.textarea({}),
-  },
+  fields: { id: Field.text({}), tenant_id: Field.lookup('sys_organization', {}), new_value: Field.textarea({}) },
 });
 ```
 
-```typescript
-// ❌ Refused at parse time: id / created_at order the leaves
-seal: { valueFields: ['created_at'] }
-```
-
-Also refused: `seal` off class `audit`, an undeclared `valueFields` name, no
-text `tenant_id` outside `valueFields` (or `chainField: 'organization_id'`),
-and beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
-`storage`. Unsealed, `error` hourly: no declared `id`; a `password`,
+Refused at parse: `seal` off class `audit`, a `valueFields` name that is
+undeclared, `id` or `created_at` (they order the leaves), a chain column (`chainField`, else `tenant_id`) the object lacks or that
+cannot name an organization (not one text value, `id`, `created_at`, or in
+`valueFields`), and beside `seal` any `onlyWhen`, a `ttl` not on
+`created_at`, or rotation `storage`. Unsealed, `error` hourly: no declared `id`; a `password`,
 `secret`, `formula`, `summary`, `image`, `file`, `avatar`, `video` or `audio`
 column; no `cryptoProvider` on `AuditPlugin`.
 
@@ -169,9 +138,9 @@ runtime) the sweeper still deletes sealed rows, which then read as missing.
 ## Operations
 
 | Knob | Where | Effect |
-|:-----|:------|:-------|
+|:-|:-|:-|
 | `enabled` | `lifecycle` settings namespace | Runtime master switch |
-| `retention_overrides` | settings, **tenant-scoped** | Per-object window overrides — a regulated tenant sets `'2y'` while dev keeps days; sealed objects: see § Sealing |
+| `retention_overrides` | settings, **tenant-scoped** | Per-object window overrides; sealed objects: see § Sealing |
 | `quotas` / `quota_defaults` | settings | Row ceilings; breaches ALERT (never delete beyond declared policy) |
 | `growth_alert_rows` | settings | Per-sweep growth spike alert |
 | `OS_LIFECYCLE_DISABLED=1` | env | Disables sweeping entirely |

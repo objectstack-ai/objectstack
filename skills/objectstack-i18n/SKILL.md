@@ -32,12 +32,12 @@ export default defineStack({
     supportedLocales: ['en', 'zh-CN', 'ja-JP', 'es-ES'],
     fallbackLocale: 'en',
   },
-  // translations: [MyTranslations],  ← register your bundles here (see below)
+  // translations: [MyTranslations], ← register your bundles here (see below)
 });
 ```
 
 | Property | Type | Required / Default | Description |
-|:---------|:-----|:-------------------|:------------|
+|:-|:-|:-|:-|
 | `defaultLocale` | `string` | **required** | The locale a user who has not chosen one gets |
 | `sourceLocale` | `string` | optional, defaults to `defaultLocale` | The language inline `label:` text is written in: a request in it is served that text; read by `os lint`, `os i18n check`, `os i18n extract` |
 | `supportedLocales` | `string[]` | **required** | All supported locales |
@@ -149,7 +149,7 @@ All translatable content for a single object is aggregated under
 `objects.{object_name}` with these sub-keys:
 
 | Sub-key | Holds |
-|:--------|:------|
+|:-|:-|
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (likewise, the title of the related list a `lookup` or `master_detail` field draws on its parent's record page) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `submitBehavior.title` / `submitBehavior.message` (the thank-you panel of a form whose `submitBehavior` is `kind: 'thank-you'`; only the copy the form authors is translated, and the other kinds carry none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
@@ -209,7 +209,7 @@ the platform declares one, so an app bundle carrying it is refused by name.
 ## Naming Conventions
 
 | Context | Convention | Example |
-|:--------|:-----------|:--------|
+|:-|:-|:-|
 | Locale codes | BCP-47 | `en`, `en-US`, `zh-CN`, `pt-BR` |
 | Object keys in `objects.*` | `snake_case` | `objects.project_task`, `objects.support_case` |
 | Field keys | `snake_case` | `fields.first_name`, `fields.due_date` |
@@ -270,8 +270,8 @@ exact Zod shape is `TranslationItemSchema` in
 
 Both shipped adapters substitute
 **double-brace** `{{variable}}` placeholders only — single braces pass through
-unchanged. (The schema docstring mentions `{variable}` notation, but that is not
-what the runtime implements.)
+unchanged. An activity-milestone summary (`_milestones.{field}.{value}`)
+keeps its authored `{field}` tokens.
 
 ```json
 {
@@ -292,9 +292,9 @@ There is no ICU MessageFormat engine. To pluralize, select the form in applicati
 ### `os i18n check`
 
 ```bash
-os i18n check                          # every locale found in the config
-os i18n check --locales=zh-CN          # scope to specific locales
-os i18n check --strict --threshold=95  # CI gate: locale parity + minimum coverage
+os i18n check # every locale found in the config
+os i18n check --locales=zh-CN # scope to specific locales
+os i18n check --strict --threshold=95 # CI gate: locale parity + minimum coverage
 ```
 
 It compares registered bundles against source metadata and reports missing keys
@@ -355,7 +355,7 @@ registers when no i18n plugin is present):
   with `{{param}}` interpolation and fallback-locale lookup
 - **`getTranslations(locale)`** — a locale's full snapshot
 - **`loadTranslations(locale, data)`** — programmatic load (deep-merge)
-- **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`** / **`getSourceLocale()`** / **`setSourceLocale()`**
+- **`getLocales()`** / **`setSupportedLocales()`** / **`getDefaultLocale()`** / **`setDefaultLocale()`** / **`getSourceLocale()`** (the declared one only, else `undefined`) / **`setSourceLocale()`**
 
 The in-memory fallback additionally resolves locale codes through `resolveLocaleAmong`
 (`@objectstack/spec/system`), the one ladder `resolveBundleLocale` also runs: exact →
@@ -368,12 +368,12 @@ points for a custom workbench or TMS adapter.
 
 ### Registration
 
-Don't wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
+You do not need to wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
 stack config carries `translations` or `i18n` (kernel bootstrap is
 **objectstack-platform → Runtime Boot Sequence**). The runtime's HTTP dispatcher,
-which `os serve` composes, mounts `GET /api/v1/i18n/locales`, `/translations/:locale` and
+which `os serve` composes, mounts for signed-in callers `GET /api/v1/i18n/locales`, `/translations/:locale` and
 `/labels/:object/:locale`, served from the i18n service; the locales
-answer marks the default locale (`isDefault`) and names `sourceLocale` (the declared one, else the default).
+answer marks the default locale (`isDefault`) and names `sourceLocale` (the declared one, else the default) and the declared `fallbackChain`, if any.
 
 ---
 
@@ -483,8 +483,8 @@ top-level `locale`, and `_actions.confirmMessage` → `_actions.confirmText`.
 ## Verify your work
 
 ```bash
-os i18n check   # coverage: which keys are missing, per locale
-os validate     # the bundle conforms to the protocol schema
+os i18n check # coverage: which keys are missing, per locale
+os validate # the bundle conforms to the protocol schema
 ```
 
 For the build and scaffold

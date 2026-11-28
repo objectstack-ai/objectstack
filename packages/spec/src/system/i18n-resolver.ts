@@ -4586,7 +4586,8 @@ export function toLocaleDescriptors(
  * [#7679] Shared for the same reason `toLocaleDescriptors` above is: BOTH
  * providers of the `i18n` slot implement `setSupportedLocales`
  * (`createMemoryI18n` in core, `FileI18nAdapter` in service-i18n) and either
- * one can be the thing mounting `GET /i18n/locales`. Two copies of "what
+ * one can be the provider behind `GET /i18n/locales`, which the runtime HTTP
+ * dispatcher mounts (#23347). Two copies of "what
  * counts as a declaration" is how the same route came to answer in two shapes
  * before (#3636), one narrowing rule over.
  *
@@ -4629,8 +4630,9 @@ export function normalizeSupportedLocales(
  * "which fields does this locale translate at all", which is what the
  * endpoint returns and what no per-field lookup can produce.
  *
- * Shared deliberately. Both serving surfaces derive this map — the dispatcher
- * domain body and service-i18n's autonomous route — and they are the only
+ * Shared deliberately. Both serving surfaces once derived this map — the
+ * dispatcher domain body and service-i18n's own route, retired by #23347, so
+ * the runtime HTTP dispatcher now mounts the endpoint — and this is the only
  * path there is: `getFieldLabels` is optional on `II18nService` and NOTHING
  * implements it (neither `memory-i18n` nor `file-i18n-adapter`), so the
  * "dedicated method" branch both surfaces check first is dead and this

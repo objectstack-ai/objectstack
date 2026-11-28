@@ -111,7 +111,7 @@ The simplest filter — field equals value:
 ### Comparison Operators
 
 | Operator | Purpose | SQL Equivalent | Types |
-|:---------|:--------|:---------------|:------|
+|:-|:-|:-|:-|
 | `$eq` | Equal | `=` | Any |
 | `$ne` | Not equal | `<>` | Any |
 | `$gt` | Greater than | `>` | Number, Date |
@@ -127,7 +127,7 @@ The simplest filter — field equals value:
 ### Set & Range Operators
 
 | Operator | Purpose | SQL Equivalent |
-|:---------|:--------|:---------------|
+|:-|:-|:-|
 | `$in` | In list | `IN (...)` |
 | `$nin` | Not in list | `NOT IN (...)` |
 | `$between` | Inclusive range | `BETWEEN ? AND ?` |
@@ -140,7 +140,7 @@ The simplest filter — field equals value:
 ### String Operators
 
 | Operator | Purpose | SQL Equivalent |
-|:---------|:--------|:---------------|
+|:-|:-|:-|
 | `$contains` | Contains substring | `LIKE '%?%'` |
 | `$notContains` | Does not contain | `NOT LIKE '%?%'` |
 | `$startsWith` | Starts with prefix | `LIKE '?%'` |
@@ -162,14 +162,14 @@ Full table, `$like` portability and the `$ilike` boundary: **[filter rules](./ru
 ### Null & Existence Operators
 
 | Operator | Purpose | SQL / NoSQL |
-|:---------|:--------|:------------|
+|:-|:-|:-|
 | `$null` | Is null check | `IS NULL` / `IS NOT NULL` |
 | `$exists` | Has a value | `IS NOT NULL` / `IS NULL` |
 | `$empty` | Is empty by the field's declared type | `IS NULL`, plus `''` (text types) or `[]` (multi-value) |
 
 ```typescript
 { where: { deleted_at: { $null: true } } }
-{ where: { notes: { $empty: true } } }   // false = has content
+{ where: { notes: { $empty: true } } } // false = has content
 ```
 
 A view filter's `is_empty` / `is_not_empty` lowers to `$empty`. A face that judges
@@ -185,14 +185,7 @@ Combine conditions with `$and`, `$or`, and `$not`:
 { where: { $or: [{ status: 'active' }, { revenue: { $gt: 1000000 } }] } }
 
 // AND + OR combined
-{
-  where: {
-    $and: [
-      { type: 'enterprise' },
-      { $or: [{ region: 'us' }, { region: 'eu' }] },
-    ]
-  }
-}
+{ where: { $and: [{ type: 'enterprise' }, { $or: [{ region: 'us' }, { region: 'eu' }] }] } }
 
 // NOT: exclude closed accounts
 { where: { $not: { status: 'closed' } } }
@@ -200,10 +193,14 @@ Combine conditions with `$and`, `$or`, and `$not`:
 
 ### Filtering by a related record
 
-`{ customer: { country: 'US' } }` beneath a lookup is served in `where`: the
-engine reads the related object as the caller and matches its ids. The limits
-(one level, forward only, `where` only, 1000 ids, the caller's permissions) and
-the two-step route past them: **[filter rules → Relation Filters](./rules/filters.md)**.
+`{ customer: { country: 'US' } }` beneath a lookup is served in `where`, read
+as the caller: on `find` / `findOne` / `count` / `aggregate` a single-valued
+relation is one in-database subquery per relationship — no id list, no cap —
+and a relation key may carry its own condition, up to three relationships.
+The driver it needs (`DriverCapabilities.readableIdsLeaf`; MongoDB and OData
+refuse it), the limits (forward only, `where` only, the 1000-id cap where ids
+are still read, the caller's permissions at every hop) and the two-step route
+past them: **[filter rules → Relation Filters](./rules/filters.md)**.
 
 ### Cross-field comparisons
 
@@ -221,10 +218,7 @@ Sort with `orderBy` — an array of sort nodes:
 import type { QueryInput } from '@objectstack/spec/data';
 const query: QueryInput = {
   object: 'account',
-  orderBy: [
-    { field: 'priority', order: 'desc' },
-    { field: 'name', order: 'asc' },      // Secondary sort
-  ]
+  orderBy: [{ field: 'priority', order: 'desc' }, { field: 'name', order: 'asc' }], // name: secondary sort
 };
 ```
 
@@ -268,8 +262,6 @@ const rows = await engine.aggregate('deal', {
     { function: 'count', alias: 'deal_count' },
   ],
 });
-// SQL: SELECT region, SUM(amount) AS total_revenue, COUNT(*) AS deal_count
-//      FROM deal GROUP BY region
 ```
 
 `fields` and `orderBy` are NOT in `ENGINE_AGGREGATE_OPTION_KEYS` — do not put
@@ -288,14 +280,11 @@ key in `fields`** — the relation is carried by that column:
 import type { IDataEngine } from '@objectstack/spec/contracts';
 declare const engine: IDataEngine;
 const tasks = await engine.find('task', {
-  fields: ['title', 'status', 'owner_id', 'project'],   // the FK columns stay
+  fields: ['title', 'status', 'owner_id', 'project'], // the FK columns stay
   expand: {
     owner_id: { object: 'user', fields: ['name', 'email'] },
-    project: {
-      object: 'project',
-      fields: ['name'],
-      expand: { org: { object: 'org', fields: ['name'] } },   // nested expand
-    },
+    // nested expand
+    project: { object: 'project', fields: ['name'], expand: { org: { object: 'org', fields: ['name'] } } },
   },
 });
 ```
@@ -369,9 +358,9 @@ related record's column, `where: { relation: { column: value } }`; to *display* 
 ### Cross-Object Queries: Which Tool to Use?
 
 | Scenario | Use |
-|:---------|:----|
+|:-|:-|
 | Load lookup fields for display | `expand` |
-| Filter rows by their lookup target's column | `{ lookup: { column: value } }` in `where`, up to 1000 related ids; past the cap query the target, then `{ lookup: { $in: ids } }` — `$contains` per id when `multiple` |
+| Filter rows by their lookup target's column | `{ lookup: { column: value } }` in `where`; past the 1000-id cap where ids are still read, query the target, then `{ lookup: { $in: ids } }` — `$contains` per id when `multiple` |
 | Filter parent by child conditions | Query the child with `fields: [lookup]`, then `{ id: { $in: those ids } }` on the parent |
 | **Keyword-search by a related record's title** | **Mirror the title into a stored field on this object and search that** — `search` never traverses |
 | Paginate/sort a parent's related records | Query the related object directly |
