@@ -59,12 +59,31 @@ export const HOOK_REFUSAL_PARAM_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** A string literal in any of the three quote forms, holding a refusal reason. */
 const REASON_LITERAL = String.raw`(?<rquote>['"\x60])(?<reason>[a-z][a-z0-9]*(?:_[a-z0-9]+)*)\k<rquote>`;
 
-/** `reason: 'x'` — the property in an object literal a `throw` builds. */
-const REASON_PROPERTY = new RegExp(String.raw`(?<![\w$.])reason\s*:\s*` + REASON_LITERAL, 'g');
+/**
+ * [#36670] What must follow a property's quoted value for the value to be that
+ * literal: `,` or `}`, after optional whitespace (a comment is blanked to
+ * whitespace first, {@link maskedSource}). Anything else — `'X' + suffix`, a
+ * member access such as `'X'.concat(suffix)` — builds a computed value, which
+ * the run-time refusal decides.
+ */
+const PROPERTY_VALUE_END = String.raw`(?=\s*[,}])`;
 
-/** `e.reason = 'x'` — the reason assigned onto a name the body later throws. */
+/**
+ * [#36670] What must follow an assignment's quoted value for the value to be
+ * that literal: `;`, `,`, `}` or `)` after optional whitespace, the source's
+ * end, or a line end whose next line does not continue the expression. A next
+ * line that opens with an operator, a member access, a call or index bracket
+ * or a template (`+ suffix`, `.concat(suffix)`) continues it, as JavaScript
+ * reads it, so the value is computed.
+ */
+const ASSIGNMENT_VALUE_END = String.raw`(?=\s*[;,})]|\s*$|[ \t]*\r?\n\s*[^\s+\-*/%.?[(&|^<>=,\x60])`;
+
+/** `reason: 'x'` — the property in an object literal a `throw` builds, the literal closing the value. */
+const REASON_PROPERTY = new RegExp(String.raw`(?<![\w$.])reason\s*:\s*` + REASON_LITERAL + PROPERTY_VALUE_END, 'g');
+
+/** `e.reason = 'x'` — the reason assigned onto a name the body later throws, the literal closing the value. */
 const REASON_ASSIGNMENT = new RegExp(
-  String.raw`(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*reason\s*=(?!=)\s*` + REASON_LITERAL,
+  String.raw`(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*reason\s*=(?!=)\s*` + REASON_LITERAL + ASSIGNMENT_VALUE_END,
   'g',
 );
 
@@ -79,12 +98,12 @@ const REASONS_LIST_PROPERTY = /(?<![\w$.])reasons\s*:\s*\[/g;
 /** [#36877] `e.reasons = [` — the list assigned onto a name the body later throws. */
 const REASONS_LIST_ASSIGNMENT = /(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*reasons\s*=(?!=)\s*\[/g;
 
-/** `code: 'X'` — the property in an object literal a `throw` builds. */
-const CODE_PROPERTY = new RegExp(String.raw`(?<![\w$.])code\s*:\s*` + CODE_LITERAL, 'g');
+/** `code: 'X'` — the property in an object literal a `throw` builds, the literal closing the value. */
+const CODE_PROPERTY = new RegExp(String.raw`(?<![\w$.])code\s*:\s*` + CODE_LITERAL + PROPERTY_VALUE_END, 'g');
 
-/** `e.code = 'X'` — the code assigned onto a name the body later throws. */
+/** `e.code = 'X'` — the code assigned onto a name the body later throws, the literal closing the value. */
 const CODE_ASSIGNMENT = new RegExp(
-  String.raw`(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*code\s*=(?!=)\s*` + CODE_LITERAL,
+  String.raw`(?<![\w$.])(?<binding>[A-Za-z_$][\w$]*)\s*\.\s*code\s*=(?!=)\s*` + CODE_LITERAL + ASSIGNMENT_VALUE_END,
   'g',
 );
 
@@ -253,11 +272,14 @@ function thrownBinding(statement: string): string | undefined {
  *    `throw Object.assign(new Error(), { code: 'X' })`, `throw { code: 'X' }`;
  *  - `e.code = 'X'` on a name some `throw` statement throws bare: `throw e`.
  *
- * A code that arrives any other way — a helper's parameter
- * (`refuse('…', code)`), a variable, a computed value — is left to the run-time
- * refusal, which judges the code the body actually threw. Only SCREAMING_SNAKE
- * literals are read ({@link HOOK_REFUSAL_CODE_PATTERN}), so a record field
- * named `code` written with a lower-case value is never mistaken for one.
+ * Each literal closes its value ({@link PROPERTY_VALUE_END},
+ * {@link ASSIGNMENT_VALUE_END}). A code that arrives any other way — a
+ * helper's parameter (`refuse('…', code)`), a variable, a computed value, a
+ * literal joined to something (`'OVER' + suffix`) included — is left to the
+ * run-time refusal, which judges the code the body actually threw. Only
+ * SCREAMING_SNAKE literals are read ({@link HOOK_REFUSAL_CODE_PATTERN}), so a
+ * record field named `code` written with a lower-case value is never mistaken
+ * for one.
  */
 export function hookRefusalCodesThrownIn(source: string): string[] {
   const codes = new Set<string>();
@@ -299,9 +321,10 @@ export interface HookRefusalThrownReason {
  *    with that name's literal `e.code = 'X'` — and, marked `listed`, each
  *    `reason: 'x'` inside `e.reasons = [ … ]` on such a name.
  *
- * A reason with no literal code beside it, or one that arrives any other way
- * (a list built in a variable, a computed reason), is left to the run-time
- * refusal.
+ * Each literal closes its value, as for a code. A reason with no literal code
+ * beside it, or one that arrives any other way (a list built in a variable, a
+ * computed reason, a literal joined to something such as `'too' + suffix`), is
+ * left to the run-time refusal.
  */
 export function hookRefusalReasonsThrownIn(source: string): HookRefusalThrownReason[] {
   const found: HookRefusalThrownReason[] = [];

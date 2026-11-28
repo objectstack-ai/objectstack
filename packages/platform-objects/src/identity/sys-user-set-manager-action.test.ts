@@ -109,8 +109,8 @@ describe('#19249 — sys_user.set_user_manager posts the admin endpoint', () => 
   });
 
   it('surfaces on the row menu AND the record-detail header', () => {
-    expect(ACTION.locations).toContain('list_item');
-    expect(ACTION.locations).toContain('record_header');
+    // `record` is the row menu and the record page (objectstack#36495).
+    expect(ACTION.locations).toContain('record');
   });
 
   it('collects the manager on `manager_id`, seeded from the row, under the body key the endpoint reads', () => {

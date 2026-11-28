@@ -46,7 +46,7 @@ const REASON = 'Locked plans cannot be allocated';
 const ALLOCATE = {
   name: 'allocate',
   label: 'Allocate',
-  locations: ['record_header', 'record_related'],
+  locations: ['record_page', 'record_related'],
   disabled: "record.status == 'locked'",
   disabledReason: REASON,
 };

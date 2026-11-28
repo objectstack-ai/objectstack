@@ -1,5 +1,102 @@
 # @objectstack/service-knowledge
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+
+### Patch Changes
+
+- 73d0240: fix(service-knowledge): a source naming an unmounted adapter is logged once at boot, not twice
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  At boot, a knowledge source whose `adapter` names a store nothing mounted was named twice: once at `error` by the boot's reading of unmounted adapters, and once more at `warn` by the first-build pass ("is not built at boot: what the adapter holds could not be read"). The first-build pass now skips such a source without a line, so the one boot line is the `error` that names the source, the adapter and the mounted choices. Nothing else changes: indexing and searching the source still answer `SERVICE_UNAVAILABLE`, and a source loaded while the process runs is still named at `warn` by its reload build, since no boot reading runs then.
+- 724d6f3: feat(service-knowledge): a scheduled reconcile keeps every knowledge index equal to its source, daily and soon after a predicate write
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Record events keep an index fresh; the reconcile now keeps it correct (ADR-0161 K1). `KnowledgeService.reconcileSources()` walks every source whose store lists its documents with the complete build the boot and `os knowledge rebuild` already run — same cluster lease and fence, same skip, same purge, same `completeBuild`, trigger `reconcile` — so the documents of rows inserted or changed without an event are written, those of rows deleted or moved out of `where` by a predicate write, or built from an insert that rolled back, are purged, and nothing is embedded again for a row that did not change.
+  
+  - `KnowledgeServicePlugin` schedules one job, `knowledge:reconcile`, on the platform's job service, daily at 03:00 UTC. The new plugin option `reconcile` moves it (`{ cron, timezone }`) or turns it off (`false`). A run that could not finish a source is `degraded` in the job's run history, naming the source. With no job service composed, the plugin says so once at boot.
+  - A `data.records.updated` / `data.records.deleted` event (a `multi: true` write) now asks for a reconcile of every source over the object, started once the object has had no further predicate write for two minutes, at the latest ten minutes after the first; its warning says so. A source on an adapter without `listDocuments` is never reconciled: the reconcile says so once at `warn`, and the predicate-write warning keeps its old text for it.
+  - A source whose index fingerprint or recipe moved while the server runs (a split or embedder setting saved) is built as a new generation by the next reconcile instead of at the next restart.
+  - `KnowledgeBuildTrigger` gains `'reconcile'`; new exports `KnowledgeReconcileReport`, `KnowledgeReconcileEntry`, `KnowledgeReconcileRequest`, `RECONCILE_JOB`, `RECONCILE_DEFAULT_CRON`, `RECONCILE_QUIET_MS` and `RECONCILE_MAX_WAIT_MS`; `KnowledgeService.requestReconcile(object)`.
+  
+  No migration: nothing an author writes changes, and a deployment that wants no scheduled walk sets `reconcile: false`.
+- 58be677: feat(service-knowledge): record changes sync through the queue service — a save does not wait for the embedder, a failed sync is retried, a rolled-back write is never indexed
+  
+  Clause-②: yes (widening) — `KnowledgeServicePluginOptions` gains the optional `recordSyncRetry`; `KnowledgeService` gains `routeRecordSyncs`, `recordSyncQueued`, `enqueueRecordSync` and `processRecordSync`; the package exports `KNOWLEDGE_RECORD_SYNC_QUEUE`, `RECORD_SYNC_RETRY_DEFAULTS` and the `KnowledgeRecordSync*` types
+  Metadata-protocol: none
+  
+  A save of a record a knowledge source indexes used to sync its document inside the write: with a realtime service composed, the save waited for the re-read, the split, the embedding call and the store write, all before the write's unit of work committed. A failed sync was one `warn` line and was never retried, and a write that then rolled back could leave a document built from a row that never committed, or delete the document of a row that still matched.
+  
+  Where the kernel composes a durable `queue` service (the platform's `QueueServicePlugin` over a data engine, which the standard runtime mounts on every preset but `minimal`) and a data engine is bound, the sync now runs through the `knowledge-record-sync` queue:
+  
+  - **A save publishes and returns.** Either trigger — the realtime subscription, or the after-write hooks on a kernel without one — publishes one message per source that indexes the object on record change: the source's index key, the object, the record id and the reason (`event`, or `freshness` for the repair a search starts). Never a field value. The save does not wait for the embedder.
+  - **After the commit, and never for a rollback.** The message is published through the engine's `runAfterOpenUnitsCommit`, once the write's own unit or a caller's `engine.transaction()` commits, and not at all when it rolls back. So nothing is processed before the write commits, and after a rollback the index equals the committed database.
+  - **Retried, then a dead letter.** The worker re-reads the row and writes or removes its document; a failure is thrown to the queue, which runs it up to eight times, 5 s doubling to a 2 min cap between attempts (`recordSyncRetry` changes it). Then the message is a dead letter `listFailed` lists, naming the source and the record, logged once at `error`; the reconcile repairs it. A source no longer registered, or no longer indexing the object on record change, completes its message with no write and no retry; a source whose adapter is not mounted is retried like a failure.
+  - **One queue row per source per save**, no idempotency key: a keyed message would suppress a save made while the record's sync runs, and every later save for a day after one completed.
+  - **The freshness repair** a search starts is a `freshness` message too, so it survives a restart and is retried.
+  
+  With only the kernel's in-memory fallback queue, a queue with no dead-letter surface (`listFailed`), or no data engine, the sync runs inline as before, and the boot says so once at `warn`. A host that mounts the service by hand adds `new QueueServicePlugin()` from `@objectstack/service-queue` to get the queued sync. `enableEventSync: false` and `refresh.onRecordChange: false` publish nothing. Nothing to migrate.
+- 8d598aa: fix(service-knowledge): record changes reach the knowledge index on a kernel with no realtime service
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a kernel that composes no `realtime` service (every hosted kernel), the knowledge index was built once at boot and then never saw a later create, update or user delete: the engine publishes no `data.record.*` event there, so `KnowledgeServicePlugin` only warned "event sync disabled". It now registers the data engine's `afterInsert` / `afterUpdate` / `afterDelete` hooks on every object a record-change source indexes, and each hook calls the same `handleRecordUpsert` / `handleRecordDelete` the realtime subscription calls. A new record is searchable without a rebuild, an updated one is found by its new text, and a deleted one is gone.
+  
+  - **One trigger per kernel.** With a `realtime` service the subscription stays the trigger and no hook is registered, so each write is synced once.
+  - **Off the write's response.** The hook only hands the sync off: the re-read, the split and the embed run after the write has answered, so a slow embedding provider no longer slows the write.
+  - **After the commit.** The sync starts through the engine's `runAfterOpenUnitsCommit`: once the unit of work open at the write commits, and never when it rolls back.
+  - **Predicate writes** (`multi: true`) are synced row by row, since an object with an `afterUpdate` / `afterDelete` hook gets one dispatch per matched row. Such a write is then held to the engine's per-row hook ceiling (10,000 matched rows), as on every object that already carries a per-row hook such as the audit plugin's: on a kernel with neither a `realtime` service nor the audit plugin, a predicate write over more than 10,000 rows of an indexed object is now refused, with nothing written. Narrow the write's `where` to stay under it.
+  - **A source added later** for a new object gets its hooks when it arrives; the plugin's teardown removes them.
+  - A recycle-bin restore runs no hooks, so on such a kernel a restored row is not re-indexed by itself; `reindexSource` brings it back.
+- 0ea3093: feat(service-knowledge): `embedderSettings: false` keeps the embedder section off the ai settings page
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `KnowledgeServicePluginOptions` gains `embedderSettings` (default `true`). A host that provides the embedder itself (it registers the `embedder` service, which the plugin keeps) sets it to `false`: the `ai` settings page then carries no `embedder_*` fields, `ai/test_embedder` has no handler and answers like any undeclared action, and the boot warning about the embedder settings not being offered is not logged. The knowledge settings page, its actions and its Setup entry are unchanged. `contributeKnowledgeSettings` takes the same switch as an optional fourth argument (`KnowledgeSettingsContributionOptions`). Omitted or `true`, nothing changes. Nothing to migrate.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/embedder-openai@19.0.0-next.2
+  - @objectstack/service-settings@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Minor Changes

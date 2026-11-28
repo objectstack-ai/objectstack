@@ -38,6 +38,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
@@ -576,11 +578,18 @@ describe('#15079 point 7 — no current record is a located refusal, not a silen
             ai: { exposed: true, description: 'x' },
         };
         const rig = makeRig({ standaloneAction: globalUpdate });
-        const res = await dispatchRest(OWNER, rig, `/global_update`, { recordId: RECORD_ID });
+        const res = await dispatchRest(OWNER, rig, `/global_update`, {});
 
         expect(res.status).toBe(400);
         expect(res.body.error.code).toBe('VALIDATION_ERROR');
         expect(res.body.error.message).toMatch(/objectName/);
+        expect(rig.updates).toHaveLength(0);
+
+        // Called with a record id, it is refused before the update arm: an
+        // action not bound to an object accepts no record.
+        const withRecord = await dispatchRest(OWNER, rig, `/global_update`, { recordId: RECORD_ID });
+        expect({ status: withRecord.status, code: withRecord.body.error.code, field: withRecord.body.error.details?.fields?.[0]?.field })
+            .toEqual({ status: 400, code: 'VALIDATION_FAILED', field: 'recordId' });
         expect(rig.updates).toHaveLength(0);
     });
 

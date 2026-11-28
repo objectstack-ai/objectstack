@@ -88,7 +88,7 @@ const REVOKE = {
   name: 'revoke_session',
   label: 'Revoke Session',
   type: 'api',
-  locations: ['list_item'],
+  locations: ['record_row'],
   target: '/api/v1/auth/revoke-session',
   recordIdParam: 'token',
   recordIdField: 'token',
@@ -112,7 +112,7 @@ describe('ObjectGrid — $select harvests every declared `recordIdField` (object
 
   it("projects a view `bulkActionDefs` entry's `recordIdField`", async () => {
     const select = await selectFor({
-      bulkActionDefs: [{ ...REVOKE, locations: ['list_toolbar'] }],
+      bulkActionDefs: [{ ...REVOKE, locations: ['list'] }],
     });
     expect(select).toContain('token');
   });

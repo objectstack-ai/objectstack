@@ -285,24 +285,20 @@ describe('carry-in: an addressed call on an object falls back to the holder\'s o
         expect(ran.map((r) => r.packageId)).toEqual([CRM]);
     });
 
-    it('the same CALL on both doors, with a record id: the subject object is the caller\'s, and its record is loaded and handed on', async () => {
+    it('the same CALL on both doors, with a record id: an action not bound to an object accepts no record — 400 naming `recordId`, nothing read, nothing run', async () => {
         const rest = fixture();
         const viaRest = await rest.post('/crm/lead/log_call/r1');
-        expect(viaRest.status, JSON.stringify(viaRest.body)).toBe(200);
+        expect(viaRest.status, JSON.stringify(viaRest.body)).toBe(400);
+        expect(viaRest.body?.error?.code).toBe('VALIDATION_FAILED');
+        expect(viaRest.body?.error?.details?.fields?.[0]?.field).toBe('recordId');
         const mcp = fixture();
-        const viaMcp = await mcp.bridge.runAction('log_call', { namespace: 'crm', objectName: 'lead', recordId: 'r1' });
-        expect(viaMcp.ok, JSON.stringify(viaMcp)).toBe(true);
+        const err = await refusalOf(mcp.bridge.runAction('log_call', { namespace: 'crm', objectName: 'lead', recordId: 'r1' }));
+        expect({ status: err.status, code: err.code }).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
         for (const door of [rest, mcp]) {
-            expect(door.ran).toEqual([{ obj: 'lead', key: 'log_call', packageId: CRM }]);
-            expect(door.subjects).toHaveLength(1);
-            expect(door.subjects[0]?.obj).toBe('lead');
-            expect(door.subjects[0]?.record).toEqual({ id: 'r1' });
-        }
-        // The record was read from the caller's object on both doors.
-        const readFrom = (ql: any) => [...ql.find.mock.calls, ...ql.findOne.mock.calls].map((c: any[]) => c[0]);
-        for (const door of [rest, mcp]) {
-            expect(readFrom(door.ql)).toContain('lead');
-            expect(readFrom(door.ql)).not.toContain('global');
+            expect(door.ran).toEqual([]);
+            expect(door.subjects).toHaveLength(0);
+            const readFrom = [...door.ql.find.mock.calls, ...door.ql.findOne.mock.calls].map((c: any[]) => c[0]);
+            expect(readFrom).not.toContain('lead');
         }
     });
 

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type {
   AdapterContext,
   AdapterIndexExpectation,
+  AdapterIndexStatus,
   AdapterScopeTerm,
   IDataEngine,
   IKnowledgeAdapter,
@@ -44,6 +45,7 @@ import {
 import {
   admitObject,
   admitSourceFields,
+  mayServeEarlierRuleTitle,
   declaredFields,
   documentTitleField,
   type KnowledgeAdmissionDeps,
@@ -73,6 +75,12 @@ import {
   type KnowledgeReconcileReport,
   type KnowledgeReconcileRequest,
 } from './knowledge-build.js';
+import {
+  readRecordSyncMessage,
+  type KnowledgeRecordSyncMessage,
+  type KnowledgeRecordSyncOutcome,
+  type KnowledgeRecordSyncReason,
+} from './knowledge-record-sync-queue.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -222,6 +230,11 @@ export class KnowledgeService implements IKnowledgeService {
   private reconcileTail: Promise<void> = Promise.resolve();
   /** Told after the set of registered sources changed ({@link onSourcesChanged}). */
   private readonly sourceListeners = new Set<() => void>();
+  /**
+   * Where record syncs are published while they run through the queue
+   * ({@link routeRecordSyncs}); `undefined` while they run inline.
+   */
+  private recordSyncPublisher: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined;
 
   constructor(private readonly options: KnowledgeServiceOptions = {}) {
     this.defaultTopK = options.defaultTopK ?? 10;
@@ -1889,12 +1902,18 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const byRecord = opts.granularity === 'record' || groupBy !== undefined;
     const ctx = opts.executionContext;
-    let admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }> =
+    let admitted: Array<AdmittedSource & { scope?: AdapterScopeTerm[] }> =
       await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
     if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
     if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
     if (admitted.length === 0) return { hits: [], refused: [] };
-    const sources = await this.planSearches(admitted);
+    const refused: KnowledgeSearchRefusal[] = [];
+    const sources = await this.planSearches(admitted, refused);
+    // The sources whose every hit is checked against its live record before
+    // it is served: the ones the earlier title rule could serve a field for.
+    const verified = new Set(sources.filter((target) => target.verifyHits === true).map((target) => target.source.name));
+    const served = async (hits: KnowledgeHit[]): Promise<KnowledgeHit[]> =>
+      verified.size === 0 ? hits : this.dropUnverifiedHits(hits, verified);
 
     const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = byRecord || filtered;
@@ -1903,11 +1922,10 @@ export class KnowledgeService implements IKnowledgeService {
     const groupOf = byRecord
       ? (hit: KnowledgeHit): string | undefined => this.groupKeyOf(hit, groupBy)
       : recordKeyOf;
-    const refused: KnowledgeSearchRefusal[] = [];
     const first = await this.searchRound(query, sources, firstAsk, opts.filter, refused);
     if (first.size === 0 && refused.length > 0) throw wholeRefusal(this.facedRefusals(refused));
     const raw = [...first.values()].flatMap((answer) => answer.hits);
-    let kept = await this.applyPermissionFilter(raw, ctx, byRecord);
+    let kept = await served(await this.applyPermissionFilter(raw, ctx, byRecord));
     let removed = raw.length - kept.length;
 
     if ((filtered || byRecord) && distinctGroups(kept, groupOf) < topK) {
@@ -1921,7 +1939,7 @@ export class KnowledgeService implements IKnowledgeService {
         // A refilled source's second answer is a superset of its first: its
         // first-round survivors are dropped and the whole answer re-checked.
         const refilledHits = [...refill.values()].flatMap((answer) => answer.hits);
-        const refilledKept = await this.applyPermissionFilter(refilledHits, ctx, byRecord);
+        const refilledKept = await served(await this.applyPermissionFilter(refilledHits, ctx, byRecord));
         const firstRaw = raw.filter((hit) => refill.has(hit.sourceId)).length;
         const firstKept = kept.filter((hit) => refill.has(hit.sourceId)).length;
         kept = [...kept.filter((hit) => !refill.has(hit.sourceId)), ...refilledKept];
@@ -1939,7 +1957,7 @@ export class KnowledgeService implements IKnowledgeService {
 
     if (removed > 0) {
       this.options.logger?.debug?.(
-        `[knowledge] the permission re-check removed ${removed} hit(s) this caller may not read; ` +
+        `[knowledge] the permission re-check and the per-hit record check removed ${removed} hit(s); ` +
           `${Math.min(byRecord ? distinctGroups(kept, groupOf) : kept.length, topK)} of topK=${topK} answered.`,
       );
     }
@@ -2139,14 +2157,143 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * The hits of `verified` sources whose stored document is the one the
+   * current recipe assembles from the record as it reads now; every other hit
+   * of those sources is dropped. A hit of any other source passes untouched.
+   *
+   * Why: a source the earlier title rule could serve a field for
+   * (`mayServeEarlierRuleTitle`) is searched without the field gate's former
+   * `title` arm, and its index may still hold a document assembled under
+   * another recipe: one a build walked past and did not purge (a store with
+   * no `listDocuments`, `refresh.onRecordChange: false`, a purge candidate
+   * kept or listed under a foreign id), or one written between two builds
+   * while the object's display field was another field. The recipe hash
+   * cannot see either; this check reads the record. A hit survives only when
+   * its record still belongs to the source (one system read per source,
+   * `{ $and: [where, { id: { $in } }] }`, projected to the fields assembly
+   * reads), its document id is the one the source derives from that record,
+   * and the `docHash` the store holds equals the one {@link recordToDocument}
+   * computes from the row under the current object definition (the title is
+   * part of it). Strict, unlike {@link checkFreshness}: a hit with no record
+   * id or no stored hash, a read that fails or answers no list, a posture
+   * that cannot be read and a hash that cannot be computed each drop the hit.
+   *
+   * The read decides only whether a hit survives: a surviving hit is returned
+   * as the store answered it, and nothing the read returned is put on it. A
+   * stale record's document is repaired in the background ({@link
+   * repairStale}), as the record-level check repairs it.
+   */
+  private async dropUnverifiedHits(hits: KnowledgeHit[], verified: ReadonlySet<string>): Promise<KnowledgeHit[]> {
+    const engine = this.options.dataEngine;
+    const checked = hits.filter((hit) => verified.has(hit.sourceId));
+    if (checked.length === 0) return hits;
+    const passed = new Set<KnowledgeHit>();
+    const dropped = (sourceId: string, count: number, why: string): void => {
+      if (count > 0) {
+        this.options.logger?.debug?.(
+          `[knowledge] ${count} hit(s) of source '${this.faceOfKey(sourceId)}' not served: ${why}`,
+        );
+      }
+    };
+    let posture: TenancyPosture | undefined;
+    let postureRead = true;
+    try {
+      posture = await this.readTenancyPosture();
+    } catch (err) {
+      postureRead = false;
+      this.options.logger?.warn?.(
+        `[knowledge] the tenancy posture could not be read (${errorText(err)}); no hit of a source checked against its ` +
+          'record is served this search (fail-closed).',
+      );
+    }
+    const bySource = new Map<string, KnowledgeHit[]>();
+    for (const hit of checked) bySource.set(hit.sourceId, [...(bySource.get(hit.sourceId) ?? []), hit]);
+    for (const [sourceId, sourceHits] of bySource) {
+      const source = this.handed(sourceId);
+      if (!engine || !postureRead || !source || source.source.kind !== 'object') {
+        dropped(sourceId, sourceHits.length, 'their records cannot be read to check them.');
+        continue;
+      }
+      const objSource = source.source;
+      const usable = sourceHits.filter(
+        (hit) => isRecordId(hit.sourceRecordId) && typeof hit.docHash === 'string' && hit.docHash !== '',
+      );
+      dropped(sourceId, sourceHits.length - usable.length, 'a hit names no record or carries no stored hash.');
+      if (usable.length === 0) continue;
+      const ids = [...new Set(usable.map((hit) => String(hit.sourceRecordId)))];
+      const byId = { id: { $in: ids } };
+      const schema = this.schemaFor(objSource.object);
+      let rows: unknown;
+      try {
+        const fields = freshnessFields(objSource, schema, posture);
+        rows = await engine.find(
+          objSource.object,
+          {
+            where: objSource.where !== undefined ? { $and: [objSource.where, byId] } : byId,
+            ...(fields === undefined ? {} : { fields }),
+          },
+          { context: systemContext() },
+        );
+        if (!Array.isArray(rows)) throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
+      } catch (err) {
+        this.options.logger?.warn?.(
+          `[knowledge] the records of source '${this.faceOfKey(sourceId)}' could not be read to check its hits ` +
+            `(${errorText(err)}); none is served (fail-closed).`,
+        );
+        continue;
+      }
+      const byRow = new Map<string, Record<string, unknown>>();
+      for (const row of rows as Array<Record<string, unknown> | null | undefined>) {
+        if (row && isRecordId(row.id)) byRow.set(String(row.id), row);
+      }
+      const current = new Map<string, string | undefined>();
+      for (const hit of usable) {
+        const recordId = String(hit.sourceRecordId);
+        if (hit.documentId !== documentIdFor(sourceId, recordId)) continue;
+        if (!current.has(recordId)) {
+          const row = byRow.get(recordId);
+          let hash: string | undefined;
+          if (row !== undefined) {
+            try {
+              hash = recordToDocument(source, objSource, row, schema, posture).docHash;
+            } catch {
+              hash = undefined;
+            }
+          }
+          current.set(recordId, hash);
+          if (row === undefined || (hash !== undefined && hash !== hit.docHash)) this.repairStale(source, objSource, recordId);
+        }
+        const hash = current.get(recordId);
+        if (hash !== undefined && hash === hit.docHash) {
+          passed.add(hit);
+          this.freshnessRepairs.delete(documentIdFor(sourceId, recordId));
+        }
+      }
+      dropped(
+        sourceId,
+        usable.filter((hit) => !passed.has(hit)).length,
+        'the record no longer belongs to the source, or the stored document is not the one the current recipe assembles from it.',
+      );
+    }
+    return hits.filter((hit) => !verified.has(hit.sourceId) || passed.has(hit));
+  }
+
+  /**
    * Repair the document of a record the freshness check found stale: the
    * event sync's own path ({@link syncRecord}, serialized per document), run
    * in system context, in this process and NOT awaited — the search that found
    * it answers without it. Single-flight per document, and at most once per
    * document until a later search finds its hash matching. Never throws into
    * the search. The scheduled reconcile does not take it over: the reconcile
-   * walks whole sources, and this repairs one document now. It moves onto the
-   * queue with the record-change sync, whose path it is.
+   * walks whole sources, and this repairs one document now. That is the
+   * inline path.
+   *
+   * While record syncs run through the queue ({@link routeRecordSyncs}) the
+   * repair is a record-sync message with reason `freshness`, for this source
+   * alone: it survives a restart of the process that searched and is retried
+   * like any other sync. A message that could not be published is reported
+   * at `error` and the document is left to the next search that finds it
+   * stale.
    *
    * A source with `refresh.onRecordChange: false` is never repaired: it is
    * asked through {@link objectSourcesFor}, the one predicate that keeps the
@@ -2158,32 +2305,154 @@ export class KnowledgeService implements IKnowledgeService {
     const docId = documentIdFor(source.name, recordId);
     if (this.freshnessRepairs.has(docId)) return;
     this.freshnessRepairs.add(docId);
+    if (this.recordSyncPublisher) {
+      this.publishRecordSyncs([source], objSource.object, recordId, 'freshness', () => this.freshnessRepairs.delete(docId));
+      return;
+    }
     void this.serializeRecordSync(docId, () => this.syncRecord(source, objSource.object, recordId, { id: recordId }));
   }
 
   /**
-   * Each admitted source paired with the fingerprint its search carries
-   * ({@link planIndex}); a source whose adapter is not registered carries none
-   * (the round skips it, as before).
+   * Each admitted source paired with the adapter it binds to, resolved here
+   * once for the whole search, and the fingerprint its search carries
+   * ({@link planIndex}); a source whose adapter does not resolve carries the
+   * coded refusal instead and is refused by the round, never searched.
+   *
+   * A source admitted with `proveIndex` ({@link admitSources}) is searched
+   * only when its index is proven built under the current recipe
+   * ({@link unprovenIndex}); otherwise it is not searched and is added to
+   * `refused` as `KNOWLEDGE_REBUILD_REQUIRED` (409), the operator told why at
+   * `warn`. Each says whether a rebuild ends the refusal: for a source no
+   * build can prove, neither promises one. The boot's build pass, a reload,
+   * the reconcile and the operator's rebuild are what build a source; a
+   * search never starts a build.
    */
   private async planSearches(
-    admitted: Array<{ source: KnowledgeSource; organizationIds?: string[]; scope?: AdapterScopeTerm[] }>,
+    admitted: Array<AdmittedSource & { scope?: AdapterScopeTerm[] }>,
+    refused: KnowledgeSearchRefusal[],
   ): Promise<SearchTarget[]> {
     const out: SearchTarget[] = [];
     // The settings page's chunk target, read at most once for the whole search.
     let target: Promise<number | undefined> | undefined;
     const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
-    for (const entry of admitted) {
-      const adapterId = this.boundAdapterId(entry.source);
-      const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
-      if (!adapter) {
-        out.push(entry);
+    for (const { proveIndex, ...entry } of admitted) {
+      // The adapter is resolved here, once per search: the proof below is read
+      // from this instance and both rounds search this instance, so a source
+      // cannot change binding between the check and the use.
+      let adapterId: string;
+      let adapter: IKnowledgeAdapter;
+      try {
+        adapterId = this.adapterIdFor(entry.source);
+        adapter = this.getAdapter(adapterId);
+      } catch (err) {
+        // Refused like an adapter that cannot serve, as the round refuses it; a
+        // source that needs the index proof is never searched without it.
+        out.push({ ...entry, binding: { refusal: codedRefusalOf(err) } });
         continue;
       }
       const plan = await this.planIndex(entry.source, adapter, chunkTarget);
-      out.push({ ...entry, fingerprint: plan.index.fingerprint });
+      if (proveIndex === true) {
+        const unproven = await this.unprovenIndex(plan);
+        if (unproven !== undefined) {
+          const label = this.label(entry.source);
+          refused.push({
+            sourceId: entry.source.name,
+            code: INDEX_NOT_PROVEN_CODE,
+            status: 409,
+            message: `Knowledge source '${label}' is not searched: its index is not proven built under the current recipe. ` +
+              UNPROVEN_CALLER_TEXT[unproven.ends],
+          });
+          this.options.logger?.warn?.(
+            `[knowledge] source '${label}' not searched (${INDEX_NOT_PROVEN_CODE}): ${unproven.why} Its object declares ` +
+              "a field named 'title' the source does not serve, and a document indexed under the earlier title rule " +
+              "carries that field's value, so the source is searched only once its index is proven built under the " +
+              `current recipe. ${UNPROVEN_OPERATOR_TEXT[unproven.ends]}`,
+          );
+          continue;
+        }
+      }
+      out.push({
+        ...entry,
+        binding: { adapterId, adapter },
+        fingerprint: plan.index.fingerprint,
+        ...(proveIndex === true ? { verifyHits: true as const } : {}),
+      });
     }
     return out;
+  }
+
+  /**
+   * Why `plan`'s source is not proven built under the current recipe, and
+   * what ends it, or `undefined` when it is proven: its adapter's
+   * `indexStatus` reports the fingerprint AND the recipe hash
+   * {@link planIndex} computes now, and the builds that record that hash
+   * purge what they did not walk.
+   *
+   * The recipe hash names the title rule (ADR-0161 K7), and an adapter
+   * records it only at `completeBuild`, the end of a complete build. A
+   * complete build rewrites every document whose title changed (`docHash`
+   * covers the title) and, when it purges, removes every document it did not
+   * walk. It does not purge, and still records the hash, for a source with
+   * `refresh.onRecordChange: false` and on an adapter with no
+   * `listDocuments` ({@link walkObjectSource}): a document it did not walk,
+   * such as one whose row left the source's `where`, keeps what it was
+   * assembled with. So those two shapes are never proven, before any read,
+   * whatever the hash reads; nor is an adapter with no `indexStatus` (nothing
+   * to read) or no `completeBuild` (nothing ever records a hash).
+   *
+   * The proof covers what the last complete build walked and purged. Read on
+   * every search that needs it, never cached: another node may rebuild, or
+   * drop, the index. Fails closed: a status that throws is not proven.
+   */
+  private async unprovenIndex(plan: IndexPlan): Promise<{ why: string; ends: UnprovenEnd } | undefined> {
+    const { adapter, index, source } = plan;
+    if ((source.refresh?.onRecordChange ?? true) === false) {
+      return {
+        ends: 'never',
+        why:
+          'refresh.onRecordChange is false, so an external indexer owns its index: a build of it purges nothing, ' +
+          'so a recorded recipe hash does not prove the index holds no document assembled under an earlier recipe.',
+      };
+    }
+    if (typeof adapter.indexStatus !== 'function') {
+      return {
+        ends: 'never',
+        why: `the adapter '${adapter.id}' reports no index status (no indexStatus), so what its index was built under cannot be read.`,
+      };
+    }
+    if (typeof adapter.completeBuild !== 'function') {
+      return {
+        ends: 'never',
+        why: `the adapter '${adapter.id}' has no completeBuild, so no build records a recipe hash for its index.`,
+      };
+    }
+    if (typeof adapter.listDocuments !== 'function') {
+      return {
+        ends: 'never',
+        why:
+          `the adapter '${adapter.id}' does not list its documents (no listDocuments), so a complete build cannot purge a ` +
+          'document it did not walk, and a recorded recipe hash does not prove the index holds none assembled under an ' +
+          'earlier recipe.',
+      };
+    }
+    let held: AdapterIndexStatus;
+    try {
+      held = await adapter.indexStatus(plan.context('search'));
+    } catch (err) {
+      return { ends: 'unreadable', why: `the adapter's index status could not be read (${operatorText(err)}).` };
+    }
+    if (held?.fingerprint !== index.fingerprint) {
+      return { ends: 'rebuild', why: 'the index holds no complete build under the current fingerprint.' };
+    }
+    if (held.recipeHash !== index.recipeHash) {
+      return {
+        ends: 'rebuild',
+        why: held.recipeHash === undefined
+          ? 'the index records no recipe hash: no complete build of it has completed.'
+          : "the index was last completed under another recipe (the source's where, metadataFields, title rule or withheld fields).",
+      };
+    }
+    return undefined;
   }
 
   /**
@@ -2211,21 +2480,17 @@ export class KnowledgeService implements IKnowledgeService {
     refused: KnowledgeSearchRefusal[],
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
-    for (const { source, organizationIds, fingerprint, scope } of sources) {
+    for (const { source, organizationIds, fingerprint, scope, binding } of sources) {
       // Refused like an adapter that cannot serve: the caller is told which
       // source was not searched and why; the boot said so at `error`
-      // (`reportUnmountedAdapters`), so no line per search. A source that
-      // names no adapter is placed here, as everywhere (`adapterIdFor`).
-      let adapterId: string;
-      let adapter: IKnowledgeAdapter;
-      try {
-        adapterId = this.adapterIdFor(source);
-        adapter = this.getAdapter(adapterId);
-      } catch (err) {
-        const coded = codedRefusalOf(err);
-        if (coded !== undefined) refused.push({ sourceId: source.name, ...coded });
+      // (`reportUnmountedAdapters`), so no line per search. The adapter was
+      // resolved once for the whole search ({@link planSearches}); a round
+      // searches that instance and never looks it up again.
+      if ('refusal' in binding) {
+        if (binding.refusal !== undefined) refused.push({ sourceId: source.name, ...binding.refusal });
         continue;
       }
+      const { adapterId, adapter } = binding;
       try {
         const hits = await adapter.search(query, {
           source,
@@ -2336,13 +2601,151 @@ export class KnowledgeService implements IKnowledgeService {
     return kept;
   }
 
-  // ── Sync entrypoints (called by the host plugin's event bridge) ───
+  // ── Sync entrypoints (called by the host plugin's triggers and worker) ───
+
+  /**
+   * Run record syncs through a queue (ADR-0161 K1): from now on
+   * {@link enqueueRecordSync} and the freshness repair publish one
+   * {@link KnowledgeRecordSyncMessage} per source through `publish`, and the
+   * host's worker hands each message to {@link processRecordSync}.
+   * `undefined` returns to the inline sync. `KnowledgeServicePlugin` calls it
+   * in `kernel:ready`, when the composed `queue` service is durable and a
+   * data engine is bound (the worker re-reads the row, so it needs one).
+   */
+  routeRecordSyncs(publish: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined): void {
+    this.recordSyncPublisher = publish;
+  }
+
+  /** Whether record syncs run through the queue ({@link routeRecordSyncs}). */
+  get recordSyncQueued(): boolean {
+    return this.recordSyncPublisher !== undefined;
+  }
+
+  /**
+   * A record of `object` was created, updated, restored or deleted: ask for
+   * the sync of its document in every source that indexes `object` on record
+   * change ({@link objectSourcesFor}) — one message per source, carrying the
+   * source's index key, the object, the record id and the reason, never a
+   * field value. Nothing is synced here: the worker re-reads the row when it
+   * processes the message, so a create, an update and a delete ask for the
+   * same thing (the document follows the row as it is then, or leaves the
+   * index when no row matches).
+   *
+   * The messages are published once the unit of work open here commits, and
+   * never when it rolls back (`runAfterOpenUnitsCommit` of the ObjectQL
+   * engine): a trigger runs inside the write, before the write's own unit or
+   * a caller's `transaction()` commits, so a message published at once could
+   * be processed before the commit, and one for a write that rolls back would
+   * be processed at all. With no unit open they are published at once,
+   * outside every unit. Never awaited and never throws: a publish that fails
+   * is reported at `error` (the save stands, its document is stale until the
+   * record's next save, a search that finds it stale, or the reconcile).
+   *
+   * Requires {@link routeRecordSyncs}; inline, the triggers call
+   * {@link handleRecordUpsert} / {@link handleRecordDelete} instead.
+   */
+  enqueueRecordSync(object: string, recordId: string | number, reason: KnowledgeRecordSyncReason = 'event'): void {
+    if (!isRecordId(recordId)) return;
+    const sources = this.sourcesForObject(object);
+    if (sources.length === 0) return;
+    this.publishRecordSyncs(sources, object, String(recordId), reason);
+  }
+
+  /**
+   * Publish one record-sync message per source in `sources`, once the unit
+   * open here commits ({@link enqueueRecordSync}). `onFailed` runs for each
+   * message that could not be published.
+   */
+  private publishRecordSyncs(
+    sources: KnowledgeSource[],
+    object: string,
+    recordId: string,
+    reason: KnowledgeRecordSyncReason,
+    onFailed?: () => void,
+  ): void {
+    const publish = this.recordSyncPublisher;
+    if (!publish) return;
+    const send = (): void => {
+      for (const source of sources) {
+        const message: KnowledgeRecordSyncMessage = { source: source.name, object, recordId, reason };
+        void Promise.resolve()
+          .then(() => publish(message))
+          .catch((err: unknown) => {
+            onFailed?.();
+            const report =
+              `[knowledge] the sync of record '${recordId}' of source '${this.label(source)}' could not be queued ` +
+              `(${errorText(err)}): the write stands, and the record's document stays as it was until the record's ` +
+              'next save, a search that finds it stale, or the reconcile.';
+            if (this.options.logger?.error) this.options.logger.error(report);
+            else this.options.logger?.warn?.(report);
+          });
+      }
+    };
+    const engine = this.options.dataEngine as { runAfterOpenUnitsCommit?(body: () => void): void } | undefined;
+    if (typeof engine?.runAfterOpenUnitsCommit === 'function') engine.runAfterOpenUnitsCommit(send);
+    else send();
+  }
+
+  /**
+   * The worker's body: sync the document one {@link KnowledgeRecordSyncMessage}
+   * names. The source is resolved by its index key now, at processing time,
+   * and the row re-read under the source's `where` as the system identity
+   * ({@link handleRecordUpsert}, "What decides a document"): a row comes back →
+   * its document is written; none → its document is deleted. Serialized with
+   * every other sync of the same document in this process.
+   *
+   * A failure that a retry can change — the re-read, the split, the
+   * embedding call, the store write — is THROWN, so the queue retries the
+   * message on its backoff and, once its attempts are spent, keeps it as a
+   * dead letter. Every other outcome completes the message and is answered
+   * ({@link KnowledgeRecordSyncOutcome}).
+   */
+  async processRecordSync(data: unknown): Promise<KnowledgeRecordSyncOutcome> {
+    const message = readRecordSyncMessage(data);
+    if (!message) {
+      this.options.logger?.warn?.(
+        `[knowledge] a message on the record-sync queue is not a record-sync message (${describeValue(data)}); completed without a sync.`,
+      );
+      return 'malformed';
+    }
+    const source = this.handed(message.source);
+    if (!source) {
+      this.options.logger?.debug?.(
+        `[knowledge] record sync of '${message.recordId}' skipped: source '${message.source}' is no longer registered.`,
+      );
+      return 'source-gone';
+    }
+    if (objectSourcesFor([source], message.object).length === 0) return 'not-synced';
+    const engine = this.options.dataEngine;
+    if (!engine) {
+      this.options.logger?.warn?.(
+        `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: no data engine is ` +
+          'bound to re-read the row.',
+      );
+      return 'not-synced';
+    }
+    // The source's adapter is resolved now ({@link adapterFor}): the one it
+    // names, else the deployment's store, else the only one registered. Where
+    // none can be resolved it throws its coded refusal — the named adapter is
+    // not mounted, no adapter is mounted (`503 SERVICE_UNAVAILABLE`), or
+    // several are and none is the deployment's (`400 VALIDATION_ERROR`) — so
+    // the message is retried: a store that registers late is met by a later
+    // attempt, and one that never does leaves a dead letter naming the source
+    // and the record.
+    const adapter = this.adapterFor(source);
+    await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
+      this.syncRow(source, adapter, message.object, message.recordId, engine),
+    );
+    return 'synced';
+  }
 
   /**
    * Apply an ObjectQL `data.record.created`, `data.record.updated` or
    * `data.record.restored` event to every source bound to the
-   * matching object. `record` is the event payload's `after`; its `id` names
+   * matching object, inline. `record` is the event payload's `after`; its `id` names
    * the row. Failures are logged but never thrown — sync must not block writes.
+   * The plugin calls this only where record syncs do not run through the
+   * queue ({@link routeRecordSyncs}).
    *
    * ## What decides a document (ADR-0049: a declared key holds on every path)
    *
@@ -2367,32 +2770,39 @@ export class KnowledgeService implements IKnowledgeService {
    *
    * ## When this runs, measured against the engine
    *
-   * The engine publishes `data.record.created` / `data.record.updated` from
-   * inside the write's engine body (`insert` / `update`), after its `after*`
-   * hooks, and so BEFORE any unit of work around the write commits — the
-   * write's own unit (opened when a metadata hook can abort it) or a caller's
-   * `engine.transaction(…)`. The in-process realtime service awaits each
-   * subscriber in turn, so this handler runs inside the write's async context,
-   * and its system-context re-read rides the same open transaction through the
-   * engine's ambient transaction store: it sees the row the write just made.
+   * Only on the inline path: a kernel whose `queue` service is not durable
+   * (the kernel's own fallback queue), or a service with no data engine.
+   * There the realtime subscription calls this from inside the write: the
+   * engine publishes `data.record.created` / `data.record.updated` from the
+   * write's engine body, after its `after*` hooks and BEFORE any unit of work
+   * around the write commits — the write's own unit (opened when a metadata
+   * hook can abort it) or a caller's `engine.transaction(…)` — and the
+   * in-process realtime service awaits each subscriber, so the save waits for
+   * the re-read, the split, the embedding call and the store write, and the
+   * re-read rides the open transaction through the engine's ambient store.
    * If that unit then rolls back, the index is wrong in one of two ways: on a
    * match, the document stays built from a row that never committed; on a
-   * miss, the uncommitted row did not match and the document was deleted, so
-   * the committed row — which may still match — is missing from the index.
-   * The row's next event or a `reindexSource` repairs a row that still exists;
-   * a document built from an INSERT that rolled back has no row left to
-   * repair it from — it stays until a complete `reindexSource` purges it.
+   * miss, the document was deleted although the committed row may still
+   * match. The reconcile, a later event of the row or a `reindexSource`
+   * repairs it. The after-write hooks (the trigger on a kernel with no
+   * `realtime` service) start this once the unit commits and never on a
+   * rollback, off the write's response (`knowledge-record-hooks.ts`).
    * `data.record.restored` is published after the restore's own unit has
-   * committed. Bulk events (`data.records.*`) carry a count, not records, and
+   * committed; with no `realtime` service an engine middleware hears the
+   * restore instead and starts the sync of its rows the same way as the hooks. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
+   *
+   * Through the queue none of this holds: the triggers publish a message once
+   * the write's unit commits and nothing for one that rolls back, the save
+   * does not wait for the sync, and a failed sync is retried
+   * ({@link enqueueRecordSync}, {@link processRecordSync}).
    *
    * Syncs of one document are serialized in this process
    * ({@link serializeRecordSync}), so two opposite events for one row cannot
    * interleave: each sync re-reads after the previous one finished, and the
-   * last one leaves the index agreeing with the database. The chain is awaited
-   * inline, so a write's sync can wait behind an earlier in-flight sync of the
-   * same document (on a single-connection pool, up to the pool's acquire
-   * timeout); the index still ends consistent.
+   * last one leaves the index agreeing with the database. Inline, the chain
+   * is awaited, so a write's sync can wait behind an earlier in-flight sync
+   * of the same document; the index still ends consistent.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
     const recordId = record.id;
@@ -2405,7 +2815,8 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * One source's sync of one row — see {@link handleRecordUpsert}. Never throws.
+   * One source's inline sync of one row — see {@link handleRecordUpsert}.
+   * Never throws: a failure is one `warn` line.
    */
   private async syncRecord(
     source: KnowledgeSource,
@@ -2433,18 +2844,36 @@ export class KnowledgeService implements IKnowledgeService {
         );
         return;
       }
-      const row = await rereadRow(engine, objSource, recordId);
-      if (row) {
-        const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
-        await this.writeSynced(source, adapter, doc, recordId);
-      } else {
-        const plan = await this.planIndex(source, adapter);
-        await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
-      }
+      await this.syncRow(source, adapter, object, recordId, engine);
     } catch (err) {
       this.options.logger?.warn?.(
         `[knowledge] event-sync failed for source '${this.label(source)}': ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * THE sync of one row's document, both paths' ({@link syncRecord} inline,
+   * {@link processRecordSync} from the queue): re-read the row under the
+   * source's `where` as the system identity ({@link rereadRow}) and write its
+   * document, or delete the document when no row matches. Throws what the
+   * re-read, the split, the embedding call or the store throws.
+   */
+  private async syncRow(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    object: string,
+    recordId: string | number,
+    engine: IDataEngine,
+  ): Promise<void> {
+    const objSource = source.source;
+    const row = await rereadRow(engine, objSource, recordId);
+    if (row) {
+      const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
+      await this.writeSynced(source, adapter, doc, recordId);
+    } else {
+      const plan = await this.planIndex(source, adapter);
+      await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
     }
   }
 
@@ -2592,6 +3021,11 @@ export class KnowledgeService implements IKnowledgeService {
    * every source over that object, reported once at `error`. The objects'
    * admissions are asked concurrently.
    *
+   * An admitted source over which an index built under the earlier title
+   * rule could serve a field the gate does not ask about
+   * (`mayServeEarlierRuleTitle`) carries `proveIndex`: {@link planSearches}
+   * searches it only once its index is proven built under the current recipe.
+   *
    * Each admitted source carries the organizations its search hands the
    * adapter ({@link scopeByOrganization}, ADR-0161 K8, item 9). The system
    * context's bypass above covers that scope too: the system identity's
@@ -2600,7 +3034,7 @@ export class KnowledgeService implements IKnowledgeService {
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
-  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+  ): Promise<AdmittedSource[]> {
     if (ctx?.isSystem) return sources.map((source) => ({ source }));
     const engine = this.options.dataEngine;
     if (!ctx || !engine) {
@@ -2628,7 +3062,7 @@ export class KnowledgeService implements IKnowledgeService {
         }),
       );
     }
-    const out: KnowledgeSource[] = [];
+    const out: AdmittedSource[] = [];
     for (const source of sources) {
       const objSource = source.source;
       const objectAdmission = await byObject.get(objSource.object);
@@ -2637,7 +3071,10 @@ export class KnowledgeService implements IKnowledgeService {
         ? { admitted: false, reason: objectAdmission.refused, object: objSource.object }
         : admitSourceFields(objSource, objectAdmission);
       if (verdict.admitted) {
-        out.push(source);
+        // An index built under the earlier title rule could serve a field
+        // the gate no longer asks about: searched only once its index is
+        // proven built under the current recipe ({@link planSearches}).
+        out.push(mayServeEarlierRuleTitle(objSource, objectAdmission.schema) ? { source, proveIndex: true } : { source });
       } else {
         this.options.logger?.debug?.(
           `[knowledge] source '${this.label(source)}' not searched for this caller: ${verdict.reason} ` +
@@ -2857,9 +3294,9 @@ export class KnowledgeService implements IKnowledgeService {
    * reported at `error`, `warn` as the fallback.
    */
   private async scopeByOrganization(
-    sources: KnowledgeSource[],
+    sources: AdmittedSource[],
     ctx: ExecutionContext,
-  ): Promise<Array<{ source: KnowledgeSource; organizationIds?: string[] }>> {
+  ): Promise<AdmittedSource[]> {
     if (sources.length === 0) return [];
     let posture: TenancyPosture | undefined;
     try {
@@ -2872,9 +3309,9 @@ export class KnowledgeService implements IKnowledgeService {
       else this.options.logger?.warn?.(report);
       return [];
     }
-    return sources.map((source) => {
-      const organizationIds = searchOrganizationIds(ctx, posture, this.schemaFor(source.source.object));
-      return organizationIds === undefined ? { source } : { source, organizationIds };
+    return sources.map((entry) => {
+      const organizationIds = searchOrganizationIds(ctx, posture, this.schemaFor(entry.source.source.object));
+      return organizationIds === undefined ? entry : { ...entry, organizationIds };
     });
   }
 
@@ -3032,11 +3469,54 @@ export interface KnowledgeSearchReport {
  * One source a search round asks: its organizations scope, the fingerprint its
  * search carries, and the record scope's terms for it (ADR-0161 K8, item 17).
  */
+/** A source {@link KnowledgeService.admitSources} admitted for a caller. */
+interface AdmittedSource {
+  source: KnowledgeSource;
+  organizationIds?: string[];
+  /** Searched only once its index is proven built under the current recipe (`mayServeEarlierRuleTitle`). */
+  proveIndex?: true;
+}
+
+/** What ends a refusal for want of a proof ({@link KnowledgeService.unprovenIndex}). */
+type UnprovenEnd = 'rebuild' | 'never' | 'unreadable';
+
+/** The second sentence of the caller's refusal, by what ends it. */
+const UNPROVEN_CALLER_TEXT: Readonly<Record<UnprovenEnd, string>> = {
+  rebuild: 'It answers again once a complete rebuild of the source has completed.',
+  never: 'No rebuild changes that for this source; an administrator can say why.',
+  unreadable: 'What its index holds could not be read; it is asked again on the next search.',
+};
+
+/** The last sentence of the operator's `warn` line, by what ends the refusal. */
+const UNPROVEN_OPERATOR_TEXT: Readonly<Record<UnprovenEnd, string>> = {
+  rebuild:
+    'The boot pass, a source reload or the reconcile builds it where they run; os knowledge rebuild builds it now.',
+  never:
+    'No rebuild can prove it for this source as it is configured, so nothing is rebuilt for it; it stays refused to ' +
+    'every caller but the system context.',
+  unreadable: 'It is asked again on the next search.',
+};
+
+/**
+ * The code of a source refused because its index is not proven built under
+ * the current recipe: the one a generation-keeping adapter answers for an
+ * index built under another fingerprint, as the remedy is the same rebuild.
+ */
+const INDEX_NOT_PROVEN_CODE = 'KNOWLEDGE_REBUILD_REQUIRED';
+
 interface SearchTarget {
   source: KnowledgeSource;
+  /**
+   * The adapter the source binds to, resolved once per search
+   * ({@link KnowledgeService.planSearches}), or the coded refusal its
+   * resolution answered (`undefined`: an uncoded failure, skipped unsearched).
+   */
+  binding: { adapterId: string; adapter: IKnowledgeAdapter } | { refusal: Omit<KnowledgeSearchRefusal, 'sourceId'> | undefined };
   organizationIds?: string[];
   fingerprint?: string;
   scope?: AdapterScopeTerm[];
+  /** Each hit is checked against its live record before it is served ({@link KnowledgeService.dropUnverifiedHits}). */
+  verifyHits?: true;
 }
 
 /** An ADR-0112 coded refusal's code, status and message, or `undefined` for any other thrown value. */

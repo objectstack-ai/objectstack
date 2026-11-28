@@ -43,6 +43,8 @@ export interface MetadataGridColumn {
   width?: string;
   /** Pinned at the table's right edge (the row's controls). */
   pinnedRight?: boolean;
+  /** A column of numbers, drawn right-aligned (objectstack#37918). */
+  alignRight?: boolean;
 }
 
 /**
@@ -115,6 +117,7 @@ export function metadataListGridSchema(
         resizable: false,
         ...(width ? { width } : {}),
         ...(c.pinnedRight ? { pinned: 'right' as const } : {}),
+        ...(c.alignRight ? { align: 'right' as const } : {}),
       };
     }),
     showSearch: false,

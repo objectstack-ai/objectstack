@@ -10,7 +10,7 @@
  * objectui#12772 — `record:quick_actions` (the record-header path) draws a
  * declared `ActionSchema.icon` beside the button's label. The producer that
  * filed it is a control-plane "Open" action declaring `icon: 'external-link'`
- * on `record_header`.
+ * on `record_page`.
  *
  *  (a) a declared, known name draws its glyph AND keeps the label;
  *  (b) CONTROL — no `icon` declared ⇒ the button's markup is the label alone,
@@ -31,7 +31,7 @@ import { RecordQuickActionsRenderer } from '../record-quick-actions';
 
 const LABEL = 'Open';
 /** `locations` is not defaulted — `getActionsForLocation` requires the match. */
-const OPEN = { name: 'open', label: LABEL, type: 'script', locations: ['record_header'] };
+const OPEN = { name: 'open', label: LABEL, type: 'script', locations: ['record_page'] };
 
 function mount(action: Record<string, unknown>) {
   return render(

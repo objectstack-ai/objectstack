@@ -47,7 +47,7 @@ export const CompleteTaskAction = defineAction({
   icon: 'check-circle',
   type: 'script',
   target: 'completeTask',           // resolved to the handler registered below
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   successMessage: 'Task marked as complete!',
   refreshAfter: true,
   ai: {
@@ -95,7 +95,7 @@ export const MarkDoneAction = defineAction({
   },
   successMessage: 'Task marked done.',
   visible: 'has(record.done) && record.done != true',
-  locations: ['list_item', 'record_header', 'record_section'],
+  locations: ['record', 'record_section'],
   refreshAfter: true,
 });
 ```
@@ -365,16 +365,29 @@ is collected, then the body runs with those values as its `input`.
 
 ## Bind it to the UI
 
-`locations` is the primary binding — the action appears wherever it declares:
+`locations` is the primary binding. Each word says what the action acts on, and the action
+appears on every surface that word covers:
 
-| Location | Where the button renders |
-|:---|:---|
-| `list_toolbar` | List view toolbar (no record context) |
-| `list_item` | Per-row menu in list views |
-| `record_header` | Record page header |
-| `record_more` | Record page overflow ("…") menu |
-| `record_related` | Each row of a related list inside a parent record — there only, never on the object's own list views (unlike `list_item`). Declared, not yet placed: the console does not draw it on those rows yet |
-| `record_section` | Named action bars on record pages |
+| Location | Acts on | Where the button renders |
+|:---|:---|:---|
+| `list` | No record | List view toolbar |
+| `record` | One record | Record page header **and** the per-row menu in list views |
+| `record_page` | One record, opened | Record page header |
+| `record_row` | One record, in a list | Per-row menu in list views |
+| `record_related` | One record, in its parent | Each row of a related list inside a parent record — there only, never on the object's own list views (unlike `record_row`). Declared, not yet placed: the console does not draw it on those rows yet |
+| `record_section` | One record | Named action bars on record pages |
+
+`record_related` takes the "One record" cell too. To keep a record page action out of the
+header's buttons and put it straight into the header's 「More」 (`⋯`) menu, set
+`component: 'action:menu'` on it.
+
+<Callout type="info">
+Protocol 19 replaced the page-part words: `list_toolbar` is `list`, `list_item` is
+`record_row`, `record_header` and `record_more` are `record_page` (`record` when the action
+was on list rows as well), and an action that was only in the `⋯` menu keeps that place with
+`component: 'action:menu'`. Run `os migrate meta --from 18` to list the mechanical edits for existing
+sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+</Callout>
 
 ### Choose the header's buttons
 
@@ -388,9 +401,9 @@ ObjectSchema.create({
   name: 'crm_opportunity',
   // ...
   actionLayout: {
-    // the list scope: actions placed at list_toolbar, drawn on the list page toolbar
+    // the list scope: actions placed at list, drawn on the list page toolbar
     list: { pinned: ['mass_assign', '$export'], more: ['send_digest'] },
-    // the record scope: actions placed at record_header or record_more
+    // the record scope: actions placed at record or record_page
     record: { pinned: ['mark_won', 'mark_lost'], more: ['clone', 'share'] },
   },
 });
@@ -611,7 +624,7 @@ is a spec proposal for a properly named key, not a values map under this one.
 
   1. **Always prefix record fields** — `record.status != "closed"`, never a bare
      `status`, which faults as an undeclared identifier.
-  2. **Guard with `has()`** — a record-scoped predicate on `list_item` binds a
+  2. **Guard with `has()`** — a record-scoped predicate on `record_row` binds a
      LIST ROW, which carries only the columns that view projects. Reading a
      field the list does not show aborts the expression with `No such key`, and
      fail-closed means the button simply is not offered — indistinguishable from
@@ -719,7 +732,7 @@ names, with the same read the per-record door makes for its `recordId`.
 If any id does not come back, the **whole call** is refused with
 `404 RECORD_NOT_FOUND`, the per-record door's own answer; no id is dropped, the
 body or flow never starts, and nothing is written. The selection must be a list
-of non-empty record ids (strings or numbers), at most 5000 of them, on an action called on
+of non-empty record ids (strings or numbers), at most 5000 of them, on an action declared on
 an object; anything else is refused `400 VALIDATION_FAILED`. So
 `ctx.params._selectedIds` only ever holds ids of rows of the object the call
 names (`ctx.params.objectName`) that this caller can read — your body still
@@ -796,6 +809,13 @@ Full table in the [error catalog](/docs/api/error-catalog). The
 Global (object-less) actions post to `/api/v1/actions/global/:action`, or to
 `/api/v1/actions//:action` with the object segment left empty. For credentials,
 see [API Authentication](/docs/api#authentication).
+
+**An action not bound to an object accepts no record.** A call to an action
+declared on no object that carries a `recordId` or a `params._selectedIds` is
+refused `400 VALIDATION_FAILED`, the key named in `error.details.fields[]`,
+before any record is read and before the action runs — whatever object the
+path names, for every caller, and at every door (REST, MCP `run_action` and a
+host's `dispatchAction`). To act on records, declare the action on their object.
 
 The endpoint dispatches on the **declared `type`**, exactly like the MCP
 `run_action` tool — so the same URL invokes a script handler or a flow:

@@ -144,7 +144,7 @@ export function ObjectViewPageBarActions({
     // subtitle), Import and the favorites entry — the page's once-in-a-while
     // acts.
     const moreShown = !!objectSettingsPath || !!description || !!listFavorite || (ioInMore && (importInMenus || !!exportDoor));
-    const drawsToolbar = !!listActions?.some((a: any) => a.locations?.includes('list_toolbar'));
+    const drawsToolbar = !!listActions?.some((a: any) => a.locations?.includes('list'));
     return (
         <>
             {ioAtEnd && (

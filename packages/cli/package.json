@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "19.0.0-next.1",
+  "version": "19.0.0-next.2",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -165,7 +165,7 @@
     "@objectstack/trigger-schedule": "workspace:*",
     "@objectstack/types": "workspace:*",
     "@objectstack/verify": "workspace:*",
-    "@oclif/core": "^5.1.2",
+    "@oclif/core": "^5.1.12",
     "bundle-require": "^5.1.0",
     "chalk": "^6.0.1",
     "chokidar": "^5.0.0",

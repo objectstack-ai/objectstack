@@ -16,12 +16,14 @@
  *
  *  - in the cross-package leg the row shows `showcase_task` under an "Object"
  *    header and links to that extension in its own package;
- *  - in the base's area the row is found by `extend`, carries the pair's
- *    "Added" mark, and its link addresses the extension, never `(unnamed-N)`;
+ *  - in the base's area the row is found by `extend`, counts as the pair's
+ *    "new", and its link addresses the extension, never `(unnamed-N)`;
  *  - the mark is looked up by `extend`: a read listing the extension as an
- *    override marks the row "Customized";
+ *    override shows the row as "Modified" (the App Studio list's Source,
+ *    objectstack#37918);
  *  - the search box matches `extend`;
- *  - the Label column shows the extension's own label;
+ *  - the extension's own label leads its row (the App Studio list draws the
+ *    label above the identity, objectstack#37918);
  *  - CONTROL: a row of another type (`page`) still names and links by `name`.
  */
 
@@ -161,10 +163,11 @@ function mountList(host: MetadataAreaHost, type: string, search = '') {
 /** The table row of `el`'s first cell: the row's test id sits there, and `ObjectGrid` draws the row (objectstack#36897). */
 const trOf = (el: HTMLElement) => el.closest('tr') as HTMLElement;
 const linkOf = (row: HTMLElement) => within(row).getAllByRole('link')[0]!;
-const marksOf = (row: HTMLElement) =>
+/** objectstack#37918 — the App Studio list says modified / new in its Source column. */
+const sourcesOf = (row: HTMLElement) =>
   within(row)
-    .queryAllByTestId('customization-mark')
-    .map((m) => m.getAttribute('data-kind'));
+    .queryAllByTestId('metadata-row-source')
+    .map((m) => m.getAttribute('data-source-kind'));
 
 describe('an object_extension row names, links and marks the object it extends (objectstack#29569)', () => {
   it('the cross-package leg shows `extend` under an "Object" header and links to that extension', async () => {
@@ -187,13 +190,15 @@ describe('an object_extension row names, links and marks the object it extends (
     );
   });
 
-  it("in the base's area the pair's row is found by `extend`, marked Added, and opens that extension", async () => {
+  it("in the base's area the pair's row is found by `extend`, counted as new, and opens that extension", async () => {
     mountList(area(BASE), 'object_extension', `?package=${BASE}`);
     const row = trOf(await screen.findByTestId('metadata-row-showcase_task'));
-    await within(row).findByTestId('customization-mark');
 
     expect(within(row).getAllByRole('cell')[0]).toHaveTextContent('showcase_task');
-    expect(marksOf(row)).toEqual(['added']);
+    // Both rows are the pair's, both new: the Source column, the same on every
+    // row, is not drawn (the App Studio list, objectstack#37918).
+    expect(screen.getByTestId('metadata-row-showcase_project')).toBeInTheDocument();
+    expect(sourcesOf(row)).toEqual([]);
     expect(linkOf(row).getAttribute('href')).toBe(
       `/studio/${BASE}/metadata/object_extension/showcase_task?package=${encodeURIComponent(PAIR)}`,
     );
@@ -207,11 +212,11 @@ describe('an object_extension row names, links and marks the object it extends (
     };
     mountList(area(BASE), 'object_extension', `?package=${BASE}`);
     const row = trOf(await screen.findByTestId('metadata-row-showcase_task'));
-    await within(row).findByTestId('customization-mark');
+    await within(row).findByTestId('metadata-row-source');
 
-    expect(marksOf(row)).toEqual(['customized']);
-    // CONTROL: the other extension the read does not list stays "Added".
-    expect(marksOf(trOf(screen.getByTestId('metadata-row-showcase_project')))).toEqual(['added']);
+    expect(sourcesOf(row)).toEqual(['modified']);
+    // CONTROL: the other extension the read does not list stays new.
+    expect(sourcesOf(trOf(screen.getByTestId('metadata-row-showcase_project')))).toEqual(['new']);
   });
 
   it('the search box matches `extend`', async () => {
@@ -223,12 +228,16 @@ describe('an object_extension row names, links and marks the object it extends (
     expect(screen.queryByTestId('metadata-row-showcase_task')).toBeNull();
   });
 
-  it("the Label column shows the extension's own label", async () => {
+  it("the extension's own label leads its row, above the object it extends", async () => {
     mountList(area(null), 'object_extension');
     const row = trOf(await screen.findByTestId('metadata-row-showcase_task'));
 
-    expect(within(row).getAllByRole('cell')[1]).toHaveTextContent('Work items');
-    expect(within(trOf(screen.getByTestId('metadata-row-showcase_project'))).getAllByRole('cell')[1]).toHaveTextContent('—');
+    expect(linkOf(row)).toHaveTextContent(/^Work items$/);
+    expect(within(row).getByTestId('metadata-row-api-name')).toHaveTextContent('showcase_task');
+    // CONTROL: an extension with no label leads with the object it extends, and draws no second line.
+    const unlabelled = trOf(screen.getByTestId('metadata-row-showcase_project'));
+    expect(linkOf(unlabelled)).toHaveTextContent(/^showcase_project$/);
+    expect(within(unlabelled).queryByTestId('metadata-row-api-name')).toBeNull();
   });
 
   it('CONTROL: a row of another type still names and links by `name`', async () => {

@@ -813,6 +813,17 @@ wins over a stored `auth.email_password_enabled = false` and over the stack
 config, and email and password sign-in comes back. Or restore the sign-in
 method the configuration no longer declares.
 
+A cloud-managed runtime (`OS_CLOUD_MANAGED=1`) whose deployment declares email
+and password off is the exception. The host refuses every password sign-in
+there, so the settings never turn it back on: a save of
+`auth.email_password_enabled` that reads on is refused
+`400 SETTINGS_VALIDATION` at the field, a value stored on earlier is not
+applied (the server says so once at **error**), and `GET /api/v1/auth/config`
+keeps answering `emailPassword.enabled: false`. Turning the switch off or
+clearing it is accepted there without the checks above, because it removes no
+way in. `OS_AUTH_EMAIL_PASSWORD_ENABLED` is the deployment's own declaration
+and still applies.
+
 ## Who may sign up — and what each posture tells a stranger
 
 `auth.audience.posture` is the one declaration answering who may become a user

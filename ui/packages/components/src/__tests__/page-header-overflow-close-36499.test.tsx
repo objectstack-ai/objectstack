@@ -64,7 +64,7 @@ afterEach(() => {
 describe('page:header — a ⋯ entry that finished on the click closes the menu (objectstack#36499)', () => {
   it('an in-place entry runs once and the menu closes', async () => {
     const enter = vi.fn();
-    renderHeader([{ name: 'configure', label: 'Configure tabs', locations: ['record_header'], component: 'action:menu', onClick: enter }]);
+    renderHeader([{ name: 'configure', label: 'Configure tabs', locations: ['record_page'], component: 'action:menu', onClick: enter }]);
     await openMore();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Configure tabs' }));
     expect(enter).toHaveBeenCalledTimes(1);
@@ -74,7 +74,7 @@ describe('page:header — a ⋯ entry that finished on the click closes the menu
   it('an entry still running keeps the menu open, its row busy, until it settles', async () => {
     let settle: () => void = () => {};
     const run = vi.fn(() => new Promise<void>((resolve) => { settle = resolve; }));
-    renderHeader([{ name: 'recompute', label: 'Recompute', locations: ['record_header'], component: 'action:menu', onClick: run }]);
+    renderHeader([{ name: 'recompute', label: 'Recompute', locations: ['record_page'], component: 'action:menu', onClick: run }]);
     await openMore();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Recompute' }));
     expect(run).toHaveBeenCalledTimes(1);
@@ -89,7 +89,7 @@ describe('page:header — a host entry declaring leadsMenu opens the ⋯, ahead 
   const host = (name: string, label: string, extra: Record<string, unknown> = {}) => ({
     name,
     label,
-    locations: ['record_header'],
+    locations: ['record_page'],
     component: 'action:menu',
     onClick: vi.fn(),
     ...extra,
@@ -102,7 +102,7 @@ describe('page:header — a host entry declaring leadsMenu opens the ⋯, ahead 
   });
 
   it('an authored action cannot claim the place: it stays in its band, after Refresh', async () => {
-    renderHeader([{ name: 'approve', label: 'Approve', locations: ['record_more'], leadsMenu: true }], [host('sys_share', 'Share')]);
+    renderHeader([{ name: 'approve', label: 'Approve', locations: ['record_page'], component: 'action:menu', leadsMenu: true }], [host('sys_share', 'Share')]);
     await openMore();
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Refresh', 'Approve', 'Share']);
   });

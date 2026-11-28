@@ -184,7 +184,7 @@ describe('record:alert CTA — resolved through resolveDeclaredActionIds (object
       label: 'Injected Inline',
       type: 'url',
       target: 'https://example.invalid/',
-      locations: ['record_header'],
+      locations: ['record_page'],
     };
     render(
       <RecordAlertRenderer schema={{ properties: { title: 'Verify', action: { actionName: inline as unknown as string } } }} />,

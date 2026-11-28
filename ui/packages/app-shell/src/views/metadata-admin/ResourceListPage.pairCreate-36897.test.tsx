@@ -134,7 +134,8 @@ function mount(host: MetadataAreaHost | null, type: string) {
   return render(host ? <MetadataAreaHostContext.Provider value={host}>{tree}</MetadataAreaHostContext.Provider> : tree);
 }
 
-const createButton = () => screen.queryByRole('button', { name: t('engine.list.create', 'en-US') });
+// The header's New: "New X" in the Studio area (objectstack#37918), "New" in Setup.
+const createButton = () => screen.queryByTestId('metadata-list-create');
 
 describe('the list offers 「新建」 on a read-only base, into its pair (objectstack#36897)', () => {
   it('an object: 新建 is offered and opens the list create dialog', async () => {

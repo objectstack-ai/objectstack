@@ -15,10 +15,13 @@
  * for).
  *
  * Only the OVERLAY-SIZE helpers below (`deriveOverlaySize` / `overlayWidthFor`
- * / `OverlaySize`) stay objectui-local: they map a field count to a
+ * / `OverlaySize`) stay objectui-local: they map a size bucket to a
  * viewport-clamped CSS width, which is a renderer concern the protocol does
- * not (and should not) own. They reuse spec's `countAuthorableFields` so the
- * field set stays in lockstep with `deriveRecordSurface`.
+ * not (and should not) own. `deriveOverlaySize` also maps a field count to a
+ * bucket for a caller that asks for one; the console's `navigation.size:
+ * 'auto'` never does, it is the side preview's fixed width whatever the
+ * field count. They reuse spec's `countAuthorableFields` so the field set
+ * stays in lockstep with `deriveRecordSurface`.
  */
 
 export {
@@ -39,8 +42,8 @@ export type {
 import { countAuthorableFields } from '@objectstack/spec/data';
 
 /**
- * Overlay size bucket for a drawer/modal (mirrors spec `NavigationConfig.size`
- * / `FormView.modalSize`). objectstack-ai/objectstack#2578: width is a runtime concern — the author can't
+ * Overlay size bucket for a drawer (the buckets of spec `NavigationConfig.size`
+ * other than `'auto'`). objectstack-ai/objectstack#2578: width is a runtime concern — the author can't
  * know the client viewport — so buckets map to a pixel CAP that the renderer
  * always clamps to the viewport (`min(cap, 92vw)`).
  */
@@ -51,7 +54,11 @@ const OVERLAY_SIZE_PX: Record<OverlaySize, number> = {
   sm: 480, md: 720, lg: 960, xl: 1200, full: 1600,
 };
 
-/** Derive the overlay size bucket from field count (the `size: 'auto'` path). */
+/**
+ * A size bucket from the object's field count. Not what `navigation.size:
+ * 'auto'` means: the console opens an `auto` record drawer at the side
+ * preview's fixed width, whatever the field count.
+ */
 export function deriveOverlaySize(objectSchema: unknown): OverlaySize {
   const n = countAuthorableFields(objectSchema);
   if (n <= 3) return 'sm';
@@ -61,9 +68,11 @@ export function deriveOverlaySize(objectSchema: unknown): OverlaySize {
 }
 
 /**
- * Resolve an overlay `size` (bucket or `'auto'`/absent) to a viewport-clamped
- * CSS width. `'auto'` derives the bucket from field count. The `min(cap, 92vw)`
- * clamp is why the AUTHOR never needs the client width — the client applies it.
+ * Resolve an overlay `size` bucket to a viewport-clamped CSS width. Given
+ * `'auto'` or nothing it falls back to {@link deriveOverlaySize}; the console
+ * never passes either, because it resolves `auto` to the side preview's fixed
+ * width before calling. The `min(cap, 92vw)` clamp is why the AUTHOR never
+ * needs the client width — the client applies it.
  */
 export function overlayWidthFor(size: 'auto' | OverlaySize | undefined, objectSchema: unknown): string {
   const bucket = (!size || size === 'auto') ? deriveOverlaySize(objectSchema) : size;
