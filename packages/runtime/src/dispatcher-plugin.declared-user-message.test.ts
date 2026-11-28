@@ -80,7 +80,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+import { recordNotFoundError } from '@objectstack/core';
+import { INTERNAL_ERROR_MESSAGE, LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
@@ -129,8 +130,10 @@ function makeRes() {
     const res: any = {
         statusCode: undefined as number | undefined,
         body: undefined as any,
+        // [#37828] Every header the exit writes, in order, as written.
+        headers: [] as Array<[string, string | string[]]>,
         status(c: number) { res.statusCode = c; return res; },
-        header() { return res; },
+        header(name: string, value: string | string[]) { res.headers.push([name, value]); return res; },
         json(b: any) { res.body = b; return res; },
     };
     return res;
@@ -463,5 +466,42 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             expect(res.body.error.userMessage).toBe('Try again shortly.');
             expect((res.body.error.details as any)?.userMessage).toBeUndefined();
         });
+    });
+});
+
+/**
+ * [#37828] The exit's answer to a throw carrying a `userMessage` says it varies
+ * by `Accept-Language`, since that sentence is in the caller's language. The
+ * throw is the real producer's: `recordNotFoundError` with a zh-CN caller, the
+ * by-id read's `404` a cache stores by default. The route is this file's
+ * throw-transparent instrument; the rule is the exit's, status and route alike.
+ */
+describe('[#37828] the dispatcher throw-transparent exit: a userMessage varies by Accept-Language', () => {
+    let errSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { errSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
+    afterEach(() => { errSpy.mockRestore(); });
+
+    const varyWrites = (res: any) => res.headers.filter(([name]: [string]) => name.toLowerCase() === 'vary');
+
+    it('404 RECORD_NOT_FOUND in zh-CN: the userMessage on the wire and Vary: Accept-Language, in the multi-value form the hosts append', async () => {
+        const res = await throwFromAnalyticsQuery(recordNotFoundError('ledger', 'r_nowhere', { locale: 'zh-CN' }));
+        expect(res.statusCode).toBe(404);
+        expect(res.body.error.code).toBe('RECORD_NOT_FOUND');
+        expect(res.body.error.userMessage).toBe('该记录不存在，或您无权访问它。');
+        expect(varyWrites(res)).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+    });
+
+    it('status-agnostic: a marked 400 says so too', async () => {
+        const res = await throwFromAnalyticsQuery(
+            declaring({ status: 400, code: 'VALIDATION_FAILED', userMessage: 'Pick a smaller date range.' }, 'range too wide'),
+        );
+        expect(res.statusCode).toBe(400);
+        expect(varyWrites(res)).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+    });
+
+    it('CONTROL a throw with no userMessage writes no Vary', async () => {
+        const res = await throwFromAnalyticsQuery(declaring({ status: 404, code: 'RECORD_NOT_FOUND' }, 'Record r_nowhere not found in ledger'));
+        expect(res.statusCode).toBe(404);
+        expect(varyWrites(res)).toEqual([]);
     });
 });
