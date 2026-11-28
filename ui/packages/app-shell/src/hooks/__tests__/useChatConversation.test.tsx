@@ -1389,7 +1389,9 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
    * calls the decision made — an empty list means the affordance was dead.
    */
   async function pressApprove(messages: ReturnType<typeof hydratedMessagesToChatMessages>) {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ status: 'executed' }));
+    // A fresh Response per call: the row read (objectstack#38250) would
+    // otherwise consume the one body the decision POST reads.
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse({ status: 'executed' }));
     vi.stubGlobal('fetch', fetchMock);
     const { result } = renderHook(() =>
       useHitlInChat({ messages, apiBase: API_BASE }),
@@ -1398,7 +1400,11 @@ describe('sanitizeChatMessagesForCache — a pending approval survives the cache
       await result.current.decide('tc-approve', true);
     });
     return {
-      urls: fetchMock.mock.calls.map((c) => String(c[0])),
+      // The decision POSTs only: since objectstack#38250 the hook also reads
+      // the restored card's row once (`GET …/pending-actions/:id`).
+      urls: fetchMock.mock.calls
+        .filter((c) => (c[1] as RequestInit | undefined)?.method === 'POST')
+        .map((c) => String(c[0])),
       decision: result.current.decisions['tc-approve'],
     };
   }

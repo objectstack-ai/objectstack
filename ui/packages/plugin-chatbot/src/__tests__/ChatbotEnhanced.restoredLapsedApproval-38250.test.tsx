@@ -56,7 +56,7 @@ const restored = () =>
   ]);
 
 function Harness() {
-  const messages = React.useMemo(restored, []);
+  const messages = React.useMemo(() => restored(), []);
   const hitl = useHitlInChat({ messages, apiBase: '/api/v1/ai' });
   return (
     <ChatbotEnhanced

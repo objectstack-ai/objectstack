@@ -229,11 +229,6 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
     }
     return list;
   }, [messages]);
-  // The effect keys on these primitives only; the transport and headers ride a
-  // ref, so a new `headers` object each render re-reads nothing.
-  const awaitingKey = awaiting.map((a) => `${a.toolCallId}=${a.pendingActionId}`).join('|');
-  const readCfgRef = React.useRef({ base, headers, apiFetch, awaiting });
-  readCfgRef.current = { base, headers, apiFetch, awaiting };
   /** Rows already asked for, by pending-action id: one read per card per mount. */
   const rowReadRef = React.useRef(new Set<string>());
   // Unmount guard. Not a per-run flag: the effect below re-runs whenever a new
@@ -246,34 +241,36 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
     };
   }, []);
 
+  // Re-running is cheap and safe: a card whose row was already asked for is
+  // skipped, so a new `headers` object or a streamed message re-reads nothing.
   React.useEffect(() => {
-    const { base: readBase, headers: readHeaders, apiFetch: readFetch, awaiting: cards } =
-      readCfgRef.current;
-    for (const { toolCallId, pendingActionId } of cards) {
+    for (const { toolCallId, pendingActionId } of awaiting) {
       if (rowReadRef.current.has(pendingActionId)) continue;
       rowReadRef.current.add(pendingActionId);
-      void (async () => {
-        let row: Pick<PendingActionRow, 'status' | 'rejection_reason' | 'decided_by'> | null = null;
-        try {
-          const response = await (readFetch ?? fetch)(
-            `${readBase}/pending-actions/${encodeURIComponent(pendingActionId)}`,
-            { method: 'GET', credentials: 'include', headers: buildHeaders(readHeaders, false) },
-          );
-          if (!response.ok) return;
-          row = readPendingActionRow(await parseJson(response));
-        } catch {
-          // No answer (offline, no AI service): the card keeps its buttons, as
-          // before; a press still meets the lapse `409` and draws Expired.
-          return;
-        }
+      void readRow(pendingActionId).then((row) => {
         if (!mountedRef.current || !row) return;
         const settled = settledDecisionOf(row);
         if (!settled) return;
         // Never over a decision made on this card meanwhile: the press wins.
         setDecisions((prev) => (toolCallId in prev ? prev : { ...prev, [toolCallId]: settled }));
-      })();
+      });
     }
-  }, [awaitingKey, base]);
+
+    async function readRow(pendingActionId: string) {
+      try {
+        const response = await (apiFetch ?? fetch)(
+          `${base}/pending-actions/${encodeURIComponent(pendingActionId)}`,
+          { method: 'GET', credentials: 'include', headers: buildHeaders(headers, false) },
+        );
+        if (!response.ok) return null;
+        return readPendingActionRow(await parseJson(response));
+      } catch {
+        // No answer (offline, no AI service): the card keeps its buttons, as
+        // before; a press still meets the lapse `409` and draws Expired.
+        return null;
+      }
+    }
+  }, [awaiting, base, headers, apiFetch]);
 
   const decide = React.useCallback(
     async (toolCallId: string, approved: boolean, reason?: string) => {
