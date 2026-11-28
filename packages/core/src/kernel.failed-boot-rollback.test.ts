@@ -206,7 +206,7 @@ describe('ObjectKernel — a boot that fails after every plugin started rolls th
     });
 
     describe('is still the one contract', () => {
-        it('CONTROL: the Phase 2 rollback (a start() that throws) runs once per started plugin, not twice', async () => {
+        it('CONTROL: the Phase 2 rollback (a start() that throws) runs once per initialised plugin, not twice', async () => {
             const log: string[] = [];
             const driver: FakeDriver = { connected: false };
             const kernel = newKernel();
@@ -228,13 +228,13 @@ describe('ObjectKernel — a boot that fails after every plugin started rolls th
                     log.push('thrower:start');
                     throw new Error('thrower exploded');
                 },
-                // Never started, so never rolled back — its destroy() must not run.
+                // Its init() ran, so it is rolled back like the others (#37462), first: it initialised last.
                 destroy: async () => { log.push('thrower:destroy'); },
             });
 
             await expect(kernel.bootstrap()).rejects.toThrow('failed to start - rollback complete: thrower exploded');
 
-            expect(log).toEqual(['connect', 'middle:start', 'thrower:start', 'middle:destroy', 'disconnect']);
+            expect(log).toEqual(['connect', 'middle:start', 'thrower:start', 'thrower:destroy', 'middle:destroy', 'disconnect']);
             expect(driver.connected).toBe(false);
             expect(kernel.getState()).toBe('stopped');
         });
@@ -301,7 +301,7 @@ describe('ObjectKernel — a boot that fails after every plugin started rolls th
             expect(kernel.getState()).toBe('stopped');
         });
 
-        it('a boot that fails in Phase 1 destroys nothing: no plugin has started', async () => {
+        it('a boot that fails in Phase 1 destroys the plugins that initialised, never the one whose init() threw (#37462)', async () => {
             const log: string[] = [];
             const kernel = newKernel();
             await kernel.use({
@@ -324,7 +324,7 @@ describe('ObjectKernel — a boot that fails after every plugin started rolls th
 
             await expect(kernel.bootstrap()).rejects.toThrow('init refused');
 
-            expect(log).toEqual(['first:init', 'thrower:init']);
+            expect(log).toEqual(['first:init', 'thrower:init', 'first:destroy']);
             expect(kernel.getState()).toBe('stopped');
         });
     });

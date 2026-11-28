@@ -111,16 +111,22 @@ export interface ObjectKernelConfig {
     shutdownTimeout?: number;
     
     /**
-     * Whether a failed boot destroys the plugins that started, in reverse start
-     * order. Default `true`: a `start()` that throws or times out, the
-     * system-requirement check, and a `kernel:ready`, `kernel:bootstrapped` or
-     * `kernel:listening` handler that throws each fail the boot after that
-     * rollback. A failing `start()` rejects with an error naming the plugin
-     * (its `cause` is the original); the other failures reject with their own
-     * error, unwrapped. `false`: a failing `start()` is logged and the boot
-     * goes on without that plugin; any later failure rejects the boot with the
-     * started plugins left started (the kernel is `stopped` and `shutdown()` on
-     * it is a no-op), so the host owns whatever they hold.
+     * Whether a failed boot destroys every plugin whose `init()` ran, in
+     * reverse init order — the same plugins a shutdown would destroy, whether
+     * or not their `start()` ran or succeeded. Default `true`: an `init()` or
+     * `start()` that throws or times out, the system-requirement check, and a
+     * `kernel:ready`, `kernel:bootstrapped` or `kernel:listening` handler that
+     * throws each fail the boot after that rollback. A plugin whose `init()`
+     * threw or never ran is not destroyed, a plugin with no `destroy()` is
+     * skipped, a `destroy()` that throws is logged and the rest still run, and
+     * no plugin is destroyed twice. A failing `start()` rejects with an error
+     * naming the plugin (its `cause` is the original); the other failures
+     * reject with their own error, unwrapped. So a `destroy()` must tolerate
+     * that its own `start()` never ran. `false`: a failing `start()` is logged
+     * and the boot goes on without that plugin; any later failure rejects the
+     * boot with the initialised plugins left as they are (the kernel is
+     * `stopped` and `shutdown()` on it is a no-op), so the host owns whatever
+     * they hold.
      */
     rollbackOnFailure?: boolean;
     
@@ -204,7 +210,13 @@ export class ObjectKernel {
     private context: PluginContext;
     private pluginLoader: PluginLoader;
     private config: ObjectKernelConfig;
-    private startedPlugins: Set<string> = new Set();
+    /**
+     * Names of the plugins whose `init()` resolved, in init order: exactly the
+     * plugins a failed boot destroys (reverse order), whether or not their
+     * `start()` ran. Emptied by the rollback, so a second rollback destroys
+     * nothing.
+     */
+    private initializedPlugins: Set<string> = new Set();
     /**
      * Plugin name -> elapsed milliseconds that plugin's `start()` took. These
      * are DURATIONS, never start instants; the old spelling `pluginStartTimes`
@@ -583,8 +595,13 @@ export class ObjectKernel {
                     console.error(`[Kernel] Plugin startup failed: ${plugin.name}`, origMsg, origStack);
 
                     if (this.config.rollbackOnFailure) {
-                        this.logger.warn('Rolling back started plugins...');
-                        await this.rollbackStartedPlugins();
+                        // `stopping` while the rollback runs, as the outer catch
+                        // does: a `shutdown()` or a signal arriving from inside a
+                        // `destroy()` is absorbed instead of destroying every
+                        // plugin a second time.
+                        this.state = 'stopping';
+                        this.logger.warn('Rolling back initialised plugins...');
+                        await this.rollbackInitializedPlugins();
                         // Propagate the original cause through the thrown error
                         // so callers (e.g. cloud auth-proxy) can surface the
                         // real failure instead of an opaque "rollback complete"
@@ -643,32 +660,36 @@ export class ObjectKernel {
 
             this.logger.info('✅ Bootstrap complete');
         } catch (error) {
-            // A boot that fails once its plugins have STARTED — the readiness
-            // check, or a `kernel:ready` / `kernel:bootstrapped` /
-            // `kernel:listening` handler — leaves them holding what `start()`
-            // took: a connected driver, an armed timer. This kernel is stopped
-            // for good below, so `shutdown()` on it is a no-op and nothing
-            // else will ever destroy them: the failed boot tears them down
-            // itself, through the SAME rollback a failing `start()` runs (reverse
-            // start order, a throwing `destroy()` logged and never replacing
+            // A boot that fails once a plugin's `init()` has run — a later
+            // `init()`, the core-service fallbacks, the readiness check, or a
+            // `kernel:ready` / `kernel:bootstrapped` / `kernel:listening`
+            // handler — leaves every initialised plugin holding what it took in
+            // `init()` and `start()`: an open pool, a connected driver, an armed
+            // timer. This kernel is stopped for good below, so `shutdown()` on
+            // it is a no-op and nothing else will ever destroy them: the failed
+            // boot tears them down itself, through the SAME rollback a failing
+            // `start()` runs (reverse init order, the plugins a shutdown would
+            // destroy, a throwing `destroy()` logged and never replacing
             // `error`) and under the same `rollbackOnFailure` gate, so one
             // contract answers a failed boot at whatever phase it fails.
             //
-            // `startedPlugins` is empty once the Phase 2 branch above has
+            // `initializedPlugins` is empty once the Phase 2 branch above has
             // rolled back, so a boot that already rolled back never destroys a
-            // plugin twice. Only a kernel still `running` rolls back: a
-            // `shutdown()` that began mid-boot already owns the destroys. The
-            // `stopping` state holds the same ownership the other way round —
-            // a `shutdown()` or a signal that arrives during the rollback is
-            // absorbed (listeners stay installed until `stopped`, below).
+            // plugin twice. Only a kernel still `initializing` or `running`
+            // rolls back: a `shutdown()` that began mid-boot already owns the
+            // destroys (`shutdown()` refuses an `initializing` kernel, so none
+            // can begin during Phase 1). The `stopping` state holds the same
+            // ownership the other way round — a `shutdown()` or a signal that
+            // arrives during the rollback is absorbed (listeners stay installed
+            // until `stopped`, below).
             if (
                 this.config.rollbackOnFailure
-                && this.state === 'running'
-                && this.startedPlugins.size > 0
+                && (this.state === 'initializing' || this.state === 'running')
+                && this.initializedPlugins.size > 0
             ) {
                 this.state = 'stopping';
-                this.logger.warn('Bootstrap failed after plugins started — rolling back started plugins...');
-                await this.rollbackStartedPlugins();
+                this.logger.warn('Bootstrap failed after plugins initialised — rolling back initialised plugins...');
+                await this.rollbackInitializedPlugins();
             }
             this.state = 'stopped';
             // A kernel whose boot failed is stopped for good (`shutdown()` on it
@@ -950,6 +971,7 @@ export class ObjectKernel {
                 timeout,
                 `Plugin ${plugin.name} init timeout after ${timeout}ms`
             );
+            this.initializedPlugins.add(plugin.name);
         } finally {
             this.currentlyInitializing = undefined;
         }
@@ -1025,7 +1047,6 @@ export class ObjectKernel {
             );
 
             const duration = Date.now() - startTime;
-            this.startedPlugins.add(plugin.name);
             this.pluginStartupDurations.set(plugin.name, duration);
             
             this.logger.debug(`Plugin started: ${plugin.name} (${duration}ms)`);
@@ -1049,9 +1070,18 @@ export class ObjectKernel {
         }
     }
 
-    private async rollbackStartedPlugins(): Promise<void> {
-        const pluginsToRollback = Array.from(this.startedPlugins).reverse();
-        
+    /**
+     * Destroy every plugin whose `init()` resolved, in reverse init order —
+     * started or not, as a shutdown would — then forget them, so a second call
+     * destroys nothing. A plugin with no `destroy()` is skipped; one that
+     * throws is logged at `error` and the rest still run. The caller rethrows
+     * the boot error, so nothing here replaces it.
+     */
+    private async rollbackInitializedPlugins(): Promise<void> {
+        const pluginsToRollback = Array.from(this.initializedPlugins).reverse();
+        this.initializedPlugins.clear();
+
+
         for (const pluginName of pluginsToRollback) {
             const plugin = this.plugins.get(pluginName);
             if (plugin?.destroy) {
@@ -1063,8 +1093,6 @@ export class ObjectKernel {
                 }
             }
         }
-        
-        this.startedPlugins.clear();
     }
 
     /**
