@@ -33,13 +33,13 @@ import {
     // `manage_metadata` (or `isSystem`), the one predicate the REST doors run
     // too. No `/meta` branch here carries an organization into a metadata
     // write or read: the per-organization overlay axis is retired.
-    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
     authoredKnowledgeSourceRefusal,
     metaWriteCapabilityVerdict,
     // [ADR-0131 D3 · D12 items 7–8] …and, under a wall, the platform operator
     // alone: the walled refusal every environment-metadata write door asks.
     walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
+import { resolveKnowledgeServiceForSave } from './knowledge-service-lookup.js';
 // [#15238] The DECLARED protocol contracts this domain's request literals are
 // compiled against. Imported, never restated: a second hand-written
 // `getMetaItem(…)` signature here would silently drift from the one the spec
@@ -1994,12 +1994,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     item,
                     executionContext: _context.executionContext,
                     // The classified lookup, not the `resolveService` probe:
-                    // a name nothing registered answers `undefined` (no
-                    // knowledge service: the save is refused), and a service that
-                    // is registered and cannot be resolved rejects, which the
-                    // predicate answers `503`.
-                    resolveKnowledgeService: () =>
-                        deps.resolveServiceOrLoud(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
+                    // a name nothing registered answers the no-service refusal,
+                    // a registration with no instance in this scope its own,
+                    // and a service that is registered and cannot be resolved
+                    // rejects, which the predicate answers `503`.
+                    resolveKnowledgeService: () => resolveKnowledgeServiceForSave(deps, _context),
                 });
                 if (refused) {
                     return { handled: true, response: deps.error(refused.message, refused.status) };

@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -374,6 +374,57 @@ describe('ADR-0161 K4 — dispatcher PUT asks the knowledge service to admit the
         const hostMounted = new HttpDispatcher({ context: { getService: (n: string) => services[n] ?? null } } as any);
         expect((await hostMounted.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE))).response?.status).toBe(200);
         expect(saveMetaItem).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * A host that registers `knowledge` per environment, as a scoped factory
+     * serving no instance for this request's environment: the deployment does
+     * run a knowledge service, so the author is not told it runs none, nor
+     * sent to the stack's `requires`. The platform's `KnowledgeServicePlugin`
+     * registers a plain instance, so the platform's own path is the control.
+     */
+    describe('a knowledge service registered with no instance in the request\'s environment', () => {
+        function bootScoped(served: string) {
+            const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+            const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
+            const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+            kernel.registerService('protocol', { saveMetaItem });
+            kernel.registerServiceFactory(
+                'knowledge',
+                (_ctx: unknown, scopeId?: string) => (scopeId === served ? { admitAuthoredSource } : undefined),
+                ServiceLifecycle.SCOPED,
+            );
+            return { dispatcher: new HttpDispatcher(kernel as any), saveMetaItem, admitAuthoredSource };
+        }
+
+        it('is refused 503 SERVICE_UNAVAILABLE with its own sentence naming the environment, and nothing is saved', async () => {
+            const stack = bootScoped('northwind');
+            const res = await stack.dispatcher.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE));
+            expect(res.response?.status).toBe(503);
+            expect(res.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+            expect(res.response?.body?.error?.message).toMatch(
+                /^The knowledge source 'faq' was not saved: the knowledge service registered on this deployment serves no instance for environment 'platform'/,
+            );
+            expect(res.response?.body?.error?.message).not.toContain('runs no knowledge service');
+            expect(stack.saveMetaItem).not.toHaveBeenCalled();
+        });
+
+        it('CONTROL: the same factory serving this environment admits the save; the platform\'s plain instance is unchanged', async () => {
+            const served = bootScoped('platform');
+            expect((await served.dispatcher.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE))).response?.status).toBe(200);
+            expect(served.admitAuthoredSource).toHaveBeenCalledTimes(1);
+            expect(served.saveMetaItem).toHaveBeenCalledTimes(1);
+
+            const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+            const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
+            const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+            kernel.registerService('protocol', { saveMetaItem });
+            kernel.registerService('knowledge', { admitAuthoredSource });
+            const plain = new HttpDispatcher(kernel as any);
+            expect((await plain.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE))).response?.status).toBe(200);
+            expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
+            expect(saveMetaItem).toHaveBeenCalledTimes(1);
+        });
     });
 
     it('the gate is behind the capability gates, and is not asked for another type', async () => {

@@ -153,6 +153,27 @@ export interface DomainRoute {
  * reads a kernel without taking the request, and do not cache the resolved
  * kernel anywhere that outlives one request.
  */
+/**
+ * [#16402] What {@link DomainHandlerDeps.classifyServiceOrLoud} answers: the
+ * classified service lookup's three non-fault outcomes.
+ *
+ *  - `resolved`: an instance.
+ *  - `never-registered`: every registry in the chain answered the branded
+ *    "nothing was ever registered under this name", or the probe tail found
+ *    nothing. The supported no-service composition.
+ *  - `no-instance-in-scope`: a registry did know the name, and the read made
+ *    in this scope produced no instance.
+ *
+ * A caller that named no scope and asked for a `SCOPED` registration is not
+ * here: that stays the unbranded rejection `packages/core` raises, so
+ * `Scope ID required for scoped service 'NAME'` keeps reaching the one caller
+ * it is true about.
+ */
+export type ClassifiedServiceLookup =
+    | { readonly outcome: 'resolved'; readonly value: any }
+    | { readonly outcome: 'never-registered' }
+    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
 export interface DomainHandlerDeps {
     /**
      * Environment-scoped service resolution (per-request kernel aware), typed
@@ -199,8 +220,10 @@ export interface DomainHandlerDeps {
      *    service the same way it reads a deployment with none. ⚠️ It is a
      *    DIFFERENT fact from the one above with the same licence, and the
      *    lookup tells the two apart internally (`HttpDispatcher.classifyService`)
-     *    — it is collapsed HERE because no door needs to act on the difference,
-     *    ⛔ not because they are the same state;
+     *    — it is collapsed HERE because both misses license the same answer at
+     *    the doors that read this member, ⛔ not because they are the same
+     *    state. A door whose ANSWER differs between them asks
+     *    {@link classifyServiceOrLoud} instead;
      *  - every other rejection (a factory that threw, a scoped registration
      *    resolved without a scope id, a circular service dependency) →
      *    re-raised, for the gate to answer as an OUTAGE rather than as an
@@ -245,6 +268,23 @@ export interface DomainHandlerDeps {
      * nothing verifies.
      */
     resolveServiceOrLoud(context: HttpProtocolContext, name: string, environmentId?: string): Promise<any>;
+    /**
+     * {@link resolveServiceOrLoud} with its two quiet misses told apart, for a
+     * door that tells its caller something different for each: today the
+     * `knowledge_source` save doors (ADR-0161 K4), where "this deployment runs
+     * no knowledge service" is false for a host whose scoped `knowledge`
+     * factory serves no instance for the request's environment. The same
+     * chain, the same scope travel, and the same loud rejections; only the
+     * answer is classified ({@link ClassifiedServiceLookup}). It claims no
+     * more than the registry did: `no-instance-in-scope` never asserts that the
+     * registration is `SCOPED`.
+     *
+     * Optional, so an implementation of this exported interface written
+     * before it existed (a host's own deps, a test double) still compiles; a
+     * door reading a deps without it falls back to {@link resolveServiceOrLoud}
+     * and answers both misses as `never-registered`, the answer it gave before.
+     */
+    classifyServiceOrLoud?(context: HttpProtocolContext, name: string, environmentId?: string): Promise<ClassifiedServiceLookup>;
     /**
      * Unscoped service lookup on the current kernel, typed by the slot.
      *
