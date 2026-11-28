@@ -323,10 +323,22 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * name, rename the content list, drop the inert keys; they touch no type the
  * permission conversion or the agent's touches, so the ties at `order: 1` and
  * `order: 2` are settled by `id`.
+ *
+ * The action's two are NOT independent: `action-type-ask-ai-removed` and
+ * `action-locations-acted-on` walk the same action rows and group / menu
+ * members, so their order is set, not left to `id`. The removal applies
+ * first (`order: 2.5`): an `action:group` at `record_header` whose only
+ * `record_more`-only member is an `ask_ai` member then has no folded member
+ * left and converts to `record_page`. In the other order the locations entry
+ * leaves the group at `record_header` as a TODO, the removal deletes the
+ * member, and the group is stranded at a word protocol 19 draws nowhere.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionLocationsActedOn, order: 3 },
-  { conversion: actionTypeAskAiRemoved, order: 3 },
+  // BEFORE `actionLocationsActedOn`: both walk the same action rows and
+  // `action:group` / `action:menu` members. An `ask_ai` member is deleted here
+  // first, so it cannot hold a `record_header` group back as a TODO there.
+  { conversion: actionTypeAskAiRemoved, order: 2.5 },
   { conversion: agentModelProviderRemoved, order: 2 },
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
   { conversion: knowledgeSourceIdToName, order: 1 },

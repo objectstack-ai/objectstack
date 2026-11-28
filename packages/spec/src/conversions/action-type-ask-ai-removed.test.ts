@@ -106,4 +106,45 @@ describe('action-type-ask-ai-removed (ADR-0160 D7)', () => {
     }) as { actions: { name: string }[] };
     expect(object.actions.map((a) => a.name)).toEqual(['reopen_ticket']);
   });
+
+  it('applies before action-locations-acted-on: a record_header group whose only ⋯-only member is ask_ai converts to record_page', () => {
+    const ids = ALL_CONVERSIONS.map((c) => c.id);
+    expect(ids.indexOf(ID)).toBeLessThan(ids.indexOf('action-locations-acted-on'));
+    const group = () => ({
+      pages: [
+        {
+          name: 'ticket_desk',
+          regions: [
+            {
+              name: 'main',
+              components: [
+                {
+                  type: 'action:group',
+                  properties: {
+                    location: 'record_header',
+                    actions: [
+                      { label: 'Close', type: 'script', target: 'close_ticket', locations: ['record_header'] },
+                      { label: 'Ask AI', type: 'ask_ai', locations: ['record_more'] },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const expected = {
+      type: 'action:group',
+      properties: {
+        location: 'record_page',
+        actions: [{ label: 'Close', type: 'script', target: 'close_ticket', locations: ['record_page'] }],
+      },
+    };
+    const componentOf = (stack: unknown) =>
+      (stack as ReturnType<typeof group>).pages[0]!.regions[0]!.components[0];
+    // Over sources and at rest alike, the group is not left at a word protocol 19 draws nowhere.
+    expect(componentOf(applyMetaMigrations(group(), 18, 19).stack)).toEqual(expected);
+    expect(componentOf(applyConversions(group(), { includeRetired: true }))).toEqual(expected);
+  });
 });
