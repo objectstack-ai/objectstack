@@ -495,6 +495,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'TSO-U: unit pins on predicate 4\'s readers': 37,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
+  'TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body': 20,
   'The #22918 category: `runtime-export-retired`': 49,
   'REX-N: the predicate set is pinned BY NAME, never by count': 3,
   'REX-U: unit pins on the operand grammar and the FROM-side reader': 24,
@@ -2885,8 +2886,8 @@ function metadataSurfaceFilesAt(rev, cwd) {
 
 const IDENT = '[A-Za-z_$][A-Za-z0-9_$]*';
 // A DOTTED MEMBER PATH: `oauth.applications.get`. The leading segments are the
-// nesting the member sits in -- an object literal or a class (#17279); the last
-// one is the member itself.
+// nesting the member sits in -- an object literal or a class (#17279), an
+// interface or a type-literal alias (#37445); the last one is the member itself.
 const MEMBER_PATH_RE = new RegExp(`^${IDENT}(?:\\.${IDENT})*$`);
 
 /**
@@ -4580,8 +4581,9 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
       problems.push(
         `\`type-surface-only ${ref}\` [predicate 4] cannot be resolved at HEAD in ${path}:\n` +
         `      ${read.refusal}\n` +
-        '      A dotted member path is walked through the nesting it names -- an object literal or\n' +
-        '      a class body (#17279) -- and a walk that lands on zero or on several candidates is\n' +
+        '      A dotted member path is walked through the nesting it names -- an object literal, a\n' +
+        '      class body (#17279), or an interface or type-literal alias body (#37445) -- and a walk\n' +
+        '      that lands on zero or on several candidates is\n' +
         '      REPORTED rather than guessed at -- a reference that resolves to the wrong same-named\n' +
         '      member reads as a true sentence about a member the diff never touched (#15627).\n' +
         HOW(null),
@@ -8349,6 +8351,175 @@ function selfTest() {
   red('TSO-C14 a class segment that does not resolve is still refused by predicate 4, never guessed at',
     run(mk(CLS_FIXTURE(`type-surface-only ${CLS('NoSuchClass.findOne')}`))),
     [/cannot be resolved at HEAD/, /no `NoSuchClass` object literal or class/]);
+
+  // ---- TSO-I (#37445): a DOTTED path resolves through an INTERFACE body ------
+  //
+  // The third container kind, and the one neither #15627's fix nor #17279's
+  // covered. Measured on `ui/packages/auth/src/types.ts`: the dotted
+  // `…/types.ts#AuthClient.updateUser` was refused with "no `AuthClient` object
+  // literal or class … is declared at the top of the file", though `AuthClient` is
+  // an exported `interface`, so a narrowing of an interface member was nameable
+  // only BARELY -- the FIRST same-named definition in the file.
+  //
+  // The fixture keeps that file's shape: a `AuthClientSession` interface whose name
+  // PREFIXES the target's, a property signature typed as a function (the #38093
+  // position reader), a method signature, and a second interface declaring the
+  // same member name ABOVE it so the bare spelling reads the wrong one.
+  //
+  // ⚠️ Declaration merging (two `interface AuthClient` blocks) is pinned as
+  // AMBIGUOUS, not merged (TSO-I8/I9): the walk counts bodies, and which block a
+  // member's bytes sit in is what predicate 4 compares at both revs.
+  battery('TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body');
+  const IFC_TYPES =
+    'export interface AuthClientSession {\n' +
+    '  token: string;\n' +
+    '  refresh: () => Promise<Session>;\n' +
+    '}\n' +
+    '\n' +
+    'export interface AdminClient {\n' +
+    '  updateUser(id: string): Promise<AdminRow>;\n' +
+    '}\n' +
+    '\n' +
+    '/** Auth client interface - abstracts the underlying auth library */\n' +
+    'export interface AuthClient extends AuthBase<{ a: 1 }> {\n' +
+    '  /** Sign in with email/password. */\n' +
+    '  signIn(email: string, password: string): Promise<SignInResult>;\n' +
+    '  profile: {\n' +
+    '    updateUser(data: Partial<AuthUser>): Promise<ProfileRow>;\n' +
+    '  };\n' +
+    '  updateUser: (data: Partial<AuthUser>) => Promise<AuthUser>;\n' +
+    '}\n';
+  const IFC = (spelling) => `packages/client/src/types.ts#${spelling}`;
+
+  // -- the reading the card could not write ----------------------------------
+  {
+    const r = readRef(IFC_TYPES, IFC('AuthClient.updateUser'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<AuthUser>',
+      `TSO-I1: THE CARD'S SHAPE -- \`AuthClient.updateUser\`, a function-typed PROPERTY signature on an exported interface, resolves through the INTERFACE body to its return type. Before this it read "no \`AuthClient\` object literal or class". Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(IFC_TYPES, IFC('AuthClient.signIn'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<SignInResult>',
+      `TSO-I2: a METHOD signature on the same interface resolves too -- \`extends AuthBase<{ a: 1 }>\` does not send the walk into a type argument's braces. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const bare = readRef(IFC_TYPES, IFC('updateUser'));
+    const admin = readRef(IFC_TYPES, IFC('AdminClient.updateUser'));
+    const deep = readRef(IFC_TYPES, IFC('AuthClient.profile.updateUser'));
+    const auth = readRef(IFC_TYPES, IFC('AuthClient.updateUser'));
+    assert(
+      bare.refusal === null && bare.surface?.type === 'Promise<AdminRow>',
+      `TSO-I3: THE NEGATIVE CONTROL -- a BARE \`updateUser\` still reads the FIRST definition in the file (\`AdminClient.updateUser\`). If this moves, the widening silently changed what every bare reference means. Got: ${JSON.stringify(bare)}`,
+    );
+    assert(
+      admin.surface?.type === 'Promise<AdminRow>' && deep.surface?.type === 'Promise<ProfileRow>' &&
+      new Set([bare.surface?.type, deep.surface?.type, auth.surface?.type]).size === 3,
+      `TSO-I4: the #16571 TOP-DEPTH rule holds inside an interface -- \`AuthClient.updateUser\` is the interface's OWN member, \`AuthClient.profile.updateUser\` the nested type literal's, and the three spellings land on THREE different definitions. Got: ${JSON.stringify([admin, deep, auth])}`,
+    );
+  }
+  {
+    const r = readRef(IFC_TYPES, IFC('AuthClient.refresh'));
+    assert(
+      r.surface === null && /no `refresh` definition sits inside it/.test(r.refusal ?? ''),
+      `TSO-I5: THE NONSENSE CONTROL -- \`refresh\` lives on \`AuthClientSession\`, whose name PREFIXES the segment; the walk matches the whole name and refuses by member, never resolving into the prefixed interface. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef(IFC_TYPES, IFC('NoSuchClient.updateUser'));
+    assert(
+      r.surface === null && /no `NoSuchClient` object literal or class, nor interface or type-literal alias/.test(r.refusal ?? '') &&
+      /`interface NoSuchClient \{`/.test(r.refusal ?? '') && /`type NoSuchClient = \{`/.test(r.refusal ?? ''),
+      `TSO-I6: a segment naming no container is refused, and the message names EVERY shape the walk looked for, interface and type-literal alias included. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const r = readRef('export declare interface Api<T = string> {\n  get(id: T): Promise<Row>;\n}\n', IFC('Api.get'));
+    assert(
+      r.refusal === null && r.surface?.type === 'Promise<Row>',
+      `TSO-I7: \`export declare interface\` with a type-parameter DEFAULT is a declaration the walk reads. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  {
+    const merged = IFC_TYPES + '\nexport interface AuthClient {\n  updateUser(data: unknown): Promise<Merged>;\n}\n';
+    const r = readRef(merged, IFC('AuthClient.updateUser'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /opens 2 interfaces/.test(r.refusal ?? ''),
+      `TSO-I8: DECLARATION MERGING is AMBIGUOUS, never merged -- two \`interface AuthClient\` blocks are two bodies, refused and counted BY KIND like two classes (TSO-C8). Got: ${JSON.stringify(r)}`,
+    );
+    const onlyInOne = IFC_TYPES + '\nexport interface AuthClient {\n  signOut(): Promise<void>;\n}\n';
+    const r2 = readRef(onlyInOne, IFC('AuthClient.updateUser'));
+    assert(
+      r2.surface === null && /opens 2 interfaces/.test(r2.refusal ?? ''),
+      `TSO-I9: ...and still AMBIGUOUS when the member sits in only ONE of the merged blocks -- the SEGMENT is what is ambiguous, so the refusal does not depend on where the member happens to sit. Got: ${JSON.stringify(r2)}`,
+    );
+  }
+  {
+    const both = 'export class AuthClient {\n  async updateUser(): Promise<Cls> { return {} as Cls; }\n}\n' +
+      'export interface AuthClient {\n  updateUser(): Promise<Ifc>;\n}\n';
+    const r = readRef(both, IFC('AuthClient.updateUser'));
+    assert(
+      r.surface === null && /opens 2 class bodies and interface bodies/.test(r.refusal ?? ''),
+      `TSO-I10: THE UNION PIN -- a class and an interface of one name (class/interface merging) is AMBIGUOUS across kinds, never "one of each". Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- the type-literal alias --------------------------------------------------
+  {
+    const alias = 'export type Hooks<T = string> = {\n  onSave: (row: T) => Promise<Saved>;\n  load(id: string): Promise<T>;\n};\n' +
+      'export type Plain = {\n  load(): Promise<PlainRow>;\n};\n';
+    const onSave = readRef(alias, IFC('Hooks.onSave'));
+    const load = readRef(alias, IFC('Hooks.load'));
+    const plain = readRef(alias, IFC('Plain.load'));
+    assert(
+      onSave.refusal === null && onSave.surface?.type === 'Promise<Saved>' &&
+      load.refusal === null && load.surface?.type === 'Promise<T>',
+      `TSO-I11: a GENERIC type-literal alias is a container -- its \`=\` is found past the type-parameter default, and both member spellings resolve. Got: ${JSON.stringify([onSave, load])}`,
+    );
+    assert(
+      plain.refusal === null && plain.surface?.type === 'Promise<PlainRow>',
+      `TSO-I12: a PLAIN \`type X = {\` alias resolves ONCE -- the object-literal reader no longer claims the same braces, which would count one body twice and refuse it as AMBIGUOUS against itself. Got: ${JSON.stringify(plain)}`,
+    );
+  }
+  {
+    const r = readRef('export type Alias = AuthClient;\nexport interface AuthClient {\n  updateUser(): Promise<X>;\n}\n', IFC('Alias.updateUser'));
+    assert(
+      r.surface === null && /no `Alias` object literal or class, nor interface or type-literal alias/.test(r.refusal ?? ''),
+      `TSO-I13: an alias whose right-hand side is NOT an object type literal opens no body and is refused as absent -- never followed into the type it names. Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- end to end, through the shipping scan ----------------------------------
+  const IFC_BASE = IFC_TYPES.replace('  updateUser: (data: Partial<AuthUser>) => Promise<AuthUser>;\n', '  updateUser: (data: Partial<AuthUser>) => any;\n');
+  const IFC_BODY =
+    'fix(client): type the auth client\'s profile update, whose published return was `any`\n\n' +
+    '**BREAKING**: `AuthClient.updateUser` resolved to `any`; it now resolves to `AuthUser`.\n\n' +
+    '## Migration\n\n' +
+    '| you wrote | write instead |\n| --- | --- |\n' +
+    '| `(await auth.updateUser(d)).anything` | `(await auth.updateUser(d)).id` |\n';
+  const IFC_FIXTURE = (marker, head = IFC_TYPES) => ({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/types.ts': IFC_BASE },
+    files: {
+      'packages/client/src/types.ts': head,
+      '.changeset/x.md': CS({ bumps: [['@objectstack/client', 'minor']], body: `${IFC_BODY}\n<!-- adr-0087: not-required (${marker}) ${TSO_WHY} -->\n` }),
+    },
+  });
+
+  green('TSO-I14 the #37445 shape, finally claimable: a dotted marker naming the INTERFACE member that actually narrowed',
+    run(mk(IFC_FIXTURE(`type-surface-only ${IFC('AuthClient.updateUser')}`))));
+
+  red('TSO-I15 the bare spelling on the same diff still lands on the FIRST same-named definition, which this diff never touched',
+    run(mk(IFC_FIXTURE(`type-surface-only ${IFC('updateUser')}`))),
+    [/narrowed-from-erased/]);
+
+  red('TSO-I16 a merged (twice-declared) interface at HEAD is refused by predicate 4 as AMBIGUOUS, never merged or guessed at',
+    run(mk(IFC_FIXTURE(`type-surface-only ${IFC('AuthClient.updateUser')}`,
+      IFC_TYPES + '\nexport interface AuthClient {\n  signOut(): Promise<void>;\n}\n'))),
+    [/cannot be resolved at HEAD/, /AMBIGUOUS/, /opens 2 interfaces/]);
 
   // ---- The #22918 category: `runtime-export-retired` -------------------------
   //
