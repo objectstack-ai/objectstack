@@ -38,6 +38,15 @@
  *  - `@objectstack/hono`: `thrownJson`, both of `createHonoApp`'s catch arms;
  *  - `@objectstack/runtime`: `dispatcher-plugin`'s `errorResponseBase`.
  *
+ * Those three answer a THROW. An answer a dispatcher domain catches and composes
+ * itself is RETURNED instead (`HttpDispatcher.errorFromThrown`, `deps.error`
+ * with a `userMessage`, the dispatch foot's `PERMISSION_DENIED`, the `/actions`
+ * door), and it leaves through the two exits that send a returned answer, which
+ * ask the same question of its body (#38123):
+ *
+ *  - `@objectstack/runtime`: `dispatcher-plugin`'s `sendResultBase`;
+ *  - `@objectstack/hono`: `createHonoApp`'s `toResponse`.
+ *
  * Each exit adds the token with its host's APPEND form, never a set, so a `Vary`
  * already on the response (CORS's `Origin`, compression's `Accept-Encoding`)
  * keeps its tokens.
