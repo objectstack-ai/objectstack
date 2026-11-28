@@ -135,11 +135,15 @@ const VECTOR_MIN_POOL = 8;
  * scope: the same `WHERE` over the nearest `topK × vectorIndexOverfetch × 10`
  * by their one-bit vector, kept only if it clears the same floor; otherwise
  * the leg runs exact. It is tried only when the first pass's pool, scaled by
- * this factor, reaches the floor: a scope too narrow for that (the visible
- * ids of a narrow caller, a few hundred records) goes to the exact scan as
- * before, without a pass that could not answer. Measured at 200,000
- * passages of 1,536 dimensions (clustered, topK 10, 40 candidates a hit)
- * under a record scope: see the bench in the changeset that added it.
+ * this factor, reaches the floor, so a scope too narrow for it goes to the
+ * exact scan without a pass that could not answer; and never under a scope
+ * of record terms alone, whose exact scan the record index serves from the
+ * rows in scope. Measured at 200,000 passages of 1,536 dimensions
+ * (clustered, topK 10, 40 candidates a hit), 50 queries a share: under a
+ * parent (metadata) scope keeping 10%, 15% and 20% of the passages, the
+ * exact scan's p95 was 836, 853 and 790 ms and this pass's 326, 325 and
+ * 299 ms, at the floor's recall; under a record scope the exact scan's was
+ * 128, 207 and 265 ms, and this pass's 333, 313 and 407 ms.
  */
 const VECTOR_RETRY_POOL = 10;
 
@@ -302,8 +306,9 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   their float32 vector; a leg the filter leaves with fewer than
  *   {@link VECTOR_MIN_POOL} × `topK` candidates in scope, or short of
  *   `topK` hits, is run once more over {@link VECTOR_RETRY_POOL} times the
- *   candidates when its pool says that can clear the floor, and is run
- *   again exactly when it cannot or does not.
+ *   candidates when its pool says that can clear the floor and its scope is
+ *   not of record terms alone, and is run again exactly otherwise, or when
+ *   that pass falls short too.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -687,6 +692,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // the metadata filter, each bound as values. ?1 is the query vector.
     const args: unknown[] = [vectorLiteral(vector)];
     const where: string[] = [];
+    // Whether the record index can serve the exact scan: a scope of record terms alone.
+    let recordScope = false;
     if (opts.organizationIds !== undefined) {
       args.push(JSON.stringify(opts.organizationIds));
       where.push(`organization_id IN (SELECT value FROM json_each(?${args.length}))`);
@@ -699,6 +706,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // `metadata` term holds for a stored string or number equal to an id as
       // text, or a list with such an element; any other value holds for nothing.
       const scopeTerms: string[] = [];
+      let parentTerm = false;
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         args.push(JSON.stringify(term.ids));
@@ -707,6 +715,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           scopeTerms.push(`source_record_id IN ${ids}`);
           continue;
         }
+        parentTerm = true;
         args.push(term.field);
         scopeTerms.push(
           `EXISTS (SELECT 1 FROM json_each(metadata) AS m WHERE m.key = ?${args.length} AND (` +
@@ -716,6 +725,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         );
       }
       where.push(`(${scopeTerms.join(' OR ')})`);
+      recordScope = !parentTerm;
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       args.push(key, JSON.stringify(value === undefined ? null : value));
@@ -821,8 +831,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         if (stands(near)) return near;
         // Such a leg tries VECTOR_RETRY_POOL times the candidates once, under
         // the same floor, when the first pool says the wider one can reach it;
-        // otherwise, or short again, the exact scan answers.
-        if (poolOf(near) * VECTOR_RETRY_POOL >= VECTOR_MIN_POOL * topK) {
+        // otherwise, or short again, the exact scan answers. Not under a scope
+        // of record terms alone: the record index serves that exact scan from
+        // the rows in scope, which costs less than the wider pass.
+        if (!recordScope && poolOf(near) * VECTOR_RETRY_POOL >= VECTOR_MIN_POOL * topK) {
           const wide = await approximate(candidates * VECTOR_RETRY_POOL);
           if (wide !== undefined && stands(wide)) return wide;
         }

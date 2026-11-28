@@ -1305,43 +1305,63 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(vectorLegs(over.sql, from)).toEqual({ approximate: 1, exact: 1 });
     });
 
-    it('a leg under 8 × topK in scope tries 10 × the candidates once before the exact scan, unless its pool is too thin for that', async () => {
+    it('a leg under 8 × topK in scope tries 10 × the candidates once before the exact scan, unless its pool is too thin or its scope is of records alone', async () => {
+      const QUERY = 'w1x w2x w3x w4x';
+      // Two best passages, 30 next to them and 368 further away, each with a list of tags a parent
+      // (metadata) scope term matches: 'wide' holds the two best and half the far ones, 'short' the two
+      // best and 3 next ones, 'thin' one far passage.
+      const corpus = (s: KnowledgeSource) => [
+        ...['best_1', 'best_2'].map((n) => doc(s, n, QUERY, { metadata: { tags: ['wide', 'short'] } })),
+        ...Array.from({ length: 30 }, (_, i) =>
+          doc(s, `mid_${String(i).padStart(2, '0')}`, `${QUERY} w${(i % 20) + 5}x w${(i % 7) + 30}x`, { metadata: { tags: [i < 3 ? 'short' : 'out'] } }),
+        ),
+        ...wordsOf(368, 23).map((text, i) =>
+          doc(s, `rest_${String(i).padStart(3, '0')}`, `w1x ${text}`, { metadata: { tags: i % 2 === 0 ? ['wide'] : i === 1 ? ['out', 'thin'] : ['out'] } }),
+        ),
+      ];
       const s = source('ann_retry');
-      const docs = corpus(s, 400);
       // topK 2 and 8 candidates a hit: 16 candidates, a floor of 16, and 160 for the second pass.
-      const { adapter, sql, args } = await built(s, docs, { vectorIndexOverfetch: 8 });
+      const { adapter, sql, args } = await built(s, corpus(s), { vectorIndexOverfetch: 8 });
       const t = source('ann_retry_exact');
-      const exact = await built(t, corpus(t, 400), { vectorIndexThreshold: Infinity });
-      const QUERY = 'w1x w2x w3x';
+      const exact = await built(t, corpus(t), { vectorIndexThreshold: Infinity });
       const ids = (hits: Array<{ sourceRecordId?: string }>) => hits.map((h) => h.sourceRecordId);
+      const tagged = (tag: string) => [{ kind: 'metadata' as const, field: 'tags', ids: [tag] }];
+      const search = async (scope: NonNullable<Parameters<TursoKnowledgeAdapter['search']>[1]['scope']>) => {
+        const from = sql.length;
+        const hits = await adapter.search(QUERY, { source: s, topK: 2, scope });
+        expect(ids(hits), JSON.stringify(scope).slice(0, 60)).toEqual(ids(await exact.adapter.search(QUERY, { source: t, topK: 2, scope })));
+        return { hits, from };
+      };
 
-      // A quarter of the passages in scope: the first pass keeps about 4 of its 16, the second about 40 of
-      // its 160, which clears the floor, so the second pass answers, as the exact scan would, without it.
-      const quarter = [{ kind: 'record' as const, ids: docs.flatMap((d) => d.sourceRecordId ?? []).filter((_, i) => i % 4 === 0) }];
-      let from = sql.length;
-      const wide = await adapter.search(QUERY, { source: s, topK: 2, scope: quarter });
+      // 'wide': the first pass keeps the 2 best of its 16 candidates; 10 × a pool of 2 can reach 16, and the
+      // second pass keeps far more than 16 of its 160, so it answers, as the exact scan would, without it.
+      let { hits, from } = await search(tagged('wide'));
+      expect(ids(hits)).toEqual(['best_1', 'best_2']);
       expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 0 });
+      expect(sql.flatMap((q, i) => (i >= from && q.includes('vector1bit(') ? [args[i][args[i].length - 1]] : []))).toEqual([16, 160]);
       // Each pass binds exactly the values it reads, its candidate count last.
       for (const st of vectorStatements({ sql, args }, from)) expect(st).toMatchObject({ reads: st.bound });
-      expect(
-        sql.flatMap((q, i) => (i >= from && q.includes('vector1bit(') ? [args[i][args[i].length - 1]] : [])),
-      ).toEqual([16, 160]);
-      expect(ids(wide)).toEqual(ids(await exact.adapter.search(QUERY, { source: t, topK: 2, scope: quarter })));
 
-      // The five nearest passages in scope: both passes keep at most 5, so the exact scan answers after both.
-      const nearest = ids(await adapter.search(QUERY, { source: s, topK: 5 })).flatMap((id) => id ?? []);
-      from = sql.length;
-      const five = await adapter.search(QUERY, { source: s, topK: 2, scope: [{ kind: 'record', ids: nearest }] });
+      // 'short': five passages in scope, so both passes keep at most 5, and the exact scan answers after both.
+      ({ from } = await search(tagged('short')));
       expect(vectorLegs(sql, from)).toEqual({ approximate: 2, exact: 1 });
-      expect(ids(five)).toEqual(nearest.slice(0, 2));
 
-      // One record in scope (a narrow caller's visible ids): 10 × a pool of 1 cannot reach 16, so there is no
-      // second pass, and the exact scan answers as it did before the second pass existed.
-      from = sql.length;
-      const one = await adapter.search(QUERY, { source: s, topK: 2, scope: [{ kind: 'record', ids: [nearest[3]] }] });
+      // 'thin': one far passage, no candidate of the first pass; 10 × 0 cannot reach 16, so there is no
+      // second pass.
+      ({ hits, from } = await search(tagged('thin')));
+      expect(ids(hits)).toEqual(['rest_001']);
       expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
-      expect(ids(one)).toEqual([nearest[3]]);
-    });
+
+      // The 'wide' passages as a scope of records alone: the record index serves the exact scan from the
+      // rows in scope, so there is no second pass, whatever the first pool.
+      const records = corpus(s)
+        .filter((d) => (d.metadata.tags as string[]).includes('wide'))
+        .flatMap((d) => d.sourceRecordId ?? []);
+      ({ hits, from } = await search([{ kind: 'record', ids: records }]));
+      expect(ids(hits)).toEqual(['best_1', 'best_2']);
+      expect(vectorLegs(sql, from)).toEqual({ approximate: 1, exact: 1 });
+      // Two builds of 400 passages on each store kind: past vitest's 5 s default on a loaded CI box.
+    }, 30_000);
 
     it('keeps the index in step with every write and removal; a generation swap and dropSource drop it whole', async () => {
       const s = source('ann_life');
