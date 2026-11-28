@@ -246,6 +246,10 @@ export default defineConfig({
             // not about a build artifact (#7668 is what a dist-resolved pin
             // costs).
             {
+              find: /^@object-ui\/data-objectstack$/,
+              replacement: path.resolve(__dirname, '../../../ui/packages/data-objectstack/src/index.ts'),
+            },
+            {
               find: /^@objectstack\/metadata-core$/,
               replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
             },

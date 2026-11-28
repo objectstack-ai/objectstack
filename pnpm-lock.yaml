@@ -2555,6 +2555,9 @@ importers:
         specifier: workspace:*
         version: link:../../verify
     devDependencies:
+      '@object-ui/data-objectstack':
+        specifier: workspace:*
+        version: link:../../../ui/packages/data-objectstack
       '@objectstack/account':
         specifier: workspace:*
         version: link:../../apps/account

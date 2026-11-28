@@ -80,6 +80,7 @@ import type {
   ImportJobUndoResult,
   ListImportJobsOptions,
   ListViewGroupHeaderAnswer,
+  UploadResult,
 } from '@object-ui/types';
 import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import {
@@ -114,6 +115,7 @@ import {
 // re-exported from this entry point: it is internal, and exporting it would
 // widen this package's published face.
 import { readErrorEnvelope } from './error-envelope';
+import { createObjectStackUploadAdapter } from './upload-adapter';
 
 /**
  * Map human-readable filter operator names produced by SDUI view configs
@@ -3546,6 +3548,49 @@ function isCallerAbort(error: unknown, init?: RequestInit): boolean {
   return (error as { name?: unknown } | null)?.name === 'AbortError';
 }
 
+/**
+ * Whether `url` is a request to this data source's server (objectstack#38163),
+ * judged by the URL parser rather than by spelling: `url` is resolved against
+ * the server, which is `baseUrl`, or the page's origin when `baseUrl` is `''`,
+ * and it is this server only when the resolved origin is the server's and, for
+ * a `baseUrl` with a path, the resolved path lies under that path. A server
+ * that cannot be read, or a URL that does not parse, is not this server.
+ */
+function isRequestToServer(url: string, baseUrl: string): boolean {
+  const base = baseUrl !== '' ? baseUrl : (globalThis as { location?: { origin?: unknown } }).location?.origin;
+  if (typeof base !== 'string' || base === '') return false;
+  try {
+    const server = new URL(base);
+    const resolved = new URL(url, server);
+    if (resolved.origin !== server.origin) return false;
+    const path = server.pathname.replace(/\/+$/, '');
+    return path === '' || resolved.pathname.startsWith(`${path}/`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `uploadFile` / `uploadFiles` refuse `fieldName` and `metadata` before any
+ * request (objectstack#38163): the storage service's presigned flow, the one
+ * upload route the standard server serves, carries neither, so sending the
+ * upload without them would drop them silently.
+ */
+function refuseUnsentUploadOptions(
+  method: 'uploadFile' | 'uploadFiles',
+  options: { fieldName?: string; metadata?: Record<string, unknown> } | undefined,
+): void {
+  const unsent = (['fieldName', 'metadata'] as const).filter((key) => options?.[key] !== undefined);
+  if (unsent.length === 0) return;
+  throw new ObjectStackError(
+    `${method}() cannot send ${unsent.join(' or ')}: it uploads through the storage service's presigned flow ` +
+      '(POST /api/v1/storage/upload/presigned, then POST /api/v1/storage/upload/complete), which carries ' +
+      'neither. Upload without them, then write the returned file onto the record with update() to fill a ' +
+      'file field.',
+    'UNSUPPORTED_OPERATION',
+  );
+}
+
 /** The message of a rejection, after the client error is normalised. */
 function rowErrorMessage(err: unknown): string {
   const normalised = normaliseClientError(err);
@@ -3665,6 +3710,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * the connection state.
    */
   private uploadTransport: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * The fetch `uploadFile` / `uploadFiles` hand the presigned storage adapter
+   * (objectstack#38163): `uploadTransport`, with the adapter's `token` added to
+   * every request to this server. A presigned byte URL on another origin (an
+   * S3 bucket) gets no token: its own signature is its authority.
+   */
+  private storageUploadFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   // In-flight find() requests keyed by resource + serialized params.
   // Coalesces concurrent identical reads (e.g. React StrictMode double-mount,
   // multiple sibling components requesting the same dataset on first paint)
@@ -3814,6 +3866,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     this.reconnectDelay = config.reconnectDelay ?? 1000;
     this.baseUrl = baseUrl;
     this.token = config.token;
+    this.storageUploadFetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (!isRequestToServer(url, this.baseUrl)) return transport(input, init);
+      const headers = new Headers(init?.headers);
+      for (const [name, value] of Object.entries(this.getAuthHeaders())) {
+        if (!headers.has(name)) headers.set(name, value);
+      }
+      return transport(input, { ...init, headers });
+    };
   }
 
   /**
@@ -8215,13 +8276,34 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   }
 
   /**
-   * Upload a single file to a resource.
-   * Posts the file as multipart/form-data to the ObjectStack server.
+   * Upload a single file through the server's storage service.
    *
-   * @param resource - The resource/object name to attach the file to
+   * The file goes through the storage service's presigned flow, the one
+   * `createObjectStackUploadAdapter` speaks (`POST /api/v1/storage/upload/presigned`,
+   * the byte `PUT`, `POST /api/v1/storage/upload/complete`): the standard server
+   * serves no other upload route (objectstack#38163). The answer is the stored
+   * `sys_file` row's id, the stable download URL and what the adapter reports.
+   *
+   * - `recordId` attaches the file to that record of `resource` in the call that
+   *   completes it (`attachTo`, scope `attachments`): the server commits the file
+   *   and writes its `sys_attachment` row as one unit, as the signed-in caller,
+   *   and `metadata.attachmentId` names the new attachment. Without `recordId`
+   *   the file is stored under the server's default scope and `resource` is not
+   *   sent.
+   * - `onProgress` receives 0–100.
+   * - `fieldName` and `metadata` are refused before any request: neither
+   *   presigned request carries them.
+   *
+   * The requests go through the injected `fetch` (outside the connection-state
+   * tracking), with the adapter's `token` on every request to this server.
+   *
+   * @param resource - The object whose record `options.recordId` names
    * @param file - File object or Blob to upload
-   * @param options - Additional upload options (recordId, fieldName, metadata)
-   * @returns Promise resolving to the upload result (file URL, metadata)
+   * @param options - Upload options (recordId, onProgress)
+   * @returns Promise resolving to the upload result (file id, URL, metadata)
+   * @throws ObjectStackError `UPLOAD_ERROR` with the server's status when a
+   *   storage request is refused; `UNSUPPORTED_OPERATION` for `fieldName` /
+   *   `metadata`
    */
   async uploadFile(
     resource: string,
@@ -8233,55 +8315,31 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       onProgress?: (percent: number) => void;
     },
   ): Promise<FileUploadResult> {
+    refuseUnsentUploadOptions('uploadFile', options);
     await this.connect();
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    if (options?.recordId) {
-      formData.append('recordId', options.recordId);
-    }
-    if (options?.fieldName) {
-      formData.append('fieldName', options.fieldName);
-    }
-    if (options?.metadata) {
-      formData.append('metadata', JSON.stringify(options.metadata));
-    }
-
-    const url = `${this.baseUrl}/api/data/${encodeURIComponent(resource)}/upload`;
-
-    const response = await this.uploadTransport(url, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        ...(this.getAuthHeaders()),
-      },
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({ message: response.statusText }));
-      // #9594 - share the DIALECT READING only. This site's envelope is not the
-      // four ladders': a different error class, a hard-coded `UPLOAD_ERROR`
-      // code, and its own last rung, all of which stay exactly as they were.
-      const envelope = readErrorEnvelope(errorBody);
-      throw new ObjectStackError(
-        envelope.message ?? `Upload failed with status ${response.status}`,
-        'UPLOAD_ERROR',
-        response.status,
-      );
-    }
-
-    return response.json();
+    const onProgress = options?.onProgress;
+    return this.uploadThroughStorage(
+      resource,
+      file,
+      options?.recordId,
+      onProgress ? (ratio) => onProgress(ratio * 100) : undefined,
+    );
   }
 
   /**
-   * Upload multiple files to a resource.
-   * Posts all files as a single multipart/form-data request.
+   * Upload several files through the server's storage service: one presigned
+   * upload per file, in order, each exactly as {@link uploadFile} sends it.
    *
-   * @param resource - The resource/object name to attach the files to
+   * `onProgress` receives 0–100 across the whole batch. The first refused file
+   * stops the batch: the files before it are already stored (and attached, with
+   * `recordId`), and the rejection is an `UPLOAD_ERROR` whose `details` carry
+   * `failedIndex` and those files' results as `uploaded`, so a caller can tell
+   * what landed. The files after it are not sent.
+   *
+   * @param resource - The object whose record `options.recordId` names
    * @param files - Array of File objects or Blobs to upload
-   * @param options - Additional upload options
-   * @returns Promise resolving to array of upload results
+   * @param options - Upload options (recordId, onProgress)
+   * @returns Promise resolving to array of upload results, in input order
    */
   async uploadFiles(
     resource: string,
@@ -8293,47 +8351,76 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       onProgress?: (percent: number) => void;
     },
   ): Promise<FileUploadResult[]> {
+    refuseUnsentUploadOptions('uploadFiles', options);
     await this.connect();
+    const onProgress = options?.onProgress;
+    const uploaded: FileUploadResult[] = [];
+    for (let index = 0; index < files.length; index++) {
+      try {
+        uploaded.push(
+          await this.uploadThroughStorage(
+            resource,
+            files[index],
+            options?.recordId,
+            onProgress ? (ratio) => onProgress(((index + ratio) / files.length) * 100) : undefined,
+          ),
+        );
+      } catch (err) {
+        const cause = err as { message?: unknown; statusCode?: unknown; details?: Record<string, unknown> };
+        throw new ObjectStackError(
+          `Upload of file ${index + 1} of ${files.length} failed, after ${index} stored: ${String(cause?.message ?? err)}`,
+          'UPLOAD_ERROR',
+          typeof cause?.statusCode === 'number' ? cause.statusCode : undefined,
+          { ...(cause?.details ?? {}), failedIndex: index, uploaded: [...uploaded], cause: err },
+        );
+      }
+    }
+    return uploaded;
+  }
 
-    const formData = new FormData();
-    files.forEach((file, idx) => {
-      formData.append(`files`, file, (file as File).name || `file-${idx}`);
+  /**
+   * One file through the storage service's presigned flow, mapped to
+   * `FileUploadResult`. The adapter is built per call because `attachTo` is
+   * one of its options; the fetch it sends through is the data source's one
+   * `storageUploadFetch`.
+   */
+  private async uploadThroughStorage(
+    resource: string,
+    file: File | Blob,
+    recordId: string | undefined,
+    onProgress: ((ratio: number) => void) | undefined,
+  ): Promise<FileUploadResult> {
+    const storage = createObjectStackUploadAdapter({
+      baseUrl: this.baseUrl,
+      fetchImpl: this.storageUploadFetch,
+      ...(recordId
+        ? { scope: 'attachments' as const, attachTo: { parentObject: resource, parentId: recordId } }
+        : {}),
     });
-
-    if (options?.recordId) {
-      formData.append('recordId', options.recordId);
-    }
-    if (options?.fieldName) {
-      formData.append('fieldName', options.fieldName);
-    }
-    if (options?.metadata) {
-      formData.append('metadata', JSON.stringify(options.metadata));
-    }
-
-    const url = `${this.baseUrl}/api/data/${encodeURIComponent(resource)}/upload`;
-
-    const response = await this.uploadTransport(url, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        ...(this.getAuthHeaders()),
-      },
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({ message: response.statusText }));
-      // #9594 - share the DIALECT READING only. This site's envelope is not the
-      // four ladders': a different error class, a hard-coded `UPLOAD_ERROR`
-      // code, and its own last rung, all of which stay exactly as they were.
-      const envelope = readErrorEnvelope(errorBody);
+    let result: UploadResult;
+    try {
+      result = await storage.upload(file, onProgress ? { onProgress } : undefined);
+    } catch (err) {
+      const refusal = err as { message?: unknown; status?: unknown; code?: unknown };
+      // A refused storage request carries the server's status (and its error
+      // code when the answer was the declared envelope); a failure with no
+      // HTTP answer reaches the caller unchanged.
+      if (typeof refusal?.status !== 'number') throw err;
       throw new ObjectStackError(
-        envelope.message ?? `Upload failed with status ${response.status}`,
+        String(refusal.message),
         'UPLOAD_ERROR',
-        response.status,
+        refusal.status,
+        typeof refusal.code === 'string' ? { serverCode: refusal.code } : undefined,
       );
     }
-
-    return response.json();
+    return {
+      id: result.meta?.fileId as string,
+      filename: result.name,
+      mimeType: result.mimeType,
+      size: result.size,
+      url: result.url,
+      ...(result.meta ? { metadata: result.meta } : {}),
+    };
   }
 
   /**
