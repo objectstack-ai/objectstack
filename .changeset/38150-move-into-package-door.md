@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/runtime': patch
 '@objectstack/client': patch
@@ -8,7 +8,7 @@
 feat(runtime): `POST /api/v1/packages/:id/move-in` moves a selection of loose items into one package, each through the save door
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added — the five new `@objectstack/spec/api` MoveIntoPackage* schemas enter the `api` authorable-surface shard (23 keys); no metadata key an author writes is added
 
 The door ADR-0084's amendment of 2026-11-26 names ("Loose items stay where they are, and one door moves them"; ruling 7184753035, question 3). It takes a selection, never "everything loose": `{ items: [{ type, name, member? }], dryRun? }` (`MoveIntoPackageRequestSchema`, strict). New in the public surface: the route, `MoveIntoPackageRequestSchema`, `MoveIntoPackageResponseSchema` and their item schemas and types in `@objectstack/spec/api`, the protocol method `moveIntoPackage`, the SDK method `client.packages.moveIn(id, request)`, and the message key `packages_move_in_unsupported` (four locales). Nothing an author writes into metadata changes.
 
