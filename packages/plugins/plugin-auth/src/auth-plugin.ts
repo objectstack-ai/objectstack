@@ -159,7 +159,12 @@ import {
   ssoProviderDeleteRefusal,
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
-import { describeEmailPasswordLiveStatus, type AuthLiveStatus } from './auth-settings-live-status.js';
+import {
+  combineAuthLiveStatus,
+  describeEmailPasswordLiveStatus,
+  describeSignUpLiveStatus,
+  type AuthLiveStatus,
+} from './auth-settings-live-status.js';
 import { registerAuthDeclaredDefaults } from './auth-settings-declared-defaults.js';
 import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
@@ -3192,9 +3197,10 @@ export class AuthPlugin implements Plugin {
     let pass: Promise<void> = Promise.resolve();
     const runPass = (): Promise<void> => (pass = applySettings());
 
-    // Setup → Authentication states what runs when the switch says otherwise:
-    // a value stored on that a cloud-managed runtime does not apply, or any
-    // other disagreement. See auth-settings-live-status.ts.
+    // Setup → Authentication states what runs when a switch says otherwise:
+    // email and password stored on that a cloud-managed runtime does not
+    // apply, or any other disagreement; sign-up stored on where the
+    // deployment forces it off. See auth-settings-live-status.ts.
     if (typeof settings.registerLiveStatus === 'function') {
       const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
       try {
@@ -3202,18 +3208,30 @@ export class AuthPlugin implements Plugin {
           await pass;
           const manager = this.authManager;
           if (!manager) return undefined;
-          return describeEmailPasswordLiveStatus({
-            running: manager.getPublicConfig().emailPassword.enabled,
-            shown: await settings.get('auth', 'email_password_enabled', pageCtx),
-            heldOffByHost: emailPasswordHeldOffByHost(floorDeps),
-            locale,
-          });
+          const running = manager.getPublicConfig().emailPassword;
+          const emailPasswordShown = await settings.get('auth', 'email_password_enabled', pageCtx);
+          return combineAuthLiveStatus([
+            describeEmailPasswordLiveStatus({
+              running: running.enabled,
+              shown: emailPasswordShown,
+              heldOffByHost: emailPasswordHeldOffByHost(floorDeps),
+              locale,
+            }),
+            describeSignUpLiveStatus({
+              running: !running.disableSignUp,
+              shown: await settings.get('auth', 'signup_enabled', pageCtx),
+              forcedOff: manager.resolveDisableSignUp(false),
+              emailPasswordShown,
+              locale,
+            }),
+          ]);
         });
       } catch (err: any) {
         ctx.logger.warn(
           '[auth] Setup → Authentication: the live status was NOT registered '
-            + `(${String(err?.message ?? err)}), so where a saved email and password value is not what runs `
-            + '(a cloud-managed environment holding it off), the page shows the switch on with nothing saying it is off.',
+            + `(${String(err?.message ?? err)}), so where a saved email and password or sign-up value is not what `
+            + 'runs (a cloud-managed or single-sign-on-only environment holding it off), the page shows the switch on '
+            + 'with nothing saying it is off.',
         );
       }
     }
