@@ -23,9 +23,15 @@
  * split, an added option gets one row per series value the answer holds, so
  * every series reads the empty value at that category.
  *
- * **Presence** is judged by every spelling a row can carry for an option: its
- * stored value, its authored label (the server resolves dimension labels,
- * ADR-0021) and its localized label.
+ * **Presence** is judged by the STORED value wherever the answer carries it:
+ * `drillRawRows[i]` is index-aligned with the rows and holds each field-backed
+ * dimension's stored value before the server relabels it, so a row whose raw
+ * twin holds the x-axis value is matched by that value alone. Only a row with
+ * no raw twin falls back to spellings: the option's stored value, its authored
+ * label (the server resolves dimension labels, ADR-0021) and its localized
+ * label. A spelling match is a guess (the server's label comes from its own
+ * translation at the request locale, the client's from another read), and a
+ * missed match would draw a false zero beside the real group.
  *
  * Added rows are APPENDED after the answer's own rows, so every index below
  * `rows.length` still addresses the answer (the drill reads those by index).
@@ -48,6 +54,8 @@ export interface EmptyOptionGroupFill {
   options: unknown;
   /** The same options with translated labels (`localizeFieldOptions`), when a translator ran. */
   localizedOptions?: unknown;
+  /** The answer's `drillRawRows`: stored dimension values, index-aligned with `rows`. */
+  rawRows?: readonly Row[];
 }
 
 /** An option's stored value plus every label it can arrive under. */
@@ -74,11 +82,20 @@ export function fillEmptyOptionGroups(rows: readonly Row[], fill: EmptyOptionGro
   if (!Array.isArray(fill.options) || fill.options.length === 0) return input;
   const localized = Array.isArray(fill.localizedOptions) ? fill.localizedOptions : [];
 
-  const present = new Set<string>();
-  for (const row of rows) {
+  // Stored values the raw twins state, and the display spellings of the rows
+  // that have no raw twin to state one.
+  const presentStored = new Set<string>();
+  const presentSpelled = new Set<string>();
+  rows.forEach((row, i) => {
+    const raw = fill.rawRows?.[i];
+    if (raw && fill.xAxis in raw) {
+      const v = raw[fill.xAxis];
+      if (v != null) presentStored.add(String(v));
+      return;
+    }
     const v = row[fill.xAxis];
-    if (v != null) present.add(String(v));
-  }
+    if (v != null) presentSpelled.add(String(v));
+  });
 
   // Series values the answer holds, in arrival order — the null group included,
   // since it is a series the chart draws.
@@ -102,9 +119,10 @@ export function fillEmptyOptionGroups(rows: readonly Row[], fill: EmptyOptionGro
     if (!spelled) return;
     const translated = optionSpellings(localized[i]);
     const keys = translated ? [...spelled.keys, ...translated.keys] : spelled.keys;
-    if (keys.some((k) => present.has(k))) return;
+    const stored = String(spelled.value);
+    if (presentStored.has(stored) || keys.some((k) => presentSpelled.has(k))) return;
     // A duplicate declaration of the same value adds it once.
-    for (const k of keys) present.add(k);
+    presentStored.add(stored);
     const base: Row = { [fill.xAxis]: spelled.value };
     if (empty !== undefined) for (const m of fill.measures) base[m] = empty;
     if (fill.seriesBy && seriesValues.length > 0) {

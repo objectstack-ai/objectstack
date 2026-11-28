@@ -26,6 +26,38 @@ describe('fillEmptyOptionGroups (objectstack#36722)', () => {
     expect(out).toBe(rows);
   });
 
+  it('a row with a raw twin is matched by its STORED value, not by a label the two sides spell differently', () => {
+    // The server relabelled `won` as "Gewonnen" (its own translation at the
+    // request locale); the client knows only "Won" and "赢". The raw twin
+    // states `won`, so Won is present and only the two empty options are added.
+    const rows = [{ s: 'Gewonnen', n: 2 }];
+    const rawRows = [{ s: 'won' }];
+    const localized = [
+      { value: 'open', label: '进行中' },
+      { value: 'won', label: '赢' },
+      { value: 'lost', label: '输' },
+    ];
+    const out = fillEmptyOptionGroups(rows, { xAxis: 's', measures: ['n'], aggregate: 'count', options: OPTIONS, localizedOptions: localized, rawRows });
+    expect(out.slice(1)).toEqual([{ s: 'open', n: 0 }, { s: 'lost', n: 0 }]);
+    // CONTROL: without the raw twin the label matches nothing, and Won is added
+    // as a false zero beside its own real group, the case the raw value prevents.
+    const blind = fillEmptyOptionGroups(rows, { xAxis: 's', measures: ['n'], aggregate: 'count', options: OPTIONS, localizedOptions: localized });
+    expect(blind.slice(1).map((r) => r.s)).toEqual(['open', 'won', 'lost']);
+  });
+
+  it('a raw twin that states the stored value overrules a display spelling another option carries', () => {
+    // The row reads "Lost" on screen but its stored value is `open`: only
+    // `open` is present, so `won` and `lost` are added.
+    const out = fillEmptyOptionGroups([{ s: 'Lost', n: 1 }], { xAxis: 's', measures: ['n'], aggregate: 'count', options: OPTIONS, rawRows: [{ s: 'open' }] });
+    expect(out.slice(1).map((r) => r.s)).toEqual(['won', 'lost']);
+  });
+
+  it('a row with no raw twin (or one without the x-axis key) falls back to spellings', () => {
+    const rows = [{ s: 'Won', n: 2 }, { s: 'open', n: 1 }];
+    const out = fillEmptyOptionGroups(rows, { xAxis: 's', measures: ['n'], aggregate: 'count', options: OPTIONS, rawRows: [{ other: 1 }] });
+    expect(out.slice(2)).toEqual([{ s: 'lost', n: 0 }]);
+  });
+
   it('appends after the answer, so every index below rows.length still addresses the answer', () => {
     const rows = [{ s: 'Won', n: 2 }];
     const out = fillEmptyOptionGroups(rows, { xAxis: 's', measures: ['n'], aggregate: 'count_distinct', options: OPTIONS });

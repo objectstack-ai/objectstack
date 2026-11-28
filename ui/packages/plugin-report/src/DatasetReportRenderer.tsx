@@ -1988,6 +1988,7 @@ function DatasetReportChart({
       aggregate: measureField(yAxis)?.aggregate,
       options: xOptions,
       localizedOptions: xLocalizedOptions,
+      ...(state.drillRawRows ? { rawRows: state.drillRawRows } : {}),
     })
     : state.rows;
   const displayRows = relabelDimensions(chartRows, dimensionLabels);

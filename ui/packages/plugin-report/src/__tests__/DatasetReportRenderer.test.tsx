@@ -1544,6 +1544,19 @@ describe('DatasetReportRenderer — chart.showEmptyGroups (objectstack#36722)', 
     ]);
   });
 
+  it('a group the server labelled in its own words is matched by the stored value its raw twin carries: no false zero', async () => {
+    // The server translated `closed_won` at the request locale as "Gewonnen";
+    // the client knows the option only as "Closed Won". `drillRawRows` states
+    // `closed_won`, so the real group is recognised and only the two empty
+    // stages are added.
+    const translated = answer('count', { rows: [{ stage: 'Gewonnen', deals: 3 }, { stage: 'Qualification', deals: 5 }] });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: translated })} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    expect(chartSchema!.data!.map((r) => r.stage).sort()).toEqual(['Gewonnen', 'Proposal', 'Prospecting', 'Qualification']);
+    expect(chartSchema!.data!.find((r) => r.stage === 'Closed Won')).toBeUndefined();
+    expect(chartSchema!.data!.find((r) => r.stage === 'Gewonnen')).toEqual({ stage: 'Gewonnen', deals: 3 });
+  });
+
   it('a sum reads 0 too; an avg is left empty (nothing to average)', async () => {
     const { unmount } = render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: answer('sum') })} />);
     await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
