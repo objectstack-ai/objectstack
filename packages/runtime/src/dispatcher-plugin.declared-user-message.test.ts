@@ -83,6 +83,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { recordNotFoundError } from '@objectstack/core';
 import { INTERNAL_ERROR_MESSAGE, LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 
+// Paid at collection, not inside a case's clocked window: the dispatcher reaches it by dynamic import.
+import '@objectstack/metadata';
+
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
 // [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
