@@ -1291,32 +1291,6 @@ function isUpdateOperationAction(action: ActionDef): boolean {
 }
 
 /**
- * The advisory warning messages the route answered for an `operation:
- * 'update'` action's write, distinct, in answer order (objectstack#37867).
- *
- * The route's declarative-update answer carries `warnings` when the write
- * tripped a `severity: 'warning'` (or `'info'`) validation rule, in the data
- * door's own element shape (`{ field, code, message, rule?, severity? }`) —
- * the write went through, and the person who clicked owes the rule's words,
- * exactly as a record save shows them (`@object-ui/react`'s
- * `answerWarningLines`, which this package sits below and cannot import).
- * Asked of an update action only: no other action's answer declares the
- * member, so a script's own `warnings` key is never read as one.
- */
-function updateAnswerWarningLines(action: ActionDef, result: ActionResult): string[] {
-  if (!isUpdateOperationAction(action)) return [];
-  const payload = readActionPayload(result.data);
-  const wire = payload && typeof payload === 'object' ? (payload as { warnings?: unknown }).warnings : undefined;
-  if (!Array.isArray(wire)) return [];
-  const lines: string[] = [];
-  for (const entry of wire) {
-    const message = (entry as { message?: unknown } | null)?.message;
-    if (typeof message === 'string' && message.trim() !== '' && !lines.includes(message)) lines.push(message);
-  }
-  return lines;
-}
-
-/**
  * What a launch of an `ask_ai` action on a runner with no in-app assistant is
  * told. Not a locale-pack text: such an action is not drawn
  * ({@link ActionRunner.drawsAction}), so only a surface that skipped that
@@ -1358,6 +1332,32 @@ function dispatchRow(action: ActionDef): Record<string, unknown> | undefined {
 function declaresSuccessMessage(action: ActionDef): boolean {
   const text = actionCopySource(action.successMessage);
   return text !== undefined && text.trim() !== '';
+}
+
+/**
+ * The advisory warning messages the route answered for an `operation:
+ * 'update'` action's write, distinct, in answer order (objectstack#37867).
+ *
+ * The route's declarative-update answer carries `warnings` when the write
+ * tripped a `severity: 'warning'` (or `'info'`) validation rule, in the data
+ * door's own element shape (`{ field, code, message, rule?, severity? }`) —
+ * the write went through, and the person who clicked owes the rule's words,
+ * exactly as a record save shows them (`@object-ui/react`'s
+ * `answerWarningLines`, which this package sits below and cannot import).
+ * Asked of an update action only: no other action's answer declares the
+ * member, so a script's own `warnings` key is never read as one.
+ */
+function updateAnswerWarningLines(action: ActionDef, result: ActionResult): string[] {
+  if (!isUpdateOperationAction(action)) return [];
+  const payload = readActionPayload(result.data);
+  const wire = payload && typeof payload === 'object' ? (payload as { warnings?: unknown }).warnings : undefined;
+  if (!Array.isArray(wire)) return [];
+  const lines: string[] = [];
+  for (const entry of wire) {
+    const message = (entry as { message?: unknown } | null)?.message;
+    if (typeof message === 'string' && message.trim() !== '' && !lines.includes(message)) lines.push(message);
+  }
+  return lines;
 }
 
 /**
