@@ -24,7 +24,10 @@ draws them in a card under the answer.
 ## What each row states
 
 - `type`, `name`, `package` name the saved draft; `label` is its display
-  label when the draft has one.
+  label when the draft has one. One row per draft, unique by `package`,
+  `type` and `name`: a draft the turn saved more than once is one row, placed
+  at its first save and carrying the verdict read last. The rows (and the
+  cap and `omitted`) count drafts, not saves.
 - `verdict` is the light authoring door's own `list_drafts` verdict on the
   draft — `publishable` is "no refusal", `refusals` are what a publish would
   refuse it on and `advisories` are findings that do not block it — read as
@@ -131,8 +134,8 @@ const result = DraftReviewItemSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **drafts** | `{ type: string; name: string; package: string; label?: string; … }[]` | ✅ | The saved drafts, in save order, at most 50 |
-| **omitted** | `integer` | optional | How many more drafts the turn saved beyond the 50 listed; absent when none |
+| **drafts** | `{ type: string; name: string; package: string; label?: string; … }[]` | ✅ | The saved drafts, in save order, at most 50: one row per draft, unique by `package`, `type` and `name`. A draft the turn saved more than once is one row, placed at its first save and carrying the verdict read last |
+| **omitted** | `integer` | optional | How many more drafts (not saves) the turn saved beyond the 50 listed; absent when none |
 
 ### Nested Shape: `DraftReviewList.drafts[number]`
 

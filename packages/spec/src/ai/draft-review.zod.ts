@@ -24,7 +24,10 @@ import { strictObject } from '../shared/strict-object';
  * ## What each row states
  *
  * - `type`, `name`, `package` name the saved draft; `label` is its display
- *   label when the draft has one.
+ *   label when the draft has one. One row per draft, unique by `package`,
+ *   `type` and `name`: a draft the turn saved more than once is one row, placed
+ *   at its first save and carrying the verdict read last. The rows (and the
+ *   cap and `omitted`) count drafts, not saves.
  * - `verdict` is the light authoring door's own `list_drafts` verdict on the
  *   draft — `publishable` is "no refusal", `refusals` are what a publish would
  *   refuse it on and `advisories` are findings that do not block it — read as
@@ -62,8 +65,16 @@ export const DRAFT_REVIEW_PART_TYPE = 'data-draft-review';
  */
 export const DRAFT_REVIEW_MAX = 50;
 
-/** A Console path: one leading `/`, never `//` (which a browser reads as another host). */
-const consolePath = (what: string) => z.string().regex(/^\/(?!\/)/).describe(what);
+/**
+ * A Console path: one leading `/`, never `//`, and no backslash, whitespace or
+ * control character anywhere. A browser reads `//` as another host, reads `\`
+ * as `/` (so `/\evil.example` is `//evil.example`), and strips a tab or a
+ * newline before it parses (so `/<tab>/evil.example` is too). The two builders
+ * (`studioChangesReviewLink`, `studioItemReviewLink`) percent-encode every
+ * segment, so a link they made never carries any of these.
+ */
+const CONSOLE_PATH = /^\/(?!\/)[^\\\s\u0000-\u001F\u007F]*$/;
+const consolePath = (what: string) => z.string().regex(CONSOLE_PATH).describe(what);
 
 /** Why no verdict was read, as the door states it: its error code, sentence and HTTP status. */
 export const DraftReviewVerdictRefusalSchema = lazySchema(() => strictObject(
@@ -143,10 +154,11 @@ export const DraftReviewListSchema = lazySchema(() => strictObject(
   },
   {
     drafts: z.array(DraftReviewItemSchema).min(1).max(DRAFT_REVIEW_MAX).describe(
-      `The saved drafts, in save order, at most ${DRAFT_REVIEW_MAX}`,
+      `The saved drafts, in save order, at most ${DRAFT_REVIEW_MAX}: one row per draft, unique by \`package\`, \`type\` and \`name\`. `
+      + 'A draft the turn saved more than once is one row, placed at its first save and carrying the verdict read last',
     ),
     omitted: z.number().int().min(1).optional().describe(
-      `How many more drafts the turn saved beyond the ${DRAFT_REVIEW_MAX} listed; absent when none`,
+      `How many more drafts (not saves) the turn saved beyond the ${DRAFT_REVIEW_MAX} listed; absent when none`,
     ),
   },
 ));

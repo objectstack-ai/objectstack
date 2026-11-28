@@ -2,8 +2,10 @@
 
 /**
  * The draft review list: the `data-draft-review` part an ask turn that saved
- * drafts ends with. Closed at every level, the verdict nullable but present,
- * the list capped, and both review routes Console paths.
+ * drafts ends with. The five new objects are closed and the findings in
+ * `refusals` / `advisories` keep the door's own `RuntimeAuthoringIssueSchema`
+ * shape; the verdict nullable but present, the list capped, and both review
+ * routes Console paths that stay on the site.
  *
  * The refusal legs assert the issue zod answers and its path, not a bare
  * failure: a shape that degraded to a loose object would still fail on `null`.
@@ -71,10 +73,43 @@ describe('DraftReviewItemSchema', () => {
     expect(firstIssue(DraftReviewItemSchema, { ...ROW, review: { ...ROW.review, note: 'x' } })).toMatchObject({ code: 'unrecognized_keys', path: ['review'] });
   });
 
-  it('refuses a review link that is not a Console path', () => {
-    for (const href of ['https://evil.example/studio', '//evil.example/studio', 'javascript:alert(1)', 'studio/acme', '']) {
+  it('refuses a review link that is not a Console path, or that a browser reads as another host', () => {
+    const offSite = [
+      'https://evil.example/studio',
+      '//evil.example/studio',
+      'javascript:alert(1)',
+      'studio/acme',
+      '',
+      '/\\evil.example/x', // a browser reads `\` as `/`: `//evil.example/x`
+      '/\t/evil.example/x', // a real tab, which the URL parser strips: `//evil.example/x`
+      '/\n/evil.example/x',
+      '/studio/acme data',
+      '/studio/acme\u0000',
+    ];
+    for (const href of offSite) {
       expect(firstIssue(DraftReviewItemSchema, { ...ROW, review: { ...ROW.review, item: href } })).toMatchObject({ path: ['review', 'item'] });
+      expect(firstIssue(DraftReviewItemSchema, { ...ROW, review: { ...ROW.review, changes: href } })).toMatchObject({ path: ['review', 'changes'] });
     }
+  });
+
+  it('admits a link the builders make, segments percent-encoded', () => {
+    // The spelling of `studioItemReviewLink` / `studioChangesReviewLink` (`@objectstack/types`).
+    const pkg = 'acme crm';
+    const name = 'inv\\oice\tlist/v2';
+    const review = {
+      changes: `/studio/${encodeURIComponent(pkg)}/data?changes=review`,
+      item: `/studio/${encodeURIComponent(pkg)}/metadata/${encodeURIComponent('view')}/${encodeURIComponent(name)}?review=1`,
+    };
+    expect(DraftReviewItemSchema.safeParse({ ...ROW, package: pkg, type: 'view', name, review }).success).toBe(true);
+  });
+
+  it('keeps the door\'s finding shape: an unknown key on a finding is dropped, not refused', () => {
+    const parsed = DraftReviewItemSchema.safeParse({
+      ...ROW,
+      verdict: { publishable: false, refusals: [{ ...ISSUE, docs: 'https://docs.example/rule' }], advisories: [] },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data!.verdict!.refusals[0]).toEqual(ISSUE);
   });
 
   it('refuses an unknown verdictRead, and an empty type, name or package', () => {
