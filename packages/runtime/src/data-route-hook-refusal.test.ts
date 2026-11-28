@@ -33,6 +33,9 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { hookBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { installDefaultOrganization } from './default-organization.testkit.js';
+// Paid at collection, not inside a case's window: `http-dispatcher.ts` reaches it
+// through a dynamic import (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 const TEST_PACKAGE_ID = 'objectstack-test';
