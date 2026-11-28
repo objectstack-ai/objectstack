@@ -495,12 +495,15 @@ function sendResultBase(
             }
             // [#38123] The RETURNED exit's half of #37828's rule. A domain that
             // catches its own fault answers through `errorFromThrown`, `deps.error`
-            // with a `userMessage`, the dispatch foot's `PERMISSION_DENIED`, the
-            // `/actions` door or the MCP transport, and every one of those answers
-            // leaves here, never through `errorResponseBase`. When the body carries
-            // a `userMessage` it is in the caller's language, so the answer varies
-            // by `Accept-Language` (`answerVariesByLanguage`, `@objectstack/types`,
-            // asked of the body actually sent). Written after the route's own
+            // with a `userMessage` (the automation resume and trigger doors), the
+            // dispatch foot's `PERMISSION_DENIED` or the `/actions` door, and every
+            // one of those HTTP answers leaves here, never through
+            // `errorResponseBase`. (mcp.ts's `resumeDoorError` answers the in-process
+            // `dispatchActionResume`, not a route, so no header applies to it.)
+            // When the body carries a `userMessage` it is in the caller's
+            // language, so the answer varies by `Accept-Language`
+            // (`answerVariesByLanguage`, `@objectstack/types`, asked of the body
+            // actually sent). Written after the route's own
             // headers and in the contract's multi-value form, which the hosts
             // APPEND, so a `Vary` the route or another layer wrote keeps its tokens.
             if (answerVariesByLanguage(result.response.body)) res.header('Vary', [LOCALIZED_ANSWER_VARY]);
