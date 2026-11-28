@@ -26,7 +26,7 @@ import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
 
 const PKG = 'com.acme.policy';
 
-let surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+let surface = { enabled: true, isLoading: false, buildServed: true };
 let agents: Array<{ name: string; label?: string }> = [{ name: 'ask' }, { name: 'build' }];
 let apps: unknown[] = [];
 
@@ -111,7 +111,7 @@ const creates = () =>
 
 beforeEach(() => {
   localStorage.clear();
-  surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+  surface = { enabled: true, isLoading: false, buildServed: true };
   agents = [{ name: 'ask' }, { name: 'build' }];
   apps = [appWith({ title: 'Ask about our policies', subtitle: 'Rules, forms and deadlines.', placeholder: 'Type a question', suggestions: ['How do I apply?', 'What is the deadline?'] })];
   fetchMock = vi.fn();
@@ -225,7 +225,7 @@ describe('AppAskPage (objectstack#37788)', () => {
   });
 
   it('renders the unavailable state where this person has no AI', () => {
-    surface = { enabled: false, isLoading: false, buildServed: false, focusServed: false };
+    surface = { enabled: false, isLoading: false, buildServed: false };
     agents = [];
     mount();
     expect(screen.getByTestId('ai-unavailable')).toBeInTheDocument();

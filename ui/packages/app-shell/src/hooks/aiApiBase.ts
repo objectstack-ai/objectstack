@@ -1,9 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The AI service base URL, in a module of its own so a hook that only needs
- * the URL (`useAskAiHandler`, objectstack#37142) does not import the surface
- * hook's module, which many layout tests replace with a mock.
+ * The AI service base URL, in a module of its own so a reader that only needs
+ * the URL (the sidebar's conversation favourites, `UnifiedSidebar`) does not
+ * import the surface hook's module, which many layout tests replace with a
+ * mock that carries no `resolveAiApiBase`.
  */
 
 /**

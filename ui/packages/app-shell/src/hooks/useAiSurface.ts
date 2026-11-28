@@ -41,7 +41,7 @@
  */
 
 import { useAgents } from '@object-ui/plugin-chatbot/core';
-import { catalogServesBuild, catalogServesFocus } from './surfaceAgent.js';
+import { catalogServesBuild } from './surfaceAgent.js';
 import { resolveAiApiBase } from './aiApiBase.js';
 
 // Re-exported where its callers have always imported it from.
@@ -59,14 +59,6 @@ export interface AiSurfaceState {
    * (`build` persisted inactive, `ask` still served).
    */
   buildServed: boolean;
-  /**
-   * objectstack#37142 — true when the same catalog serves an agent that
-   * declares it honours a conversation focus (`capabilities.focus`,
-   * objectstack#36999). With `enabled`, the gate ADR-0160 D7 puts on the
-   * `ask_ai` action: it is drawn where the pin control can be. False while
-   * loading and on a server that declares no capabilities.
-   */
-  focusServed: boolean;
 }
 
 /**
@@ -84,7 +76,6 @@ export function useAiSurfaceEnabled(options: { enabled?: boolean } = {}): AiSurf
   return {
     enabled,
     buildServed: catalogServesBuild(agents),
-    focusServed: catalogServesFocus(agents),
     // Agents present → resolved/available. Otherwise loading until a read has
     // answered (`settled`): the first render's empty list means "not fetched
     // yet", and a read the cache answers is never seen loading
