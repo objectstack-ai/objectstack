@@ -1,7 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { SettingsManifest } from '@objectstack/spec/system';
-import type { SettingsActionHandler } from '../settings-service.types.js';
 
 /**
  * Knowledge — the settings the knowledge service and its store read. The
@@ -14,7 +13,10 @@ import type { SettingsActionHandler } from '../settings-service.types.js';
  * not declared here: its one reader, `@objectstack/knowledge-turso`, adds it
  * to this page when it reads them (`contributeKnowledgeTursoSettings`), so a
  * deployment whose store is `@objectstack/knowledge-pgvector` shows no Turso
- * fields.
+ * fields. The "Test connection" action that checks those two fields, and its
+ * handler, come with them: a page without them has no such action, and
+ * `POST /api/settings/knowledge/test` there answers as every undeclared action
+ * does (no handler registered).
  *
  *   - `chunk_target` — the knowledge service's splitter (#37098), read through
  *     `KnowledgeServicePlugin` each time it splits: the longest passage, in
@@ -71,11 +73,6 @@ const manifest = {
     { type: 'number', key: 'chunk_target', label: 'Target chunk size (chars)',
       required: false, default: 800, min: 64, max: 8192,
       description: "Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model's input limit can lower it." },
-
-    // ── Probe ─────────────────────────────────────────────────────
-    { type: 'action_button', id: 'test', label: 'Test connection',
-      required: false, icon: 'Plug',
-      handler: { kind: 'http', method: 'POST', url: '/api/settings/knowledge/test' } },
   ],
 };
 
@@ -86,72 +83,3 @@ const manifest = {
  * Knowledge page (#33933).
  */
 export const knowledgeSettingsManifest = manifest as unknown as SettingsManifest;
-
-/**
- * The sentence every answer carries, so a green "Test connection" is never
- * read as a connection that succeeded.
- */
-const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempted.';
-
-/**
- * Handler for `knowledge/test` ("Test connection"), registered by
- * `@objectstack/service-knowledge` with the manifest it contributes (#33933).
- *
- * It checks the libSQL fields for completeness only — a Turso auth token
- * beside a managed `libsql://` URL — and opens NO connection. It reads
- * `turso_url` and `turso_auth_token` and nothing else: the page names no
- * adapter (#37104), so a payload or a stored row still carrying `adapter`
- * (a value saved before this version) is not read, and neither is any other
- * key the page no longer declares. The two fields are on the page only where
- * `@objectstack/knowledge-turso` contributes them; elsewhere `values` carries
- * neither, and the check answers from what the payload sends.
- *
- * Nothing in this repository replaces it with a live probe:
- * `@objectstack/service-knowledge` registers exactly this handler, and no
- * adapter package registers `knowledge/test` (a plugin that did would call
- * `SettingsService.registerAction`, which replaces this handler). So every
- * answer says no connection was attempted, and none names a package whose
- * mounting would make this check live — none does.
- */
-export const knowledgeTestActionHandler: SettingsActionHandler = async ({ values, payload }) => {
-  const overrides = extractOverrides(payload);
-  const merged: Record<string, unknown> = { ...values, ...overrides };
-
-  const url = merged.turso_url;
-  if (!url) {
-    return {
-      ok: true,
-      severity: 'info',
-      message:
-        'No Turso URL configured — where the knowledge store is @objectstack/knowledge-turso (a platform ' +
-        'database other than PostgreSQL), it uses its own file, knowledge.db under .objectstack/data/, never ' +
-        'the platform database. ' +
-        FORM_CHECK_ONLY,
-    };
-  }
-  const u = String(url);
-  if (u.startsWith('libsql://') && !merged.turso_auth_token) {
-    return {
-      ok: false,
-      severity: 'error',
-      message: 'Managed Turso URL requires an auth token.',
-    };
-  }
-  return {
-    ok: true,
-    severity: 'info',
-    message:
-      `Turso URL configured (${u}). ${FORM_CHECK_ONLY} It is read at startup by the ` +
-      '@objectstack/knowledge-turso plugin registered beside the knowledge service, which is the store a ' +
-      'platform database other than PostgreSQL gets.',
-  };
-};
-
-function extractOverrides(payload: unknown): Record<string, unknown> {
-  if (!payload || typeof payload !== 'object') return {};
-  const p = payload as Record<string, unknown>;
-  if (p.values && typeof p.values === 'object' && p.values !== null) {
-    return p.values as Record<string, unknown>;
-  }
-  return p;
-}

@@ -11222,7 +11222,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // review", "self-review") and the 2026-09-17 LANE key ("owed in the spec and skills lanes").
   t('BOTH renderings key whether the clause-② review is OWED by SURFACE, never by lane — and keep the contract-review tier\'s at-tier subagent route', [plainLines, mandLines].every((l) => l.includes('owed by SURFACE, never by lane') && l.includes('at-tier subagent')));
   t('…and neither spells a retired key — no "spec seat" (2026-09-10), no default-tier review or self-review (2026-09-16), no owed-by-lane (2026-09-17)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review') && !l.includes('owed in the spec and skills lanes')));
-  t('…and both say a clause-② hit outside the spec lane is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('a hit outside the spec lane is spec-lane work and moves there')));
+  t('…and both say a contract-surface hit no longer MOVES the card — build and review stay with the claiming seat, and the retired move-to-the-spec-lane sentence is gone', [plainLines, mandLines].every((l) => l.includes('a contract-surface hit no longer moves the card — build and review stay with the claiming seat') && !l.includes('spec-lane work') && !l.includes('moves there')));
   // The tier follows the face that made the review owed (ruling record 6159870311 on #23352, letter B′ with C):
   // the note names BOTH tiers by their constant NAMES, each beside the face it serves, so a no-mandate
   // line can no longer read as "every clause-② review is at the contract-review tier".
@@ -11436,7 +11436,7 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
   t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
   t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
-  t('the suspicion rendering keys the review by LANE — "in the spec lane", the work being the spec lane\'s whichever seat found it — never by seat (#18536)', suspectRendered.includes('in the spec lane') && suspectRendered.includes('whichever seat found it') && !suspectRendered.includes('spec seat'));
+  t('the suspicion rendering keeps build and review with the CLAIMING seat — the hit no longer moves the card, and neither the retired spec-lane routing nor a "spec seat" comes back', suspectRendered.includes('both by the claiming seat') && suspectRendered.includes('no longer moves the card') && !suspectRendered.includes('spec-lane work') && !suspectRendered.includes('in the spec lane') && !suspectRendered.includes('spec seat'));
   const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
   t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
   t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));

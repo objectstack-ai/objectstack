@@ -153,10 +153,14 @@ export function isServerFault(status: number): boolean {
  * Two members, and the ruling names both: the `NOT_IMPLEMENTED` /
  * `SERVICE_UNAVAILABLE` family a platform chooses when an optional service is
  * absent. `packages/runtime`'s `capabilityUnavailable` is the producer that
- * motivated the card — its `501` carries `serviceUnavailableMessage(slot)`,
+ * motivated the card — its `501` names `serviceUnavailableMessage(slot)`,
  * the same remedy sentence discovery publishes for that slot, which is what
  * makes "naming the missing service" a property of the existing message rather
- * than a second string composed here.
+ * than a second string composed here. [#37864] The wire body renders that
+ * sentence in the caller's language; the line printed here stays the English,
+ * which the answer hands the dispatcher plugin's writer as its
+ * `faultLogMessage`, so the one line per route per process is not in the
+ * language of whichever request came first.
  *
  * ⛔ Deliberately NOT derived from `HttpStatusErrorCodeMap` (`@objectstack/spec`),
  * whose 501/503 rows happen to hold these two spellings today. That map answers

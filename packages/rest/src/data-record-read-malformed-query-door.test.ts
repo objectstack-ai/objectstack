@@ -43,6 +43,8 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { recordNotFoundError } from '@objectstack/core';
+import { LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 import { RestServer } from './rest-server';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -219,5 +221,72 @@ describe('[#26816] GET /data/:object/:id — a malformed query is a 400, a missi
     const whole = await byId(MINE, {});
     expect(whole.status, JSON.stringify(whole.body)).toBe(200);
     expect(whole.body.record.owner).toBe(ME);
+  });
+});
+
+/**
+ * [#37828] The by-id read's `404 RECORD_NOT_FOUND` carries a `userMessage` in
+ * the caller's language (`recordNotFoundError`, `@objectstack/core`), and a
+ * `404` is cacheable by default, so the answer says it varies by
+ * `Accept-Language`. Measured on the base (`815e882b`, a showcase boot): the
+ * body's `userMessage` followed `en` / `zh-CN` / `ja-JP` and `Vary` was only
+ * `Origin, Accept-Encoding`.
+ *
+ * The door here is the real route and the real mapper; the protocol is the one
+ * line that matters, `getData` throwing the real producer's error with the
+ * caller's locale, so the case reads the route's exit and nothing else.
+ */
+describe('[#37828] GET /data/:object/:id — a localized 404 says it varies by Accept-Language', () => {
+  function makeHeaderRes() {
+    const res: any = {
+      _headers: [] as Array<[string, string | string[]]>,
+      write: () => true, end: () => {},
+      header: (name: string, value: string | string[]) => { res._headers.push([name, value]); return res; },
+      status: (code: number) => { res._status = code; return res; },
+      json: (body: any) => { res._json = body; return res; },
+    };
+    return res;
+  }
+
+  async function readById(getData: (req: any) => Promise<unknown>, locale: string | undefined) {
+    const protocol = { getData };
+    const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
+    (rest as any).resolveExecCtx = async () => ({ ...MEMBER_CTX, ...(locale ? { locale } : {}) });
+    (rest as any).enforceApiAccess = async () => false;
+    rest.registerRoutes();
+    const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/data/:object/:id');
+    expect(route).toBeDefined();
+    const res = makeHeaderRes();
+    await route!.handler({ params: { object: OBJECT, id: NOWHERE }, query: {}, headers: {} } as any, res);
+    return res;
+  }
+
+  const notFound = async (req: any) => { throw recordNotFoundError(req.object, req.id, req.context); };
+  const varyTokens = (res: any): string[] =>
+    res._headers.filter(([name]: [string]) => name.toLowerCase() === 'vary')
+      .flatMap(([, value]: [string, string | string[]]) => (Array.isArray(value) ? value : [value]));
+
+  it.each([['en', 'This record'], ['zh-CN', '该记录'], ['ja-JP', 'このレコード']])(
+    '%s: 404 RECORD_NOT_FOUND, the userMessage in that language, and Vary names Accept-Language',
+    async (locale, opening) => {
+      const res = await readById(notFound, locale);
+      expect(res._status, JSON.stringify(res._json)).toBe(404);
+      expect(res._json.code).toBe('RECORD_NOT_FOUND');
+      expect(res._json.userMessage.startsWith(opening), res._json.userMessage).toBe(true);
+      expect(varyTokens(res)).toEqual([LOCALIZED_ANSWER_VARY]);
+    },
+  );
+
+  it('the token goes on in the multi-value form, which the hosts append, never as a set that would drop CORS\'s Origin', async () => {
+    const res = await readById(notFound, 'zh-CN');
+    const vary = res._headers.filter(([name]: [string]) => name.toLowerCase() === 'vary');
+    expect(vary).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+  });
+
+  it('CONTROL a refusal with no userMessage gets no Vary from this door', async () => {
+    const res = await readById(async () => { throw Object.assign(new Error('nope'), { status: 404, code: 'OBJECT_NOT_FOUND' }); }, 'zh-CN');
+    expect(res._status, JSON.stringify(res._json)).toBe(404);
+    expect(res._json.userMessage).toBeUndefined();
+    expect(varyTokens(res)).toEqual([]);
   });
 });

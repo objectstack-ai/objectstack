@@ -780,9 +780,10 @@ async function googleAfter(
  * Ahead of that, at `email_password_enabled` on a runtime where the host holds
  * email and password off ({@link emailPasswordHeldOffByHost}): a save of a value
  * that reads on. The settings service asks a predicate only about a change from
- * the value it resolves, and with nothing stored that is the manifest default
- * (on), so re-saving that default reaches no predicate; the settings pass is
- * what keeps such a row from taking effect.
+ * the value it resolves; with nothing stored that is the deployment's
+ * declaration (off, `auth-settings-declared-defaults.ts`), so a save of on
+ * reaches this refusal. The settings pass still keeps a row stored on before
+ * this check from taking effect.
  */
 export function signInMethodFloorPredicate(deps: SignInMethodFloorDeps, read: AuthSettingReader) {
   return async (input: SignInFloorWriteInput): Promise<SignInFloorRefusal | undefined> => {

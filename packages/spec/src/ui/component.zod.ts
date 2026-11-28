@@ -69,6 +69,7 @@ import { AggregationFunction } from '../data/query.zod';
 // outside the `ui` barrel so the two carriers share it without publishing it.
 import { ListViewExportOptionsSchema } from './list-view-export-options';
 import { ActionSchema, ActionType, InlineActionSchema, ActionLocationSchema } from './action.zod';
+import { ASK_AI_RETIRED } from './action-ask-ai-retired';
 import { CONFIRM_BESIDE_PARAMS_REFUSAL, declaresConfirmBesideParams } from './action-confirm-beside-params';
 import { ACTION_TARGET_ALIASES } from './action-target-aliases';
 import { ON_SUCCESS_EXECUTORS, onSuccessBesideExecutorRefusal } from './action-on-success-executor';
@@ -3803,6 +3804,24 @@ function refuseRowUrlExecutorAlias(executorKey: 'actionType' | 'type', subject: 
 }
 
 /**
+ * ADR-0160 D7, seventh amendment — a page action row refuses the retired
+ * `ask_ai` executor with the one prescription `ActionType` answers it with
+ * (`action-ask-ai-retired.ts`). The row's executor key is an open string (a
+ * host registers handlers under other names), so the closed enum never sees
+ * it: the refusal is spelled here, on `actionType` for an `action:button` /
+ * `action:icon` row and on `type` for each `action:group` / `action:menu`
+ * member, beside {@link refuseRowUrlExecutorAlias}. No authoring surface
+ * converts it; `os migrate meta --from 18` and the stored-row read delete the
+ * row or the member (the conversion `action-type-ask-ai-removed`).
+ */
+function refuseRowRetiredAskAi(executorKey: 'actionType' | 'type') {
+  return (row: { actionType?: string; type?: string }, ctx: z.RefinementCtx): void => {
+    if (row[executorKey] !== 'ask_ai') return;
+    ctx.addIssue({ code: 'custom', path: [executorKey], message: ASK_AI_RETIRED });
+  };
+}
+
+/**
  * A page action row's `onSuccess`: `ActionSchema`'s own post-success block, by
  * reference — the one `strictObject` `{ navigate, openIn }` that
  * `ActionSchema.onSuccess` declares, read off the object half of the action's
@@ -3891,7 +3910,7 @@ const rowPatchRetired = (owner: string) => retiredKey(
 );
 
 /**
- * The console runner's built-in executors: `ActionType`'s members, which its
+ * The console runner's built-in executors: `ActionType`'s six, the members its
  * `builtinExecutors` table is typed by (`Record<RunnableActionType, …>`, so the
  * table and the enum cannot drift), and its one local alias `navigation`
  * (read points recorded in `liveness/page.json`, row `regions`). Every other name is a handler a
@@ -4142,6 +4161,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
 }).superRefine(rowDeclarativeUpdate('actionType', "An `action:button`'s"))
   .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:button`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:button`'s `actionType: 'navigation'`"))
+  .superRefine(refuseRowRetiredAskAi('actionType'))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:button`'s"))
   // #29844 (ruling record 6597621758, letter A): the third door of the
   // `confirmText` + non-empty `params` refusal, beside `ActionSchema` and
@@ -4249,6 +4269,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
 }).superRefine(rowDeclarativeUpdate('actionType', "An `action:icon`'s"))
   .superRefine(refuseUnopenableRowUrlTarget('actionType', "An `action:icon`'s"))
   .superRefine(refuseRowUrlExecutorAlias('actionType', "An `action:icon`'s `actionType: 'navigation'`"))
+  .superRefine(refuseRowRetiredAskAi('actionType'))
   .superRefine(refuseRowOnSuccessBesideExecutor('actionType', "An `action:icon`'s"))
   // #30017 (ruling record 6624208841, letter A): the fourth door of the
   // `confirmText` + non-empty `params` refusal, `action:button`'s predicate and
@@ -4492,6 +4513,7 @@ function buildActionGroupMember() {
     .superRefine(actionContainerMemberParamsFitType('action:group'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:group` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:group` member's `type: 'navigation'`"))
+    .superRefine(refuseRowRetiredAskAi('type'))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:group` member's"))
     // #30017 (ruling record 6624208841, letter A): `action:button`'s
     // `confirmText` + non-empty ARRAY `params` refusal, its predicate and its
@@ -4523,6 +4545,7 @@ function buildActionMenuMember() {
     .superRefine(actionContainerMemberParamsFitType('action:menu'))
     .superRefine(refuseUnopenableRowUrlTarget('type', "An `action:menu` member's"))
     .superRefine(refuseRowUrlExecutorAlias('type', "An `action:menu` member's `type: 'navigation'`"))
+    .superRefine(refuseRowRetiredAskAi('type'))
     .superRefine(refuseRowOnSuccessBesideExecutor('type', "An `action:menu` member's"))
     // #30017 (ruling record 6624208841, letter A): `action:button`'s
     // `confirmText` + non-empty ARRAY `params` refusal, its predicate and its

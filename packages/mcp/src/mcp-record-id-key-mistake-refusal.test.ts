@@ -55,14 +55,14 @@
  * for the new sentence would pass just as well against an implementation that
  * had added the alias.
  *
- * MINIMUM ASSERTIONS ON A REFUSAL. There is no ADR-0112 envelope on this wire —
- * MCP answers a rejected `tools/call` as a TOOL ERROR, so the `code` + `status`
- * pair is asserted in this surface's own vocabulary: the protocol code
- * `-32602` (invalid params) carried in the message, and `result.isError: true`
- * with `error` ABSENT, which is this transport's promise that a refusal is
- * returned rather than thrown across the wire. The HTTP status stays `200`
- * because JSON-RPC carries its own outcome; that is pinned too, so a later
- * change cannot turn a tool error into a transport error unnoticed.
+ * MINIMUM ASSERTIONS ON A REFUSAL. MCP answers a rejected `tools/call` as a
+ * TOOL ERROR whose text is the platform's coded refusal (#37411): the
+ * ADR-0112 `code` + `status` pair is read off that text (`VALIDATION_ERROR`,
+ * 400), beside `result.isError: true` with `error` ABSENT, which is this
+ * transport's promise that a refusal is returned rather than thrown across the
+ * wire. The HTTP status stays `200` because JSON-RPC carries its own outcome;
+ * that is pinned too, so a later change cannot turn a tool error into a
+ * transport error unnoticed.
  *
  * ⚠️ WHY EVERY KEY ASSERTION USES THE BACKTICK FORM. A bare
  * `expect(text).toContain('id')` is satisfied by the word **Invalid** in
@@ -83,8 +83,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { McpActionBridge, McpDataBridge } from './mcp-http-tools.js';
 
-/** The protocol code for invalid params — the `code` half of the refusal pin. */
-const INVALID_PARAMS = '-32602';
+/** The `code` + `status` half of the refusal pin, read off the tool error's coded text. */
+function expectSchemaRefusal(text: string): void {
+  const { error } = JSON.parse(text);
+  expect(error.code).toBe('VALIDATION_ERROR');
+  expect(error.status).toBe(400);
+}
 
 /** The record id from the card's recording, kept so the repro reads as itself. */
 const RECORD_ID = '_IFp-Bf8yQcrfV8o';
@@ -168,7 +172,7 @@ describe('#17568 a missing required key names the unexpected key that was sent',
 
     // The refusal pin's `code` + `status` half, in this surface's vocabulary.
     expect(refused).toBe(true);
-    expect(text).toContain(INVALID_PARAMS);
+    expectSchemaRefusal(text);
     expect(protocolError).toBeUndefined();
     expect(status).toBe(200);
 
@@ -222,7 +226,7 @@ describe('#17568 a missing required key names the unexpected key that was sent',
       data: { status: 'qualified' },
     });
     expect(refused).toBe(true);
-    expect(text).toContain(INVALID_PARAMS);
+    expectSchemaRefusal(text);
     expect(text).toContain('recordId');
     // There is no offending key, so nothing is quoted as one. Asserted as the
     // ABSENCE OF ANY quoted key rather than of one particular sentence: an
@@ -259,7 +263,7 @@ describe('#17568 a missing required key names the unexpected key that was sent',
         id: RECORD_ID,
       });
       expect(refused).toBe(true);
-      expect(text).toContain(INVALID_PARAMS);
+      expectSchemaRefusal(text);
       expect(text).toContain('recordId');
       expect(text).toContain('`id`');
       expect(text).toContain('`recordId`');
@@ -379,7 +383,7 @@ describe('#17568 the same refusal arrives over the stdio transport', () => {
       const text = String(frame.result?.content?.map((c: { text?: string }) => c.text).join('\n') ?? '');
       expect(frame.result?.isError).toBe(true);
       expect(frame.error).toBeUndefined();
-      expect(text).toContain(INVALID_PARAMS);
+      expectSchemaRefusal(text);
       expect(text).toContain('recordId');
       expect(text).toContain('`id`');
       expect(text).toContain('`recordId`');

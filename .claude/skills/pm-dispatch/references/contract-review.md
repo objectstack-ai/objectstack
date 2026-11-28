@@ -18,11 +18,11 @@
 - 四面皆不碰 ⇒ CI 加席位自读 ⛔ 不起第二个 agent;谁跑 = 派发席,档经子代理或卡线程取。
 - p1 卡线程卡交回且欠 L2 ⇒ L1 线程起隔离 L2 子代理,与其 L1 并行,两份意见同回席。
 - 送审路由只住此处:车道能取 `CONTRACT_REVIEW_TIER` 才自审;取不到(账号够不到、配额拒 429、
-  维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔请 L2 席(请谁照 `lanes/l2-review.md`);
+  维护者限配)⇒ ⛔ 不降档 ⛔ 非分诊,落交接行并同笔请 L2 席(照 `lanes/l2-review.md`);
   无 L2 席在座改点能取该档的兄弟席,皆无则挂等 L2 标记留欠审表待 (a)(b)(c)。交接行:
-- `Contract-review-handoff: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
+- `Contract-review-handoff: <l2-review#N|repo:NAME#N|epic:#N#k> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`
 - 欠审 PR(含 draft)现 head 无记录无活认领且 (a)(b)(c) 之一 ⇒ 车道达档自审或交接,⛔ 非分诊
-- (a) 交接行/敲门点名现 head(同轮所点席接)或带等 L2 标记;(b) 现 head 已等满一轮(约 60 分钟);
+- (a) 交接行/敲门点名现 head(同轮所点席接)或带等 L2 标记;(b) 现 head 已等满一轮;
 - (c) 车道收班或离总表,欠审入交班简报;L2 席只接 (a) 所点、自记录 delta、他席皆禁之 head。
 - L2 席或车道起审前读 PR:现 head 有记录或活认领 ⇒ ⛔ 不起;否则先落认领行,一 head 一行:
 - `Contract-review-claim: <session> · head <full sha> · <UTC>`

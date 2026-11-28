@@ -228,7 +228,9 @@ type Row = Record<string, unknown>;
  *
  * The permission re-read (`where: { id: { $in } }`, the caller's context in
  * the query) answers the rows `wall` admits for that context; without a
- * `wall`, every row. The record-level search's freshness check passes its
+ * `wall`, every row. So does the read of the records a caller may read
+ * (`fields: ['id']`, the source's `where` and a `limit`, the caller's context in
+ * the query), ids only. The record-level search's freshness check passes its
  * system context in the trailing options, never in the query, so it is
  * answered as any other read: the rows its `where` (`id: { $in }`, alone or
  * under `$and`) matches, whole.
@@ -274,6 +276,14 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
       const pinsIds = JSON.stringify(query?.where ?? {}).includes('"$in"');
       if (!pinsIds && (typeof query?.limit !== 'number' || !(query.limit > 0))) {
         throw new Error('engine double: an unbounded find');
+      }
+      const caller = query?.context;
+      if (caller !== undefined) {
+        return rows
+          .filter((r) => matches(r, query.where) && (wall === undefined || wall(r, caller)))
+          .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
+          .slice(0, typeof query.limit === 'number' ? query.limit : undefined)
+          .map((r) => ({ id: r.id }));
       }
       return rows
         .filter((r) => matches(r, query.where))
@@ -756,6 +766,25 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
             .reduce((n, d) => n + (d.chunks?.length ?? 1), 0);
           expect(hits).toHaveLength(Math.min(5, passages));
         }
+      });
+
+      it('a caller who may read only the two clauses every other outranks is answered from them, past the refill cap', async () => {
+        const source = clauseSource('scope_readable');
+        const readable = new Set(['c03', 'c07']);
+        const h = await serviceOver(make, clauseRows(), source, {
+          schemas: { article: CLAUSE_SCHEMA },
+          wall: (row) => readable.has(String(row.id)),
+        });
+        await h.svc.reindexSource(source.name);
+        // topK 1: the refill reaches 20 passages, and the eighteen better clauses hold more than that.
+        const hits = await h.svc.search(SCOPE_QUERY, { topK: 1, executionContext: READER });
+        expect(h.searched[0]?.scope).toEqual([{ kind: 'record', ids: ['c03', 'c07'] }]);
+        for (const hit of hits) expect(readable.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) expect(hits).toHaveLength(1);
+        // A caller scope of one of them stays that one.
+        const one = await h.svc.search(SCOPE_QUERY, { topK: 5, scope: [{ object: 'article', ids: ['c07'] }], executionContext: READER });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'record', ids: ['c07'] }]);
+        for (const hit of one) expect(hit.sourceRecordId).toBe('c07');
       });
 
       it('a parent scope: only the clauses whose listed lookup holds one of the policy ids', async () => {

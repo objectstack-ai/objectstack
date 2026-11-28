@@ -78,7 +78,7 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
       },
     };
     const notices: ConversionNotice[] = [];
-    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
+    const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) })!;
     expect(out.fields.amount).toEqual({ type: 'number', precision: 18 });
     expect(out.fields.weight).toEqual({ type: 'number', scale: 2 });
     // A well-formed count is untouched.

@@ -9,6 +9,8 @@ import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@obje
 import {
   SEARCH_SCOPE_MAX_ENTRIES,
   SEARCH_SCOPE_MAX_IDS,
+  SEARCH_VISIBLE_IDS_MAX,
+  narrowToVisible,
   readSearchScope,
   scopeCheck,
   scopeTermsFor,
@@ -221,5 +223,38 @@ describe('scopeCheck — every hit, after the adapter answers', () => {
     expect(check(hit('c1', { policy: 'p1' }))).toBe(true);
     expect(check(hit('c1', { policy: 'p2' }))).toBe(false);
     expect(scopeCheck([])(hit('c1', { policy: 'p1' }))).toBe(false);
+  });
+});
+
+describe('narrowToVisible: the visible ids intersect the caller\'s scope, never widen it', () => {
+  it('the bound is the scope entry\'s: 500', () => {
+    expect(SEARCH_VISIBLE_IDS_MAX).toBe(500);
+  });
+
+  it('no caller scope: one record term holding the visible ids, once each', () => {
+    expect(narrowToVisible(undefined, ['a', 'b', 'a'])).toEqual([{ kind: 'record', ids: ['a', 'b'] }]);
+  });
+
+  it('record terms: their ids that are visible, in the caller\'s order, once each — one term', () => {
+    const terms = [{ kind: 'record' as const, ids: ['c', 'x', 'a'] }, { kind: 'record' as const, ids: ['a', 'y', 'b'] }];
+    expect(narrowToVisible(terms, ['a', 'b', 'c', 'd'])).toEqual([{ kind: 'record', ids: ['c', 'a', 'b'] }]);
+  });
+
+  it('a one-record scope stays one record however many ids are visible', () => {
+    expect(narrowToVisible([{ kind: 'record', ids: ['a'] }], ['a', 'b', 'c'])).toEqual([{ kind: 'record', ids: ['a'] }]);
+  });
+
+  it('nothing visible in scope: a term with no ids', () => {
+    expect(narrowToVisible([{ kind: 'record', ids: ['x'] }], ['a'])).toEqual([{ kind: 'record', ids: [] }]);
+  });
+
+  it('a metadata (parent) term: not narrowed', () => {
+    expect(narrowToVisible([{ kind: 'record', ids: ['a'] }, { kind: 'metadata', field: 'policy', ids: ['p1'] }], ['a'])).toBeUndefined();
+  });
+
+  it('the caller\'s terms are not mutated', () => {
+    const terms = [{ kind: 'record' as const, ids: ['a', 'x'] }];
+    narrowToVisible(terms, ['a']);
+    expect(terms).toEqual([{ kind: 'record', ids: ['a', 'x'] }]);
   });
 });

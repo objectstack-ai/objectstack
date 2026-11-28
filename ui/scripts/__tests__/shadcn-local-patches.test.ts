@@ -262,6 +262,19 @@ function upstreamFor(name: string): string {
   return rewriteRegistryImports(readRegistryFixture(name).toString('utf-8'));
 }
 
+/**
+ * Reads logical insets back as the physical ones they compute to in a
+ * left-to-right document (`start` is `left`, `end` is `right`), for the
+ * sidebar families written in logical spelling (objectstack#37914).
+ */
+function ltrPhysical(classes: string): string {
+  return classes
+    .replace(/(^|[\s":-])start-/g, '$1left-')
+    .replace(/(^|[\s":-])end-/g, '$1right-')
+    .replace(/(^|[\s":])border-e(?=[\s"])/g, '$1border-r')
+    .replace(/(^|[\s":])border-s(?=[\s"])/g, '$1border-l');
+}
+
 /** Registry bytes for `dialog`, the i18n close-label family's worked example. */
 const UPSTREAM_DIALOG = upstreamFor('dialog');
 
@@ -350,12 +363,42 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
       // carry the payload byte for byte, not merely a fragment of it.
       expect(p.marker, p.id).toBe(p.replace);
       // Each patch only ADDS the collapsed-state qualifier: with it removed,
-      // the replacement is the upstream anchor again.
+      // and the logical insets read back as the physical ones they compute to
+      // in a left-to-right document (objectstack#37914), the replacement is
+      // the upstream anchor again.
       expect(
-        p.replace.replaceAll('group-data-[state=collapsed]:', '').replace('[data-state=collapsed]', ''),
+        ltrPhysical(p.replace.replaceAll('group-data-[state=collapsed]:', '').replace('[data-state=collapsed]', '')),
         p.id,
       ).toBe(p.find);
     }
+  });
+
+  /**
+   * The logical-inset family (objectstack#37914): with the offcanvas family's
+   * offsets, every physical inset the desktop panel and the rail carry upstream
+   * reads as the document's start or end, so a right-to-left document draws
+   * the panel on the right beside the gap instead of over the page. Read back
+   * through the left-to-right mapping, each replacement keeps upstream's
+   * classes, and the only classes it adds are `rtl:` mirrors.
+   */
+  it('sidebar declares the logical-inset patches', () => {
+    const family = LOCAL_PATCHES.sidebar.filter((p: { issue: string }) => p.issue === 'objectstack#37914');
+    expect(family.map((p: { id: string }) => p.id)).toEqual([
+      'sidebar-logical-divider',
+      'sidebar-logical-rail',
+      'sidebar-logical-rail-cursor',
+      'sidebar-logical-rail-cursor-collapsed',
+    ]);
+    for (const p of family as Array<{ id: string; find: string; replace: string; marker: string }>) {
+      expect(p.marker, p.id).toBe(p.replace);
+      const tokens = (classes: string) => classes.replace(/^"|",$/g, '').split(/\s+/);
+      const kept = tokens(ltrPhysical(p.replace)).filter((c) => !c.startsWith('rtl:'));
+      expect(kept, p.id).toEqual(tokens(p.find));
+    }
+    // No physical inset is left on the desktop panel or the rail.
+    const shipped = fs.readFileSync(path.join(uiDir, 'sidebar.tsx'), 'utf-8');
+    const desktop = shipped.slice(shipped.indexOf('This is what handles the sidebar gap on desktop'), shipped.indexOf('SidebarRail.displayName'));
+    expect(desktop.match(/(?<![\w-])-?(?:left|right)-(?:0|1\/2|2|4|full|\[)|border-[lr](?![\w-])/g) ?? []).toEqual([]);
   });
 
   /**
@@ -393,11 +436,12 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
     ]);
   });
 
-  it('sidebar declares no patch outside those five families', () => {
+  it('sidebar declares no patch outside those six families', () => {
     const issues = [...new Set(LOCAL_PATCHES.sidebar.map((p: { issue: string }) => p.issue))].sort();
     expect(issues).toEqual([
       'objectstack#36899',
       'objectstack#37018',
+      'objectstack#37914',
       'objectui#10859',
       'objectui#11464',
       'objectui#4234',

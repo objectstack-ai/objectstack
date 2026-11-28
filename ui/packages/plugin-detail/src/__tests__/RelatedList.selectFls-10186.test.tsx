@@ -341,3 +341,46 @@ describe('RelatedList row fetch — the derived-columns boundary (objectui#10186
     for (const params of rowFetches(ds)) expect('$select' in params).toBe(false);
   });
 });
+
+/**
+ * objectstack#37891 — the child object's `highlightFields` (ADR-0085) ride
+ * along. On a phone the enlarged tab's grid draws each row as a card whose
+ * amount and subtitle are those fields, in that order, whether or not a
+ * column shows them, so the rows this list reads must carry them. Through the
+ * name field's gates: declared, readable, not redacted.
+ *
+ * Directions on the base tree, measured by reverting the fix:
+ *   a declared, readable highlighted field no column shows is requested   RED
+ *   a highlighted field FLS denies is not requested                       RED  (the readable one is missing too)
+ *   control: no highlightFields keeps the projection byte-identical      GREEN
+ */
+describe('RelatedList row fetch — the child object\'s highlightFields ride along (objectstack#37891)', () => {
+  const withHighlights = { name: OBJECT, highlightFields: ['salary', 'title', 'undeclared_field'], fields: baseFields };
+  const lastSelect = (ds: ReturnType<typeof makeDataSource>): string[] =>
+    rowFetches(ds).at(-1)?.$select ?? [];
+  const schemaLanded = (): boolean =>
+    tableDrawn() && typeof (h.schema?.columns ?? []).find((c: any) => c.accessorKey === 'name')?.cell === 'function';
+
+  it('requests a declared, readable highlighted field no column shows, and never an undeclared one', async () => {
+    const ds = makeDataSource(withHighlights);
+    renderList(ds, [], { columns: ['name'] });
+    await waitFor(() => expect(lastSelect(ds)).toContain('salary'));
+    expect(lastSelect(ds)).toEqual(['id', 'name', 'salary', 'title']);
+    expect(drawnKeys()).not.toContain('salary');
+  });
+
+  it('does not request a highlighted field FLS denies', async () => {
+    const ds = makeDataSource(withHighlights);
+    renderList(ds, denying('salary'), { columns: ['name'] });
+    await waitFor(() => expect(schemaLanded()).toBe(true));
+    for (const params of rowFetches(ds)) expect(params.$select).not.toContain('salary');
+    expect(lastSelect(ds)).toEqual(['id', 'name', 'title']);
+  });
+
+  it('control: a child with no highlightFields sends the projection it sent before', async () => {
+    const ds = makeDataSource();
+    renderList(ds, [], { columns: ['name'] });
+    await waitFor(() => expect(schemaLanded()).toBe(true));
+    expect(lastSelect(ds)).toEqual(['id', 'name']);
+  });
+});

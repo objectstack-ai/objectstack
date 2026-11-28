@@ -525,8 +525,9 @@ request of its own:
 
 Every request goes through the adapter's one fetch, including those made
 through `getClient()`, except `uploadFile` / `uploadFiles`. Those two call the
-global `fetch`, so an upload's outcome does not move the state. The response or
-rejection reaches your code unchanged.
+same injected `fetch` directly, outside the state tracking, so an upload's
+outcome does not move the state. The response or rejection reaches your code
+unchanged.
 
 ### Auto-Reconnect
 

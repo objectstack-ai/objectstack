@@ -1430,9 +1430,12 @@ export async function bootSchemaStack(
           : {}),
         ...(opts.serveFlags ? { serveFlags: opts.serveFlags } : {}),
         // [#22506] The compiled artifact's `requires`, as `serve`'s merge lays
-        // them over the config's, for the auth gate and the provider tokens.
+        // them over the config's, for the auth gate and the provider tokens —
+        // and the standalone result itself, whose shipped items (an
+        // artifact-only stack's `knowledgeSources`) `serve` reads the tokens
+        // they mount off (ADR-0161 K8 item 12).
         ...(opts.composeServedPlatform === true
-          ? { servedPlatform: { artifactRequires: stack.requires } }
+          ? { servedPlatform: { artifactRequires: stack.requires, artifactStack: stack } }
           : {}),
       }).catch((error: unknown) => {
         releaseStdout();

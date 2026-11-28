@@ -177,3 +177,44 @@ describe('§1c retry — scope of the rewrite (#7098)', () => {
     });
   });
 });
+
+// [#38135] A date field ordered against a call that RETURNS a Timestamp other
+// than the four clock functions. The business case: a flow that runs for loans
+// due within thirty days (`record.due_date < addDays(today(), 30)`). The field
+// reaches the run as its `YYYY-MM-DD` text, and the retry's counterpart test knew
+// only `today` / `now` / `daysFromNow` / `daysAgo` / `date` / `datetime`, so the
+// comparison faulted on every run while `daysFromNow(30)` evaluated. Every save
+// door accepts the condition; the run now evaluates it as the `daysFromNow` one.
+describe('§1c retry — a date field ordered against any Timestamp-returning call (#38135)', () => {
+  const now = new Date('2026-06-20T08:00:00Z');
+  const row = (due: unknown) => ({ now, record: { due, borrowed: '2026-06-01' } });
+
+  it.each([
+    ['record.due < addDays(today(), 30)', '2026-07-01', true],
+    ['record.due < addDays(today(), 30)', '2026-08-01', false],
+    ['addDays(today(), 30) > record.due', '2026-07-01', true],
+    ['record.due >= addMonths(today(), 1)', '2026-07-20', true],
+    ['record.due <= addDays(record.borrowed, 14)', '2026-06-15', true],
+    ['record.due < timestamp("2030-01-01T00:00:00Z")', '2026-07-01', true],
+    ['record.due > timestamp("2030-01-01T00:00:00Z")', '2026-07-01', false],
+  ] as Array<[string, string, boolean]>)('%s over %s answers %s', (src, due, expected) => {
+    expect(celEngine.evaluate(cel(src), row(due))).toEqual({ ok: true, value: expected });
+  });
+
+  it('CONTROL: answers exactly what the daysFromNow() spelling of the same bound answers', () => {
+    for (const due of ['2026-07-19', '2026-07-20', '2026-07-21']) {
+      expect(celEngine.evaluate(cel('record.due < addDays(today(), 30)'), row(due)), due)
+        .toEqual(celEngine.evaluate(cel('record.due < daysFromNow(30)'), row(due)));
+    }
+  });
+
+  it('a datetime field\'s ISO instant meets addDays(now(), N) too', () => {
+    expect(celEngine.evaluate(cel('record.at < addDays(now(), 1)'), { now, record: { at: '2026-06-20T09:30:00.000Z' } }))
+      .toEqual({ ok: true, value: true });
+  });
+
+  it('stays LOUD for text that is no date, against the same counterpart', () => {
+    expect(celEngine.evaluate(cel('record.due < addDays(today(), 30)'), row('soon')).ok).toBe(false);
+    expect(celEngine.evaluate(cel('record.due < addDays(today(), 30)'), row('7')).ok).toBe(false);
+  });
+});

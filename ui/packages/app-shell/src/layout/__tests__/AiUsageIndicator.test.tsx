@@ -13,6 +13,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { AiUsageResponse, AiMeterUsage } from '../../hooks/useAiUsage';
 
+// The console language the mocked `useObjectTranslation` reports; the tier
+// notice cases switch it, `beforeEach` puts it back.
+const lang = vi.hoisted(() => ({ current: 'en' }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
@@ -23,7 +26,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
       String(options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_m, name: string) =>
         String(options?.[name] ?? ''),
       ),
-    language: 'en',
+    language: lang.current,
   }),
 }));
 const openMock = vi.fn();
@@ -77,6 +80,7 @@ describe('AiUsageIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal('open', openMock);
+    lang.current = 'en';
   });
 
   it('renders nothing when usage is unknown (null)', () => {
@@ -155,6 +159,117 @@ describe('AiUsageIndicator', () => {
     });
   });
 
+  // cloud#5159 — a paid plan's answer carries `tiers`: the popover widens to
+  // one row per tier, plus the server's notice once turns draw on the pool.
+  describe('the paid plan tiers', () => {
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const NOTICE = {
+      en: 'Your personal AI allowance for this week is used up; you are now using the team pool.',
+      zh: '你本周的个人 AI 额度已用完，正在使用团队共享额度。',
+      ja: '今週の個人 AI 枠を使い切りました。チーム共有枠を使用しています。',
+      es: 'Has agotado tu cuota personal de IA de esta semana; ahora usas el fondo del equipo.',
+    };
+    const overflowing = (): AiUsageResponse => ({
+      pool: pool({ planType: 'paid', fraction: 0.4, resetKind: 'weekly', upgrade: false, topUp: true }),
+      tiers: {
+        personal: { fraction: 1, resetsAt: new Date(Date.now() + 3 * ONE_DAY_MS).toISOString() },
+        teamPool: { fraction: 0.4, resetsAt: new Date(Date.now() + 5 * ONE_DAY_MS).toISOString() },
+        usingTeamPool: true,
+        notice: NOTICE,
+      },
+    });
+    const open = () => {
+      fireEvent.click(screen.getByTestId('ai-usage-indicator'));
+      return screen.getByTestId('ai-usage-popover');
+    };
+
+    it("shows both tiers — each its status, used share and reset — in place of the pool's one figure", () => {
+      setUsage(overflowing());
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      const popover = open();
+      const personal = screen.getByTestId('ai-usage-tier-personal');
+      const team = screen.getByTestId('ai-usage-tier-team-pool');
+      expect(personal).toHaveTextContent('Personal allowance');
+      expect(personal).toHaveTextContent('Limit reached');
+      expect(screen.getByTestId('ai-usage-tier-personal-used')).toHaveTextContent('100% used');
+      expect(personal).toHaveTextContent('Resets in 3 days');
+      expect(team).toHaveTextContent('Team pool');
+      expect(team).toHaveTextContent('Plenty left');
+      expect(screen.getByTestId('ai-usage-tier-team-pool-used')).toHaveTextContent('40% used');
+      expect(team).toHaveTextContent('Resets in 5 days');
+      // Two figures: one per tier; the pool's own figure gives way to them.
+      expect(screen.queryByTestId('ai-usage-pool-used')).not.toBeInTheDocument();
+      expect(popover.textContent?.match(/\d+\s?%/g)).toEqual(['100%', '40%']);
+      // D5: fractions only, never a token count.
+      expect(popover.textContent ?? '').not.toMatch(/\d{4,}/);
+    });
+
+    it('keeps the ring on the pool — the binding reading — not on either tier', () => {
+      setUsage(overflowing());
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      const trigger = screen.getByTestId('ai-usage-indicator');
+      expect(ringsIn(trigger)).toBe(1);
+      const fill = trigger.querySelector('[data-gauge-part="fill"]');
+      const [dash, gap] = (fill?.getAttribute('stroke-dasharray') ?? '').split(' ').map(Number);
+      expect(dash / gap).toBeCloseTo(0.4);
+      // The personal tier is full, but the pool is not: no "Limit reached" on the trigger.
+      expect(trigger).not.toHaveTextContent('Limit reached');
+    });
+
+    it('shows the notice while turns draw on the team pool', () => {
+      setUsage(overflowing());
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      open();
+      expect(screen.getByTestId('ai-usage-tier-notice')).toHaveTextContent(NOTICE.en);
+    });
+
+    it.each([
+      ['zh-Hans', NOTICE.zh],
+      ['zh-Hant', NOTICE.zh],
+      ['ja', NOTICE.ja],
+      ['es', NOTICE.es],
+      ['fr', NOTICE.en],
+      ['pt-BR', NOTICE.en],
+    ])('shows the notice in the console language %s (else English)', (language, expected) => {
+      lang.current = language;
+      setUsage(overflowing());
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      open();
+      expect(screen.getByTestId('ai-usage-tier-notice')).toHaveTextContent(expected);
+    });
+
+    it('shows no notice while the personal share lasts', () => {
+      const usage = overflowing();
+      usage.tiers = { ...usage.tiers!, personal: { fraction: 0.3, resetsAt: null }, usingTeamPool: false, notice: null };
+      setUsage(usage);
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      open();
+      expect(screen.queryByTestId('ai-usage-tier-notice')).not.toBeInTheDocument();
+      // A tier with no reset instant shows no reset line — never guessed.
+      expect(screen.getByTestId('ai-usage-tier-personal')).not.toHaveTextContent(/Resets/);
+    });
+
+    it('a pool-only caller (`personal: null`) sees the team pool alone', () => {
+      const usage = overflowing();
+      usage.tiers = { ...usage.tiers!, personal: null, usingTeamPool: false, notice: null };
+      setUsage(usage);
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      const popover = open();
+      expect(screen.queryByTestId('ai-usage-tier-personal')).not.toBeInTheDocument();
+      expect(screen.getByTestId('ai-usage-tier-team-pool')).toHaveTextContent('40% used');
+      expect(popover.textContent?.match(/\d+\s?%/g)).toEqual(['40%']);
+    });
+
+    it('with no `tiers`: no tier rows, no notice, the one pool figure as before', () => {
+      setUsage({ pool: pool({ fraction: 0.4 }) });
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      open();
+      expect(screen.queryByTestId('ai-usage-tiers')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('ai-usage-tier-notice')).not.toBeInTheDocument();
+      expect(screen.getByTestId('ai-usage-pool-used')).toHaveTextContent('40% used');
+    });
+  });
+
   // objectui#11658 item 4 — at low usage the old ring was a short stroked arc
   // over a faint track: the silhouette of a loading spinner. The gauge is a
   // CLOSED outline in the tone colour around a pie wedge, which reads as a
@@ -224,6 +339,26 @@ describe('AiUsageIndicator', () => {
       await waitFor(() => expect(last?.error).toBeDefined());
       expect(last?.usage).toBeNull();
       expect(container).toBeEmptyDOMElement();
+    });
+
+    // cloud#5159 — `tiers` through the real parser: rendered when well-formed,
+    // dropped alone (the ring stays) when not.
+    it('renders the tier rows for an answer that carries `tiers`', async () => {
+      const tiers = { personal: { fraction: 0.5, resetsAt: null }, teamPool: { fraction: 0.1, resetsAt: null }, usingTeamPool: false, notice: null };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse({ pool: pool({ fraction: 0.5 }), tiers })));
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      fireEvent.click(await screen.findByTestId('ai-usage-indicator'));
+      expect(screen.getByTestId('ai-usage-tier-personal-used')).toHaveTextContent('50% used');
+      expect(screen.getByTestId('ai-usage-tier-team-pool-used')).toHaveTextContent('10% used');
+    });
+
+    it('a malformed `tiers` still renders the ring and the one pool figure', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse({ pool: pool({ fraction: 0.5 }), tiers: { teamPool: 'x' } })));
+      render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+      fireEvent.click(await screen.findByTestId('ai-usage-indicator'));
+      expect(screen.getByTestId('ai-usage-pool-used')).toHaveTextContent('50% used');
+      expect(screen.queryByTestId('ai-usage-tiers')).not.toBeInTheDocument();
+      expect(last?.error).toBeUndefined();
     });
 
     // objectui#11415 — cloud#2574's wire vocabulary reaches the reset line.

@@ -302,7 +302,9 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     });
     expect(withMember.isError, withMember.text).toBe(true);
     expect(withMember.text).toContain('`confirm`');
-    expect(withMember.payload?.error?.code, withMember.text).toBeUndefined();
+    // [#37411] The closed input's schema refusal is coded VALIDATION_ERROR, the code any undeclared key
+    // gets; the member mints none of its own, and never the confirmation gate's.
+    expect(withMember.payload?.error?.code, withMember.text).toBe('VALIDATION_ERROR');
     expect(await isBanned(targetUserId)).toBe(false);
   }, 120_000);
 
@@ -386,7 +388,9 @@ describe('[#27681, #27900] sys_user identity actions over MCP: what each bucket\
     });
     expect(withMember.isError, withMember.text).toBe(true);
     expect(withMember.text).toContain('`confirm`');
-    expect(withMember.payload?.error?.code, withMember.text).toBeUndefined();
+    // [#37411] The closed input's schema refusal is coded VALIDATION_ERROR, the code any undeclared key
+    // gets; the member mints none of its own, and never the confirmation gate's.
+    expect(withMember.payload?.error?.code, withMember.text).toBe('VALIDATION_ERROR');
     expect(await isBanned(agentTargetUserId)).toBe(false);
   }, 120_000);
 

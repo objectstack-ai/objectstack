@@ -1,8 +1,10 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { serviceUnavailableMessage } from '@objectstack/spec/system';
-import type { HttpDispatcherResult } from '../http-dispatcher.js';
+import { CORE_SERVICE_PROVIDER } from '@objectstack/spec/system';
+import { operationUserMessage } from '@objectstack/core';
+import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
+import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
 
 /**
  * The one answer a dispatcher domain gives when its route is mounted but
@@ -39,24 +41,88 @@ import type { DomainHandlerDeps } from '../domain-handler-registry.js';
  * `/ui` said **503**, which claims the condition is temporary. An uninstalled
  * MetadataPlugin does not become installed by retrying.
  *
- * ## Why the message comes from `spec`
+ * ## Why the English comes from `spec`, and the other languages do not
  *
- * `serviceUnavailableMessage` is the same sentence `services.<slot>.message`
- * carries in discovery (#4093 follow-up), so the 501 body and the discovery
- * entry cannot drift into naming different remedies — and a caller who hits
- * the wall gets the fix without a second round trip.
+ * `serviceUnavailableMessage` is the sentence `services.<slot>.message`
+ * carries in discovery (#4093 follow-up), and the 501's English is that
+ * sentence byte for byte, so the 501 body and the discovery entry cannot
+ * drift into naming different remedies, and a caller who hits the wall gets
+ * the fix without a second round trip.
+ *
+ * [#37864] The 501 answers in the request's top `Accept-Language` tag, with
+ * the `Vary: Accept-Language` such a body owes (`catalogNotImplemented`), as
+ * the other catalog 501s do. Discovery does not follow it: it is a
+ * machine-read surface (SDKs, codegen, AI clients), and a host-level
+ * `/discovery` is served with no request to read a language from. So the
+ * sentence lives twice: once in `serviceUnavailableMessage` for discovery,
+ * once as the `capability_unavailable_*` keys of the operation-message
+ * catalog for the 501, and `domain-501-language-37811.test.ts` holds the
+ * English of every `CoreServiceName` slot equal to `serviceUnavailableMessage`.
+ * A slot whose `serviceUnavailableMessage` has a sentence of its own needs a
+ * key in {@link SLOT_SENTENCE_KEY}; that pin fails until it has one.
+ *
+ * The operator's fault log stays English too. A declared capability absence
+ * is logged once per route per process (`logServerFault`,
+ * `@objectstack/types`), so a line in the caller's language would carry the
+ * language of whichever request reached the route first for the life of the
+ * process. The answer names the English as its `faultLogMessage`, which the
+ * dispatcher plugin's writer prints in place of the body's message.
  *
  * There is deliberately no per-call message override. One briefly existed for
  * `ai`, whose provider ships outside this workspace, and it hid the real bug:
  * the shared table said "nothing ships" for a slot that Cloud/Enterprise does
  * provide. Teaching the table to say the accurate thing fixed the domain AND
  * discovery, which the override could only ever have fixed here. A slot whose
- * sentence is wrong needs the table corrected, not a local exception.
+ * sentence is wrong needs the table corrected, not a local exception, and
+ * its catalog key with it (the pin above fails until both say the same).
  *
+ * @param context the request, whose top `Accept-Language` tag picks the language.
  * @param slot the `CoreServiceName` key, NOT the route segment — `/notifications`
  *             is served by the `notification` slot, and the remedy is looked up
  *             by slot.
  */
-export function capabilityUnavailable(deps: DomainHandlerDeps, slot: string): HttpDispatcherResult {
-    return { handled: true, response: deps.error(serviceUnavailableMessage(slot), 501) };
+export function capabilityUnavailable(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): HttpDispatcherResult {
+    const { key, params } = capabilityUnavailableSentence(slot);
+    const answer = catalogNotImplemented(deps, context, key, params);
+    // The operator's fault log keeps the English (`faultLogMessage`): its one
+    // line per route per process is not the first caller's language.
+    return answer.response
+        ? { ...answer, response: { ...answer.response, faultLogMessage: capabilityUnavailableMessage(slot) } }
+        : answer;
+}
+
+/**
+ * The slots whose `serviceUnavailableMessage` is a sentence of its own
+ * (`REMEDY_DETAIL` in `core-services.zod.ts`), each with its catalog key.
+ * Every other slot is `Install <package> to enable` or, when nothing ships
+ * for it, the generic unshipped sentence.
+ */
+const SLOT_SENTENCE_KEY: Readonly<Record<string, string>> = {
+    ui: 'capability_unavailable_ui',
+    ai: 'capability_unavailable_ai',
+    search: 'capability_unavailable_search',
+};
+
+function capabilityUnavailableSentence(slot: string): { key: string; params?: Record<string, string> } {
+    const own = SLOT_SENTENCE_KEY[slot];
+    if (own) return { key: own };
+    const pkg = CORE_SERVICE_PROVIDER[slot];
+    return pkg
+        ? { key: 'capability_unavailable_install', params: { package: pkg } }
+        : { key: 'capability_unavailable_unshipped', params: { slot } };
+}
+
+/**
+ * The same sentence as a string, for a door that builds its own `501`
+ * envelope (the custom-endpoint flow target, `endpoint-executor.ts`): in the
+ * caller's locale, English when it names none.
+ */
+export function capabilityUnavailableMessage(slot: string, locale?: string): string {
+    const { key, params } = capabilityUnavailableSentence(slot);
+    return operationUserMessage(key, { locale }, params);
+}
+
+/** {@link capabilityUnavailableMessage} in the request's top `Accept-Language` tag. */
+export function capabilityUnavailableMessageFor(context: HttpProtocolContext, slot: string): string {
+    return capabilityUnavailableMessage(slot, requestLocaleOf(context));
 }
