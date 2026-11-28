@@ -19,9 +19,32 @@ const baseMessage = (pendingActionId: string, toolCallId = 'tc-1'): ChatbotEnhan
   ],
 });
 
+/**
+ * The decision POSTs this file scripts, answered in order. Since
+ * objectstack#38250 the hook also reads each awaiting card's row once
+ * (`GET …/pending-actions/:id`); that read is answered 404 here, which leaves
+ * the card as it is, so the scripted replies reach the decision they were
+ * written for.
+ */
+const decisionReplies: Response[] = [];
+function decisionReply(reply: Response): void {
+  decisionReplies.push(reply);
+}
+function stubDecisionFetch(): void {
+  decisionReplies.length = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'GET'
+        ? ({ ok: false, status: 404, text: async () => '' } as Response)
+        : (decisionReplies.shift() as Response),
+    ),
+  );
+}
+
 describe('useHitlInChat', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
+    stubDecisionFetch();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -29,7 +52,7 @@ describe('useHitlInChat', () => {
   });
 
   it('fires continueConversation with an executed-outcome prompt on approve', async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       // The approve wire response, exactly: `{ status, result?, error? }` and no
       // `id` (spec `ApproveAiPendingActionResponseSchema`; objectui#3783). The
@@ -70,7 +93,7 @@ describe('useHitlInChat', () => {
   });
 
   it('fires continueConversation with a rejection prompt that includes the reason', async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ id: 'pa_42', status: 'rejected' }),
     } as Response);
@@ -95,7 +118,7 @@ describe('useHitlInChat', () => {
   });
 
   it('does NOT continue when execution failed', async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'failed', error: 'boom' }),
     } as Response);
@@ -122,7 +145,7 @@ describe('useHitlInChat', () => {
     // conversation: the spec's `held` approve outcome, a 200 where nothing
     // was written. Before it had a branch it fell into the catch-all and was
     // recorded as `success`.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'held', result: { code: 'AI_WRITE_HELD' } }),
     } as Response);
@@ -159,7 +182,7 @@ describe('useHitlInChat', () => {
     // type and absent from the wire, so a consumer reading `outcome.id` here
     // got `undefined` with no compiler complaint. The type no longer declares
     // it; this pins that the runtime object never had it either.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'executed', result: { deleted: 1 } }),
     } as Response);
@@ -183,7 +206,7 @@ describe('useHitlInChat', () => {
   it('hands onDecided the reject payload verbatim — where id IS the wire', async () => {
     // Mirror image: the spec puts `id` on the reject response, so it is present
     // here and `RejectOutcome` declares it.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'rejected', id: 'pa_42' }),
     } as Response);
@@ -205,7 +228,7 @@ describe('useHitlInChat', () => {
     // there is no decision response at all, so the hook fabricates one. That
     // object has carried `id` since the callback shipped and still does —
     // `ApproveOutcome` simply stopped DECLARING a field the wire never sent.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: false,
       status: 403,
       text: async () => JSON.stringify({ error: 'ai:approve required' }),
@@ -240,7 +263,7 @@ describe('useHitlInChat', () => {
     // filing report got wrong: `succeeded` goes true, but the continuation
     // prompt builder returns `undefined` for an unknown status, so the
     // conversation is NOT continued.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'quarantined' }),
     } as Response);
@@ -266,7 +289,7 @@ describe('useHitlInChat', () => {
     // The record-write card draws its own outcome — "written" plus the record's
     // link, or "cancelled" — from these two fields rather than from the English
     // `message`, which the generic strip keeps reading as before.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () =>
         JSON.stringify({
@@ -285,7 +308,7 @@ describe('useHitlInChat', () => {
       result: { status: 'written', objectName: 'crm_lead', recordId: 'new_1', label: '张伟' },
     });
 
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'rejected', id: 'pa_42' }),
     } as Response);
@@ -300,7 +323,7 @@ describe('useHitlInChat', () => {
   });
 
   it('does NOT continue when option is omitted', async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'executed', result: 'ok' }),
     } as Response);

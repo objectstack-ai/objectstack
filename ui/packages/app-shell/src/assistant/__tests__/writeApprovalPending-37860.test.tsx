@@ -57,9 +57,32 @@ function hydratePendingWrite() {
   );
 }
 
+/**
+ * The decision POSTs this file scripts, answered in order. Since
+ * objectstack#38250 the hook also reads each awaiting card's row once
+ * (`GET …/pending-actions/:id`); that read is answered 404 here, which leaves
+ * the card as it is, so the scripted replies reach the decision they were
+ * written for.
+ */
+const decisionReplies: Response[] = [];
+function decisionReply(reply: Response): void {
+  decisionReplies.push(reply);
+}
+function stubDecisionFetch(): void {
+  decisionReplies.length = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'GET'
+        ? ({ ok: false, status: 404, text: async () => '' } as Response)
+        : (decisionReplies.shift() as Response),
+    ),
+  );
+}
+
 describe('a write awaiting approval, as the drawer host reads it (objectstack#37860)', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
+    stubDecisionFetch();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -72,8 +95,7 @@ describe('a write awaiting approval, as the drawer host reads it (objectstack#37
 
   it('an approval the user made in the chat clears it; a failed one leaves it waiting', async () => {
     const messages = hydratePendingWrite();
-    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-    fetchMock.mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'executed', result: { deleted: 1 } }),
     } as Response);
@@ -84,7 +106,7 @@ describe('a write awaiting approval, as the drawer host reads it (objectstack#37
     expect(approved.result.current.decisions.c1?.state).toBe('success');
     expect(countWritesAwaitingApproval(messages, approved.result.current.decisions)).toBe(0);
 
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' } as Response);
+    decisionReply({ ok: false, status: 500, text: async () => 'boom' } as Response);
     const failed = renderHook(() => useHitlInChat({ messages, apiBase: '/api/v1/ai' }));
     await act(async () => {
       await failed.result.current.decide('c1', true);

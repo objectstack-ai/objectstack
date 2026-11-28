@@ -47,7 +47,12 @@ import { SchemaRendererContext } from '@object-ui/react';
 import type { ChatbotEnhancedMessage as ChatMessage, ToolDecisionState } from './ChatbotEnhanced';
 import type { ApproveOutcome, RejectOutcome } from './usePendingActions';
 import { hitlContinuationTag } from './hitlContinuation';
-import { isPendingActionLapsedConflict, PENDING_ACTION_LAPSED_REASON } from './pendingActionLapse';
+import {
+  isLapsedPendingAction,
+  isPendingActionLapsedConflict,
+  PENDING_ACTION_LAPSED_REASON,
+} from './pendingActionLapse';
+import type { PendingActionRow } from './usePendingActions';
 
 export type { ToolDecisionState };
 
@@ -208,6 +213,68 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
     [],
   );
 
+  // objectstack#38250 — a card restored from a saved conversation still says
+  // `approval-requested`, whatever became of its pending action since: the
+  // transcript is the proposal, not its outcome. So each awaiting card reads
+  // its row once, through the same pending-actions endpoint the inbox reads
+  // (`GET …/pending-actions/:id`), and settles where the row says it settled.
+  const awaiting = React.useMemo(() => {
+    const list: Array<{ toolCallId: string; pendingActionId: string }> = [];
+    for (const msg of messages) {
+      for (const tool of msg.toolInvocations ?? []) {
+        if (tool.state === 'approval-requested' && tool.pendingActionId && tool.toolCallId) {
+          list.push({ toolCallId: tool.toolCallId, pendingActionId: tool.pendingActionId });
+        }
+      }
+    }
+    return list;
+  }, [messages]);
+  // The effect keys on these primitives only; the transport and headers ride a
+  // ref, so a new `headers` object each render re-reads nothing.
+  const awaitingKey = awaiting.map((a) => `${a.toolCallId}=${a.pendingActionId}`).join('|');
+  const readCfgRef = React.useRef({ base, headers, apiFetch, awaiting });
+  readCfgRef.current = { base, headers, apiFetch, awaiting };
+  /** Rows already asked for, by pending-action id: one read per card per mount. */
+  const rowReadRef = React.useRef(new Set<string>());
+  // Unmount guard. Not a per-run flag: the effect below re-runs whenever a new
+  // message arrives, and a read already in flight must still land then.
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const { base: readBase, headers: readHeaders, apiFetch: readFetch, awaiting: cards } =
+      readCfgRef.current;
+    for (const { toolCallId, pendingActionId } of cards) {
+      if (rowReadRef.current.has(pendingActionId)) continue;
+      rowReadRef.current.add(pendingActionId);
+      void (async () => {
+        let row: Pick<PendingActionRow, 'status' | 'rejection_reason' | 'decided_by'> | null = null;
+        try {
+          const response = await (readFetch ?? fetch)(
+            `${readBase}/pending-actions/${encodeURIComponent(pendingActionId)}`,
+            { method: 'GET', credentials: 'include', headers: buildHeaders(readHeaders, false) },
+          );
+          if (!response.ok) return;
+          row = readPendingActionRow(await parseJson(response));
+        } catch {
+          // No answer (offline, no AI service): the card keeps its buttons, as
+          // before; a press still meets the lapse `409` and draws Expired.
+          return;
+        }
+        if (!mountedRef.current || !row) return;
+        const settled = settledDecisionOf(row);
+        if (!settled) return;
+        // Never over a decision made on this card meanwhile: the press wins.
+        setDecisions((prev) => (toolCallId in prev ? prev : { ...prev, [toolCallId]: settled }));
+      })();
+    }
+  }, [awaitingKey, base]);
+
   const decide = React.useCallback(
     async (toolCallId: string, approved: boolean, reason?: string) => {
       const entry = idMap.get(toolCallId);
@@ -348,6 +415,50 @@ export function useHitlInChat(options: UseHitlInChatOptions): UseHitlInChatRetur
   );
 
   return { decisions, decide, isDeciding };
+}
+
+/**
+ * The row out of a `GET …/pending-actions/:id` answer: the bare row, or the
+ * `{ success, data }` envelope around it (`@objectstack/client`'s
+ * `pendingActions.get` reads both). Anything without a string `status` is not
+ * a row, and the card is left as it is.
+ */
+function readPendingActionRow(
+  body: Record<string, unknown> | null,
+): Pick<PendingActionRow, 'status' | 'rejection_reason' | 'decided_by'> | null {
+  if (!body) return null;
+  const inner =
+    typeof body.success === 'boolean' && body.data && typeof body.data === 'object'
+      ? (body.data as Record<string, unknown>)
+      : body;
+  if (typeof inner.status !== 'string') return null;
+  return inner as unknown as Pick<PendingActionRow, 'status' | 'rejection_reason' | 'decided_by'>;
+}
+
+/**
+ * What a restored card shows for a row that has already settled, or
+ * `undefined` to leave its buttons (still pending, or settled some other way).
+ *
+ *  - lapsed (nobody decided in time, or the proposer lost access) → `expired`,
+ *    the state a press on it would reach through the lapse `409`;
+ *  - rejected by a person (a decider is recorded) → the rejection, drawn as
+ *    the card draws one made in this session.
+ *
+ * Other settled rows (approved, executed, failed, held) keep their buttons:
+ * this card's ask is the lapse, and a press on one of them still answers.
+ */
+function settledDecisionOf(
+  row: Pick<PendingActionRow, 'status' | 'rejection_reason' | 'decided_by'>,
+): ToolDecisionState | undefined {
+  if (isLapsedPendingAction(row)) return { state: 'expired' };
+  if (row.status === 'rejected') {
+    return {
+      state: 'success',
+      message: row.rejection_reason ? `Rejected: ${row.rejection_reason}` : 'Rejected.',
+      decision: 'rejected',
+    };
+  }
+  return undefined;
 }
 
 /**

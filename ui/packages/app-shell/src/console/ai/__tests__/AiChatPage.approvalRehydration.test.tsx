@@ -77,9 +77,32 @@ function hydrateServerRows() {
   );
 }
 
+/**
+ * The decision POSTs this file scripts, answered in order. Since
+ * objectstack#38250 the hook also reads each awaiting card's row once
+ * (`GET …/pending-actions/:id`); that read is answered 404 here, which leaves
+ * the card as it is, so the scripted replies reach the decision they were
+ * written for.
+ */
+const decisionReplies: Response[] = [];
+function decisionReply(reply: Response): void {
+  decisionReplies.push(reply);
+}
+function stubDecisionFetch(): void {
+  decisionReplies.length = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'GET'
+        ? ({ ok: false, status: 404, text: async () => '' } as Response)
+        : (decisionReplies.shift() as Response),
+    ),
+  );
+}
+
 describe('a rehydrated ModelMessage approval is decidable end to end (objectui#9233)', () => {
   beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn());
+    stubDecisionFetch();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -98,7 +121,7 @@ describe('a rehydrated ModelMessage approval is decidable end to end (objectui#9
     // HALF TWO — the decision. Drive the REAL hook over the REAL hydrated
     // messages: the id is never persisted as a part key, so the only way it can
     // be here is the shared `detectPendingApproval` parse.
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    decisionReply({
       ok: true,
       text: async () => JSON.stringify({ status: 'executed', result: { deleted: 1 } }),
     } as Response);
@@ -110,8 +133,14 @@ describe('a rehydrated ModelMessage approval is decidable end to end (objectui#9
       await result.current.decide('c1', true);
     });
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    // One decision POST. Beside it the hook read the restored card's row once
+    // by the same id (objectstack#38250) — a second proof the id survived.
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const posts = calls.filter(([, i]) => (i as RequestInit | undefined)?.method === 'POST');
+    const reads = calls.filter(([, i]) => (i as RequestInit | undefined)?.method === 'GET');
+    expect(posts).toHaveLength(1);
+    expect(reads.map(([u]) => u)).toEqual(['http://localhost:3004/api/v1/ai/pending-actions/pa_44']);
+    const [url, init] = posts[0];
     expect(url).toBe('http://localhost:3004/api/v1/ai/pending-actions/pa_44/approve');
     expect((init as RequestInit).method).toBe('POST');
     // Not merely "no crash": an unindexed invocation never calls fetch at all —
