@@ -212,11 +212,9 @@ export const INLINE_EXCLUDED_FIELD_TYPES = new Set<string>([
  * Members of {@link INLINE_EXCLUDED_FIELD_TYPES} that the LIST GRID's cell
  * nevertheless edits, in a panel opened under the cell (objectstack#36023):
  * the rich-content types, whose panel is the form's own text box over the
- * stored source. Enter in it is a new line; a select-first grid
- * (`cellSelection`) saves on Ctrl/Cmd+Enter or a click outside and discards on
- * Esc. A grid without `cellSelection` opens the box over the cell instead, where
- * Ctrl/Cmd+Enter does nothing, Esc discards and a click outside keeps the text
- * as a pending change for the grid's save buttons.
+ * stored source. Enter in it is a new line; Ctrl/Cmd+Enter or a click outside
+ * saves and Esc discards. The grid edits only in its select-first model, so
+ * the panel under the cell is the only place these types are edited in a grid.
  *
  * Only a host that asks for the cell face (`inCell`) gets them, so the record
  * page's field editor, the required-fields dialogs and every other host of

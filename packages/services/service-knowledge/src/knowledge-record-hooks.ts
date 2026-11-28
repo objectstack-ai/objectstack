@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { isSummaryRecomputeRefusal } from '@objectstack/types';
 import { guardedObjectsFor } from './knowledge-reap-guard.js';
 import type { KnowledgeLogger, KnowledgeService } from './knowledge-service.js';
 
@@ -10,6 +11,12 @@ import type { KnowledgeLogger, KnowledgeService } from './knowledge-service.js';
  */
 export const KNOWLEDGE_RECORD_SYNC_HOOK_PACKAGE = 'service-knowledge:record-sync';
 
+/**
+ * The engine operation a recycle-bin restore is dispatched as
+ * (`OperationContext.operation`, objectql `engine-top-level.ts`).
+ */
+const RESTORE_OPERATION = 'restore';
+
 /** The after-write events the record sync listens on. */
 const RECORD_SYNC_EVENTS = ['afterInsert', 'afterUpdate', 'afterDelete'] as const;
 type RecordSyncEvent = (typeof RECORD_SYNC_EVENTS)[number];
@@ -19,7 +26,9 @@ type RecordSyncEvent = (typeof RECORD_SYNC_EVENTS)[number];
  * from the `objectql` service as every plugin reaches it
  * (`IObjectQLEngine.registerHook`, `@objectstack/spec/contracts`).
  * `runAfterOpenUnitsCommit` is `ObjectQL`'s (`unit-detach.ts`); an engine
- * without it starts the sync at once.
+ * without it starts the sync at once. `registerMiddleware` is how a
+ * recycle-bin restore is heard (`IObjectQLEngine.registerMiddleware`); an
+ * engine without it leaves a restored row to the reconcile.
  */
 export interface KnowledgeRecordHookEngine {
   registerHook(
@@ -28,6 +37,7 @@ export interface KnowledgeRecordHookEngine {
     options?: { object?: string; packageId?: string },
   ): void;
   unregisterHooksByPackage?(packageId: string): number;
+  registerMiddleware?(fn: (opCtx: RestoreOperationContext, next: () => Promise<void>) => Promise<void>): void;
   runAfterOpenUnitsCommit?(body: () => void): void;
 }
 
@@ -60,6 +70,29 @@ function idOf(value: unknown): string | undefined {
 
 function rowOf(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+/** The fields of the engine's operation context the restore middleware reads (`OperationContext`). */
+interface RestoreOperationContext {
+  operation?: unknown;
+  result?: unknown;
+}
+
+/**
+ * The rows a restore wrote back, in its order (the master first), read off
+ * what `ObjectQL.restore` answers (`RecycleBinRestoreResult.rows`); `[]` for
+ * a restore that found no entry (`null`).
+ */
+function restoredRowsOf(result: unknown): Array<{ object: string; id: string }> {
+  const rows = rowOf(result)?.rows;
+  if (!Array.isArray(rows)) return [];
+  const out: Array<{ object: string; id: string }> = [];
+  for (const row of rows) {
+    const object = rowOf(row)?.object;
+    const id = idOf(rowOf(row)?.id);
+    if (typeof object === 'string' && object !== '' && id !== undefined) out.push({ object, id });
+  }
+  return out;
 }
 
 /**
@@ -101,6 +134,27 @@ function rowOf(value: unknown): Record<string, unknown> | undefined {
  * which publishes the message on the same commit, and never on a rollback;
  * the worker then syncs, retrying a failure.
  *
+ * ## A recycle-bin restore
+ *
+ * A restore writes its rows back through each object's driver and runs no
+ * hook (a restore is never a create, ADR-0148 D2), and the
+ * `data.record.restored` events it publishes go only to a `realtime` service.
+ * So the restore is heard as the engine operation it is dispatched as: one
+ * engine middleware, registered for every object, that passes every other
+ * operation straight through and, once a `restore` has answered, syncs each row
+ * it wrote back, the master first, in the order the events are published. A
+ * restore that refuses or fails syncs nothing. A restore that landed but could
+ * not recompute a roll-up (`ERR_SUMMARY_RECOMPUTE`, its rows written) syncs
+ * them as one that recomputed. Every object, not only the indexed ones: a
+ * restored detail of an indexed object comes back with a master no source
+ * indexes, and an object-keyed middleware would also turn the analytics
+ * native-SQL path away from the object (`hasObjectMiddleware`). The sync takes
+ * the same seams as a write's: {@link deferRecordSync} (once the unit open at
+ * the restore commits, never on its rollback, off the restore's response) or
+ * `enqueueRecordSync` through the queue. The answer names only ids, and the
+ * service re-reads each row by its id under the source's `where` (the engine
+ * whose hooks run here is the one bound to the service).
+ *
  * ## The objects follow the sources
  *
  * Registered for every object a record-change source indexes now, and for
@@ -112,6 +166,8 @@ export class KnowledgeRecordHooks {
   private readonly hooked = new Set<string>();
   private readonly inFlight = new Set<Promise<void>>();
   private stopped = false;
+  /** Whether the restore middleware is registered ({@link watchRestores}). */
+  private restoresWatched = false;
 
   constructor(
     private readonly engine: KnowledgeRecordHookEngine,
@@ -125,6 +181,7 @@ export class KnowledgeRecordHooks {
    */
   sync(): string[] {
     if (this.stopped) return [];
+    this.watchRestores();
     const objects = guardedObjectsFor(this.service.indexedSources()).filter((object) => !this.hooked.has(object));
     for (const object of objects) {
       for (const event of RECORD_SYNC_EVENTS) {
@@ -136,6 +193,49 @@ export class KnowledgeRecordHooks {
       this.hooked.add(object);
     }
     return objects;
+  }
+
+  /** Whether a recycle-bin restore is synced: the engine took the restore middleware. */
+  get watchesRestores(): boolean {
+    return this.restoresWatched;
+  }
+
+  /**
+   * Register the restore middleware, once per instance: the engine has no
+   * per-middleware unregister, so after {@link stop} it passes every
+   * operation through.
+   */
+  private watchRestores(): void {
+    if (this.restoresWatched || typeof this.engine.registerMiddleware !== 'function') return;
+    this.engine.registerMiddleware((opCtx, next) => this.onOperation(opCtx, next));
+    this.restoresWatched = true;
+  }
+
+  /** The middleware: let the operation run, and after a `restore` sync the rows it wrote back. */
+  private async onOperation(opCtx: RestoreOperationContext, next: () => Promise<void>): Promise<void> {
+    if (opCtx?.operation !== RESTORE_OPERATION || this.stopped) return next();
+    try {
+      await next();
+    } catch (err) {
+      // The rows ARE written; only a roll-up is stale.
+      if (isSummaryRecomputeRefusal(err)) this.onRestore(err.written);
+      throw err;
+    }
+    this.onRestore(opCtx.result);
+  }
+
+  /** Hand the sync of each restored row off, the master first. Never throws. */
+  private onRestore(result: unknown): void {
+    if (this.stopped) return;
+    const rows = restoredRowsOf(result);
+    if (rows.length === 0) return;
+    if (this.service.recordSyncQueued) {
+      for (const row of rows) this.service.enqueueRecordSync(row.object, row.id);
+      return;
+    }
+    this.deferRecordSync(async () => {
+      for (const row of rows) await this.service.handleRecordUpsert(row.object, { id: row.id });
+    });
   }
 
   /** The objects the hooks are registered for. */

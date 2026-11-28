@@ -1,5 +1,48 @@
 # @objectstack/platform-objects
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 0b539b6: feat(app-shell): 「Who sees this view」 — pick a shared view's or a dashboard's audience from the known capabilities, and see which positions will see it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audience gate is the existing, server-enforced `requiredPermissions` (all of the capabilities listed are required). The console now sets it from a closed list and shows who it reaches; no key, value or gate changes, and nothing is granted from the view (granting stays in Setup).
+  
+  - **`@object-ui/app-shell`.** The view switcher's in-place create card offers 「Who sees this view」 for a shared view: the capabilities the environment knows (declared, or granted by a permission set), each with the permission sets granting it, and a read-only preview of the positions whose permission sets grant every capability picked. The preview reads each position's sets from the server (`GET /meta/position?include=grants`, the sets the resolver grants its holders), never from a position's raw definition; a list served without them leaves the positions unknown. While a gate is picked, the card says it applies to its creator too. It starts from the open view's gate, which a new shared view used to inherit silently, and the pick replaces it; an empty pick writes no gate. A failed catalog read offers nothing to type. The shared hint no longer says every shared view is seen by everyone who can see the list. In Studio, the view panel's and the dashboard settings' audience row is the new `ref-multi:capability` picker: a closed list (no typed-name box when the catalog is unread, empty or failed), each option with its granting sets, and the same preview under it. The picker reads the catalog once its row is on screen, so an editor whose audience section stays closed sends no request.
+  - **`@objectstack/spec`.** The view and dashboard forms' `requiredPermissions` rows declare `widget: 'ref-multi:capability'` (the list is closed: a host with no catalog offers nothing to add). The view hint's last sentence now says only what holds on every carrier: the person setting the gate no longer sees the view in the list either.
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the narrowed view hint (zh-CN, ja-JP and es-ES translated; the other locales the English source).
+  - **`@object-ui/i18n`.** The create card's new strings and the corrected shared hint, in all eleven console locales.
+  
+  Nothing to migrate.
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Minor Changes

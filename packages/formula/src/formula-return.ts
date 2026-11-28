@@ -65,12 +65,29 @@
  *    not on this object;
  *  - a read whose key is computed, or a name the map does not declare.
  *
- * So a numeric formula over declared quantities stays `number`. The CEL type
- * still decides once the proof succeeds: a bare ratio of two amounts in one
- * currency (`record.amount / record.tax`) is proven a plain number, but cel-js
- * types it `dyn`, so it answers `{}` and a declared `currency` is kept. A
- * `summary` field is not read as a quantity: a roll-up of a currency field is
- * itself money, and its source type is not on this object.
+ * So a numeric formula over declared quantities stays `number`. Once the unit
+ * proof succeeds the CEL type is not asked to prove "numeric" again (#35815):
+ * an operator over two field reads (`record.quantity * record.hours`, or a
+ * bare ratio of two amounts in one currency, `record.amount / record.tax`)
+ * types `dyn`, because a field read is `dyn` to cel-js, but every operand the
+ * proof followed is a declared number, so the result is a plain number and
+ * answers `number` — a declared `currency` is withdrawn on that edit, exactly
+ * as it is for `record.quantity * 2`. A `summary` field is not read as a
+ * quantity: a roll-up of a currency field is itself money, and its source type
+ * is not on this object.
+ *
+ * ## Accepted limit — a read through a relationship stays unproven
+ *
+ * `record.account.employee_count * 2` answers `{}` (#35815). The leaf is a
+ * field of the RELATED object, and this function is handed the host object's
+ * field map only: neither the reference's target object nor that object's
+ * fields are in its input, so the leaf's unit cannot be read, and an unread
+ * unit is never answered `number`. A declared `currency` is therefore kept on
+ * an edit into such a read — the safe direction: the author's declaration
+ * stands until an edit proves the result is not money. Proving it would need
+ * the related objects' declared fields as a further input to this function
+ * (and a caller that loads them), which is a change to its published
+ * signature, not to the proof.
  */
 
 import { CurrencyConfigSchema, NUMERIC_VALUE_TYPES, type Field } from '@objectstack/spec/data';
@@ -360,10 +377,13 @@ function sourceOf(input: ExprInput): string | null {
  *   formula with no `returnType`, a non-`count` roll-up, a reference hop, a
  *   computed key, an undeclared name) ⇒ `{}`, unproven. `number` is never
  *   the answer there: a stamp reads it as "proved not money".
+ * - A numeric expression the unit proof DOES prove a plain number, whose CEL
+ *   type is `dyn` (an operator over two field reads: `record.quantity *
+ *   record.hours`, a same-currency ratio `record.amount / record.tax`) ⇒
+ *   `{ returnType: 'number' }` (#35815): the proof read every operand's unit.
  * - Otherwise ⇒ the {@link inferExpressionType} answer as `returnType`
- *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown`
- *   (a bare same-currency ratio such as `record.amount / record.tax` types
- *   `dyn`), so a numeric formula over declared quantities stays `number`.
+ *   (`number` / `text` / `boolean` / `date`), or `{}` when that is `unknown`,
+ *   so a numeric formula over declared quantities stays `number`.
  *
  * Pure and conservative: it never throws, and an expression that does not
  * type-check is never money.
@@ -392,6 +412,10 @@ export function inferFormulaReturn(
         }
         return { returnType: 'currency' };
       }
+      // #35815 — the unit proof read every operand as a declared number, so a
+      // `dyn` CEL type (a field read is `dyn` to cel-js) is no reason to leave
+      // the result unproven: it is a plain number, proved not money.
+      if (celType === 'dyn' && isPlainNumber(dim)) return { returnType: 'number' };
       // #35631 — `number` means proved not money: unless the unit proof
       // succeeded, every record read must name a declared field whose unit
       // can be read and is not money, or the answer is unproven.

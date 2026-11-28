@@ -417,3 +417,104 @@ describe('reverse pin — a script action WITHOUT `operation` is untouched', () 
     expect(navigated).toEqual(['/docs']);
   });
 });
+
+describe("operation: 'update' — the write's warnings reach the person (objectstack#37867)", () => {
+  /** The route's 200 answer for a write that tripped a `severity: 'warning'` rule. */
+  function warnedFetch(warnings: unknown[]) {
+    return okFetch({
+      success: true,
+      data: {
+        operation: 'update',
+        object: 'tasks',
+        id: 'rec_1',
+        record: { id: 'rec_1', status: 'done' },
+        ...(warnings.length > 0 ? { warnings } : {}),
+      },
+    });
+  }
+  const OVER_QUOTA = {
+    field: 'contract',
+    code: 'rule_violation',
+    message: 'This order takes its framework contract over the Contract Value.',
+    rule: 'framework_quota_exceeded',
+    severity: 'warning',
+  };
+
+  function wireWithOptions(fetch: ReturnType<typeof okFetch>) {
+    const runner = new ActionRunner({});
+    const toasts: Array<{ message: string; opts?: Parameters<Parameters<ActionRunner['setToastHandler']>[0]>[1] }> = [];
+    runner.setToastHandler((message, opts) => { toasts.push({ message, opts }); });
+    runner.registerHandler('script', createServerActionHandler({ fetch: fetch as unknown as ServerActionFetch }));
+    return { runner, toasts };
+  }
+
+  it('one toast, on the warning variant: the success message as its title, the rule\'s words under it', async () => {
+    const { runner, toasts } = wireWithOptions(warnedFetch([OVER_QUOTA]));
+    const result = await runner.execute(updateAction({
+      successMessage: 'Order confirmed.',
+      params: { recordId: 'rec_1' } as never,
+    }));
+
+    expect(result.success).toBe(true);
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].message).toBe('Order confirmed.');
+    expect(toasts[0].opts?.type).toBe('warning');
+    expect(toasts[0].opts?.description).toBe(OVER_QUOTA.message);
+  });
+
+  it('repeated messages are said once, and every distinct one gets its own line', async () => {
+    const second = { ...OVER_QUOTA, rule: 'credit_hold', message: 'The account is on credit hold.' };
+    const { runner, toasts } = wireWithOptions(warnedFetch([OVER_QUOTA, { ...OVER_QUOTA, field: 'total' }, second]));
+    await runner.execute(updateAction({ params: { recordId: 'rec_1' } as never }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.description).toBe(`${OVER_QUOTA.message}\n${second.message}`);
+  });
+
+  it('keeps the Undo affordance on the warning toast of an undoable action', async () => {
+    const { runner, toasts } = wireWithOptions(warnedFetch([OVER_QUOTA]));
+    const result = await runner.execute(updateAction({
+      undoable: true,
+      params: { recordId: 'rec_1', _rowRecord: { id: 'rec_1', status: 'todo' } } as never,
+    }));
+
+    expect(result.undo?.undoData).toEqual({ status: 'todo' });
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.type).toBe('warning');
+    expect(toasts[0].opts?.undo).toBeDefined();
+  });
+
+  it('control: a write with no warnings keeps the plain success toast, with no description', async () => {
+    const { runner, toasts } = wireWithOptions(warnedFetch([]));
+    await runner.execute(updateAction({ params: { recordId: 'rec_1' } as never }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.type).toBe('success');
+    expect(toasts[0].opts && 'description' in toasts[0].opts).toBe(false);
+  });
+
+  it('an author who turned the success toast off still has the person warned, in the rule\'s own words', async () => {
+    const { runner, toasts } = wireWithOptions(warnedFetch([OVER_QUOTA]));
+    await runner.execute(updateAction({
+      toast: { showOnSuccess: false },
+      params: { recordId: 'rec_1' } as never,
+    } as never));
+
+    expect(toasts).toEqual([{ message: OVER_QUOTA.message, opts: { type: 'warning', duration: undefined } }]);
+  });
+
+  it('reverse pin: a script action WITHOUT `operation` never reads its answer\'s `warnings` key', async () => {
+    const { runner, toasts } = wireWithOptions(warnedFetch([OVER_QUOTA]));
+    await runner.execute({
+      type: 'script',
+      name: 'recalc',
+      label: 'Recalc',
+      objectName: 'tasks',
+      target: 'recalc',
+      successMessage: 'Done.',
+    } as ActionDef);
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.type).toBe('success');
+  });
+});

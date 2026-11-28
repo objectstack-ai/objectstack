@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES, resolveFormulaValueType } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -4430,14 +4430,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
-    // field type is `currency` (the column draft's resolved type, so a view
-    // that presents the field as another type keeps it a plain value). It
-    // never shares the subtitle's width: it gets a line of its own under the
+    // value draws as money (the column draft's resolved type, so a view that
+    // presents the field as another type keeps it a plain value). It never
+    // shares the subtitle's width: it gets a line of its own under the
     // subtitle, drawn whole at the right edge, and the status chip moves to
     // that line's left so the two never compete for one row. A masked amount
     // is not promoted; it stays a subtitle candidate, which skips it.
+    //
+    // objectstack#37890 — money is a `currency` column, and also a `formula`
+    // or `summary` column whose cell draws a number as currency: a formula
+    // declaring `returnType: 'currency'` (an order line's total) or a summary
+    // declaring its currency. That is asked of `resolveFormulaValueType`, the
+    // rule the formula cell draws by, so the slot and the cell cannot disagree.
+    // The slot is chosen once for the whole list (every card keeps one shape),
+    // so the rule is asked how the column draws a NUMBER, not how one row's
+    // value happens to draw: only a numeric value is an amount.
+    const drawsAsMoney = (c: ObjectGridColumnDraft): boolean => {
+      if (c.type === 'currency') return true;
+      if (c.type !== 'formula' && c.type !== 'summary') return false;
+      const def = objectFields?.[c.accessorKey];
+      return def?.type === c.type && resolveFormulaValueType(def, 0) === 'currency';
+    };
     const amountCol = bodyColumns.find(
-      (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
+      (c) => c !== statusCol && drawsAsMoney(c) && !isMaskedCardColumn(c.accessorKey),
     );
     const subtitleColumns = bodyColumns
       .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))

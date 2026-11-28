@@ -1,5 +1,51 @@
 # @object-ui/console
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 5b32625: fix(auth): a cloud-managed runtime's password refusal is shown in the session's language and points at the identity provider's button
+  
+  Clause-②: yes (widening) — `@object-ui/auth` `ForgotPasswordFormProps` gains the optional `errorMessages`; `@object-ui/i18n` gains `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset` in every locale
+  Metadata-protocol: none
+  
+  A cloud-managed runtime refuses the password doors (sign-in, forgot password, reset password, set password) with 409 `RESOURCE_CONFLICT`. Its code never reached the pages. The hosted relay and the set-password route answer in the platform's error envelope, `{ success: false, error: { code, message } }`, which the auth client did not read. Forgot and reset dropped the code where the client threw. So each of those pages showed the server's English sentence or `Auth request failed with status 409`, whatever the language.
+  
+  - **`@object-ui/auth`.** The client's error builder reads `code`, `message`, `details` and `userMessage` from the envelope's `error` when the flat body has none; a better-auth refusal answers exactly as before. `forgotPassword`, `resetPassword` and `setInitialPassword` now keep the refusal's code and status too. `ForgotPasswordForm` gains an `errorMessages` prop, the same code-to-text map `LoginForm` takes; without it the server's message is shown as before.
+  - **`@object-ui/app-shell`.** `signInRefusalMessages` maps `RESOURCE_CONFLICT` to a sentence that says the deployment signs people in through its identity provider and points at its button above the form. The new `passwordDoorRefusalMessages` carries the matching sentence for the forgot, reset and set-password doors, and the package's forgot-password page passes it.
+  - **`@object-ui/i18n`.** Two keys, `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset`, in every locale.
+  - **`@object-ui/console`.** The forgot-password, reset-password and set-password pages show the same sentence.
+  
+  On the sign-in door only a cloud-managed runtime answers this code, so a self-hosted sign-in is unchanged. On the reset and set-password doors a self-hosted deployment answers the same 409 `RESOURCE_CONFLICT` in two cases: an account its identity provider provisions while SSO-only mode is on, and a pending SSO person not yet signed in. Those pages now show the same localized sentence in place of the server's English one; it is true for that reader too. Nothing to migrate.
+- 5f48cb0: feat(console): the create-workspace dialog shows the unpaid-organization limit refusal and its next step
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` gains `organization.errors.unpaidOrganizationLimitReached` and `organization.viewPlans` in every locale
+  Metadata-protocol: none
+  
+  The hosted control plane refuses a create past its cap on free organizations with 403 `UNPAID_ORGANIZATION_LIMIT_REACHED`. The body carries a sentence in the request's language (`message` and `userMessage`) and `details.next_step`, either `upgrade_to_team` or `contact_support`. The create-workspace dialog now recognizes this code:
+  
+  - It shows the control plane's own `userMessage`, which names the next step. A refusal that arrives without one shows the console's sentence instead (new key `organization.errors.unpaidOrganizationLimitReached`, in all eleven console locales). That sentence names no number and no plan.
+  - When the next step is `upgrade_to_team` and the host serves its upgrade entry (`upgradeUrl` on `/api/v1/runtime/config`), the dialog also shows a link to it (new key `organization.viewPlans`). The console never builds that address itself. If the host serves no entry, no link is shown and the sentence alone gives the step. A `contact_support` step shows no link, because the sentence already names the contact address.
+  
+  better-auth's own organization-limit refusal (`YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`) and every other code behave as before. Nothing to migrate.
+- 74cd5b6: fix(console): a refused "Set as default" on Setup › Apps no longer leaves the deployment with no default app
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setting an app as the default first un-sets the current default, then sets the new one. When the second write was refused (for example, the app belongs to a read-only package and the server answers 403), the first write stayed and no app was the default any more. Now, when the server refuses the write (a 4xx answer) or the write fails before it is sent, the page puts each un-set default back, in the package it came from, before it shows the refusal. So a refused set-default leaves the default where it was. If putting it back fails too, a second error names the app that is no longer the default (new key `appManagement.toast.restoreDefaultFailed`, in all eleven console locales). A failure the server did not answer, or a 5xx, may have been written, so it is not undone: the page shows the failure and re-reads the list, which shows the result.
+  
+  Nothing to migrate.
+- cb3f8b9: fix(console): the profile page's password card shows a password refusal in the session's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The profile page's password card (set a local password, change password) now maps a refusal's `code` through `passwordDoorRefusalMessages`, as the set-password and reset-password pages do: a 409 `RESOURCE_CONFLICT` (a cloud-managed runtime, an SSO-only account, a pending SSO person) shows the localized sentence instead of the server's English one. Any other code keeps the server's message.
+  
+  `@object-ui/auth`: `sendVerificationEmail`, `signOut` and `signInWithProvider` now reject through the same error builder as the other doors, so the thrown error carries the refusal's `code` and HTTP `status`, read from better-auth's flat body or from the ADR-0112 envelope. The `message` is unchanged.
+- @objectstack/sdui-parser@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes

@@ -1,5 +1,33 @@
 # @objectstack/service-external-datasource
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/driver-memory@19.0.0-next.2
+  - @objectstack/driver-mongodb@19.0.0-next.2
+  - @objectstack/driver-sql@19.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.2
+  - @objectstack/driver-turso@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes
