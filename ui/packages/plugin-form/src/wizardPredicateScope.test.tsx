@@ -223,3 +223,88 @@ describe('#6110 controls — stated plainly: these pass on a revert', () => {
     await expectBlocked(ds);
   });
 });
+
+// ─── objectstack#37402 (L2 S1) — "a create is not judged" holds in this gate ──
+
+/**
+ * The object's whole-record hand lock (`ObjectSchema.uiReadonlyWhen`) rides on
+ * every form field `fromObjectSchema` builds. The form renderer drops it on a
+ * create; this gate must too, or a lock TRUE (or faulting) over a CREATE
+ * wizard's values makes every inheriting field read-only and the whole-form
+ * required re-check is skipped. On an EDIT wizard the lock still holds: a
+ * locked field is not demanded.
+ */
+describe('#37402 — the submit-time gate does not judge the object hand lock on a CREATE wizard', () => {
+  /** True over the wizard's own values (step 1 fills `subject` with 'S1'). */
+  const LOCK_TRUE_ON_CREATE = "record.subject == 'S1'";
+  const CONFIRMED_LOCK = "record.status == 'confirmed'";
+
+  function lockedSchema(uiReadonlyWhen: string) {
+    return {
+      name: 'order',
+      uiReadonlyWhen,
+      fields: {
+        subject: { type: 'text', label: 'Subject' },
+        status: { type: 'text', label: 'Status' },
+        owner: { type: 'text', label: 'Owner', required: true },
+        // Keeps itself editable inside a locked record, so an edit can be made.
+        notes: { type: 'text', label: 'Notes', uiReadonlyWhen: 'false' },
+      },
+    };
+  }
+
+  function mount(mode: 'create' | 'edit', uiReadonlyWhen: string, stored?: Record<string, unknown>) {
+    const dataSource: any = {
+      getObjectSchema: vi.fn().mockResolvedValue(lockedSchema(uiReadonlyWhen)),
+      findOne: vi.fn().mockResolvedValue(stored ? { id: 'o1', ...stored } : null),
+      create: vi.fn().mockResolvedValue({ id: 'o1' }),
+      update: vi.fn(async (_o: string, _id: string, d: any) => ({ id: 'o1', ...stored, ...d })),
+    };
+    render(
+      <PredicateScopeProvider scope={DENIED as any}>
+        <WizardForm
+          schema={{
+            type: 'object-form',
+            formType: 'wizard',
+            objectName: 'order',
+            mode,
+            ...(mode === 'edit' ? { recordId: 'o1' } : {}),
+            allowSkip: true,
+            sections: [
+              { name: 's1', label: 'Step 1', fields: ['subject'] },
+              { name: 's2', label: 'Step 2', fields: ['owner'] },
+              { name: 's3', label: 'Step 3', fields: ['notes'] },
+            ],
+          } as any}
+          dataSource={dataSource}
+        />
+      </PredicateScopeProvider>,
+    );
+    return dataSource;
+  }
+
+  it('a CREATE wizard over a locked object still demands the empty required field', async () => {
+    const ds = mount('create', LOCK_TRUE_ON_CREATE);
+    await waitFor(() => expect(document.body.querySelector('[data-field="subject"]')).toBeTruthy());
+    fill('subject', 'S1');
+    fireEvent.click(stepIndicator(2));
+    await waitFor(() => expect(document.body.querySelector('[data-field="notes"]')).toBeTruthy());
+    fill('notes', 'n');
+    fireEvent.click(screen.getByRole('button', { name: /Create/i }));
+    await expectBlocked(ds);
+  });
+
+  it('CONTROL — an EDIT wizard on a confirmed record still treats the inheriting field as locked: it is not demanded', async () => {
+    const ds = mount('edit', CONFIRMED_LOCK, { subject: 'Order', status: 'confirmed', owner: null, notes: '' });
+    // `subject` inherits the lock on this confirmed record, so it draws its read
+    // face, not an input: wait for the stored record to load instead.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(document.body.querySelector('[data-field="subject"]')).toBeTruthy());
+    await waitFor(() => expect(document.body.textContent ?? '').toContain('Order'));
+    fireEvent.click(stepIndicator(2));
+    await waitFor(() => expect(document.body.querySelector('[data-field="notes"]')).toBeTruthy());
+    fill('notes', 'followed up');
+    fireEvent.click(screen.getByRole('button', { name: /Update/i }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+  });
+});
