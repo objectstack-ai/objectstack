@@ -1101,24 +1101,38 @@ describe('QuickJSScriptRunner — ctx.api.transaction', () => {
     expect(events.some((e) => e.op === 'commit')).toBe(false);
   }, 30000);
 
-  it('rejects a nested transaction', async () => {
-    const { api } = makeTxApi();
-    await expect(
-      runner.runScript(
-        {
-          language: 'js',
-          source: `
+  // One level per body: a `ctx.api.transaction` inside another in the same
+  // body is refused at the inner begin, before any driver call, and the refusal
+  // travels out through the outer callback, which rolls its own unit back. The
+  // hook docs and the data skill state this bound beside "joins".
+  it('refuses a nested transaction at the inner begin: one begin, the outer unit rolled back, nothing after it runs', async () => {
+    const { api, events } = makeTxApi();
+    const err = await runner.runScript(
+      {
+        language: 'js',
+        source: `
+          await ctx.api.transaction(async () => {
+            await ctx.api.object('a').insert({ x: 1 });
             await ctx.api.transaction(async () => {
-              await ctx.api.transaction(async () => {});
+              await ctx.api.object('a').insert({ never: 1 });
             });
-          `,
-          capabilities: ['api.write', 'api.transaction'],
-          timeoutMs: 30000,
-        },
-        ctx({ api }),
-        actionOpts,
-      ),
-    ).rejects.toThrow(/nested/i);
+            await ctx.api.object('a').insert({ never: 2 });
+          });
+        `,
+        capabilities: ['api.write', 'api.transaction'],
+        timeoutMs: 30000,
+      },
+      ctx({ api }),
+      actionOpts,
+    ).then(() => null, (e) => e as SandboxError);
+
+    expect(err).toBeInstanceOf(SandboxError);
+    expect(err?.message).toMatch(/nested/i);
+    expect(events).toEqual([
+      { op: 'begin', tx: 1 },
+      { op: 'insert', name: 'a', tx: 1 },
+      { op: 'rollback', tx: 1 },
+    ]);
   }, 30000);
 
   it('requires the api.transaction capability', async () => {
