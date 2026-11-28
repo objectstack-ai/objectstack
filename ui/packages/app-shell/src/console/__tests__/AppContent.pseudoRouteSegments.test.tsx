@@ -191,6 +191,11 @@ vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
 // identical to the component's own, so ESM hands the lazy factory this
 // already-resolved module.
 import '@object-ui/plugin-designer';
+// objectstack#38149 — the route's lazy boundary is now the console's wrapper
+// (`React.lazy(() => import('./ConsoleCreateAppPage.js'))`), whose own graph
+// (the package ask, the Packages page's create dialog) was a second unbounded
+// load inside the same `findByTestId` budget. Paid here too, for the same reason.
+import '../ConsoleCreateAppPage';
 
 /**
  * The probe that makes the bug visible: it reports WHICH app's shell rendered.
