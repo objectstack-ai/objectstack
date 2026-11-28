@@ -51,6 +51,7 @@ describe('cellReadOnlyKind — the reason a cell names (objectstack#35684)', () 
   it("puts the field's reason first, then the grid's, then the record's", () => {
     const all: CellReadOnlyInputs = {
       fieldDef: { type: 'formula' },
+      object: null,
       fieldWritable: false,
       gridEditable: false,
       objectEditable: false,

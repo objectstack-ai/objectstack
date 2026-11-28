@@ -80,8 +80,12 @@ type DefaultsFieldValue = NonNullable<NonNullable<FieldDefaultsSchemaLike['field
  * literal on the right is what the type must evaluate to.
  */
 const PIN = {
-  /** The child schema carries the object's `name`; the defaults one does not. */
-  childKeys: true satisfies Equals<keyof ChildObjectSchemaLike, 'name' | 'fields'>,
+  /**
+   * The child schema carries the object's `name`; the defaults one does not.
+   * objectstack#37402 added `uiReadonlyWhen`: the child object's whole-record
+   * hand lock, which the line-item columns fold.
+   */
+  childKeys: true satisfies Equals<keyof ChildObjectSchemaLike, 'name' | 'fields' | 'uiReadonlyWhen'>,
   defaultsKeys: true satisfies Equals<keyof FieldDefaultsSchemaLike, 'fields'>,
   /** The child one deliberately does not constrain a field value. */
   childFieldValueIsAny: true satisfies IsAny<ChildFieldValue>,

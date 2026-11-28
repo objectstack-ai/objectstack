@@ -47,6 +47,8 @@ import { effectiveUiReadonlyWhen, isExpressionComputedField } from '@object-ui/c
 export interface ChildObjectSchemaLike {
   name?: string;
   fields?: Record<string, any>;
+  /** The child object's whole-record hand lock (`ObjectSchema.uiReadonlyWhen`), folded onto its columns. */
+  uiReadonlyWhen?: unknown;
 }
 
 /** Map an ObjectQL field type to a LineItems grid column type. */
