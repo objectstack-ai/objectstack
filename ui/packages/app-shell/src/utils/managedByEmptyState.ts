@@ -46,7 +46,7 @@ export interface ManagedByEmptyState {
  * actions? (objectui#11687)
  *
  * The answer is the toolbar's own verdict, asked with the same predicates the
- * `action:bar` → `action:button` pair applies to `list_toolbar`: placement
+ * `action:bar` → `action:button` pair applies to `list`: placement
  * through `actionRendersAt`, the capability gate the caller passes in (the
  * `useCapabilityGate` closure), and the action's `visible` gate, asked through
  * `hasDeclaredPredicate` and evaluated fail-closed with no row bound — a list
@@ -58,7 +58,7 @@ export interface ManagedByEmptyState {
  * Why "the toolbar draws an action" may stand for "the page offers a way to
  * add a row" in the `better-auth` arm, without asking an action what it does:
  * read off objectstack's platform objects when objectui#11687 landed, every
- * `list_toolbar` action on a `better-auth` object either adds a row (Invite
+ * `list` action on a `better-auth` object either adds a row (Invite
  * User, Register OAuth Application, Create Team, Enable 2FA, …) or sits on a
  * list whose every view is filtered ("Sign out other devices" on sessions), so
  * an empty one gets the list's view-filter copy rather than first-run copy.
@@ -78,7 +78,7 @@ export function listToolbarDrawsAction(
       requiredPermissions?: unknown;
       visible?: unknown;
     };
-    if (!actionRendersAt(action, 'list_toolbar')) return false;
+    if (!actionRendersAt(action, 'list')) return false;
     if (!mayInvoke(action.requiredPermissions)) return false;
     if (isActionSwitchedOff(action)) return false;
     if (!hasDeclaredPredicate(action.visible)) return true;
@@ -96,7 +96,7 @@ export function listToolbarDrawsAction(
 
 /**
  * @param pageOffersCreate The list page offers a way to add a row: its generic
- *   New button, or a `list_toolbar` action it draws
+ *   New button, or a `list` action it draws
  *   ({@link listToolbarDrawsAction}). The `better-auth` arm's copy says rows
  *   are "not added by hand here", which that page contradicts (objectui#11687).
  */

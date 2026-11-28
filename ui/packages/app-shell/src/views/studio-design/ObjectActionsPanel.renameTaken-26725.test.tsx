@@ -40,7 +40,7 @@ const act = (name: string, label: string) => ({
   label,
   type: 'script',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   body: { language: 'expression', source: 'true' },
 });
 

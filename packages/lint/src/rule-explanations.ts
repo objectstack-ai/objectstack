@@ -3830,7 +3830,7 @@ const RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION: RuleExplanation = {
       '`variant: \'primary\'`, else the first button. The incoming order is where the two pages differ: the ' +
       'full page takes it from the header\'s `actions` list, the standard page (phone, drawer, preview) from ' +
       'the object\'s action declaration order, and the standard page draws every action placed at ' +
-      '`record_header` or `record_more`, listed or not. This finding means the two give a different primary ' +
+      '`record` or `record_page`, listed or not. This finding means the two give a different primary ' +
       'button, or the listed actions in a different order.',
     'The order has one declaration point, the actions. Give each an `order` (lower first) and the main one ' +
       '`variant: \'primary\'`, and both pages sort alike; the header\'s list then only chooses which actions ' +
@@ -5745,22 +5745,22 @@ const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
       '`actions`; a `record:related_list`\'s `actions`; an `action` nav entry\'s ' +
       '`actionDef.actionName`; and an `object` nav entry\'s deep-link `runAction`.',
     'A name resolves when any action in the stack carries it: a `stack.actions` entry or an entry ' +
-      'of any object\'s `actions`. The runtime ships no built-in action names (`list_toolbar` and ' +
-      '`list_item` are locations, not actions), so a name that resolves nowhere is dead: most ' +
+      'of any object\'s `actions`. The runtime ships no built-in action names (`list` and ' +
+      '`record_row` are locations, not actions), so a name that resolves nowhere is dead: most ' +
       'surfaces draw a button that does nothing when clicked, the alert drops its call-to-action ' +
       'without a word, and the header draws no button, with only a browser-console warning. An ' +
       'error: there is no cross-package escape to soften it with, and an action another installed ' +
       'package contributes is the one legitimate miss.',
     'To fix a miss, define the action — a `stack.actions` entry or an entry of the object\'s `actions` — ' +
       'placed where the surface looks for it, or remove the reference. A `page:header` draws only actions ' +
-      'placed at `record_header` or `record_more`, so a header action needs one of the two in its ' +
+      'placed at `record` or `record_page`, so a header action needs one of the two in its ' +
       '`locations`; the selection bar and an alert\'s call-to-action place an action by name, with no ' +
       '`locations` entry.',
     // The drawn locations are held to the rule by its test, over every location.
     'A `record:related_list` is the exception, and resolves the way its renderer does: against the ' +
       'RELATED object\'s own actions (written on it, or a `stack.actions` entry bound to it by ' +
       '`objectName`), never the page\'s object or a global action, and only an action placed at a ' +
-      'location the list draws (`list_toolbar` as a header button, `list_item` and `record_related` ' +
+      'location the list draws (`list` as a header button, `record`, `record_row` and `record_related` ' +
       'as a row-menu item): naming it in `actions` is not a placement. An id that misses either test ' +
       'draws no button, only a refusal notice above the list. So define the action on the related ' +
       'object (in its `actions`, or in `stack.actions` with `objectName` naming it) with one of those ' +
@@ -6282,6 +6282,99 @@ const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Knowledge sources (`validate-knowledge-source.ts`) ──
+
+const KNOWLEDGE_SOURCE_DOORS =
+  'Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate for a ' +
+  '`knowledge_source` write (Studio, the metadata API, MCP), with the same rule id and message. An error ' +
+  'refuses the publish (ADR-0161 K4): a source over a missing object has nothing to index, a missing field ' +
+  'indexes no text for that member, and a gated object is never searched for a caller the service judges.';
+
+const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-object-unknown',
+  covers: 'why a knowledge source must name an existing object',
+  paragraphs: [
+    'A knowledge source (`knowledgeSources`, ADR-0161 K4) indexes the records of one object, `source.object`. ' +
+      'An object nothing defines has no records, so the source is built empty and every search over it ' +
+      'answers nothing, with no error anywhere.',
+    'Defined means an object of this stack, of a package in the same artifact (`packages[]`), or, at the ' +
+      'publish gate, an object the host serves. A platform object a known package registers (`sys_user`) is ' +
+      'not judged when the stack does not carry its definition. A name with a platform prefix that no known ' +
+      'package registers is a warning, because a third-party package may still provide it. When the publish ' +
+      'gate states the package\'s closure (the package, the packages its manifest declares in ' +
+      '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
+      'dependency.',
+    'On the command line a package the manifest declares in `dependencies` but the artifact does not carry ' +
+      'is out of sight: its objects cannot be read there. So while the manifest declares such a dependency, ' +
+      'an object the stack does not define is a warning, which clears when that dependency defines it (the ' +
+      'publish gate judges the source against the package\'s closure, which holds the dependency\'s objects). ' +
+      'With no such dependency it is an error, which clears only by naming an object that exists.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-field-unknown',
+  covers: 'why each listed field must exist on the object',
+  paragraphs: [
+    'A source lists the fields whose text becomes each document (`source.content`) and the fields projected ' +
+      'into a hit\'s metadata (`source.metadataFields`). A name the object does not define reads nothing on ' +
+      'every record: the document is built without that text, or the metadata without that value.',
+    'Defined means declared in the object\'s `fields` (an object extension of the same stack included) or ' +
+      'addressable without a declaration: `id`, which the driver provisions, and the system columns the ' +
+      'platform injects (`owner_id`, `created_at` and the rest) are read like any field. An object whose ' +
+      'definition carries no readable field map is not judged.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-object-not-searchable',
+  covers: 'why the API must serve the object for search',
+  paragraphs: [
+    'A knowledge search is a search over the object\'s records, so the knowledge service searches a source ' +
+      'only when the API exposure serves its object for `search`: the decision `canServeApiOperation` in ' +
+      '`@objectstack/spec/data` answers, the one every door serving object rows asks. `enable.apiEnabled: ' +
+      'false` refuses it. So does an `enable.apiMethods` list that does not grant `list`, from which search ' +
+      'derives (`search` itself is a retired list value the parse strips), or one that grants `list` beside ' +
+      '`enable.searchable: false`. With no `apiMethods` list, `searchable: false` does not refuse it.',
+    'To clear it, keep `enable.apiEnabled` true and, where the object declares `enable.apiMethods`, include ' +
+      '`list` with `enable.searchable` not false; or index another object.',
+    'This gate needs no caller, so it is judged here. The gates that need one (the object\'s package is not ' +
+      'disabled, and the author may query every field the source serves) are asked when the source is saved, ' +
+      'as its author.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-system-object-not-ai-readable',
+  covers: 'why a system object source must opt into AI reads',
+  paragraphs: [
+    'A system object (a `sys_` name) is indexed and searched only when its own definition opts into AI reads ' +
+      'with `enable.aiReadable: true`, the posture the MCP record tools take (`isAiReadExposed` in ' +
+      '`@objectstack/spec/data`). The objects that store serialized metadata bodies are never opened, ' +
+      'whatever they declare.',
+    'The declaration belongs to the system object\'s author, not to the source: index a business object, or a ' +
+      'system object that declares it.',
+    KNOWLEDGE_SOURCE_DOORS,
+  ],
+};
+
+const KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION: RuleExplanation = {
+  rule: 'knowledge-source-field-never-indexed',
+  covers: 'why a credential-class or internal field is skipped',
+  paragraphs: [
+    'Embedding is egress: the text of every listed field is sent to the embedding provider and kept in an ' +
+      'index outside the row store. So the index never carries a credential-class field (a `secret`, or a ' +
+      '`password` the platform masks on read) or a field declared `internal: true`, even when the source ' +
+      'names it (ADR-0161 K5). The member is skipped, and the documents read less than the list says.',
+    'A warning, not a refusal: the rest of the source is indexed. Remove the member from `content` or ' +
+      '`metadataFields`. Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate ' +
+      'for a `knowledge_source` write, where it rides the advisories.',
+  ],
+};
+
 // ── Assignment rules (`validate-assignment-rules.ts`) ──
 
 const ASSIGNMENT_RULE_USER_TARGET_EXPLANATION: RuleExplanation = {
@@ -6376,7 +6469,7 @@ const ACTION_NO_PLACEMENT_EXPLANATION: RuleExplanation = {
       'publishes and is listed in Setup, and no user can ever click it — the ADR-0078 shape of a ' +
       'declaration that renders nothing.',
     // Held equal to `ACTION_LOCATIONS` (`@objectstack/spec/ui`) by the rule's test.
-    'The locations an action can declare: `list_toolbar`, `list_item`, `record_header`, `record_more`, ' +
+    'The locations an action can declare: `list`, `record`, `record_page`, `record_row`, ' +
       '`record_related`, `record_section`. A list view places an action by NAME instead: naming it in ' +
       '`bulkActions` or `bulkActionDefs` puts it on the selection bar, which the view drives, never ' +
       '`locations` (an action that only makes sense over a selection has no single-record location). ' +
@@ -7371,6 +7464,11 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION.rule]: AI_CONTEXT_RELATED_LINK_UNKNOWN_EXPLANATION,
   [AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION.rule]: AI_CONTEXT_BODY_NOT_LONG_TEXT_EXPLANATION,
   [AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION.rule]: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION,
+  [KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION.rule]: KNOWLEDGE_SOURCE_FIELD_UNKNOWN_EXPLANATION,
+  [KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION.rule]: KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION.rule]: KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE_EXPLANATION,
+  [KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION.rule]: KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED_EXPLANATION,
   [ASSIGNMENT_RULE_USER_TARGET_EXPLANATION.rule]: ASSIGNMENT_RULE_USER_TARGET_EXPLANATION,
   [ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION.rule]: ASSIGNMENT_RULE_QUEUE_UNSTAFFED_EXPLANATION,
   [SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION.rule]: SEED_VALUE_OUTSIDE_STATE_MACHINE_EXPLANATION,

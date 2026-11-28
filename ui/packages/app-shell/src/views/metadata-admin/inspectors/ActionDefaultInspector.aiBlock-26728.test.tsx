@@ -37,6 +37,8 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector, AI_DESCRIPTION_MIN } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
@@ -46,7 +48,7 @@ const SCRIPT_ACTION: Draft = {
   name: 'invoice_send',
   label: 'Send',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };

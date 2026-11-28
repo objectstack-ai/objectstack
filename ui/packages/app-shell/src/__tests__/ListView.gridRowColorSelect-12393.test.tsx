@@ -113,7 +113,7 @@ const objectDef = {
     stage: { name: 'stage', type: 'text', label: 'Stage' },
     due_date: { name: 'due_date', type: 'date', label: 'Due' },
   },
-  actions: [{ name: 'approve', label: 'Approve', locations: ['list_item'], visible: "record.approver == 'u1'" }],
+  actions: [{ name: 'approve', label: 'Approve', locations: ['record_row'], visible: "record.approver == 'u1'" }],
   userActions: { edit: { visibleWhen: 'record.locked != true' } },
 };
 

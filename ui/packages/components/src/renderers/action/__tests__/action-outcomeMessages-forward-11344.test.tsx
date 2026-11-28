@@ -68,7 +68,7 @@ const declaration = (extra: Record<string, unknown> = {}) => ({
   name: 'delete_environment',
   label: 'Delete environment',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   outcomeMessages: OUTCOME_MESSAGES,
   successMessage: 'Environment ${result.name} updated',
   ...extra,

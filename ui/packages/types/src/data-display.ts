@@ -1137,7 +1137,7 @@ export interface TableSchema extends BaseSchema {
  * A single extra per-row action rendered in the data-table's row overflow
  * menu (after Edit/Delete). Used to surface an object's own row actions in
  * embedded tables — e.g. a detail page's related list showing the child
- * object's `list_item` actions. The host pre-localizes `label`/`confirmText`
+ * object's `record_row` actions. The host pre-localizes `label`/`confirmText`
  * and executes the action via {@link DataTableSchema.onRowActionDef}.
  */
 export interface DataTableRowAction {

@@ -30,7 +30,7 @@ import { RecordQuickActionsRenderer } from '../record-quick-actions';
 
 const LABEL = 'Archive';
 /** `locations` is not defaulted — `getActionsForLocation` requires the match. */
-const ARCHIVE = { name: 'archive', label: LABEL, type: 'script', locations: ['record_header'] };
+const ARCHIVE = { name: 'archive', label: LABEL, type: 'script', locations: ['record_page'] };
 
 function mount(action: Record<string, unknown>, blockVariant?: string) {
   return render(

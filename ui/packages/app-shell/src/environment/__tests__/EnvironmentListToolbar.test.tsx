@@ -43,7 +43,7 @@ const renderToolbar = (ui: React.ReactElement) =>
 
 const CREATE = {
   name: 'create_environment', label: 'Create Environment',
-  type: 'api', variant: 'primary', locations: ['list_toolbar'],
+  type: 'api', variant: 'primary', locations: ['list'],
 };
 const st = (o: Partial<EnvironmentEntitlementsState>): EnvironmentEntitlementsState =>
   ({ ready: true, hasProductionEnv: true, upgradeUrl: '/settings/billing', source: 'summary', ...o });
@@ -57,7 +57,7 @@ const UNRESOLVED: EnvironmentEntitlementsState = {
   ready: false, hasProductionEnv: false, source: 'unknown',
 };
 
-const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
+const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list'] };
 
 describe('EnvironmentListToolbar', () => {
   it('no production env → "Set up your production environment" (primary)', () => {
@@ -166,7 +166,7 @@ describe('EnvironmentListToolbar — loading state (objectui#3482)', () => {
   });
 
   it('non-create toolbar actions still render while resolving (they never re-label)', () => {
-    const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
+    const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list'] };
     renderToolbar(
       <EnvironmentListToolbar actions={[CREATE, REFRESH]} entitlements={null} />,
     );
@@ -176,7 +176,7 @@ describe('EnvironmentListToolbar — loading state (objectui#3482)', () => {
   });
 
   it('no create action in the toolbar → nothing can jump, so no skeleton', () => {
-    const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list_toolbar'] };
+    const REFRESH = { name: 'refresh_all', label: 'Refresh', type: 'api', locations: ['list'] };
     renderToolbar(<EnvironmentListToolbar actions={[REFRESH]} entitlements={null} />);
     expect(screen.getByText('Refresh')).toBeTruthy();
     expect(screen.queryByTestId(CREATE_LOADING)).toBeNull();

@@ -95,6 +95,8 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { ConsoleToaster } from '../chrome/ConsoleToaster';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 // ── The served objects (abridged to the keys these pages read) ─────────────
 
@@ -119,7 +121,7 @@ function inviteUser(successMessage: string) {
     name: 'invite_user',
     label: 'Invite User',
     variant: 'primary',
-    locations: ['list_toolbar'],
+    locations: ['list'],
     type: 'api',
     target: '/api/v1/auth/organization/invite-member',
     visible: { dialect: 'cel', source: INVITE_MEMBER_GATE },
@@ -149,7 +151,7 @@ function sysUser(inviteCopy = 'Invitation sent') {
       {
         name: 'ban_user',
         label: 'Ban User',
-        locations: ['list_toolbar'],
+        locations: ['list'],
         type: 'api',
         target: '/api/v1/auth/admin/ban-user',
         description: 'Ban this user? They will be signed out and unable to sign in until unbanned.',

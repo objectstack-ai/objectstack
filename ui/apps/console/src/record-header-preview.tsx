@@ -2,7 +2,7 @@
  * DEV-ONLY record-header api-action preview (objectui#3391).
  *
  * Mounts the REAL RecordDetailView with a stub dataSource and no backend so
- * the `record_header` `type:'api'` `{field}`-interpolation fix can be
+ * the `record_page` `type:'api'` `{field}`-interpolation fix can be
  * browser-verified: clicking the header action must PATCH
  * `/api/v1/data/os_tianshun_ehr_production_plan/plan-42` — not the literal
  * `{id}` (`%7Bid%7D`) the bug sent.

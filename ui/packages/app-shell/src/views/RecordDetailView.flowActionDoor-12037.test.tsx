@@ -88,7 +88,7 @@ const CHILD_ACTION = {
   label: 'Escalate',
   type: 'flow',
   target: 'escalate_task_flow',
-  locations: ['list_item'],
+  locations: ['record_row'],
   requiredPermissions: ['lead_task.escalate'],
 };
 /** Declared on this page's object, offered in the header. */
@@ -97,7 +97,7 @@ const HEADER_ACTION = {
   label: 'Qualify',
   type: 'flow',
   target: 'qualify_lead_wizard',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 const OBJECTS = [
   {
@@ -223,7 +223,7 @@ describe('objectui#12037 — record-page flow clicks on a declared action use th
     const runner = await mountRunner();
     authFetchSpy.mockResolvedValue(answered({ success: true, status: 'completed' }));
 
-    const { url, body } = await run(runner, { ...CHILD_ACTION, locations: ['list_toolbar'], objectName: CHILD });
+    const { url, body } = await run(runner, { ...CHILD_ACTION, locations: ['list'], objectName: CHILD });
 
     expect(url).toBe(`/api/v1/actions/${CHILD}/escalate_task`);
     expect(body).toEqual({ params: {} });

@@ -34,7 +34,7 @@ import { bootShowcase } from './showcase-boot.js';
 
 const PKG = 'com.example.qasaveother';
 const action = (name: string, label: string, objectName: string) => ({
-  name, label, objectName, type: 'url', target: `https://example.invalid/${label}`, locations: ['record_more'],
+  name, label, objectName, type: 'url', target: `https://example.invalid/${label}`, locations: ['record_page'], component: 'action:menu',
 });
 
 describe('[ADR-0150 D4] a package-less action save on an object the package does not bind', () => {

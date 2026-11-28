@@ -75,7 +75,7 @@ import { DesignModeProvider, useDesignModeController } from '../layout/designMod
 import { DesignModeBar } from '../layout/DesignModeBar';
 
 const RECORD_ID = 'rec-1';
-const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_more'], order: 3 };
+const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_page'], component: 'action:menu', order: 3 };
 
 const OBJECTS = [
   {
