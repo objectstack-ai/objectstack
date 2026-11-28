@@ -35,9 +35,13 @@
  *  5. a run parked on a `map:` link at a node other than the built-in `map`
  *     is not woken: the engine records the marker for no other node, so
  *     re-running it would advance it past the item with nothing recorded.
+ *
+ * The record-delete void (#37763) cancels a run for the same want of a
+ * decision and wakes its batch through the same call, so its pins share this
+ * harness: the last `describe` below.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AutomationEngine, InMemorySuspendedRunStore, ObjectStoreSuspendedRunStore, installBuiltinNodes } from '@objectstack/service-automation';
 import { APPROVAL_REVISE_NODE_TYPE, defineActionDescriptor } from '@objectstack/spec/automation';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
@@ -174,8 +178,9 @@ function wireReplica(
   store: InMemorySuspendedRunStore | ObjectStoreSuspendedRunStore,
   clock: { now: () => Date },
   onPeek: (seen: { results: unknown; count: unknown }) => void | Record<string, unknown>,
+  serviceLogger: any = silentLogger(),
 ) {
-  const service = new ApprovalService({ engine: fake as any, logger: silentLogger(), clock });
+  const service = new ApprovalService({ engine: fake as any, logger: serviceLogger, clock });
   const automation = new AutomationEngine(silentLogger(), store);
   installBuiltinNodes(automation, { logger: silentLogger(), getService() { throw new Error('none'); } } as any);
   registerApprovalNode(automation, service, silentLogger());
@@ -526,5 +531,212 @@ describe('#34638 — a refused batch resume after a revise-window recall tells t
     expect(out.resumeFailure).toEqual({
       code: 'RESUME_FAILED', runId: batchRunId, status: 'stranded', repairable: true, ...refusal,
     });
+  });
+});
+
+/** An outer flow whose `subflow` node runs the sign-off: the approval parks in the child. */
+const WRAPPED_SIGNOFF = {
+  name: 'wrapped_signoff', label: 'Wrapped Sign-off', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'call', type: 'subflow', label: 'Sign off', config: { flowName: 'task_signoff' } },
+    { id: 'peek', type: 'peek', label: 'After the sign-off' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'w1', source: 'start', target: 'call' },
+    { id: 'w2', source: 'call', target: 'peek' },
+    { id: 'w3', source: 'peek', target: 'end' },
+  ],
+};
+
+/** Two `subflow` levels above the approval: outer → wrapped → sign-off. */
+const DOUBLY_WRAPPED_SIGNOFF = {
+  name: 'doubly_wrapped_signoff', label: 'Doubly Wrapped Sign-off', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'call', type: 'subflow', label: 'Wrapped', config: { flowName: 'wrapped_signoff' } },
+    { id: 'peek', type: 'peek', label: 'After the wrapped sign-off' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'd1', source: 'start', target: 'call' },
+    { id: 'd2', source: 'call', target: 'peek' },
+    { id: 'd3', source: 'peek', target: 'end' },
+  ],
+};
+
+/** A batch whose every item runs the sign-off inside a `subflow`. */
+const BATCH_OF_WRAPPED = {
+  ...RELEASE_SIGNOFF,
+  name: 'batch_of_wrapped',
+  nodes: RELEASE_SIGNOFF.nodes.map(n => (n.id === 'signoffs'
+    ? { ...n, config: { ...(n as any).config, flowName: 'wrapped_signoff' } }
+    : n)),
+};
+
+describe('a record delete cancels the run its voided request gated (#37763)', () => {
+  let automation: AutomationEngine;
+  let service: ApprovalService;
+  let fake: ReturnType<typeof makeFakeEngine>;
+  let peeks: Array<{ results: unknown; count: unknown }>;
+  let logged: Array<{ level: string; msg: string; meta: any }>;
+
+  beforeEach(() => {
+    peeks = [];
+    logged = [];
+    fake = makeFakeEngine();
+    const capture = (level: string) => (msg: any, meta?: any) => { logged.push({ level, msg: String(msg), meta }); };
+    const serviceLogger = { info() {}, debug() {}, warn: capture('warn'), error: capture('error'), child() { return serviceLogger; } };
+    ({ automation, service } = wireReplica(fake, new InMemorySuspendedRunStore(), tickingClock(), (s) => { peeks.push(s); }, serviceLogger));
+    automation.registerFlow('wrapped_signoff', WRAPPED_SIGNOFF as never);
+    automation.registerFlow('doubly_wrapped_signoff', DOUBLY_WRAPPED_SIGNOFF as never);
+    automation.registerFlow('batch_of_wrapped', BATCH_OF_WRAPPED as never);
+  });
+
+  const requestFor = async (recordId: string, status: string) =>
+    (await fake.find('sys_approval_request', { where: { record_id: recordId, status } }))[0];
+  const parked = () => automation.listSuspendedRuns().map(r => ({ runId: r.runId, nodeId: r.nodeId, correlation: r.correlation }));
+  const REASON = /record it is about was deleted/;
+  /** The delete hook's call, with what the service logs from here on captured alone. */
+  const deleteRecord = (recordId: string) => {
+    logged.length = 0;
+    return service.cancelForDeletedRecord('rel_task', recordId);
+  };
+  /** What was logged about runs: the fake holds no `rel_task` rows, so opening a request always warns about that. */
+  const runLogs = () => logged.filter(l => !l.msg.includes('not found at node entry'));
+
+  it('cancels the run parked on the approval, with the reason; neither branch runs', async () => {
+    const run = await automation.execute('task_signoff', { object: 'rel_task', record: { id: 'solo' }, userId: 'submitter' } as never);
+    const req = await requestFor('solo', 'pending');
+
+    const out = await deleteRecord('solo');
+
+    expect(out).toEqual({ cancelled: [req.id], cancelledRuns: [run.runId], suspendedRuns: [] });
+    const history: any = await automation.getRun(run.runId!);
+    expect(history?.status).toBe('cancelled');
+    expect(history?.error).toMatch(REASON);
+    // Neither `mark_ok` nor `mark_no` ran: the run never left the approval.
+    expect(history?.steps?.map((s: any) => s.nodeId)).not.toEqual(expect.arrayContaining(['mark_ok']));
+    expect(history?.steps?.map((s: any) => s.nodeId)).not.toEqual(expect.arrayContaining(['mark_no']));
+    expect(parked()).toEqual([]);
+    expect(await automation.hasSuspendedRun(run.runId!)).toBe(false);
+    expect((await requestFor('solo', 'cancelled'))?.cancel_reason).toBe('record_deleted');
+    expect(runLogs()).toEqual([]);
+  });
+
+  it('a batch item: the item is cancelled and the batch goes on to the next one', async () => {
+    const batch = await automation.execute('release_signoff', {
+      userId: 'submitter', params: { items: [{ id: 't1' }, { id: 't2' }] },
+    } as never);
+    const first = await requestFor('t1', 'pending');
+
+    const out = await deleteRecord('t1');
+
+    expect(out).toMatchObject({ cancelledRuns: [first.flow_run_id], suspendedRuns: [] });
+    expect((await automation.getRun(first.flow_run_id))?.status).toBe('cancelled');
+    const second = await requestFor('t2', 'pending');
+    expect(second, 'the batch opened the next item').toBeDefined();
+    expect(parked()).toContainEqual({ runId: batch.runId, nodeId: 'signoffs', correlation: `map:${second.flow_run_id}` });
+
+    await service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+
+    expect(peeks).toEqual([{ results: [{ $status: 'cancelled', $itemRunId: first.flow_run_id }, { decision: 'approved' }], count: 1 }]);
+    expect((await automation.getRun(batch.runId!))?.status).toBe('completed');
+    expect(runLogs()).toEqual([]);
+  });
+
+  it('inside subflows: every run up the chain is cancelled, deepest first, and no parent is resumed', async () => {
+    const outer = await automation.execute('doubly_wrapped_signoff', {
+      object: 'rel_task', record: { id: 'w1' }, userId: 'submitter',
+    } as never);
+    const req = await requestFor('w1', 'pending');
+    expect(parked()).toHaveLength(3);
+    const cancelRun = vi.spyOn(automation, 'cancelRun');
+    const resume = vi.spyOn(automation, 'resume');
+
+    const out = await deleteRecord('w1');
+
+    expect(out.suspendedRuns).toEqual([]);
+    expect(out.cancelledRuns).toHaveLength(3);
+    const order = cancelRun.mock.calls.map(([id]) => id);
+    expect(order[0]).toBe(req.flow_run_id);
+    expect(order[2]).toBe(outer.runId);
+    for (const [, reason] of cancelRun.mock.calls) expect(reason).toMatch(REASON);
+    // ⛔ A resume of a subflow parent would read as the subflow completing.
+    expect(resume).not.toHaveBeenCalled();
+    expect((await automation.getRun(outer.runId!))?.status).toBe('cancelled');
+    expect(peeks).toEqual([]);
+    expect(parked()).toEqual([]);
+  });
+
+  it('a batch item that runs its sign-off in a subflow: the item chain is cancelled and the batch goes on', async () => {
+    const batch = await automation.execute('batch_of_wrapped', {
+      userId: 'submitter', params: { items: [{ id: 'k1' }, { id: 'k2' }] },
+    } as never);
+    const first = await requestFor('k1', 'pending');
+    expect(parked()).toHaveLength(3);
+
+    const out = await deleteRecord('k1');
+
+    expect(out.cancelledRuns).toHaveLength(2);
+    expect(out.cancelledRuns).toContain(first.flow_run_id);
+    const second = await requestFor('k2', 'pending');
+    expect(second).toBeDefined();
+    await service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+
+    // The batch's own reader, not the wrapped flow's (whose peek sees no batch).
+    expect(peeks.filter(p => p.count !== undefined)).toEqual([
+      { results: [{ $status: 'cancelled', $itemRunId: out.cancelledRuns[1] }, {}], count: 1 },
+    ]);
+    expect((await automation.getRun(batch.runId!))?.status).toBe('completed');
+    expect(parked()).toEqual([]);
+  });
+
+  it('a request that names no record run cancels its own run alone and says a parent may stay parked', async () => {
+    const outer = await automation.execute('wrapped_signoff', {
+      object: 'rel_task', record: { id: 'old' }, userId: 'submitter',
+    } as never);
+    const req = await requestFor('old', 'pending');
+    // A request opened before requests recorded the column.
+    await fake.update('sys_approval_request', { id: req.id, record_run_id: null });
+
+    const out = await deleteRecord('old');
+
+    expect(out).toMatchObject({ cancelledRuns: [req.flow_run_id], suspendedRuns: [] });
+    // Nothing reached the parent: it stays parked, exactly as before this card.
+    expect(parked()).toEqual([{ runId: outer.runId, nodeId: 'call', correlation: `subflow:${req.flow_run_id}` }]);
+    expect(peeks).toEqual([]);
+  });
+
+  it('a request whose record run cannot be walked to its own run cancels that run alone, and warns', async () => {
+    const outer = await automation.execute('wrapped_signoff', {
+      object: 'rel_task', record: { id: 'gap' }, userId: 'submitter',
+    } as never);
+    const req = await requestFor('gap', 'pending');
+    vi.spyOn(automation, 'suspensionOf').mockRejectedValueOnce(new Error('store unavailable'));
+
+    const out = await deleteRecord('gap');
+
+    expect(out).toMatchObject({ cancelledRuns: [req.flow_run_id], suspendedRuns: [] });
+    expect(parked()).toEqual([{ runId: outer.runId, nodeId: 'call', correlation: `subflow:${req.flow_run_id}` }]);
+    expect(runLogs()).toContainEqual(expect.objectContaining({
+      level: 'warn', meta: expect.objectContaining({ run: req.flow_run_id, recordRun: outer.runId }),
+    }));
+  });
+
+  it('a cancel that throws leaves that run and the runs above it parked, named, and never throws', async () => {
+    const outer = await automation.execute('wrapped_signoff', {
+      object: 'rel_task', record: { id: 'boom' }, userId: 'submitter',
+    } as never);
+    const req = await requestFor('boom', 'pending');
+    vi.spyOn(automation, 'cancelRun').mockRejectedValueOnce(new Error('store unavailable'));
+
+    const out = await deleteRecord('boom');
+
+    expect(out).toMatchObject({ cancelled: [req.id], cancelledRuns: [], suspendedRuns: [req.flow_run_id, outer.runId] });
+    expect(parked()).toHaveLength(2);
+    expect(runLogs().map(l => l.level)).toEqual(['error', 'warn']);
+    expect(runLogs()[1].meta.runs).toEqual([req.flow_run_id, outer.runId]);
   });
 });

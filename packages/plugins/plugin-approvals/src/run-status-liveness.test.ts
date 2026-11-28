@@ -241,8 +241,8 @@ describe('the dead-run sweep classifies every ExecutionStatus member (#16433)', 
 // `STRANDABLE_REQUEST_STATUSES` is a subset of `APPROVAL_STATUSES`, which grew
 // `cancelled` (#13568) after that subset was written. The reading: `cancelled`
 // is correctly OUTSIDE it — `cancelForDeletedRecord` does not resume the run
-// and warns about it by name, so reporting those rows would bury the real
-// findings. The value was right; only the mechanism was a hand-copy.
+// (it cancels it since #37763, and warns by name about any it could not), so
+// reporting those rows would bury the real findings. The value was right; only the mechanism was a hand-copy.
 
 describe('the stranded-request scan classifies every ApprovalStatus (#16433)', () => {
   it('the contract vocabulary is reachable', () => {

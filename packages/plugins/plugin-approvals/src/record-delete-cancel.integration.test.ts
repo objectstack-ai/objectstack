@@ -103,12 +103,15 @@ function makeSqliteDriver() {
  * plus a reason, NOT a flow resume, and this is how "the downstream nodes did
  * not run" is measured rather than asserted. A spy that is never called proves
  * nothing unless the same spy is reachable — `openNodeRequest` below is handed
- * this same object, so the wiring is live throughout.
+ * this same object, so the wiring is live throughout. `cancelRun` answers
+ * `true`, the engine's "cancelled" (#37763 cancels the parked run; the real
+ * engine's chain, batch and subflow cases are pinned in
+ * `batch-item-recall-resumes-batch.test.ts`, its last `describe`).
  */
 function makeAutomationSpy() {
   return {
     resume: vi.fn(async () => ({ status: 'completed' })),
-    cancelRun: vi.fn(async () => undefined),
+    cancelRun: vi.fn(async (_runId: string, _reason?: string) => true as boolean),
     getRun: vi.fn(async (runId: string) => ({ id: runId, status: 'suspended' })),
   };
 }
@@ -295,7 +298,7 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     expect(await svc.countRequests({ status: 'pending', approverId: 'approver' }, APPROVER)).toBe(1);
   });
 
-  it('runs no flow node and mirrors no status back', async () => {
+  it('cancels the parked run with the reason, runs no flow node and mirrors no status back (#37763)', async () => {
     await openOn('LR6', 'run_1');
     automation.resume.mockClear();
     automation.cancelRun.mockClear();
@@ -307,10 +310,29 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     // would be an `update_record` against a row that no longer exists — the
     // exact write this card's forensics caught failing on the reject door.
     expect(automation.resume).not.toHaveBeenCalled();
-    expect(automation.cancelRun).not.toHaveBeenCalled();
-    // The suspended run is REPORTED rather than repaired — the datum an
-    // operator (and the automation-side card) needs, without this hook
-    // guessing at run lifecycle.
+    // The maintainer's #37763 ruling (option A): the run the request gated is
+    // cancelled in the same step, end state `cancelled`, reason the delete.
+    expect(automation.cancelRun).toHaveBeenCalledTimes(1);
+    const [runId, reason] = automation.cancelRun.mock.calls[0];
+    expect(runId).toBe('run_1');
+    expect(reason).toMatch(/record it is about was deleted/);
+    // Nothing is left parked, so nothing is reported as left.
+    expect(warnings.some((w) => w.msg.includes('stay suspended'))).toBe(false);
+  });
+
+  it('a cancel that fails never fails the delete: the run is named in the warning (#37763)', async () => {
+    await openOn('LR6', 'run_1');
+    automation.cancelRun.mockRejectedValueOnce(new Error('store unavailable'));
+
+    await expect(
+      engine.delete('crm_leave_request', { where: { id: 'LR6' }, context: SYSTEM } as any),
+    ).resolves.toBeDefined();
+
+    expect(await engine.find('crm_leave_request', {
+      where: { id: 'LR6' }, context: SYSTEM,
+    } satisfies EngineQueryOptions)).toEqual([]);
+    const [row] = await requestsFor('LR6');
+    expect(row.status).toBe('cancelled');
     expect(warnings.some((w) => w.msg.includes('stay suspended')
       && Array.isArray(w.meta?.runs) && w.meta.runs.includes('run_1'))).toBe(true);
   });
