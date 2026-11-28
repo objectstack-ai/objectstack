@@ -3,29 +3,29 @@
 import { Args, Command, Flags } from '@oclif/core';
 import {
   describeBuild,
+  describeFailures,
   resolveKnowledgeTarget,
   runKnowledgeAction,
+  type KnowledgeQueueView,
   type KnowledgeSourceView,
 } from '../../utils/knowledge-actions.js';
 
 /**
  * `os knowledge status [source]` — what each knowledge source's index holds
- * against what the server expects of it, and the last build the answering
- * node ran: its progress while it runs, its result once it ended.
+ * against what the server expects of it, the source's last build (its
+ * progress while it runs, its result once it ended), its record syncs that
+ * failed and are not yet repaired, and the record syncs waiting on the queue.
  *
  * Calls the `knowledge` settings namespace's `index_status` action, which
- * admits an administrator only. A build record lives in memory on the node
- * that ran the build: behind a load balancer, the node that answers may not
- * be the one building, and a restarted node remembers none. The answer
- * carries no node identity, so the command says which node a record is from
- * only as "the node that answered", and when that node holds none it says
- * that a build run on another node (or before a restart) is not shown here.
- * The index state it prints is the store's own: the same on every node when
- * the adapter's store is shared, and per node on the `memory` adapter.
+ * admits an administrator only. The last build and the failed syncs are the
+ * source's sync state: one durable record per source, the same whichever
+ * node answers and kept across restarts. The index state is the store's own:
+ * the same on every node when the adapter's store is shared, and per node on
+ * the `memory` adapter, whose index lives in each process.
  */
 export default class KnowledgeStatus extends Command {
   static override description =
-    'Show each knowledge source\'s index state (built, never built, needs a rebuild) and the last build the server ran, with its progress or result';
+    'Show each knowledge source\'s index state (built, never built, needs a rebuild), its last build with its progress or result, and its record syncs that failed';
 
   static override examples = [
     '$ os knowledge status',
@@ -59,15 +59,26 @@ export default class KnowledgeStatus extends Command {
       this.log(`${source.id}  (${source.label ?? source.id}; adapter ${source.adapter ?? '?'}${held})`);
       const index = source.index;
       this.log(`  index: ${index?.state ?? 'unknown'}${index?.due ? ' — a build is due' : ''}${index?.detail ? ` — ${index.detail}` : ''}`);
-      this.log(
-        source.build
-          ? `  last build on the node that answered: ${describeBuild(source.build)}`
-          : '  last build on the node that answered: none recorded there (a build run on another node, or before ' +
-              'this node restarted, is not shown; the index state above is the store\'s, the same on every node only when ' +
-              'the adapter\'s store is shared between nodes, not on the memory adapter)',
-      );
+      this.log(source.build ? `  last build: ${describeBuild(source.build)}` : '  last build: none recorded');
       const note = source.build?.message;
       if (note) this.log(`    ${note}`);
+      if (source.failures) {
+        this.log(`  failed syncs: ${describeFailures(source.failures)}`);
+        if ((source.failures.count ?? 0) > 0 && source.failures.lastError) this.log(`    ${source.failures.lastError}`);
+      } else {
+        this.log(`  sync state: not read${source.syncStateError ? ` — ${source.syncStateError}` : ''}`);
+      }
+      if (source.adapter === 'memory') {
+        this.log('  (the memory adapter keeps its index in each server process: the index state above is the answering node\'s own)');
+      }
+    }
+    const queue = answer.details.queue as KnowledgeQueueView | undefined;
+    if (queue) {
+      this.log(
+        queue.pending !== undefined
+          ? `record syncs waiting on queue ${queue.queue ?? '?'}: ${queue.pending} (every source's together)`
+          : `record syncs waiting on queue ${queue.queue ?? '?'}: not read${queue.error ? ` — ${queue.error}` : ''}`,
+      );
     }
   }
 }

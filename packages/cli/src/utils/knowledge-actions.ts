@@ -28,24 +28,36 @@ export function resolveKnowledgeTarget(flags: { url?: string; token?: string }):
   return { url, ...(token ? { token } : {}) };
 }
 
-/** A build's progress, as the server reports it. */
-export interface KnowledgeBuildProgressView {
-  pages?: number;
+/** A build's counts, as the source's sync state records them. */
+export interface KnowledgeBuildCountsView {
   discovered?: number;
   indexed?: number;
   skipped?: number;
+  /** `null` while the build runs, and for a build that purged nothing. */
+  purged?: number | null;
   failed?: number;
 }
 
-/** A build record, as the server reports it. */
+/**
+ * A source's last build, as its sync state records it: one durable record per
+ * source, the same on every node, kept across restarts.
+ */
 export interface KnowledgeBuildView {
   trigger?: string;
-  status?: 'running' | 'done' | 'failed' | 'not-run' | 'lease-lost' | 'timed-out';
+  /** `interrupted`: the node running it stopped before it ended. */
+  status?: 'running' | 'done' | 'failed' | 'lease-lost' | 'timed-out' | 'interrupted';
   startedAt?: string;
   finishedAt?: string;
-  progress?: KnowledgeBuildProgressView;
-  result?: { ok?: boolean; discovered?: number; indexed?: number; skipped?: number; purged?: number | null; failed?: number; message?: string };
+  counts?: KnowledgeBuildCountsView;
   message?: string;
+}
+
+/** A source's record syncs that spent every attempt and are not yet repaired. */
+export interface KnowledgeFailuresView {
+  count?: number;
+  firstFailedAt?: string;
+  lastFailedAt?: string;
+  lastError?: string;
 }
 
 /** One source of an `index_status` answer. */
@@ -58,6 +70,17 @@ export interface KnowledgeSourceView {
   packageId?: string;
   index?: { state?: string; due?: boolean; detail?: string };
   build?: KnowledgeBuildView | null;
+  /** `null` when the sync state could not be read (`syncStateError` says why). */
+  failures?: KnowledgeFailuresView | null;
+  syncStateError?: string;
+}
+
+/** The record-sync queue of an `index_status` answer. */
+export interface KnowledgeQueueView {
+  queue?: string;
+  /** Record syncs waiting, every source's together. */
+  pending?: number;
+  error?: string;
 }
 
 /** What one action answered: its result, or the server's refusal text. */
@@ -96,12 +119,18 @@ export async function runKnowledgeAction(
 
 /** One line of a build's counts. */
 export function describeBuild(build: KnowledgeBuildView): string {
-  const p = build.progress ?? {};
-  const purged = build.result?.purged;
-  const purgedPart = build.status === 'running' ? '' : `${purged === undefined || purged === null ? 'none' : purged} purged, `;
+  const c = build.counts ?? {};
+  const purgedPart = build.status === 'running' ? '' : `${c.purged === undefined || c.purged === null ? 'none' : c.purged} purged, `;
   const counts =
-    `${p.discovered ?? 0} row(s) read, ${p.indexed ?? 0} written, ${p.skipped ?? 0} unchanged, ` +
-    `${purgedPart}${p.failed ?? 0} cannot be indexed`;
+    `${c.discovered ?? 0} row(s) read, ${c.indexed ?? 0} written, ${c.skipped ?? 0} unchanged, ` +
+    `${purgedPart}${c.failed ?? 0} cannot be indexed`;
   const when = build.status === 'running' ? `started ${build.startedAt ?? '?'}` : `ended ${build.finishedAt ?? '?'}`;
   return `${build.status ?? 'unknown'} (${build.trigger ?? '?'}, ${when}): ${counts}`;
+}
+
+/** One line of a source's failed record syncs. */
+export function describeFailures(failures: KnowledgeFailuresView): string {
+  const count = failures.count ?? 0;
+  if (count === 0) return 'none';
+  return `${count} not yet repaired (first ${failures.firstFailedAt ?? '?'}, last ${failures.lastFailedAt ?? '?'})`;
 }
