@@ -142,7 +142,7 @@
     {
       "id": 9,
       "prompt": "Users of our ObjectStack app need to see who changed which field on a record and when. Create an `audit_entry` object (object name, record id, field, old value, new value, user, time) and hooks on every object that fill it.",
-      "expected_output": "Does not build it: the platform catalog lists `sys_audit_log` (every write is recorded) and `sys_activity` (the record timeline, `enable.activities`, on by default) as what the platform ships for change history, read through the record page's activity stream and the data API. Leaves `activities` on, sets `trackHistory` where field-level history is wanted, and points the users at the timeline; `view_all_audit_log` is the capability for rows a reader could not otherwise open. No `audit_entry` object and no hooks.",
+      "expected_output": "Does not build it: the platform catalog lists `sys_audit_log` (every write is recorded) and `sys_activity` (the record timeline, `enable.activities`, on by default) as what the platform ships for change history, read through the record page's activity stream and the data API. Leaves `activities` on, where a changed field's old and new values show by default (`fieldHistory`), and points the users at the timeline; `view_all_audit_log` is the capability for rows a reader could not otherwise open. No `audit_entry` object and no hooks.",
       "files": [],
       "assertions": {
         "must_contain": [
