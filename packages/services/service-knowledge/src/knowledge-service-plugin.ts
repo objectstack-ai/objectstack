@@ -348,9 +348,11 @@ export interface KnowledgeServicePluginOptions {
    * `data.record.restored` / `data.record.deleted` events from
    * `IRealtimeService`; without one, it registers the data engine's
    * `afterInsert` / `afterUpdate` / `afterDelete` hooks on every indexed
-   * object instead, and each sync starts once the write's unit of work
-   * commits, off the write's response (`KnowledgeRecordHooks`). One of the
-   * two, never both: each write is synced once.
+   * object instead, plus one engine middleware that hears a recycle-bin
+   * `restore` (which runs no hook, ADR-0148 D2), and each sync starts once the
+   * write's unit of work commits, off the write's response
+   * (`KnowledgeRecordHooks`). One of the two, never both: each write and each
+   * restore is synced once.
    *
    * Where the kernel composes a durable `queue` service (the platform's
    * `QueueServicePlugin` over a data engine) and a data engine is bound, the
@@ -1203,7 +1205,10 @@ export class KnowledgeServicePlugin implements Plugin {
     ctx.logger.info?.(
       'KnowledgeServicePlugin: no realtime service — record sync runs on the data engine\'s after-write hooks' +
         `${objects.length > 0 ? ` for [${objects.join(', ')}]` : ''}; each sync starts once the write's unit of work ` +
-        'commits, off the write\'s response.',
+        'commits, off the write\'s response.' +
+        (hooks.watchesRestores
+          ? ' A recycle-bin restore re-indexes the rows it writes back (an engine middleware on the restore operation).'
+          : ' The engine takes no middleware, so a recycle-bin restore is not re-indexed until the reconcile.'),
     );
     return true;
   }

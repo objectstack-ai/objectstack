@@ -1,5 +1,58 @@
 # @objectstack/dogfood
 
+## 0.0.55-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [1f03dc5]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0bfdee9]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0c190a8]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/mcp@19.0.0-next.2
+  - @objectstack/service-analytics@19.0.0-next.2
+  - @objectstack/verify@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-approvals@19.0.0-next.2
+  - @objectstack/plugin-auth@19.0.0-next.2
+  - @objectstack/example-crm@4.0.107-next.2
+  - @objectstack/example-multi-package@0.0.14-next.2
+  - @objectstack/example-showcase@0.3.29-next.2
+  - @objectstack/connector-mcp@19.0.0-next.2
+  - @objectstack/connector-openapi@19.0.0-next.2
+  - @objectstack/connector-rest@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/plugin-audit@19.0.0-next.2
+  - @objectstack/plugin-email@19.0.0-next.2
+  - @objectstack/plugin-pinyin-search@19.0.0-next.2
+  - @objectstack/plugin-security@19.0.0-next.2
+  - @objectstack/plugin-sharing@19.0.0-next.2
+  - @objectstack/plugin-webhooks@19.0.0-next.2
+  - @objectstack/service-automation@19.0.0-next.2
+  - @objectstack/service-datasource@19.0.0-next.2
+  - @objectstack/service-messaging@19.0.0-next.2
+  - @objectstack/service-storage@19.0.0-next.2
+  - @objectstack/trigger-record-change@19.0.0-next.2
+  - @objectstack/trigger-schedule@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
 ## 0.0.55-next.1
 
 ### Patch Changes

@@ -43,10 +43,11 @@
  *     that names nothing produce the SAME envelope, compared field by field
  *     with the id itself normalised out. This is the property that keeps the
  *     card p1 rather than p0, and it is the report's step 4 re-run.
- *  4. **Record-less and new-record actions are byte-for-byte unchanged.** An
- *     object-less action key never attempts a load, so its verdict is never
- *     `true` and it still receives the `recordId` stamp — the regression that
- *     commit f19475c0a deliberately kept and that this card must not take away.
+ *  4. **Record-less and new-record actions are byte-for-byte unchanged.** A
+ *     call that names no record attempts no load and is never refused here.
+ *     An action not bound to an object accepts no record at all: called with
+ *     a `recordId` it is refused `400` naming the key, before any load and
+ *     before anything runs.
  *  5. **A load that SUCCEEDS still runs.** The owner reaches the flow and the
  *     handler exactly as before; this is the firing control that stops every
  *     zero above from being a rig that dispatches nothing.
@@ -393,36 +394,50 @@ describe('[#16370] the refusal discloses nothing — an unreadable row and a gho
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('[#16370] record-less and new-record actions keep the stamp behaviour unchanged', () => {
-    it('REST: an object-less SCRIPT action invoked WITH a recordId still dispatches, stamp intact', async () => {
-        const { response, actionCtx, ql } = await rest(STRANGER, `/global/log_call/${RECORD_ID}`);
+    it('REST: an object-less SCRIPT action called with a recordId is refused 400 naming it, and nothing runs', async () => {
+        const { response, ql } = await rest(STRANGER, `/global/log_call/${RECORD_ID}`);
 
-        expect(response.status).toBe(200);
-        expect(ql.executeAction).toHaveBeenCalledTimes(1);
-        // ⛔ The prohibition this case exists for: the stamp is still there and
-        // the verdict was never `true`, because no load was attempted at all.
-        expect(actionCtx.record).toEqual({ id: RECORD_ID });
-        expect('recordLoadDenied' in actionCtx).toBe(false);
+        expect({ status: response.status, code: response.body.error?.code, field: response.body.error?.details?.fields?.[0]?.field })
+            .toEqual({ status: 400, code: 'VALIDATION_FAILED', field: 'recordId' });
+        expect(ql.executeAction).not.toHaveBeenCalled();
         expect(ql.find.mock.calls.filter((c: any[]) => c[0] === OBJECT)).toHaveLength(0);
     });
 
-    it('REST: an object-less FLOW action invoked WITH a recordId still starts its run', async () => {
-        const { response, automation, flowCtx } = await rest(STRANGER, `/global/escalate_global/${RECORD_ID}`);
+    it('REST: an object-less FLOW action called with a recordId is refused 400 naming it, and no run starts', async () => {
+        const { response, automation } = await rest(STRANGER, `/global/escalate_global/${RECORD_ID}`);
+
+        expect({ status: response.status, code: response.body.error?.code, field: response.body.error?.details?.fields?.[0]?.field })
+            .toEqual({ status: 400, code: 'VALIDATION_FAILED', field: 'recordId' });
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('MCP: an object-less action called with a recordId is refused 400 naming it, and nothing runs', async () => {
+        const { run, ql } = await mcp(STRANGER, GLOBAL_SCRIPT_ACTION.name, { recordId: RECORD_ID });
+
+        await expect(run()).rejects.toMatchObject({ status: 400, code: 'VALIDATION_FAILED' });
+        expect(ql.executeAction).not.toHaveBeenCalled();
+    });
+
+    it('REST: an object-less FLOW action called with no record still starts its run', async () => {
+        const { response, automation, flowCtx } = await rest(STRANGER, '/global/escalate_global');
 
         expect(response.status).toBe(200);
         expect(automation.execute).toHaveBeenCalledTimes(1);
-        expect(flowCtx.record).toEqual({ id: RECORD_ID });
         expect('recordLoadDenied' in flowCtx).toBe(false);
         // An object-less key carries no `object` on the flow context.
         expect('object' in flowCtx).toBe(false);
     });
 
-    it('MCP: an object-less action invoked WITH a recordId still dispatches, stamp intact', async () => {
-        const { run, ql } = await mcp(STRANGER, GLOBAL_SCRIPT_ACTION.name, { recordId: RECORD_ID });
+    it('an object-less action called with no record still dispatches, at both doors', async () => {
+        const viaRest = await rest(STRANGER, '/global/log_call');
+        expect(viaRest.response.status).toBe(200);
+        expect(viaRest.ql.executeAction).toHaveBeenCalledTimes(1);
+        expect('recordLoadDenied' in viaRest.actionCtx).toBe(false);
 
-        const result: any = await run();
+        const viaMcp = await mcp(STRANGER, GLOBAL_SCRIPT_ACTION.name, {});
+        const result: any = await viaMcp.run();
         expect(result.ok).toBe(true);
-        expect(ql.executeAction).toHaveBeenCalledTimes(1);
-        expect(ql.executeAction.mock.calls[0][2].record).toEqual({ id: RECORD_ID });
+        expect(viaMcp.ql.executeAction).toHaveBeenCalledTimes(1);
     });
 
     it('MCP: a new-record invocation (no recordId at all) is untouched — no load, no refusal', async () => {
