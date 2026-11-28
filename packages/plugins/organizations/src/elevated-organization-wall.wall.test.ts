@@ -606,13 +606,27 @@ describe('an app-authored elevation is judged by its caller’s organization wal
       expect(await noteSeen('seen-hook')).toBe('');
     });
 
+    // [#38221] An explicit 30 s timeout, the one the sibling
+    // `elevated-organization-wall.writes.wall.test.ts` gives its slow cases.
+    // This is the file's first write that FAILS inside the engine's insert
+    // door (the hook's refused update aborts the note insert), so it alone
+    // pays that path's one-time synchronous work: the door's `Insert operation
+    // failed` log reads the error's `stack` for the first time, and vite's
+    // module runner decodes the source maps of every module on it (measured
+    // locally: 51 ms of the case's 136 ms; 0.3 ms when the same case runs a
+    // second time). On a green CI shard the case takes ~0.5 s, like its
+    // neighbours; on an overloaded shard that synchronous stretch blocked the
+    // worker's event loop for 6.1 s (merge-group run 46121604593) and 11.2 s
+    // (run 46109476616), ending each time at that log line, so the case ran
+    // past the default 5 s timeout although every assertion held. The
+    // assertions below are unchanged.
     it('a system hook’s write is refused, and the write it served lands nothing', async () => {
       await reseed();
       const r = await run(NOTE, 'eow_note_add', { name: 'hook-write', target: await idOf('B1') });
       expect(r.status, JSON.stringify(r.body)).toBeGreaterThanOrEqual(400);
       expect(JSON.stringify(r.body)).toContain('no active organization');
       expect(await touched()).toEqual(UNTOUCHED);
-    });
+    }, 30_000);
 
     it('a system flow reads nothing of a tenant-scoped object', async () => {
       await reseed();
