@@ -81,7 +81,7 @@ import { LiteKernel, AuthzStoreUnavailableError } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import type { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
-import { HttpDispatcher } from '@objectstack/runtime';
+import { HttpDispatcher, hookBodyRunnerFactory, QuickJSScriptRunner } from '@objectstack/runtime';
 import { createHonoApp } from '@objectstack/hono';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -145,7 +145,7 @@ afterEach(async () => {
     }
 });
 
-interface Answer { status: number; body: any }
+interface Answer { status: number; body: any; headers: Headers }
 
 /**
  * The real store, the real protocol over it, and the REAL `createHonoApp` over
@@ -189,7 +189,7 @@ async function boot(auth?: Record<string, unknown>) {
             ...(opts.body === undefined ? {} : { body: JSON.stringify(opts.body) }),
         });
         const text = await res.text();
-        return { status: res.status, body: text === '' ? undefined : JSON.parse(text) };
+        return { status: res.status, body: text === '' ? undefined : JSON.parse(text), headers: res.headers };
     };
 
     /** A stored task, written through the engine, read back with its version. */
@@ -476,6 +476,71 @@ describe('[#23587] a real createHonoApp host: a structured refusal carries RestS
         const answer = await host.send('GET', '/data/ghost');
         expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 404, success: false, code: 'OBJECT_NOT_FOUND' });
         expect(answer.body.error.details, JSON.stringify(answer.body)).toEqual({ object: 'ghost' });
+    }, 60_000);
+});
+
+/**
+ * [#38232] A sandboxed hook that refuses every `task` insert with a
+ * three-reason list under `code`, declared in its `refusals` catalogue. Each
+ * reason's param is long enough that the joined `userMessage` passes the REST
+ * routes' 500-character bound.
+ */
+const LONG_PARAM = 'x'.repeat(200);
+function refusingTaskHook(code: string) {
+    return {
+        name: 'refuse_task',
+        object: 'task',
+        events: ['beforeInsert'],
+        body: {
+            language: 'js',
+            source: `throw { code: '${code}', reasons: [`
+                + `{ reason: 'a', params: { n: '${LONG_PARAM}' } }, `
+                + `{ reason: 'b', params: { n: '${LONG_PARAM}' } }, `
+                + `{ reason: 'c', params: { n: '${LONG_PARAM}' } }] };`,
+            capabilities: [],
+        },
+        refusals: {
+            [code]: {
+                message: 'Pick another slot.',
+                params: ['n'],
+                status: 409,
+                reasons: {
+                    a: { message: 'First clash {{ n }}' },
+                    b: { message: 'Second clash {{ n }}' },
+                    c: { message: 'Third clash {{ n }}' },
+                },
+            },
+        },
+    };
+}
+
+describe('[#38232] a real createHonoApp host: a hook refusal on `/data` answers as the REST routes do', () => {
+    const runner = new QuickJSScriptRunner({ hookTimeoutMs: 10_000 });
+
+    // A code of the hook's own, then a registered one. `RestServer`'s
+    // `mapDataError` answers both `409`, the own code demoted to `declaredCode`
+    // beside the status's registered code, the `userMessage` cut at 500
+    // characters and every reason's line whole on `details.refusals`.
+    it.each([
+        { code: 'OVERLAP', wire: { code: 'RESOURCE_CONFLICT', declaredCode: 'OVERLAP' } },
+        { code: 'RESOURCE_CONFLICT', wire: { code: 'RESOURCE_CONFLICT', declaredCode: undefined } },
+    ])('a refusal coded `$code`: 409, the bounded userMessage and every refusal line; nothing stored', async ({ code, wire }) => {
+        const host = await boot();
+        const bind = hookBodyRunnerFactory(runner, { ql: host.ql as any, appId: 'crm' });
+        host.ql.registerHook('beforeInsert', bind(refusingTaskHook(code) as any)!, { object: 'task' });
+
+        const answer = await host.send('POST', '/data/task', { body: { name: 'clash' } });
+        expect(envelope(answer), JSON.stringify(answer.body)).toEqual({ status: 409, success: false, code: wire.code });
+        const error = answer.body.error;
+        expect(error.declaredCode).toBe(wire.declaredCode);
+        expect(typeof error.message).toBe('string');
+        expect(error.userMessage).toHaveLength(500);
+        expect(error.details?.object).toBe('task');
+        const refusals: { reason: string; message: string }[] = error.details?.refusals;
+        expect(refusals?.map((line) => line.reason), JSON.stringify(answer.body)).toEqual(['a', 'b', 'c']);
+        for (const line of refusals) expect(line.message).toContain(LONG_PARAM);
+        expect(answer.headers.get('vary') ?? '').toContain('Accept-Language');
+        expect(await host.ql.find('task', {})).toHaveLength(0);
     }, 60_000);
 });
 
