@@ -52,7 +52,7 @@ import { resolveActionParams, withKnownObjects } from '@object-ui/fields';
 import { EnvironmentEntitlementDialog, type EntitlementDialogState } from '../environment/EnvironmentEntitlementDialog.js';
 import { entitlementDialogFromError, type EntitlementDialogSpec } from '../environment/entitlements.js';
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
-import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { launchConsoleFlow, withAnnouncedUpdateDroppedFields } from '../utils/flowLaunch.js';
 import { useScreenFlowQueue } from './useScreenFlowQueue.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
@@ -412,14 +412,24 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       });
       return;
     }
-    if (options?.undo) {
-      toast.success(message, {
+    // objectstack#38103 — the notice a hook on the write set, alone, when the
+    // runner's success toast is off: the hook's words as an info toast.
+    if (options?.type === 'info') {
+      toast.info(message, {
         duration: options.duration,
-        action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } },
+        ...(options.description ? { description: options.description } : {}),
       });
       return;
     }
-    toast.success(message, { duration: options?.duration });
+    // A success toast carries the write's notice under the title when a hook
+    // set one (objectstack#38103), and the Undo button when the action has one.
+    toast.success(message, {
+      duration: options?.duration,
+      ...(options?.description ? { description: options.description } : {}),
+      ...(options?.undo
+        ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+        : {}),
+    });
   }, [undoCtl]);
 
   // The app an in-place hop is hosted under (objectui#13379): the inbox's own
@@ -864,10 +874,13 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // memoized once) while the config thunks read the latest object scope and
   // refresh callback — the factory's in-flight guard only spans invocations of
   // the same instance.
-  const serverActionEnvRef = useRef({ objApiName, refresh, t, navigate });
-  serverActionEnvRef.current = { objApiName, refresh, t, navigate };
+  const serverActionEnvRef = useRef({ objApiName, refresh, t, navigate, fieldLabel, dataSource });
+  serverActionEnvRef.current = { objApiName, refresh, t, navigate, fieldLabel, dataSource };
+  // objectstack#38103 — a declarative update action's stripped fields get the
+  // record save's own stripped-fields toast, beside the action's toast (see
+  // `withAnnouncedUpdateDroppedFields`), labelled through this host's data source.
   const serverActionHandler = useMemo(
-    () => createConsoleServerActionHandler({
+    () => withAnnouncedUpdateDroppedFields(createConsoleServerActionHandler({
       fetch: authFetch,
       baseUrl: () => import.meta.env.VITE_SERVER_URL || '',
       resolveObject: () => serverActionEnvRef.current.objApiName,
@@ -881,7 +894,11 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // (objectui#3321).
       t: (key, englishDefault, values) =>
         String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
-    }),
+    }), () => ({
+      t: serverActionEnvRef.current.t as TranslateFn,
+      fieldLabel: serverActionEnvRef.current.fieldLabel,
+      dataSource: serverActionEnvRef.current.dataSource,
+    })),
     [authFetch],
   );
 

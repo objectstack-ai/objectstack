@@ -86,8 +86,8 @@
  */
 
 import { toast } from 'sonner';
-import { createServerActionHandler } from '@object-ui/core';
-import type { ActionDef, ActionResult, ServerActionFetch } from '@object-ui/core';
+import { createServerActionHandler, readActionPayload } from '@object-ui/core';
+import type { ActionContext, ActionDef, ActionResult, ServerActionFetch, ServerActionHandler } from '@object-ui/core';
 import {
   asDroppedFieldsNotice,
   isWireDroppedFieldsEntry,
@@ -166,7 +166,16 @@ export interface FlowDroppedFieldsContext {
  * in wire order; empty when the answer carries none.
  */
 export function flowAnswerDroppedFields(json: unknown): DroppedFieldsNotice[] {
-  const wire = (json as { data?: { droppedFields?: unknown } } | null | undefined)?.data?.droppedFields;
+  return parseDroppedFields((json as { data?: { droppedFields?: unknown } } | null | undefined)?.data?.droppedFields);
+}
+
+/**
+ * An answer's `droppedFields` member, parsed, in wire order; empty when it is
+ * absent or not an array. The ONE parse every answer reader here goes
+ * through: a flow run's (`AutomationResult.droppedFields`) and a declarative
+ * update action's (objectstack#38103), both the data engine's own events.
+ */
+function parseDroppedFields(wire: unknown): DroppedFieldsNotice[] {
   if (!Array.isArray(wire)) return [];
   return wire
     .filter(isWireDroppedFieldsEntry)
@@ -191,8 +200,20 @@ export async function announceFlowDroppedFields(
   ctx: FlowDroppedFieldsContext,
   sink: WriteWarningSink = toast,
 ): Promise<void> {
+  await announceDroppedFields(flowAnswerDroppedFields(json), ctx, sink);
+}
+
+/**
+ * The reader both answer kinds speak through: one `emitWriteWarning` per
+ * object the notices name, nothing when there are none. Never throws.
+ */
+async function announceDroppedFields(
+  notices: readonly DroppedFieldsNotice[],
+  ctx: FlowDroppedFieldsContext,
+  sink: WriteWarningSink,
+): Promise<void> {
   const byObject = new Map<string, DroppedFieldsNotice[]>();
-  for (const notice of flowAnswerDroppedFields(json)) {
+  for (const notice of notices) {
     const object = notice.object ?? UNATTRIBUTED_FLOW_DROP;
     byObject.set(object, [...(byObject.get(object) ?? []), notice]);
   }
@@ -213,6 +234,45 @@ export async function announceFlowDroppedFields(
       console.warn('flowLaunch: could not announce dropped fields', err);
     }
   }
+}
+
+/**
+ * A host's server-action handler that also warns about the fields a
+ * declarative update action's write did not store (objectstack#38103).
+ *
+ * An `operation: 'update'` action's answer carries the data write's
+ * `droppedFields` (the engine's own events, the member a record save's answer
+ * carries) when the engine stripped a field from the action's `patch`. The
+ * person who clicked is warned with the record save's own stripped-fields
+ * toast ("Saved — but some fields did not take effect"), beside the action's
+ * own toast and never folded into it — the same second toast a record save and
+ * a flow button raise, whatever the action's `toast` settings say, because the
+ * author's switch is about the success message, not about a value that was
+ * lost. Not on a failed dispatch, and not for any other action: only the
+ * update answer declares the member, so a script's own `droppedFields` key is
+ * never read as one.
+ *
+ * `ctx` is a thunk so the host's live translator, label convention and data
+ * source are read per dispatch while the handler instance stays stable. The
+ * handler's members (`refuseBeforeInput`) are kept.
+ */
+export function withAnnouncedUpdateDroppedFields(
+  handler: ServerActionHandler,
+  ctx: () => FlowDroppedFieldsContext,
+  sink: WriteWarningSink = toast,
+): ServerActionHandler {
+  const wrapped = async (action: ActionDef, context?: ActionContext): Promise<ActionResult> => {
+    const result = await handler(action, context);
+    if (result.success && action.operation === 'update') {
+      const payload = readActionPayload(result.data) as { droppedFields?: unknown } | null | undefined;
+      const notices = parseDroppedFields(payload && typeof payload === 'object' ? payload.droppedFields : undefined);
+      // Not awaited: the label lookup must not hold the click's outcome, and
+      // the reader never rejects.
+      if (notices.length > 0) void announceDroppedFields(notices, ctx(), sink);
+    }
+    return result;
+  };
+  return Object.assign(wrapped, { refuseBeforeInput: handler.refuseBeforeInput });
 }
 
 /** The door a flow click went through. */

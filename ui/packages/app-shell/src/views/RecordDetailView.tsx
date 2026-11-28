@@ -81,7 +81,7 @@ import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderP
 import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
 import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
-import { launchConsoleFlow } from '../utils/flowLaunch.js';
+import { launchConsoleFlow, withAnnouncedUpdateDroppedFields } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
@@ -1961,14 +1961,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       });
       return;
     }
-    if (options?.undo) {
-      toast.success(message, {
+    // objectstack#38103 — the notice a hook on the write set, alone, when the
+    // runner's success toast is off: the hook's words as an info toast.
+    if (options?.type === 'info') {
+      toast.info(message, {
         duration: options.duration,
-        action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } },
+        ...(options.description ? { description: options.description } : {}),
       });
       return;
     }
-    toast.success(message, { duration: options?.duration });
+    // A success toast carries the write's notice under the title when a hook
+    // set one (objectstack#38103), and the Undo button when the action has one.
+    toast.success(message, {
+      duration: options?.duration,
+      ...(options?.description ? { description: options.description } : {}),
+      ...(options?.undo
+        ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+        : {}),
+    });
   }, [undoCtl]);
 
   // The app an in-place hop from this page is hosted under (objectui#13396).
@@ -2392,10 +2402,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `action.recordId`; header/more actions carry none and use this page's id.
   // The env ref keeps the handler instance stable across renders (authFetch is
   // memoized once) while the thunks read the live record/object.
-  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyViewChanged, t, navigate });
-  serverActionEnvRef.current = { objectName, pureRecordId, notifyViewChanged, t, navigate };
+  const serverActionEnvRef = useRef({ objectName, pureRecordId, notifyViewChanged, t, navigate, fieldLabel, dataSource });
+  serverActionEnvRef.current = { objectName, pureRecordId, notifyViewChanged, t, navigate, fieldLabel, dataSource };
+  // objectstack#38103 — a declarative update action's stripped fields get the
+  // record save's own stripped-fields toast, beside the action's toast (see
+  // `withAnnouncedUpdateDroppedFields`), labelled through this host's data source.
   const serverActionHandler = useMemo(
-    () => createConsoleServerActionHandler({
+    () => withAnnouncedUpdateDroppedFields(createConsoleServerActionHandler({
       fetch: authFetch,
       baseUrl: () => import.meta.env.VITE_SERVER_URL || '',
       resolveObject: () => serverActionEnvRef.current.objectName,
@@ -2411,7 +2424,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // (objectui#3321).
       t: (key, englishDefault, values) =>
         String(serverActionEnvRef.current.t(key, { defaultValue: englishDefault, ...values })),
-    }),
+    }), () => ({
+      t: serverActionEnvRef.current.t as TranslateFn,
+      fieldLabel: serverActionEnvRef.current.fieldLabel,
+      dataSource: serverActionEnvRef.current.dataSource,
+    })),
     [authFetch],
   );
 
