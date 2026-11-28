@@ -69,6 +69,7 @@ import { historySlotOf, refusePackageSelectorOutsideSlottedTypes } from './proto
 import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 import { OBJECT_REGISTRY_REFUSED, reportObjectRegistryRefusal } from './protocol-registry-hydration.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
+import { promotedObjectDraftSpecRefusal } from './protocol-promoted-draft-spec-refusal.js';
 import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 
 /**
@@ -1098,6 +1099,17 @@ export class ProtocolHistoryAndPublishFacet {
                     },
                 );
             }
+            // [#35924] …and the save door's spec parse, asked of the draft
+            // this promotion makes live: a draft stored before a narrowing
+            // `ObjectSchema` refinement landed was never judged by it, and was
+            // promoted unjudged. Judged as the publish serves it (the ADR-0087
+            // chain applied), with the save door's `422 INVALID_METADATA` and
+            // `issues[]`, before `repo.promoteDraft` writes; a judge-only call
+            // raises it too. Asked ahead of the registry's refusal, as the save
+            // door orders them, so a body both refuse keeps the structured
+            // `issues[]` (#5364). See {@link promotedObjectDraftSpecRefusal}.
+            const specRefusal = promotedObjectDraftSpecRefusal(request.name, draftForGate.body);
+            if (specRefusal) throw specRefusal;
             // [#29673] …and the registry's refusal of the body this promotion
             // makes live, on the same row and for the D9.9 refusal's reason:
             // the write-through runs after the row is active, where a refusal
