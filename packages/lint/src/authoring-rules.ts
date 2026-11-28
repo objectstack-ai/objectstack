@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateTransferCascades } from './validate-transfer-cascades.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateAppNavigationPresent, validateObjectShellReach } from './validate-app-shell-reach.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
@@ -1084,7 +1085,11 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-widget-bindings.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dashboard'],
-    run: (stack) => validateWidgetBindings(stack),
+    // [#35143] `dashboard-without-widgets` is an error on the CLI and a warning
+    // at the runtime door, where Studio's own create paths save a dashboard
+    // with `widgets: []` before its first widget; `runtimeWriteType` is set by
+    // the runtime gate alone.
+    run: (stack, ctx) => validateWidgetBindings(stack, { atPublishDoor: ctx.runtimeWriteType !== undefined }),
   },
   // #16354 — the AUTHORING-TIME leg of the aggregate × field-type contract
   // (director ruling, decision batch #59, 2026-09-06: "both legs, table in
@@ -3437,6 +3442,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `base_namespace_too_long`), so the ensure door will refuse to create its
   // `.custom` pair and its installers can never customize it. Advisory: the
   // package builds, installs and runs, and only its customization is refused.
+  // [#35143] An app with no navigation entry (`app-navigation-empty`): the
+  // console's app root renders the "no access" empty state to every member.
+  // ADVISORY: Studio may save a new app before its first entry, and another
+  // package may contribute the entries (ADR-0029 D7). The written app is the
+  // whole question, so it runs on the runtime `app` door as on the CLI.
+  {
+    name: 'validateAppNavigationPresent',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-app-shell-reach.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['app'],
+    run: (stack) => validateAppNavigationPresent(stack),
+  },
+  // [#35143] An object no app's navigation opens
+  // (`object-unreachable-from-navigation`), and an object navigation opens that
+  // declares no list view (`object-without-view`). ADVISORY: both work, and
+  // show the user less than was built. CLI only: the verdict reads every app,
+  // view and object of the stack, which no per-write snapshot carries.
+  {
+    name: 'validateObjectShellReach',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-app-shell-reach.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectShellReach(stack),
+  },
   // `normalized` because it reads one string off each delivered manifest and
   // needs no parsed stack, so `os lint` judges it too.
   {

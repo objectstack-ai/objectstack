@@ -450,6 +450,17 @@ export const TABLE_COUNT_ONLY = 'table-count-only';
 export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
+/**
+ * [#35143] A dashboard that declares no widget: it publishes and opens on its
+ * header over an empty canvas (`DashboardRenderer.tsx` in objectui draws no
+ * empty state for it). An `error` on `os validate` / `lint` / `build`, where a
+ * shipped package has nothing left to add; a `warning` at the runtime publish
+ * door, because Studio's own create paths save a new dashboard with
+ * `widgets: []` and fill it afterwards (`newItemBody` in `designModeMenuCreate.ts`,
+ * the `dashboard` resource's `createDefaults` in `anchors.ts`), and refusing
+ * that save would refuse the platform's own first step.
+ */
+export const DASHBOARD_WITHOUT_WIDGETS = 'dashboard-without-widgets';
 export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
 export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unprovisioned';
 /**
@@ -493,6 +504,16 @@ const LEGACY_ANALYTICS_KEYS = [
 ] as const;
 
 export type WidgetBindingSeverity = 'error' | 'warning';
+
+/** How {@link validateWidgetBindings} is being called. */
+export interface WidgetBindingOptions {
+  /**
+   * [#35143] Set by the runtime publish gate's entry: the stack is the
+   * snapshot of one write at the save/publish door, where
+   * {@link DASHBOARD_WITHOUT_WIDGETS} is advisory.
+   */
+  atPublishDoor?: boolean;
+}
 
 export interface WidgetBindingFinding {
   /** `error` = unresolvable binding (broken page); `warning` = advisory. */
@@ -1100,7 +1121,10 @@ function measureColumn(measure: AnyRec): string | undefined {
  * should fail validate/build; `warning` findings are advisory and must
  * never fail the build on their own.
  */
-export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
+export function validateWidgetBindings(
+  stack: AnyRec,
+  options?: WidgetBindingOptions,
+): WidgetBindingFinding[] {
   const findings: WidgetBindingFinding[] = [];
 
   const resolution = indexArtifactDatasetResolution(stack);
@@ -1170,6 +1194,23 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     const dash = dashboards[i];
     const dashName = typeof dash.name === 'string' ? dash.name : `(dashboard ${i})`;
     const widgets = Array.isArray(dash.widgets) ? (dash.widgets as AnyRec[]) : [];
+    // [#35143] No widget at all — see DASHBOARD_WITHOUT_WIDGETS for the split
+    // severity. Judged on an array only: a missing or malformed `widgets` is
+    // the schema's refusal, not this rule's.
+    if (Array.isArray(dash.widgets) && dash.widgets.length === 0) {
+      findings.push({
+        severity: options?.atPublishDoor ? 'warning' : 'error',
+        rule: DASHBOARD_WITHOUT_WIDGETS,
+        where: `dashboard "${dashName}"`,
+        path: `dashboards[${i}].widgets`,
+        message:
+          `dashboard "${dashName}" declares no widgets, so it opens on its header over an empty canvas: there is ` +
+          'nothing on it to show',
+        hint:
+          'Add a widget bound to a dataset (`widgets: [{ id, type, dataset, values }]`), or remove the dashboard ' +
+          'and any navigation entry that opens it',
+      });
+    }
     // Dashboard-level filters (`dateRange` + `globalFilters`) are broadcast into
     // every widget's query (#2501) — resolved once here, checked per widget below.
     const dashFilterDefs = dashboardFilterDefs(dash);
