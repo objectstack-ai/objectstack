@@ -1232,14 +1232,14 @@ id → stored `docHash`), then walks the object's rows page by page:
   walk keeps its document: if it was listed, the re-read finds it; if it was
   not, it was never a candidate. The purge of a document waits for any
   in-flight event sync of the same document. `purged` counts the deletions.
-- **Known limit: numeric record ids.** The purge reads the record id back from
-  the document id as text and re-reads by that text. On driver-mongodb and
-  driver-memory, which do not equate `'5'` with `5`, a row stored under a
-  caller-supplied numeric id is not found by that re-read; if such a row was
-  restored (or came back into `where`) after the walk read past it, its
-  document is deleted. The row itself is untouched, and its document returns at
-  the row's next event or the next complete reindex. Platform-minted ids are
-  text on every driver, so this needs a caller-supplied numeric id.
+- **Record ids are text.** The knowledge service treats a record id as text:
+  the purge reads the record id back from the document id as text and
+  re-reads by that text. A caller-supplied numeric id on driver-mongodb or
+  driver-memory, which do not equate `'5'` with `5`, is not supported. Such a
+  row is not found by that re-read; if it was restored (or came back into
+  `where`) after the walk read past it, its document is deleted. The row
+  itself is untouched, and its document returns at the row's next event or the
+  next complete reindex. Platform-minted ids are text on every driver.
 - **`purged: null`** means no purge ran: a walk with a `limit` or a `dryRun`,
   a failed walk, a source with `refresh.onRecordChange: false` (an external
   indexer owns its index), or an adapter without `listDocuments` — which also

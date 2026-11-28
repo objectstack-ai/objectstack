@@ -1139,11 +1139,12 @@ describe('KnowledgeService — the purge never deletes on an answer it cannot re
     expect(la.stored.has('s1:r001')).toBe(true);
   });
 
-  it('the purge re-reads by the id text only: a numeric id restored mid-walk is not found (the stated limit)', async () => {
+  it('the purge re-reads by the id text: a caller-supplied numeric id, unsupported on driver-mongodb / driver-memory, restored mid-walk is not found', async () => {
     // The engine double compares with `!==`, as driver-mongodb and driver-memory
     // do: a row stored under the number 2 is not found by `{ id: '2' }`. The
     // purge does not ask again by the number (on driver-sql that number is
-    // bound against a text column), so this pins the limit the docs state.
+    // bound against a text column), so this pins what the docs state: a
+    // numeric record id is not supported there.
     const la = listingAdapter();
     const rows = taskRows(5).map((r) => ({ ...r, id: Number(String(r.id).slice(1)) + 1 }));
     const h = reindexHarness(rows, objectSource('s1', 'task'), la.adapter);
