@@ -16,6 +16,9 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic `@objectstack/lint` import; its first
+// load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
