@@ -257,8 +257,8 @@ const VISIBLE_LEGS: Record<string, VisibleLeg> = {
         h(RecordQuickActionsRenderer, {
           schema: {
             actions: [
-              { name, label: LABEL, type: 'script', locations: ['record_header'], visible: gate },
-              { name: 'print', label: COMPANION_LABEL, type: 'script', locations: ['record_header'] },
+              { name, label: LABEL, type: 'script', locations: ['record_page'], visible: gate },
+              { name: 'print', label: COMPANION_LABEL, type: 'script', locations: ['record_page'] },
             ],
           } as never,
         }),
@@ -317,8 +317,8 @@ function header(name: string, gate: unknown) {
         title: 'Northwind',
         maxVisible: 10,
         actions: [
-          { name, label: LABEL, type: 'api', locations: ['record_header'], disabled: gate },
-          { name: 'print', label: COMPANION_LABEL, type: 'api', locations: ['record_header'] },
+          { name, label: LABEL, type: 'api', locations: ['record_page'], disabled: gate },
+          { name: 'print', label: COMPANION_LABEL, type: 'api', locations: ['record_page'] },
         ],
       },
     }),

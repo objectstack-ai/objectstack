@@ -450,13 +450,13 @@ export function ObjectActionsPanel({
     // unseeded skeleton would save clean and then be invisible everywhere — the
     // author would have no button to click and nothing to tell them why.
     // Placement stays fully editable in the Placement checkboxes;
-    // `record_header` is just the starting point (an update action may not sit
-    // in `list_toolbar`, which has no current record).
+    // `record_page` is just the starting point (an update action may not sit
+    // in `list`, which has no current record).
     const fresh: ActionItem = {
       name,
       label: t('engine.studio.actions.newLabel', locale),
       objectName,
-      locations: ['record_header'],
+      locations: ['record_page'],
       operation: 'update',
       patch: {},
     };
@@ -502,7 +502,7 @@ export function ObjectActionsPanel({
       name,
       label: t('engine.studio.actions.newLabel', locale),
       objectName,
-      locations: ['record_header'],
+      locations: ['record_page'],
       ...plan.keys,
     };
     if (heldInputKey(fresh) === null) {

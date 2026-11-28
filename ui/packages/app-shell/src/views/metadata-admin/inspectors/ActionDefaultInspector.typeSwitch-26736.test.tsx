@@ -86,7 +86,7 @@ const SCRIPT_ACTION: Draft = {
   name: 'invoice_sync',
   label: 'Sync',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };

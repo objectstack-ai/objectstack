@@ -1404,6 +1404,58 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(missing.body.contract).toBeUndefined();
   });
 
+  it('[ADR-0161 K4, K5] the knowledge_source contract serves the content rule and no create seed; a source with one object and one content field saves, a wildcard or a retired key is refused', async () => {
+    const metadata = new MetadataManager({} as never);
+    metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
+    const protocol = await realProtocol(new Map([['metadata', metadata]]));
+    const { authoring } = await authorThroughDomain({ protocol, systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'knowledge_source') as any;
+
+    const { contract } = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true })).body;
+    expect(contract.form).toBe('lean');
+    // No seed is served: the type stays unseeded until the Studio form builds `source` (metadata-create-seeds.test.ts).
+    expect(getMetadataCreateSeed('knowledge_source')).toBeUndefined();
+    expect(contract).not.toHaveProperty('createSeed');
+    expect(Object.keys(contract.schema.properties)).toEqual(Object.keys(entry.schema.properties));
+
+    // The content rule, as the served schema states it: a non-empty list, no empty name, no `'*'` member.
+    const contentPath = '/properties/source/properties/content';
+    const content = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true, contractPath: contentPath })).body.contract;
+    expect(content).toMatchObject({ form: 'full', path: contentPath });
+    expect(content.schema).toEqual(entry.schema.properties.source.properties.content);
+    expect(content.schema.minItems).toBe(1);
+    expect(content.schema.items).toMatchObject({ minLength: 1 });
+    expect(new RegExp(content.schema.items.pattern).test('*')).toBe(false);
+    expect(new RegExp(content.schema.items.pattern).test('body')).toBe(true);
+
+    // A tombstone is not served: the served schema publishes what an author MAY write (`{ not: {} }` is
+    // dropped). Its prescription reaches the author through the save, below.
+    expect(entry.schema.properties.id).toBeUndefined();
+    expect(entry.schema.properties.source.properties.contentFields).toBeUndefined();
+
+    // A source with one object and one content field saves as a draft; with a wildcard it is refused and nothing is written.
+    const item = { name: 'crm_opportunity_notes', label: 'Opportunity notes', source: { kind: 'object', object: 'crm_opportunity', content: ['name'] } };
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: item.name, item, package: STUDIO_BASE });
+    expect(saved.isError, JSON.stringify(saved.body)).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'knowledge_source', name: 'crm_opportunity_notes', package: STUDIO_BASE, state: 'draft' });
+
+    const wildcard = { ...item, name: 'crm_opportunity_all', source: { ...item.source, content: ['*'] } };
+    const refused = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: wildcard.name, item: wildcard, package: STUDIO_BASE });
+    expect(refused.body.error).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect(JSON.stringify(refused.body.error.issues)).toContain('content');
+
+    // A retired key is refused with its tombstone's prescription, as the describe reads.
+    for (const [retired, replacement] of [
+      [{ ...item, name: 'crm_opportunity_id', id: 'crm_opportunity_id' }, '`name`'],
+      [{ ...item, name: 'crm_opportunity_cf', source: { ...item.source, contentFields: ['name'] } }, '`content`'],
+    ] as const) {
+      const tomb = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: retired.name, item: retired, package: STUDIO_BASE });
+      expect(tomb.body.error, replacement).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+      expect(JSON.stringify(tomb.body.error.issues), replacement).toContain(`use ${replacement}`);
+    }
+    expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts.map((d: any) => d.name)).toEqual(['crm_opportunity_notes']);
+  });
+
   it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {
     const protocol = await realProtocol();
     const { authoring } = await authorThroughDomain({ protocol });

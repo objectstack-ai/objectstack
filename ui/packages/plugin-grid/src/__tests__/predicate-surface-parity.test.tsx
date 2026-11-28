@@ -92,7 +92,7 @@ function headerVerdict(name: string, visible: unknown, record: any): boolean {
               type: 'page:header',
               title: 'Specimen',
               actions: [
-                { name, locations: ['record_header'], label: 'Parity Action', type: 'api', visible },
+                { name, locations: ['record_page'], label: 'Parity Action', type: 'api', visible },
               ],
             }}
           />

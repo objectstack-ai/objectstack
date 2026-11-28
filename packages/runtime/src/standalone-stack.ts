@@ -74,6 +74,7 @@ import {
     driverHasLocalDefault,
     resolveDatabaseDriverId,
 } from '@objectstack/spec/data';
+import { PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
 import { makeDirectorySync } from './make-directory.js';
@@ -409,6 +410,32 @@ export interface StandaloneStackResult {
      */
     permissions?: any[];
     positions?: any[];
+    /**
+     * [ADR-0161 K8 item 12] The artifact's `knowledge_source` items. Surfaced,
+     * with every other collection a `PLATFORM_CAPABILITY_PROVIDERS` row names
+     * as its `mountedBy` (see {@link stackItemMountCollections}), so a caller
+     * wrapping this result as a `defineStack()`-shaped config (the CLI
+     * artifact-serve path) mounts the capability those items mount
+     * (`stackItemCapabilities`, `@objectstack/core`), exactly as the
+     * config-load path does. Without it a stack served from its artifact alone
+     * held inert sources unless it also listed `requires: ['knowledge']`.
+     */
+    knowledgeSources?: any[];
+}
+
+/**
+ * [ADR-0161 K8 item 12] The stack collections whose items mount a capability:
+ * every `mountedBy.collection` of `PLATFORM_CAPABILITY_PROVIDERS`
+ * (`@objectstack/spec`), read off the table so a later row is surfaced by
+ * {@link createStandaloneStack} with no edit here. Today `knowledgeSources`.
+ */
+function stackItemMountCollections(): string[] {
+    const collections: string[] = [];
+    for (const row of Object.values(PLATFORM_CAPABILITY_PROVIDERS)) {
+        const collection = row.mountedBy?.collection;
+        if (collection !== undefined && !collections.includes(collection)) collections.push(collection);
+    }
+    return collections;
 }
 
 type ResolvedDriverKind = z.infer<typeof StandaloneDatabaseDriverSchema>;
@@ -1204,6 +1231,15 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         Array.isArray(artifactStack?.positions) ? artifactStack.positions : undefined;
     const i18n: any | undefined =
         artifactBundle?.i18n && typeof artifactBundle.i18n === 'object' ? artifactBundle.i18n : undefined;
+    // [ADR-0161 K8 item 12] The collections whose items mount a capability
+    // (`knowledgeSources` today), off the same resolved stack, so the CLI's
+    // `stackItemCapabilities(config)` reads them on this path as it does on
+    // the config-load path.
+    const itemCollections: Record<string, any[]> = {};
+    for (const collection of stackItemMountCollections()) {
+        const items = artifactStack?.[collection];
+        if (Array.isArray(items)) itemCollections[collection] = items;
+    }
 
     return {
         plugins,
@@ -1220,5 +1256,6 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         ...(permissions ? { permissions } : {}),
         ...(positions ? { positions } : {}),
         ...(i18n ? { i18n } : {}),
+        ...itemCollections,
     };
 }

@@ -31,7 +31,7 @@ const ARCHIVE = {
   name: 'showcase_task_archive',
   label: 'Archive',
   objectName: 'showcase_task',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };

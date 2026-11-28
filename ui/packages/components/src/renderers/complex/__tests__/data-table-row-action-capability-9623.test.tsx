@@ -9,9 +9,9 @@
 /**
  * objectui#9623 — a row action's `requiredPermissions` was INERT inside a
  * record page's related-list panel, while the SAME declaration gated correctly
- * on `record_header`.
+ * on `record_page`.
  *
- * The related list feeds a child object's `list_item` actions into this
+ * The related list feeds a child object's `record_row` actions into this
  * data-table as `rowActionDefs` (`RelatedRecordActionsBridge`), and this
  * renderer filters its own action list instead of routing through
  * `ActionEngine.getActionsForLocation` — so the engine's ADR-0066 D4 gate never

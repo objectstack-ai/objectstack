@@ -27,7 +27,7 @@
  *
  * This is the "bridge" component that connects UIActionSchema metadata to the UI,
  * enabling server-driven action rendering at every location the spec declares:
- * list_toolbar, list_item, record_header, record_more, record_related and
+ * list, record_row, record, record_page, record_related and
  * record_section. (`global_nav` used to close that list; it was retired from
  * `ACTION_LOCATIONS` in @objectstack/spec 17.0.0-rc.6 — objectstack#6888 — as a
  * location no running-app surface ever rendered. The enum this component
@@ -38,7 +38,7 @@
  * ```tsx
  * <SchemaRenderer schema={{
  *   type: 'action:bar',
- *   location: 'record_header',
+ *   location: 'record_page',
  *   actions: [
  *     { name: 'mark_complete', label: 'Mark Complete', type: 'script', icon: 'check', component: 'action:button' },
  *     { name: 'delete', label: 'Delete', type: 'api', icon: 'trash', variant: 'danger', component: 'action:button' },
@@ -147,7 +147,7 @@ const ActionBarRenderer = forwardRef<HTMLDivElement, { schema: ActionBarSchema; 
       const actions: UIActionSchema[] = schema.actions || [];
       // [ADR-0066 D4 / framework#3923] Capability gate — this bar filters its
       // own set instead of going through `ActionEngine.getActionsForLocation`,
-      // so without this a `list_toolbar` action declaring a capability nobody
+      // so without this a `list` action declaring a capability nobody
       // holds rendered as a live button. Same rule as the engine; unknown
       // capabilities fail OPEN (see `useCapabilityGate`).
       // [objectstack#27504] …and an action this installation switched off is

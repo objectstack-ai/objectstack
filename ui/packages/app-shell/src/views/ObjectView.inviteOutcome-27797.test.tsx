@@ -131,7 +131,7 @@ const SYS_INVITATION = {
     {
       name: 'invite_user',
       label: 'Invite User',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       params: [
@@ -153,7 +153,7 @@ const SYS_INVITATION = {
     {
       name: 'resend_invitation',
       label: 'Resend Invitation',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       params: [
@@ -173,7 +173,7 @@ const SYS_INVITATION = {
     {
       name: 'copy_invitation_link',
       label: 'Copy Invite Link',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'script',
       target: 'copy_invitation_link',
       variant: 'secondary',

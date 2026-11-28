@@ -214,7 +214,7 @@ describe('ObjectGrid — `$select` is FLS-gated (objectui#6898)', () => {
     const select = await selectFor({
       columns: ['name'],
       rowActionDefs: [{
-        name: 'raise', label: 'Raise', type: 'api', locations: ['list_item'],
+        name: 'raise', label: 'Raise', type: 'api', locations: ['record_row'],
         target: '/x', visible: 'record.salary > 0',
       }],
     });
@@ -231,7 +231,7 @@ describe('ObjectGrid — `$select` is FLS-gated (objectui#6898)', () => {
     const select = await selectFor({
       columns: ['name'],
       rowActionDefs: [{
-        name: 'advance', label: 'Advance', type: 'api', locations: ['list_item'],
+        name: 'advance', label: 'Advance', type: 'api', locations: ['record_row'],
         target: '/x', visible: 'record.stage == "open"',
       }],
     });

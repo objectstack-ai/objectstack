@@ -22,16 +22,16 @@ const LEAD = {
   name: 'crm_lead',
   fields: { title: { type: 'text' } },
   actions: [
-    { name: 'convert_lead', label: 'Convert', locations: ['record_header'] },
-    { name: 'log_call', label: 'Log call', locations: ['record_more'] },
-    { name: 'mass_assign', label: 'Assign', locations: ['list_toolbar'] },
+    { name: 'convert_lead', label: 'Convert', locations: ['record_page'] },
+    { name: 'log_call', label: 'Log call', locations: ['record_page'], component: 'action:menu' },
+    { name: 'mass_assign', label: 'Assign', locations: ['list'] },
     { name: 'headless', label: 'Headless', locations: [] },
   ],
 };
 
 const stack = (extra: Record<string, unknown> = {}, actionLayout?: unknown) => ({
   objects: [{ ...LEAD, ...(actionLayout ? { actionLayout } : {}) }],
-  actions: [{ name: 'send_email', objectName: 'crm_lead', label: 'Send email', locations: ['record_header', 'list_toolbar'] }],
+  actions: [{ name: 'send_email', objectName: 'crm_lead', label: 'Send email', locations: ['record_page', 'list'] }],
   ...extra,
 });
 
