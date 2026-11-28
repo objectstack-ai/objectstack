@@ -8,13 +8,13 @@ name: Framework Build Base Image
 # instead of installing and building the whole framework on every cold cache.
 # It is NOT the runtime image; that one is docker-publish.yml.
 #
-# On demand only, never per commit:
-#   - workflow_dispatch, from main, with `sha` = a full commit on main;
-#   - repository_dispatch, event type `framework-build-base`, with
-#     client_payload {"sha": "<40 hex>"}: the hook a downstream pin move can call;
-#   - pull_request touching this file or docker/framework-build-base/: the dry
-#     run of a change to the image definition. It builds the PR's base commit
-#     with the PR's Dockerfile and pushes nothing; its job has no packages grant.
+# Triggers (why per commit, and what that costs: the note above `on:`):
+#   - push to main: every landing is packaged with no human step, so whichever
+#     commit a downstream pins has its image about 20 minutes after it lands;
+#   - workflow_dispatch from main (`sha` = a full commit on main), and
+#     repository_dispatch `framework-build-base` with client_payload {"sha"}:
+#     backfill and replace. A pull_request touching this file or the directory
+#     docker/framework-build-base/ is a dry run that pushes nothing.
 #
 # A tag is written once. A request for a commit whose tag already exists reports
 # the existing digest and builds nothing, so a downstream can ask on every pin
@@ -43,7 +43,21 @@ name: Framework Build Base Image
 
 # dispatch-gates: no-check-families -- the steps are an image build and push, registry reads and digest-tag writes, and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
 
+# Why every push to main, measured on 2026-11-28 (objectstack main, the week
+# 2026-11-21..27): main took 984 landings, about 141 a day, and a downstream pins
+# any of them by commit (cloud's .objectstack-sha moved to ecd10e9e, a feature
+# landing, not a release). So a trigger on releases or `next` snapshots alone
+# would package roughly one commit a day and miss the pin. Coalescing pushes to
+# the newest head (one build running, one waiting) was simulated over that week:
+# about 61 builds a day, and main's head had its image only 12% of the time.
+# Per commit costs about 21 runner-minutes a landing (the dispatch run of
+# 2026-11-28 took 21.5 min), against about 600 for the merge-queue CI run each
+# landing already pays (ci.yml 527 + lint.yml 76 on one queue run): about 3.5%
+# more. A push for a commit already packaged builds nothing, and a push never
+# carries `rebuild` or `replace_published`, so it never moves a published tag.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       sha:
@@ -70,11 +84,11 @@ on:
 permissions:
   contents: read
 
-# One build per commit at a time; a second request for the same commit waits,
-# then finds the tag and builds nothing. A PR's dry run is superseded by its
+# One build per commit at a time; a second request for the same commit (a push
+# and a dispatch for it) waits, then finds the tag and builds nothing. A PR's dry run is superseded by its
 # next push.
 concurrency:
-  group: framework-build-base-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event.client_payload.sha || inputs.sha }}
+  group: framework-build-base-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.sha || github.event.client_payload.sha || inputs.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -152,8 +166,8 @@ jobs:
 
   publish:
     name: Build & push ghcr.io/objectstack-ai/framework-build-base
-    # Trusted runs only: a dispatch from main, or a repository_dispatch (which
-    # always runs main's copy of this file). This `if` is the policy, not a
+    # Trusted runs only: a push to main, a dispatch from main, or a
+    # repository_dispatch (which always runs main's copy of this file). This `if` is the policy, not a
     # security boundary: anyone who can push a branch can also edit it there.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -170,7 +184,7 @@ jobs:
       - name: Resolve the framework commit
         id: sha
         env:
-          REQUESTED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || inputs.sha }}
+          REQUESTED: ${{ github.event_name == 'push' && github.sha || github.event_name == 'repository_dispatch' && github.event.client_payload.sha || inputs.sha }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
