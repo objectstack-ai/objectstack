@@ -6745,6 +6745,29 @@ export function selfTest({ tier = 'full' } = {}) {
     '...and an if: with no event clause reads notOnPullRequest FALSE',
     jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.notOnPullRequest === false,
   );
+  // Ruling record 7146156389: the QUEUE-PATH clause `temporal-conformance` carries —
+  // never on the PR, on the queue only when its output matched, always on the full battery.
+  const QUEUE_PATH = "github.event_name != 'pull_request' && (github.event_name != 'merge_group' || needs.filter.outputs.temporal_live != 'false')";
+  const queuePathReading = jobIfReading(`\${{ !cancelled() && needs.filter.outputs.core != 'false' && ${QUEUE_PATH} }}`);
+  t(
+    'jobIfReading: the queue-path clause reads notOnPullRequest TRUE, fullBatteryOnly FALSE and its queueGate, beside the same refs',
+    queuePathReading?.notOnPullRequest === true && queuePathReading?.fullBatteryOnly === false
+      && `${queuePathReading?.queueGate?.job}.${queuePathReading?.queueGate?.output}` === 'filter.temporal_live'
+      && queuePathReading?.refs.map((r) => `${r.job}.${r.output}`).join() === 'filter.core',
+  );
+  t('...and every other reading carries queueGate NULL', queueAndFullReading?.queueGate === null && fullBatteryReading?.queueGate === null);
+  t(
+    '...but only as spelled: the two disjuncts reordered refuse',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' && (needs.f.outputs.b != 'false' || github.event_name != 'merge_group') }}") === null,
+  );
+  t(
+    '...an == merge_group disjunct refuses — it would say the opposite WHEN',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' && (github.event_name == 'merge_group' || needs.f.outputs.b != 'false') }}") === null,
+  );
+  t(
+    '...and the queue-path clause without the pull_request exclusion ahead of it refuses',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && (github.event_name != 'merge_group' || needs.f.outputs.b != 'false') }}") === null,
+  );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
   t(
@@ -13591,6 +13614,30 @@ export function selfTest({ tier = 'full' } = {}) {
       && !jobFilteredNotMeasuredLine(shardStripped).includes(NOT_ON_THIS_PR)
       && plainRowLine(shardStripped) !== ''
       && !plainRowLine(shardStripped).includes(NOT_ON_THIS_PR),
+  );
+  // Ruling record 7146156389: the queue-path row decides per CARD. A path outside
+  // `temporal_live` gets the full-battery sentence; a driver-sql path gets the queue build.
+  const QUEUE_PATH_NOTE = 'and your paths hit `filter.temporal_live`';
+  const temporalLedger = ledgerRow('Temporal Conformance');
+  t(
+    "LIVE: a route-ledger.ts change schedules 'Temporal Conformance', outside temporal_live, so its row reads full-battery-only and SAYS so",
+    temporalLedger?.queueOutput === 'filter.temporal_live' && temporalLedger?.fullBatteryOnly === true
+      && jobFilteredNotMeasuredLine(temporalLedger).includes(NOT_ON_PR) && plainRowLine(temporalLedger).includes(NOT_ON_PR),
+  );
+  const driverRow = jobFilteredSteps(liveWorkflows, ['packages/drivers/driver-sql/src/sql-driver.ts']).rows
+    .find((r) => r.job.startsWith('Temporal Conformance')) ?? null;
+  t(
+    "LIVE: a driver-sql change hits temporal_live, so its row says the PR skips the job and the queue build runs it first, and NOT the full-battery sentence",
+    driverRow?.notOnPullRequest === true && driverRow?.fullBatteryOnly === false
+      && jobFilteredNotMeasuredLine(driverRow).includes(NOT_ON_THIS_PR) && jobFilteredNotMeasuredLine(driverRow).includes(QUEUE_PATH_NOTE)
+      && jobFilteredNotMeasuredLine(driverRow).includes(QUEUE_FIRST) && !jobFilteredNotMeasuredLine(driverRow).includes(NOT_ON_PR)
+      && plainRowLine(driverRow).includes(QUEUE_PATH_NOTE),
+  );
+  const driverStripped = driverRow ? Object.fromEntries(Object.entries(driverRow).filter(([k]) => k !== 'queueOutput')) : null;
+  t(
+    '...ABLATED — queueOutput stripped from the row — the queue-path sentence disappears from BOTH lines',
+    Boolean(driverStripped) && !jobFilteredNotMeasuredLine(driverStripped).includes(QUEUE_PATH_NOTE)
+      && plainRowLine(driverStripped) !== '' && !plainRowLine(driverStripped).includes(QUEUE_PATH_NOTE),
   );
   const prJobRow = ledgerRow('Build Core');
   t(
