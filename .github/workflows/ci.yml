@@ -732,6 +732,10 @@ jobs:
             #   - `content/docs/ui/pages.mdx`, where the per-element data
             #     binding section of the old data-source guide landed. Two Test
             #     UI pins read its fences and its block table (objectstack#27145).
+            # And, a class of its own outside that count: each root
+            # `docs/adr/` file a ui test reads, named verbatim (objectstack#37935,
+            # the row at the end of this list). `check:ci-filter-parity` derives
+            # those rows from the ui tests and holds them to them both ways.
             ui:
               - 'ui/**'
               - 'pnpm-lock.yaml'

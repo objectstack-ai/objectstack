@@ -259,7 +259,10 @@
  * rather than a missing row, and are not judged here. A ui test whose read the
  * walker cannot resolve (an unread argument, a manifest-name `findUp`, which is
  * judged with no package name) is not in the population, exactly as the
- * walker's other callers do not see it.
+ * walker's other callers do not see it. The walker reads each test file's own
+ * text, so a read made inside a module the test IMPORTS is not seen either: a
+ * `ui` row whose only reader is such a helper is reported as reader-less, and
+ * the leftover direction therefore says check, then delete, never delete.
  *
  * ## Wiring
  *
@@ -270,7 +273,7 @@
  * same dormant shape from the other side.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -926,9 +929,14 @@ const underRoots = (path) => UI_READ_ROOTS.some((r) => path === r || path.starts
  * Every path under UI_READ_ROOTS that a tracked ui test file reads, each with
  * its readers, or `{ refusal }`. The reads come from `scanPathExpressions`, the
  * walker `check:cross-package-test-inputs` and the ui test selector already use
- * -- not a recognizer of this gate's own. `files` (a bound name), `dirs` (a
- * listing) and relative `imports` all count; a directory read is covered only
- * by its subtree.
+ * -- not a recognizer of this gate's own. `files` (a bound name) and relative
+ * `imports` are file candidates, `dirs` (a listing) directory candidates, and
+ * each counts only as what it really is on disk, the filter
+ * `check:cross-package-test-inputs` applies to the same walker's answer: the
+ * walker puts every BOUND name in `files`, so a directory bound to a name and
+ * then listed sits in both sets, and only the disk says it is a directory. A
+ * candidate naming nothing on disk is a synthetic fixture path, not a read. A
+ * directory read is covered only by its subtree.
  *
  * @param {string} root   the repository root
  * @param {string[] | null} [listed]  repo-relative tracked files (git's answer when absent)
@@ -954,15 +962,27 @@ export function uiRootReadsOf(root, listed = null) {
     }
     const segs = rel.split('/');
     const scan = scanPathExpressions(source, segs.length - 1, segs, null);
-    for (const name of new Set([...scan.files, ...scan.dirs, ...scan.imports])) {
+    const candidates = [...[...scan.files, ...scan.imports].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
+    for (const name of new Set(candidates.map(([p]) => p))) {
       if (!underRoots(name)) continue;
-      const kind = scan.dirs.has(name) && !scan.files.has(name) ? 'dir' : 'file';
+      const kind = realKindOf(root, name);
+      if (!kind || !candidates.some(([p, k]) => p === name && k === kind)) continue;
       const row = byPath.get(name) ?? { path: name, kind, from: [] };
-      row.from.push(rel);
+      if (!row.from.includes(rel)) row.from.push(rel);
       byPath.set(name, row);
     }
   }
   return { tests: tests.length, rows: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/** `'file'`, `'dir'`, or null when `rel` names nothing on disk under `root`. */
+function realKindOf(root, rel) {
+  try {
+    const st = statSync(join(root, rel));
+    return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A directory read must be covered by its subtree; a file read, by the file or a subtree above it. */
@@ -1027,7 +1047,9 @@ function reportUiReads(verdict) {
     problems.push(
       `${CI_WORKFLOW}'s \`${UI_REMEDY_FILTER}:\` filter carries entr(ies) under ${UI_READ_ROOTS.join(', ')} that no ui test reads any more:\n` +
         verdict.stale.map((e) => `      ${e}`).join('\n') +
-        `\n    Delete them: each starts every ui job for an edit no ui test reads.`,
+        `\n    Check each, then delete it: it starts every ui job for an edit no ui test file reads. This gate sees only\n` +
+        `    the reads a ui test file spells itself, not one made inside a module the test imports, so first confirm\n` +
+        `    no imported helper reads it.`,
     );
   }
   if (problems.length > 0) {
@@ -2102,8 +2124,10 @@ export async function selfTest() {
   const ownAdrReader = `${UI_SEED}readFileSync(resolve(HERE, '../../docs/adr/0002-own.md'), 'utf8');\n`;
   const uiPaths = (rows) => (rows ?? ['(no verdict)']).map((r) => r.path ?? r);
 
+  const ADR_ON_DISK = { [ADR_A]: '# 0001\n' };
   const uiReadsFx = uiScratch(
     {
+      ...ADR_ON_DISK,
       'ui/packages/p/src/a.test.ts': fileReader,
       'ui/packages/p/src/own.test.ts': ownAdrReader,
       'ui/packages/p/src/plain.ts': fileReader,
@@ -2126,13 +2150,29 @@ export async function selfTest() {
   assert(quietly(() => reportUiReads(uiHole)) === 1 && quietly(() => reportUiReads(uiCovered)) === 0, '-- and the report path returns 1 over the hole and 0 over the clean tree');
 
   // A directory read needs the subtree: a sibling file row is not coverage.
-  const uiDirReads = uiScratch({ 'ui/packages/p/src/d.test.ts': dirReader }, (r) => r);
+  const uiDirReads = uiScratch({ ...ADR_ON_DISK, 'ui/packages/p/src/d.test.ts': dirReader }, (r) => r);
   assert(
     uiPaths(uiDirReads.rows).join(',') === 'docs/adr' &&
       judgeUiReads(uiWorkflow({ ui: ['ui/**', ADR_A] }), uiDirReads).uncovered?.length === 1 &&
       judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr/**'] }), uiDirReads).uncovered?.length === 0,
     `a ui test listing \`docs/adr\` is covered by \`docs/adr/**\` alone -- got ${JSON.stringify(uiDirReads.rows)}`,
   );
+
+  // A directory BOUND to a name and then listed: the walker puts every bound
+  // name in `files`, so the name sits in both sets and only the disk says it is
+  // a directory. Read as a file row, a literal `docs/adr` row would pass while
+  // matching no changed file.
+  const boundDirReader = `${UI_SEED}const ADR_DIR = resolve(HERE, '../../../../docs/adr');\nreaddirSync(ADR_DIR);\n`;
+  const uiBoundDir = uiScratch({ ...ADR_ON_DISK, 'ui/packages/p/src/b.test.ts': boundDirReader }, (r) => r);
+  assert(
+    uiPaths(uiBoundDir.rows).join(',') === 'docs/adr' && uiBoundDir.rows[0].kind === 'dir' &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr'] }), uiBoundDir).uncovered?.length === 1 &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr/**'] }), uiBoundDir).uncovered?.length === 0,
+    `a bound-then-listed directory read is classified as a directory, covered by \`docs/adr/**\` and not by a literal \`docs/adr\` row -- got ${JSON.stringify(uiBoundDir.rows)}`,
+  );
+  // A spelled path naming nothing on disk is a synthetic fixture path, not a read.
+  const uiSynthetic = uiScratch({ 'ui/packages/p/src/a.test.ts': fileReader }, (r) => r);
+  assert(!uiSynthetic.refusal && uiSynthetic.rows.length === 0, `a ui test naming an ADR that is not on disk reads nothing -- got ${JSON.stringify(uiSynthetic.rows)}`);
 
   // The reverse direction: a `ui` row under the root whose reader is gone.
   const uiStale = judgeUiReads(uiWorkflow({ ui: ['ui/**', ADR_A, 'docs/adr/0009-gone.md'] }), uiReadsFx);
@@ -2237,7 +2277,7 @@ export async function selfTest() {
       `\`core\` row beside a build input from reading as a leftover, the checked-in tree green with the five #27961 rows ` +
       `dropped observed red through the report path, and the task pair pinned to the real job; ` +
       `and Test UI's root ADR reads: a ui test's ADR read found through the shared walker and observed red by path, ` +
-      `covered verbatim, by its subtree and by \`ui_consumers\`, a directory read needing its subtree, a wildcard row ` +
+      `covered verbatim, by its subtree and by \`ui_consumers\`, a directory read needing its subtree, a bound-then-listed directory classified as one, a path not on disk read as nothing, a wildcard row ` +
       `covering nothing, a reader-less row reported as a leftover, five refusals, and the checked-in tree green with ` +
       `the #37935 row dropped observed red through the report path.`,
   );
