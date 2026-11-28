@@ -163,7 +163,7 @@ Area boundaries, one `area:*` per card:
    - The UX rule, for `area:ux` and for an experience problem in any other area: a UX problem on a core feature that every user hits every time is p1; every other UX problem is p2. UX has no p3.
    - A wrong sentence in a shipped skill or document is a Bug, with the reach "builders, often", because AI copies it into what it writes.
    - "Someone is waiting" raises no grade on its own. A card that an open card names in a `Blocked-by:` line takes the highest grade among its own and the open cards it blocks, in this repository or another, a Feature included; a grade the maintainer set by hand is not moved, and the daily scan reports it to him instead. The blocking relation is read from those `Blocked-by:` lines by script, and no label is typed for it.
-   - A p3 with no effect on users (review nits, internal comments, wording) is closed at first touch and never queued.
+   - A p3 with no effect on users or on evaluation (review nits, internal comments, wording) is closed at first touch and never queued.
    - p0 is time, not severity, and only these: main or the merge queue red, a release blocker inside the release window, a security hole being exploited in production.
    - The grading comment carries one line: area · type · severity · reach · evidence (measured, or read from the code).
    - A card is not re-graded card by card: one re-grade pass when these grading rules change, none otherwise; a card in flight (dispatched or claimed) may be raised, never lowered.
