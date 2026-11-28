@@ -15,7 +15,7 @@
  * closed keeps that state across re-renders.
  */
 import * as React from 'react';
-import { Hourglass, Table2, Trash2, Sparkles, XCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Hourglass, Table2, Trash2, Sparkles, XCircle, Loader2, CheckCircle2, Clock } from 'lucide-react';
 import { humanizeToolName, unwrapToolResult, type ToolTitleTranslator } from '../tool-display';
 import {
   Tool,
@@ -82,6 +82,12 @@ export type ToolDetailContext = Required<
     L: { connectionOfflineLabel: string };
     toolStatusLabels: ToolStatusLabels;
     heldForApprovalLabel: string;
+    /**
+     * A decision that met a lapsed pending action (decision state `expired`,
+     * objectstack#34255): the status word and the sentence that says why.
+     */
+    expiredLabel: string;
+    expiredDetailLabel: string;
     /** Handed in, not imported: this module takes only types from `../mapMessages`. */
     detectPackageRemovedResult: typeof detectPackageRemovedResult;
   };
@@ -95,6 +101,8 @@ export const renderToolDetail = (tool: ChatbotEnhancedToolInvocation, ctx: ToolD
     L,
     toolStatusLabels,
     heldForApprovalLabel,
+    expiredLabel,
+    expiredDetailLabel,
     toolApproveLabel,
     toolDenyLabel,
     toolDenyReason,
@@ -224,6 +232,8 @@ export const renderToolDetail = (tool: ChatbotEnhancedToolInvocation, ctx: ToolD
           >
             {decision.state === 'held' ? (
               <Hourglass className="size-3.5" aria-hidden="true" />
+            ) : decision.state === 'expired' ? (
+              <Clock className="size-3.5" aria-hidden="true" />
             ) : (
               <span aria-hidden="true">
                 {decision.state === 'pending'
@@ -236,12 +246,14 @@ export const renderToolDetail = (tool: ChatbotEnhancedToolInvocation, ctx: ToolD
             <span>
               {decision.state === 'held'
                 ? heldForApprovalLabel
-                : decision.message ??
-                  (decision.state === 'pending'
-                    ? 'Submitting decision...'
-                    : decision.state === 'success'
-                      ? 'Action approved and executed.'
-                      : 'Decision failed.')}
+                : decision.state === 'expired'
+                  ? `${expiredLabel} · ${expiredDetailLabel}`
+                  : decision.message ??
+                    (decision.state === 'pending'
+                      ? 'Submitting decision...'
+                      : decision.state === 'success'
+                        ? 'Action approved and executed.'
+                        : 'Decision failed.')}
             </span>
           </div>
         ) : null}
@@ -481,6 +493,11 @@ export const renderToolDetail = (tool: ChatbotEnhancedToolInvocation, ctx: ToolD
                   <>
                     <Hourglass className="size-3.5" />
                     {heldForApprovalLabel}
+                  </>
+                ) : decision.state === 'expired' ? (
+                  <>
+                    <Clock className="size-3.5" />
+                    {`${expiredLabel} · ${expiredDetailLabel}`}
                   </>
                 ) : decision.state === 'pending' ? (
                   <>

@@ -78,7 +78,7 @@ Control which platform features are active for this object:
 
 ```typescript
 enable: {
-  trackHistory: true,      // Field history tracking for audit
+  trackHistory: true,      // Show the audit ledger's field changes on the record page
   searchable: true,        // Include in global search index
   apiEnabled: true,        // Expose object via automatic APIs (REST)
   apiMethods: ['get', 'list', 'create', 'update', 'delete', 'bulk'],
@@ -91,7 +91,7 @@ enable: {
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| `trackHistory` | `false` | Field history tracking for audit compliance |
+| `trackHistory` | `false` | Show the compliance ledger's field changes on the record page and allow the `history` verb. Every write is recorded either way, and a changed field's old → new values show on the activity stream without it — that is `fieldHistory` |
 | `fieldHistory` | — (on) | Field-change values (`old → new`) on the activity stream; `false` turns them off for the object |
 | `searchable` | `true` | Index records for global search |
 | `apiEnabled` | `true` | Expose object via automatic APIs |
