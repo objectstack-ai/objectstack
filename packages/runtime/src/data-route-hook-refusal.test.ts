@@ -126,7 +126,7 @@ async function post(object: string, body: Record<string, unknown>) {
 
 /** What `RestServer`'s create route answers for the same write: `mapDataError` of the protocol's throw. */
 async function restAnswer(object: string, body: Record<string, unknown>) {
-    const thrown = await protocol.createData({ object, data: body } as any, { userId: MEMBER.userId } as any)
+    const thrown = await protocol.createData({ object, data: body })
         .then(() => undefined, (e: unknown) => e);
     expect(thrown, 'the protocol refused the write').toBeDefined();
     return mapDataError(thrown, object);
