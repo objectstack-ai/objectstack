@@ -153,6 +153,17 @@
         "must_contain_any": [["requires: ['knowledge']", "requires: [\"knowledge\"]"]],
         "must_not_contain": ["contentFields:"]
       }
+    },
+    {
+      "id": 15,
+      "prompt": "Our support app has `kb_article` (`title`, `body`) and `support_ticket` (`subject`, `description` as a textarea, `priority`, `status`, `amount`, and a `contract_pdf` file field holding a signed PDF). The assistant should answer from article bodies, from ticket descriptions and from what the PDFs say, and also tell us how many open tickets there are per priority. Design the knowledge sources and say how a skill should search them. None of the project's files are in this directory: write the files in your answer.",
+      "expected_output": "Writes two `knowledge_source` items, one per corpus (articles, tickets), each `source: { kind: 'object', … }` with an explicit `content` list of long free-text fields only: `title` / `body` for articles, `subject` / `description` for tickets. `priority`, `status` and `amount` are not in `content` (at most `metadataFields`), and the count of open tickets per priority is answered by a record tool (`aggregate_records` / `query_records`), not by `search_knowledge`. The PDF is not indexed from the `contract_pdf` file field and no `kind: 'file'` or `'http'` source is written (both retired): the extracted text is first written to a text field on the record (a `textarea`, filled by a flow, hook or import) and that field is listed in `content`. The skill's `instructions` tell the model which source to search by passing `sourceIds` to `search_knowledge`, so a question does not scan every source; no second argument shape and no `knowledge` key on the skill is invented.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["sourceIds", "content:", "textarea"],
+        "must_contain_any": [["aggregate_records", "query_records", "aggregate_data"]],
+        "must_not_contain": ["kind: 'file'", "kind: \"file\"", "kind: 'http'", "contentFields:", "'contract_pdf']", "'amount']", "'priority']"]
+      }
     }
   ]
 }

@@ -513,7 +513,24 @@ export const CEILINGS = new Map([
   // ceil(27623 / 4) = 6906; the row moves +13, the measured remainder only.
   // Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27623 / 4)
-  ['skills/objectstack-ai/SKILL.md', 6906], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6906 -> 7109 (2026-11-28, knowledge sources over business objects): the
+  // section taught a source for a document library only. It now says three
+  // things, one example each: `content` lists long free text only, and counts
+  // and filters go to the record tools; one source per corpus, a skill's
+  // `instructions` naming which to pass in `sourceIds`, the argument of
+  // `search_knowledge`; attachment text reaches an index through a text field,
+  // since no source reads a file. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST: the `content` row's "Meaningful text only, never ids or system
+  // fields" (the first rule says it), and the `agent.knowledge` pitfall row's
+  // "describe intended grounding in `instructions`" (the second rule says it);
+  // the retired-kinds line's "no form in 19" became a pointer to the third
+  // rule. Arithmetic in priced bytes (stamp line excluded), against `main`'s
+  // 27621 (the row's 6906, headroom 0): the file is 27648 -> 28461 bytes, so
+  // the LANDED priced text is 28434 -> ceil(28434 / 4) = 7109; the row moves
+  // +203, the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(28434 / 4)
+  ['skills/objectstack-ai/SKILL.md', 7109], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
