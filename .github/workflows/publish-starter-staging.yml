@@ -1,0 +1,60 @@
+name: Publish starter to marketplace (staging)
+
+# Publishes examples/app-starter (`com.example.starter`) to the STAGING cloud
+# marketplace (https://cloud.objectos.app) as THE first-party starter: the row
+# a new workspace's first environment installs on first open. The body is
+# scripts/ci/publish-starter-marketplace.mjs; its header says what it sends and
+# what it refuses. Production is the separate, manual-only
+# publish-starter-production.yml.
+#
+# Credential: `OS_CLOUD_API_KEY_STAGING`, a platform-admin key for staging (the
+# version is auto-approved, which only a platform admin may ask for). An unset
+# secret FAILS the run and names itself; it is never a silent skip.
+#
+# Trigger: a push to main that changes the starter's package.json, which is
+# what landing the Version Packages PR does on every release (the starter
+# depends on workspace packages, so its version moves each time). ⛔ Not a tag
+# trigger: this repo's version tags are pushed by release.yml with
+# GITHUB_TOKEN, and nothing GITHUB_TOKEN pushes starts a workflow, and the
+# starter is a private package, which changesets never tag. A version already
+# on the marketplace answers 409, so a re-run publishes nothing twice.
+on:
+  push:
+    branches: [main]
+    paths:
+      - examples/app-starter/package.json
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: build, print both payloads, make no request'
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-starter-marketplace-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish the starter to staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.repository == 'objectstack-ai/objectstack'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Build the starter
+        run: pnpm turbo run build --filter=@objectstack/example-starter
+
+      - name: Publish to the staging marketplace
+        env:
+          OS_CLOUD_URL: https://cloud.objectos.app
+          OS_CLOUD_API_KEY: ${{ secrets.OS_CLOUD_API_KEY_STAGING }}
+        run: node scripts/ci/publish-starter-marketplace.mjs ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
