@@ -19,7 +19,7 @@ import { ACTION_PARAM_BUILTIN_KEYS, validateActionParams, resolveI18nLabel, type
 import { templateSlotSource } from '@objectstack/spec/automation';
 // [#15124] The facade's `find` judges its own parameter against the SAME
 // declaration its type names, so the refusal and the type cannot drift apart.
-import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
+import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
@@ -5030,18 +5030,40 @@ export interface DeclarativeUpdateResult {
      * answers the same warnings whichever door the person used.
      */
     warnings?: ValidateDataIssue[];
+    /**
+     * [#38103] The one message a hook on THIS write set for the person who made
+     * it (`ctx.notice`), exactly as the data-plane update answered it. Present
+     * only when a hook set one: the same hook on the same write tells the
+     * person the same thing whichever door they used.
+     */
+    notice?: string;
+    /**
+     * [#38103] The fields the engine did NOT store from this write (a static
+     * `readonly`, a true `readonlyWhen`, …), exactly as the data-plane update
+     * answered them — the element is the engine's own `DroppedFieldsEvent`.
+     * Present only when a field was dropped: without it the answer reads as a
+     * success that wrote everything the action declared.
+     */
+    droppedFields?: DroppedFieldsEvent[];
 }
 
 /**
- * [#37867] The `warnings` a data-plane write answer carries, or `undefined`
- * when it carries none. The protocol's `updateData` sets the member only when
- * the write raised an advisory rule hit, so an empty or absent member answers
- * the same: no warnings. Only the protocol arm of `callData` produces it; the
- * ObjectQL fallback arm answers none, and this reads none from it.
+ * [#37867, #38103] What a data-plane write answer tells the person beyond the
+ * written row: its advisory `warnings`, the `notice` a hook set and the
+ * `droppedFields` the engine stripped — each only when the answer carries it.
+ * The protocol's `updateData` sets every one of these members only when there
+ * is something to say, so an empty or absent member answers the same: nothing.
+ * Only the protocol arm of `callData` produces them; the ObjectQL fallback arm
+ * answers none, and this reads none from it.
  */
-function writeAnswerWarnings(written: unknown): ValidateDataIssue[] | undefined {
-    const warnings = (written as { warnings?: unknown } | null | undefined)?.warnings;
-    return Array.isArray(warnings) && warnings.length > 0 ? (warnings as ValidateDataIssue[]) : undefined;
+function writeAnswerFeedback(written: unknown): Pick<DeclarativeUpdateResult, 'warnings' | 'notice' | 'droppedFields'> {
+    const answer = (written ?? undefined) as { warnings?: unknown; notice?: unknown; droppedFields?: unknown } | undefined;
+    const { warnings, notice, droppedFields } = answer && typeof answer === 'object' ? answer : {};
+    return {
+        ...(Array.isArray(warnings) && warnings.length > 0 ? { warnings: warnings as ValidateDataIssue[] } : {}),
+        ...(typeof notice === 'string' && notice.trim() !== '' ? { notice } : {}),
+        ...(Array.isArray(droppedFields) && droppedFields.length > 0 ? { droppedFields: droppedFields as DroppedFieldsEvent[] } : {}),
+    };
 }
 
 /**
@@ -5299,7 +5321,10 @@ export async function executeDeclarativeUpdateAction(
     // lets the save through and tells the person; the data door answers it as
     // `warnings`, and a button that performs the same write owes the same
     // answer, or the warning holds only for people who edit the form.
-    const warnings = writeAnswerWarnings(written);
+    // [#38103] So do the hook's `notice` and the engine's `droppedFields`: a
+    // field the engine stripped from the action's patch answered as a bare
+    // success is a silent field loss.
+    const feedback = writeAnswerFeedback(written);
 
     const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
@@ -5307,7 +5332,7 @@ export async function executeDeclarativeUpdateAction(
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
-        ...(warnings ? { warnings } : {}),
+        ...feedback,
     };
     if (stale) throw withEarnedAnswer(stale, { ...result });
     return result;
