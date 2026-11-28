@@ -617,3 +617,153 @@ describe('objectstack#35455 — round trips until an app route can render, count
     expect(seen).toEqual([['app'], ['page']]);
   });
 });
+
+/**
+ * objectstack#38170 — the bundle request leaves the moment the app list lands.
+ *
+ * Measured on a cold Console load (backend `--fresh`, `vite build` with
+ * `VITE_BASE_PATH=/`, `vite preview`): the bundle request left one whole tree
+ * re-render after the app list answered — 226 ms later idle, 378 ms on a busy
+ * box (medians) — because it was asked from an effect of the render that
+ * named the app. It is now asked in the app list's own answer.
+ *
+ * The app list is still what names the app — the route carries a package id
+ * (ADR-0048) or a name, and an app the list does not hold has no bundle
+ * asked — so the request is the same one, through the same adapter, once.
+ */
+describe('objectstack#38170 — the console root enters the bundle as the app list lands', () => {
+  const PACKAGED = [{ name: 'crm', _packageId: CRM, navigation: [] }];
+
+  /** An adapter whose app list answers only when the test says so, and which records the order things happen in. */
+  function makeHeldAdapter(events: string[], apps: unknown[]) {
+    const calls: string[] = [];
+    const base = makeAdapter(calls, apps) as any;
+    let answer!: () => void;
+    const held = new Promise<void>((resolve) => { answer = resolve; });
+    const client = base.getClient();
+    const adapter = {
+      ...base,
+      getClient: () => ({
+        meta: {
+          ...client.meta,
+          getItems: (type: string, options?: Record<string, unknown>) => {
+            if (type !== 'app' || options) return client.meta.getItems(type, options);
+            events.push('list:asked');
+            return held.then(() => {
+              events.push('list:answered');
+              return client.meta.getItems(type);
+            });
+          },
+        },
+      }),
+      loadAppBundle(this: unknown, app: string) {
+        events.push(`bundle:${app}${this === adapter ? '' : ':foreign-this'}`);
+        return Promise.resolve();
+      },
+    };
+    return { adapter: adapter as Parameters<typeof MetadataProvider>[0]['adapter'], answer, calls };
+  }
+
+  /** Records each render's view of the app list, beside the requests. */
+  function Recorder({ events }: { events: string[] }) {
+    const { apps } = useMetadata();
+    useAppObjectScopePrefetch();
+    const named = Array.isArray(apps) && apps.length > 0;
+    if (events[events.length - 1] !== `render:${named ? 'named' : 'empty'}`) events.push(`render:${named ? 'named' : 'empty'}`);
+    return null;
+  }
+
+  function mountHeld(url: string, apps: unknown[] = PACKAGED) {
+    sessionStorage.clear();
+    const events: string[] = [];
+    const held = makeHeldAdapter(events, apps);
+    const view = render(
+      <AdapterCtx.Provider value={held.adapter as any}>
+        <MetadataProvider adapter={held.adapter}>
+          <MemoryRouter initialEntries={[url]}>
+            <Recorder events={events} />
+          </MemoryRouter>
+        </MetadataProvider>
+      </AdapterCtx.Provider>,
+    );
+    return { events, ...held, view };
+  }
+
+  const bundles = (events: string[]) => events.filter((e) => e.startsWith('bundle:'));
+
+  it('asks the bundle in the app list answer, before the render that names the app', async () => {
+    const { events, answer, calls, adapter } = mountHeld(`/apps/${CRM}/crm_account`);
+    await waitFor(() => expect(events).toContain('list:asked'));
+    expect(bundles(events)).toEqual([]);
+    await act(async () => answer());
+    await waitFor(() => expect(events).toContain('render:named'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The ordering pin: the request is not sequenced after the render (and
+    // the boot reads it waits on) any more. Reverting to the render-time
+    // entry puts `bundle:crm` after `render:named` and turns this red.
+    const at = events.indexOf('bundle:crm');
+    expect(at).toBeGreaterThan(events.indexOf('list:answered'));
+    expect(at).toBeLessThan(events.indexOf('render:named'));
+    // Same request count: entered once, the app list read once.
+    expect(bundles(events)).toEqual(['bundle:crm']);
+    expect(calls.filter((c) => c === 'app')).toEqual(['app']);
+    // `AppContent` reuses the root's entry: still one bundle request.
+    enterAppBundle(adapter, 'crm');
+    expect(bundles(events)).toEqual(['bundle:crm']);
+  });
+
+  it('names the bundle by the app, never by the route segment (ADR-0048), through the same adapter', async () => {
+    const { events, answer } = mountHeld(`/apps/${CRM}/crm_account`);
+    await act(async () => answer());
+    await waitFor(() => expect(events).toContain('render:named'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // `app.crm` is the package id the route carries; `crm` is the app it names.
+    expect(bundles(events)).toEqual(['bundle:crm']);
+  });
+
+  it('CONTROL: an app the list does not hold (one this user may not see) has no bundle asked, before or after the list', async () => {
+    const { events, answer } = mountHeld('/apps/hr/hr_employee');
+    await act(async () => answer());
+    await waitFor(() => expect(events).toContain('render:named'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(bundles(events)).toEqual([]);
+  });
+
+  it('CONTROL: outside an app, or after leaving before the list lands, nothing is entered', async () => {
+    const outside = mountHeld('/home');
+    await act(async () => outside.answer());
+    await waitFor(() => expect(outside.events).toContain('render:named'));
+    const left = mountHeld(`/apps/${CRM}/crm_account`);
+    await waitFor(() => expect(left.events).toContain('list:asked'));
+    left.view.unmount();
+    await act(async () => left.answer());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(bundles(outside.events)).toEqual([]);
+    expect(bundles(left.events)).toEqual([]);
+  });
+
+  it('CONTROL: an app list already in hand enters the bundle from the render, once, as before', async () => {
+    const calls: string[] = [];
+    const entered: string[] = [];
+    // The first mount reads the list into the session; the second answers from it.
+    const first = mountHeld(`/apps/${CRM}/crm_account`);
+    await act(async () => first.answer());
+    await waitFor(() => expect(first.events).toContain('bundle:crm'));
+    cleanup();
+    const adapter = Object.assign(makeAdapter(calls, PACKAGED) as object, {
+      loadAppBundle: (app: string) => { entered.push(app); return Promise.resolve(); },
+    }) as Parameters<typeof MetadataProvider>[0]['adapter'];
+    render(
+      <AdapterCtx.Provider value={adapter as any}>
+        <MetadataProvider adapter={adapter}>
+          <MemoryRouter initialEntries={[`/apps/${CRM}/crm_account`]}>
+            <Prefetch />
+          </MemoryRouter>
+        </MetadataProvider>
+      </AdapterCtx.Provider>,
+    );
+    await waitFor(() => expect(entered).toEqual(['crm']));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(entered).toEqual(['crm']);
+  });
+});
