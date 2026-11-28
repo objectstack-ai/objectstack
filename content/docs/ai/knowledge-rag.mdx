@@ -212,7 +212,7 @@ The tool is stricter than the service in a few places, so that a mistake is repo
 
 - An empty `scope`, an entry with no ids, and an empty `sourceIds` are refused, not answered with no hits.
 - An object name, record id or field name over 255 characters, or one holding a NUL character, is refused.
-- Each malformed argument is refused `VALIDATION_ERROR` (400), naming the argument. Over MCP, a shape the tool's schema states (an empty or over-long `scope`, a string over 255 characters, an unknown `granularity` or key) is refused first by the MCP input-validation check, as error `-32602` naming the argument, without that code. The coded refusal answers what the schema cannot state, such as a NUL character or `groupBy` with `"chunk"`, and every malformed argument the in-product agent sends.
+- Each malformed argument is refused `VALIDATION_ERROR` (400), naming the argument. Over MCP, a shape the tool's schema states (an empty or over-long `scope`, a string over 255 characters, an unknown `granularity` or key) is refused first by the MCP door's schema check, before the tool runs, with the same coded `VALIDATION_ERROR` (400) naming the argument. What the schema cannot state, such as a NUL character or `groupBy` with `"chunk"`, is refused by the tool itself, as is every malformed argument the in-product agent sends.
 
 The answer never says how many hits the permission re-check or the scope removed. A `scope` entry or `groupBy` field that only a withheld source would answer gets the same empty answer as one that no source answers, so the answer never shows that a withheld source exists.
 

@@ -78,12 +78,27 @@ onlyBuiltDependencies:
 #     its bin/run.js never lets oclif register tsx. Retire the patch when a
 #     tsx release resolves those three paths itself. Until then the same
 #     exact-version rule as tsup's applies on every tsx bump.
+#   - @better-auth/scim@1.7.12: TEMPORARY, by maintainer ruling record
+#     6845302116, which sets AGENTS.md's no-temporary-patches rule aside for
+#     this one patch; no other better-auth patch is added here. The vendor's
+#     setNamePart stored a name part and never recomposed name.formatted or
+#     displayName, so a SCIM PATCH that sends only name.givenName /
+#     name.familyName left sys_user.name on the old name. The patch
+#     recomposes them when name.formatted was composed from the parts, the
+#     derived test setFormattedName already makes; an explicit name is never
+#     overwritten. It applies to every install of this workspace (and the
+#     framework build base image built from it), not to an npm install of a
+#     published @objectstack/plugin-auth. Remove it in the upgrade PR to the
+#     @better-auth/scim release that ships the recompose; the pin
+#     packages/plugins/plugin-auth/src/scim-name-recompose.test.ts stays.
 patchedDependencies:
   tsup@8.5.1: patches/tsup@8.5.1.patch
   tsx@4.23.15: patches/tsx@4.23.15.patch
   # objectui's focus-scope patch (cutover, objectstack#25752);
   # it was keyed unversioned in ui/package.json's ignored `pnpm` field.
   '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope.patch
+  # Temporary, ruling record 6845302116; see the note above.
+  '@better-auth/scim@1.7.12': patches/@better-auth__scim@1.7.12.patch
 
 # Type dependencies the packages below leave undeclared. Each one ships `.d.ts`
 # files that `import ... from 'react'` (react-router and next also import

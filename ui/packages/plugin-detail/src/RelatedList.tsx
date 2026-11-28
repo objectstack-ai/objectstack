@@ -2008,6 +2008,21 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           projection.add(declaredName);
         }
       }
+      // [objectstack#37891] The child object's `highlightFields` (ADR-0085).
+      // On a phone the enlarged tab's grid draws each row as a card whose
+      // amount and subtitle are those fields, in that order, whether or not a
+      // column shows them. Fetched, never drawn as columns; on every
+      // viewport, as the gallery cover above, so crossing the breakpoint never
+      // refetches. Through the name field's gates: declared, readable, and not
+      // one the block redacts.
+      const highlights = (objectSchema as { highlightFields?: unknown } | undefined)?.highlightFields;
+      if (Array.isArray(highlights)) {
+        for (const field of highlights) {
+          if (typeof field !== 'string' || field === '' || redactedFields.has(field)) continue;
+          if (parentRelationshipFieldDef(fields, field) === undefined || !readable(field)) continue;
+          projection.add(field);
+        }
+      }
     }
     return Array.from(projection);
   }, [columns, redactedFields, referenceField, objectName, api, perms, expandFields, objectSchema, rowActions]);

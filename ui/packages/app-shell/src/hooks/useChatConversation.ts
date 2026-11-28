@@ -67,6 +67,14 @@ export interface UseChatConversationOptions {
    */
   activeId?: string;
   /**
+   * `activeId`'s conversation as the host has already read it (the route's
+   * answer, history included). The first resolve of that id hydrates from it
+   * instead of reading the same history again; any later resolve of the id
+   * reads afresh. A record of another id is ignored. Read when the resolve
+   * runs, never as an effect dependency.
+   */
+  activeRecord?: ServerConversation;
+  /**
    * Explicit "start a NEW conversation" intent (the sidebar's New button,
    * `/ai?new=1`). Without it a bare `/ai` visit resumes the last cached
    * conversation — which is right for a plain visit but made the New button a
@@ -496,7 +504,7 @@ interface ServerMessage {
   content: unknown;
 }
 
-interface ServerConversation {
+export interface ServerConversation {
   id: string;
   messages?: ServerMessage[];
   /** `AiConversationSchema.metadata` (`@objectstack/spec/api`), as the conversation routes return it. */
@@ -760,12 +768,17 @@ export function useChatConversation(
     scope,
     apiBase,
     activeId,
+    activeRecord,
     forceNew,
     resumeMode = 'resume',
     legacyScope,
     adoptLegacy,
     createMetadata,
   } = options;
+  // The host's read of `activeId`, spent by the first resolve that uses it.
+  const activeRecordRef = useRef(activeRecord);
+  const spentActiveRecordRef = useRef<ServerConversation | undefined>(undefined);
+  activeRecordRef.current = activeRecord;
   // Ref'd so the resolve effect reads the LATEST predicate without depending on
   // its identity (hosts pass inline closures; re-resolving on every render of
   // the host would defeat the resolved-once guard).
@@ -952,8 +965,11 @@ export function useChatConversation(
       let targetId: string | undefined = activeId;
       try {
         if (activeId) {
-          const existing = await fetchConversation(apiBase, activeId);
+          const held = activeRecordRef.current;
+          const reuse = held?.id === activeId && spentActiveRecordRef.current !== held;
+          const existing = reuse ? held : await fetchConversation(apiBase, activeId);
           if (cancelled) return;
+          if (reuse) spentActiveRecordRef.current = held;
           if (existing) {
             writeCache(key, existing.id);
             setConversationId(existing.id);

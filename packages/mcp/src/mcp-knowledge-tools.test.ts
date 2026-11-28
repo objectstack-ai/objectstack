@@ -398,11 +398,12 @@ describe('[ADR-0161 K9] search_knowledge over the real definition — every tran
       jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: SEARCH_KNOWLEDGE_TOOL_NAME, arguments: args },
     })).result as { content: Array<{ text: string }>; isError?: boolean };
     expect(search).not.toHaveBeenCalled();
-    // The SDK's input-validation refusal (-32602), naming the argument: a schema-stated shape never reaches the
-    // executor over MCP, so it carries no ADR-0112 code. The coded VALIDATION_ERROR is the executor's own.
+    // The door's schema refusal, naming the argument: a schema-stated shape never reaches the executor over
+    // MCP. It carries the platform's coded refusal (#37411), VALIDATION_ERROR as the executor's own does.
     expect(http.isError).toBe(true);
-    expect(http.content[0].text).toContain('-32602');
-    expect(http.content[0].text).toContain('scope');
+    const { error } = JSON.parse(http.content[0].text);
+    expect(error.code).toBe('VALIDATION_ERROR');
+    expect(error.message).toMatch(/ at scope$/);
     expect(stdio.isError).toBe(true);
     expect(stdio.content[0].text).toBe(http.content[0].text);
   });

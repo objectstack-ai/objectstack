@@ -40,7 +40,7 @@
  * The verdict: an activity is UN-CLOCKED-OUT when it is newer than reading 1 (or there is no brief), and FOREIGN when
  * its session is not `--session` or an `--own` one (a lease-table session, the seat's card threads) — an unread
  * session is foreign. A foreign, un-clocked-out activity less than one round old (`--round-minutes`, default
- * `ROUND_MINUTES`: contract-review.md's 「一轮(约 60 分钟)」) is the self-exit (YIELD, exit 5). A brief newer than every
+ * `ROUND_MINUTES`: seat-lifecycle.md's 「一轮 60 分钟」) is the self-exit (YIELD, exit 5). A brief newer than every
  * activity is the release marker: clear at once. Every reading is bounded by that window — a card not updated inside
  * it buys no thread read.
  *
@@ -93,7 +93,7 @@ export const EXIT_PREREQUISITE = 3;
 export const EXIT_INCOMPLETE = 4;
 export const EXIT_YIELD = 5;
 
-/** One round, in minutes — contract-review.md's 「一轮(约 60 分钟)」, pinned below. */
+/** One round, in minutes — the number on seat-lifecycle.md's round rule line (「一轮 60 分钟」), pinned below. */
 export const ROUND_MINUTES = 60;
 export const LANE_LABELS = Object.freeze(['pm:dispatched', 'pm:queue']);
 
@@ -108,8 +108,9 @@ export const LIFECYCLE_PHRASES = Object.freeze([
   '简报即最新事件 ⇒ 立即坐席',
   '`round-open.mjs`',
 ]);
-export const CONTRACT_REVIEW_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
-export const ROUND_PHRASE = '一轮(约 60 分钟)';
+/** The round length as that line spells it; the self-test reads the NUMBER out of it, so a changed figure is red. */
+export const ROUND_RULE = /一轮 (\d+) 分钟/g;
+export const roundMinutesOfRule = (text) => [...text.matchAll(ROUND_RULE)].map((m) => Number(m[1]));
 
 /** The legs this file cannot read, printed under every run. */
 export const UNREAD_LEGS = Object.freeze([
@@ -576,7 +577,7 @@ export function main(argv, deps = {}) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the rule text: every phrase this file is built from is in the file that writes it': 2,
+  'the rule text: every phrase this file is built from is in the file that writes it': 3,
   'readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it': 7,
   'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 10,
   'reading 4: the first closed lane card with a claim of this seat, timed by its session': 4,
@@ -644,7 +645,8 @@ export function selfTest() {
     };
     const lifecycle = read(LIFECYCLE_PATH);
     t('every reading this file takes is a phrase of seat-lifecycle.md 〈开轮互斥〉, the pointer included', LIFECYCLE_PHRASES.filter((p) => !lifecycle.includes(p)), []);
-    t("one round's length is contract-review.md's own phrase, and ROUND_MINUTES is its number", [read(CONTRACT_REVIEW_PATH).includes(ROUND_PHRASE), ROUND_PHRASE.includes(String(ROUND_MINUTES))], [true, true]);
+    t("⭐ one round's length is the number seat-lifecycle.md spells once, on its round rule line, and ROUND_MINUTES is that number", roundMinutesOfRule(lifecycle), [ROUND_MINUTES]);
+    t('…and the reading follows the text: another figure on that line reads as that figure (so the pin above goes red), a line without the spelling reads none', [roundMinutesOfRule(lifecycle.replace(`一轮 ${ROUND_MINUTES} 分钟`, '一轮 45 分钟')), roundMinutesOfRule('未满一轮 ⇒ 自退(一轮约一小时)')], [[45], []]);
   }
 
   battery('readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it');
