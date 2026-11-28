@@ -399,7 +399,7 @@ describe('an app-authored elevation is judged by its caller’s organization wal
       for (const operation of ['update', 'delete', 'purge']) {
         for (const options of [{ tenantId: 'org_b' }, { tenantIds: ['org_a', 'org_b'] }, { tenantId: null }]) {
           const e = await refusalOf(() =>
-            applyAppAutomationOrganizationWall({ object: 'task', operation, context: member(), options, ast: { object: 'task' } }, depsFor(ORG_A)),
+            applyAppAutomationOrganizationWall({ object: 'task', operation, context: member(), options, ast: {} }, depsFor(ORG_A)),
           );
           expect([e.code, e.status]).toEqual(['PERMISSION_DENIED', 403]);
         }
