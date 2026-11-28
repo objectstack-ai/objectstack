@@ -7539,17 +7539,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * ⛔ No resume is sent to a `subflow` parent: the engine reads a resumed
    * subflow parent whose child is gone as the subflow having completed, and
    * runs the rest of the parent. Every run of the chain is cancelled instead,
-   * deepest first, so no run is ever cancelled while a run it waits on is
-   * still parked. Only the batch above the chain is resumed, through
+   * deepest first, so a run is cancelled only after the run it waits on was
+   * (or the engine answered `false` for it: no suspension under that id, or
+   * a store it could not read, which the engine logs itself). Only the batch above the chain is resumed, through
    * {@link resumeBatchOfRecalledItem}, which records the item as cancelled
    * (the cancelled-item ruling) and goes on to the next one.
    *
    * ## What degrades, and how it is told
    *
    * Never throws. A request with no `record_run_id` (opened before requests
-   * recorded it), an engine without `suspensionOf`, or a walk that cannot
-   * reach the request's run cancels the request's own run alone, and says
-   * that a run above it may stay parked. A cancel that throws stops the
+   * recorded it, or on an engine that hands no record run) cancels the
+   * request's own run alone and says nothing: that is also every flat run on
+   * such an engine, where a warning would be noise. An engine without
+   * `suspensionOf`, or a walk that cannot reach the request's run, cancels
+   * the request's own run alone and warns that a run above it may stay
+   * parked. A cancel that throws stops the
    * chain there, at `error` as the revise-window recall's does, and the runs
    * not cancelled are answered in `left`.
    */
@@ -7558,7 +7562,14 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     runId: string,
     recordRunId: string | undefined,
   ): Promise<{ cancelled: string[]; left: string[] }> {
-    if (this.missingRunCapability(runId, requestId, 'the record-delete cancellation', 'cancelRun')) {
+    if (typeof this.automation?.cancelRun !== 'function') {
+      // Not `missingRunCapability`: its words (a recorded outcome to advance,
+      // a request to recall) are the decision door's, not a delete's.
+      this.logger?.error?.(
+        '[approvals] no automation engine in this process can cancel the run a record delete left with no '
+        + 'decision to wait for — the run stays parked',
+        { request: requestId, run: runId },
+      );
       return { cancelled: [], left: [runId] };
     }
     const chain = await this.voidedRunChain(requestId, runId, recordRunId);
@@ -7596,7 +7607,8 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * [#37763] The runs {@link cancelRunsOfVoidedRequest} cancels, top first and
    * ending with `runId`: the walk down from `recordRunId` described there, cut
    * below its lowest `map:` link. `[runId]` alone when there is nothing to
-   * walk, or when the walk cannot be completed (told at `warn`).
+   * walk (no record run, silently), or when the walk cannot be completed
+   * (told at `warn`).
    */
   private async voidedRunChain(
     requestId: string,

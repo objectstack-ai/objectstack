@@ -2,7 +2,7 @@
 '@objectstack/plugin-approvals': patch
 ---
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Deleting a record whose approval is still pending now ends the flow run that

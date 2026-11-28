@@ -693,7 +693,7 @@ describe('a record delete cancels the run its voided request gated (#37763)', ()
     expect(parked()).toEqual([]);
   });
 
-  it('a request that names no record run cancels its own run alone and says a parent may stay parked', async () => {
+  it('a request that names no record run cancels its own run alone, and says nothing', async () => {
     const outer = await automation.execute('wrapped_signoff', {
       object: 'rel_task', record: { id: 'old' }, userId: 'submitter',
     } as never);
@@ -707,6 +707,9 @@ describe('a record delete cancels the run its voided request gated (#37763)', ()
     // Nothing reached the parent: it stays parked, exactly as before this card.
     expect(parked()).toEqual([{ runId: outer.runId, nodeId: 'call', correlation: `subflow:${req.flow_run_id}` }]);
     expect(peeks).toEqual([]);
+    // Silent by design: a request with no record run is also every flat run
+    // on an engine that hands none, where a warning would be noise.
+    expect(runLogs()).toEqual([]);
   });
 
   it('a request whose record run cannot be walked to its own run cancels that run alone, and warns', async () => {

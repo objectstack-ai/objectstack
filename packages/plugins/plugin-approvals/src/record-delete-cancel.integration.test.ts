@@ -121,6 +121,7 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
   let svc: ApprovalService;
   let automation: ReturnType<typeof makeAutomationSpy>;
   let warnings: Array<{ msg: string; meta: any }>;
+  let errors: Array<{ msg: string; meta: any }>;
 
   const requestsFor = (recordId: string) =>
     engine.find('sys_approval_request', {
@@ -166,12 +167,14 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     await installDefaultOrganization(engine);
 
     warnings = [];
+    errors = [];
     automation = makeAutomationSpy();
     svc = new ApprovalService({
       engine: engine as any,
       automation: automation as any,
       logger: {
         warn: (msg: any, meta?: any) => { warnings.push({ msg: String(msg), meta }); },
+        error: (msg: any, meta?: any) => { errors.push({ msg: String(msg), meta }); },
       } as any,
     });
 
@@ -333,6 +336,22 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     } satisfies EngineQueryOptions)).toEqual([]);
     const [row] = await requestsFor('LR6');
     expect(row.status).toBe('cancelled');
+    expect(warnings.some((w) => w.msg.includes('stay suspended')
+      && Array.isArray(w.meta?.runs) && w.meta.runs.includes('run_1'))).toBe(true);
+  });
+
+  it('with no engine that can cancel, the delete lands and the run is named in the delete\'s own words (#37763)', async () => {
+    await openOn('LR6', 'run_1');
+    delete (automation as any).cancelRun;
+
+    await engine.delete('crm_leave_request', { where: { id: 'LR6' }, context: SYSTEM } as any);
+
+    const [row] = await requestsFor('LR6');
+    expect(row.status).toBe('cancelled');
+    expect(errors).toEqual([expect.objectContaining({
+      msg: expect.stringContaining('cancel the run a record delete left'),
+      meta: { request: row.id, run: 'run_1' },
+    })]);
     expect(warnings.some((w) => w.msg.includes('stay suspended')
       && Array.isArray(w.meta?.runs) && w.meta.runs.includes('run_1'))).toBe(true);
   });
