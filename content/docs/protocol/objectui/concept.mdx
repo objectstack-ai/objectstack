@@ -611,7 +611,7 @@ actions:
   **1. The predicate is bare CEL, and the bound record is sparse — guard every read with**
   **`has()`.** A filter object (`{ status: { $ne: 'locked' } }` — Mongo query syntax) is in
   none of the three arms `visible`/`disabled` declare, so it is a parse error. And the
-  record an action predicate sees is whatever the client already fetched: on `list_item`
+  record an action predicate sees is whatever the client already fetched: on `record_row`
   that is only what the view's `$select` projected, so an unprojected column is *absent*,
   not `null`, and CEL aborts the whole expression at key resolution. Here the abort is
   **fail-closed** — the button is simply not offered, which looks exactly like the

@@ -41,7 +41,7 @@
  *   - 查看全部  → the child object's list page scoped to this parent
  *                 (`onViewAll`, the related list's "View all" link,
  *                 objectui#12741)
- *   - 子对象 action → the child object's `list_item` actions, and its
+ *   - 子对象 action → the child object's `record_row` actions, and its
  *                 `record_related` ones when a parent record is in scope,
  *                 executed against the clicked row through the page's shared
  *                 ActionRunner
@@ -270,17 +270,17 @@ export interface RelatedRecordActionsBridgeProps {
  * The locations a related list places on each ROW, by whether a parent record
  * is in scope (objectui#11270).
  *
- * `list_item` places an action on the child's rows wherever the child is
+ * `record_row` places an action on the child's rows wherever the child is
  * listed. `record_related` places it on them only inside a parent record's
  * related-list section: objectstack-ai/objectstack#20937's enforce answer
  * (triage `5919625056`) read the spec's "actions on a related list section
  * inside a record" as row placement, and the runtime counts the location among
  * those that require a record. The child object's own list view reads
- * `list_item` alone, in `ObjectView`.
+ * `record_row` alone, in `ObjectView`.
  */
-const ROW_LOCATIONS_IN_RECORD = ['list_item', 'record_related'] as const;
-const ROW_LOCATIONS = ['list_item'] as const;
-const TOOLBAR_LOCATIONS = ['list_toolbar'] as const;
+const ROW_LOCATIONS_IN_RECORD = ['record_row', 'record_related'] as const;
+const ROW_LOCATIONS = ['record_row'] as const;
+const TOOLBAR_LOCATIONS = ['list'] as const;
 
 /**
  * Derive the child object's actions for a related-list surface (the row menu
@@ -726,7 +726,7 @@ export function RelatedRecordActionsBridge({
         // [objectui#11270] `record_related` joins the row menu only when this
         // bridge is mounted under a parent record — the record page mounts it
         // with one; a mount without (the "standalone list" these props allow)
-        // places `list_item` alone.
+        // places `record_row` alone.
         //
         // [objectui#12870] With `parentFromList` (a custom page) the parent is
         // each list's own: a list that bound its parent through

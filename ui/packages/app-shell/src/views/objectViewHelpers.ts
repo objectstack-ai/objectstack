@@ -54,7 +54,7 @@ export function substituteFilterTokens(filter: any, scope: FilterTokenScope): an
 export function declaredPrimaryToolbarAction(actions: readonly UIActionSchema[]): UIActionSchema | undefined {
     let primary: UIActionSchema | undefined;
     for (const action of actions) {
-        if (action.variant !== 'primary' || !actionRendersAt(action, 'list_toolbar')) continue;
+        if (action.variant !== 'primary' || !actionRendersAt(action, 'list')) continue;
         if (!primary || (action.order ?? 0) < (primary.order ?? 0)) primary = action;
     }
     return primary;

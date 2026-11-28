@@ -11,7 +11,7 @@
  *
  *   - The card's pin: an authored `kind: 'full'` page draws on the desktop full
  *     page; on a phone and in the drawer its page-only block is gone, the
- *     standard page's tab strip is drawn, and the object's `record_more`
+ *     standard page's tab strip is drawn, and the object's folded (`component: 'action:menu'`)
  *     action is still in the header's ⋯ menu. Red before the change (the
  *     authored page drew on all three).
  *   - CONTROL: an object with no authored page draws the standard page on all
@@ -68,7 +68,7 @@ const RECORD_ID = 'rec-1';
 const AUTHORED_MARK = 'Authored page block';
 const SLOT_MARK = 'Slotted alert';
 
-const MORE_ACTION = { name: 'qa_recalc', label: 'Recalculate', type: 'api', target: '/api/v1/x', locations: ['record_section', 'record_more'] };
+const MORE_ACTION = { name: 'qa_recalc', label: 'Recalculate', type: 'api', target: '/api/v1/x', locations: ['record_section', 'record_page'], component: 'action:menu' };
 
 function objectDef(name: string) {
   return {
@@ -267,7 +267,7 @@ describe('#36150 an authored full page', () => {
     expect(screen.queryByText(AUTHORED_MARK)).toBeNull();
   });
 
-  it('on the drawer the object\'s record_more action is in the standard header\'s ⋯ menu', async () => {
+  it('on the drawer the object\'s folded action is in the standard header\'s ⋯ menu', async () => {
     mount('qa_project', [fullPage('qa_project')], 'drawer');
     await recordDrawn();
     const trigger = await screen.findByRole('button', { name: 'More actions' });

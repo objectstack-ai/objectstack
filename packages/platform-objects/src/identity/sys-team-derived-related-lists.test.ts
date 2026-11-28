@@ -10,7 +10,7 @@
  * `deriveRelatedLists`, cited in `packages/spec/liveness/field.json`).
  *
  * `sys_session.active_team_id` used to derive one. That list carried the
- * session object's only `list_toolbar` action, "Sign out other devices",
+ * session object's only `list` action, "Sign out other devices",
  * which revokes the CALLER's own other sessions — on a team record it read as
  * a team action and was not one. The field, its lookup and its label stay
  * (better-auth writes `activeTeamId` into it); only the derived list goes.
@@ -134,6 +134,6 @@ describe("the user's own Sessions related list is unchanged", () => {
 
   it('"Sign out other devices" stays the session list toolbar action', () => {
     const action = (SysSession.actions as ActionDef[]).find((a) => a.name === 'revoke_my_other_sessions');
-    expect(action?.locations).toEqual(['list_toolbar']);
+    expect(action?.locations).toEqual(['list']);
   });
 });

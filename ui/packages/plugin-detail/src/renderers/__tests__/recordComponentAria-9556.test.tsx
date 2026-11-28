@@ -337,7 +337,7 @@ describe('the contract-refused `aria.label` alias is read on NO block', () => {
     expect(screen.getAllByRole('list', { name: 'Record path' })).toHaveLength(2);
     cleanup();
 
-    const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_header'] };
+    const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_page'] };
     mount(<RecordQuickActionsRenderer schema={{ actions: [ACT], aria: { label: ALIAS } } as never} />);
     expect(screen.queryByRole('toolbar', { name: ALIAS })).toBeNull();
     expect(screen.getByRole('toolbar', { name: 'Quick actions' })).toBeInTheDocument();
@@ -421,7 +421,7 @@ describe('record:path honours the CONTRACT spelling, not the refused alias (obje
 });
 
 describe('record:quick_actions keeps objectui#4663\'s canonical read and built-in default', () => {
-  const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_header'] };
+  const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_page'] };
   const bar = (aria?: unknown) => (
     <RecordQuickActionsRenderer schema={{ actions: [ACT], ...(aria ? { aria } : {}) } as never} />
   );

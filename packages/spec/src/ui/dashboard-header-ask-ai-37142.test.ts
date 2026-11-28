@@ -15,7 +15,7 @@ describe('DashboardHeaderActionSchema — `actionType: ask_ai`', () => {
     const issues = r.error!.issues;
     expect(issues.map((i) => i.path.join('.'))).toEqual(['actionType']);
     expect(issues[0].code).toBe('custom');
-    expect(issues[0].message).toContain("locations: ['record_header']");
+    expect(issues[0].message).toContain("locations: ['record_page']");
   });
 
   it('keeps the vocabulary derived: ask_ai is still a member, refused by the header alone', () => {

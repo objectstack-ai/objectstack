@@ -496,7 +496,7 @@ describe('unions derived from a spec vocabulary stay derived (#2944)', () => {
     // these two are explicitly kept — so they must still be defined VALUES, not
     // type-erased to undefined.
     expect(ActionLocationSchema).toBeDefined();
-    expect(optionsOf(ActionLocationSchema, 'ActionLocationSchema')).toContain('record_header');
+    expect(optionsOf(ActionLocationSchema, 'ActionLocationSchema')).toContain('record_page');
   });
 
   it('the spec still accepts every ActionComponent value (#4074)', () => {

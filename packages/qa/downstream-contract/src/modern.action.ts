@@ -9,5 +9,5 @@ export const ArchiveAccountAction = defineAction({
   objectName: 'dc_account',
   type: 'script',
   target: 'archiveAccount',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });

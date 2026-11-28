@@ -62,7 +62,7 @@ const ROWS = [
 ];
 
 /**
- * Also carries `locations: ['list_item']`, so naming it in the view's
+ * Also carries `locations: ['record_row']`, so naming it in the view's
  * `bulkActions` makes the same action a row entry AND a bulk entry.
  */
 const MARK_DONE = {
@@ -72,7 +72,7 @@ const MARK_DONE = {
   type: 'api',
   target: '/api/demo/mark-done',
   recordIdParam: 'taskId',
-  locations: ['list_item'],
+  locations: ['record_row'],
 };
 
 /** Surfaces only on the record overflow menu — until the view names it. */
@@ -83,7 +83,7 @@ const RECALC = {
   type: 'api',
   target: '/api/demo/recalc',
   recordIdParam: 'taskId',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   // Collected ONCE by the bulk dialog, then handed to every per-record dispatch.
   params: [
     {

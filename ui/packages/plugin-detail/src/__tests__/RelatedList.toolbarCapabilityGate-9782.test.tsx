@@ -15,7 +15,7 @@
  * **mirrored as a UI hide**" — a declared same-origin `type: api` action
  * included (ADR-0066 D4 as amended). The header of a
  * related list evaluated only each action's `visible` CEL predicate, so a
- * `list_toolbar` action declaring a capability the caller does not hold
+ * `list` action declaring a capability the caller does not hold
  * rendered anyway — one surface over from `EnvironmentListToolbar`, which
  * filters the same location through `mayInvoke`.
  *
@@ -132,13 +132,13 @@ function renderList(toolbarActions: unknown[], user: unknown, scope: Record<stri
   );
 }
 
-/** The header button for a `list_toolbar` action, by the component's own testid. */
+/** The header button for a `list` action, by the component's own testid. */
 const toolbarButton = (name: string) => screen.queryByTestId(`related-toolbar-action-${name}`);
 
 /** The list header is async (the fetch branch above settles first). */
 const headerReady = () => waitFor(() => expect(screen.getByText('Invitations')).toBeInTheDocument());
 
-describe('RelatedList list_toolbar — ADR-0066 D4 capability mirror (objectui#9782)', () => {
+describe('RelatedList list — ADR-0066 D4 capability mirror (objectui#9782)', () => {
   it('resolves the caller capabilities AT THIS MOUNT, and keeps EMPTY apart from ABSENT', () => {
     // The placement measurement, taken before any rendering claim rests on it:
     // the held set really is reachable from where the list body sits, so the

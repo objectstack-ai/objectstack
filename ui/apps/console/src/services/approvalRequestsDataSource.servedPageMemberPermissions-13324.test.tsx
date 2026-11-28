@@ -103,12 +103,12 @@ const REQUEST_DEF = {
     {
       name: 'approval_approve', label: 'Approve', type: 'api', method: 'POST',
       target: '/api/v1/approvals/requests/{id}/approve', params: DECISION_PARAMS,
-      visible: CAN_ACT, locations: ['record_section', 'list_item'], refreshAfter: true,
+      visible: CAN_ACT, locations: ['record_section', 'record_row'], refreshAfter: true,
     },
     {
       name: 'approval_reject', label: 'Reject', type: 'api', method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reject', params: DECISION_PARAMS,
-      visible: CAN_ACT, locations: ['record_section', 'list_item'], refreshAfter: true,
+      visible: CAN_ACT, locations: ['record_section', 'record_row'], refreshAfter: true,
     },
   ],
   enable: { apiMethods: ['get', 'list'] },

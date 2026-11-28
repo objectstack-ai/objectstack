@@ -109,7 +109,7 @@ const resolveTicket = {
   type: 'script',
   operation: 'update',
   patch: { status: 'resolved' },
-  locations: ['record_header'],
+  locations: ['record_page'],
   visible: 'record.status != "resolved" && record.status != "closed"',
   successMessage: 'Ticket resolved.',
   refreshAfter: false,
@@ -121,7 +121,7 @@ const notifyOwner = {
   label: 'Notify owner',
   objectName: OBJECT_NAME,
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   successMessage: 'Owner notified.',
   refreshAfter: false,
 };
