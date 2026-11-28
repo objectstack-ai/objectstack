@@ -142,6 +142,22 @@ describe('a position created into a writable package binds sets from outside it'
     expect(grants.permissions).toEqual(expect.arrayContaining([OWN_SET, OTHER_SET, SHIPPED_SET, LOOSE_SET]));
   });
 
+  // Setup's permission matrix mounts with no package and saves the set live,
+  // naming none (`PermissionMatrixEditPage` at the environment door). A set
+  // the ask put in a package must take that edit in its own row: one row of
+  // the name, still the package's, carrying the edit.
+  it('a live edit naming no package lands on the set the package holds', async () => {
+    const edited = await call('PUT', `/meta/permission/${OWN_SET}`, { name: OWN_SET, label: 'Own package set, edited', objects: {} });
+    expect(edited.status, edited.text).toBe(200);
+    const rows = await ql.find('sys_metadata', { where: { type: 'permission', name: OWN_SET }, context: SYSTEM_CTX });
+    const live = rows.filter((r) => r.state !== 'draft');
+    expect(live.map((r) => r.package_id ?? null), JSON.stringify(rows.map((r) => [r.package_id, r.state]))).toEqual([HOME]);
+    const reader = securityCatalogReaderOf(ql);
+    const set = await reader!.resolve('permission', OWN_SET);
+    expect(set?.packageId).toBe(HOME);
+    expect((set?.definition as { label?: string } | undefined)?.label).toBe('Own package set, edited');
+  });
+
   it('control: a loose set the position does not name is not granted', async () => {
     const grants = await resolveUserAuthzGrants(ql as never, holder, { tenantId: await sessionOrgOf(stack) });
     expect(grants.permissions).not.toContain(UNNAMED_SET);
