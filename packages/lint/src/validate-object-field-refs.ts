@@ -751,7 +751,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
     const nonScalar = (m: GraphField | undefined): string | undefined => {
       if (typeof m?.type !== 'string') return undefined;
       if (isMultiValueField({ type: m.type, multiple: m.multiple === true })) return 'a multi-valued field';
-      return STRUCTURED_JSON_TYPES.has(m.type) ? `a structured ${m.type} field` : undefined;
+      return STRUCTURED_JSON_TYPES.has(m.type) ? 'a structured field' : undefined;
     };
     const head = graph.get(objectName)?.fields.get(segments[0]!);
     const headWhat = nonScalar(head);

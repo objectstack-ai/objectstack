@@ -959,16 +959,22 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
 
     it.each(structural)('REFUSES a plain path to a `%s` field (the head)', (t) => {
       expect(refused(`s_${t}`)).toBe(
-        `fields.price_book.lookupFilters[0].value.$record "s_${t}" names "s_${t}", a structured ${t} field on `
-          + 'object "sales_quote"; a $record comparand is one value under a scalar operator.',
+        `fields.price_book.lookupFilters[0].value.$record "s_${t}" names "s_${t}", a structured field on object `
+          + '"sales_quote"; a $record comparand is one value under a scalar operator.',
       );
     });
 
     it.each(structural)('REFUSES a `%s` leaf behind a single-valued hop, naming the leaf and its object', (t) => {
       expect(refused(`account.s_${t}`)).toBe(
-        `fields.price_book.lookupFilters[0].value.$record "account.s_${t}" ends at "s_${t}", a structured ${t} `
-          + 'field on object "crm_account"; a $record comparand is one value under a scalar operator.',
+        `fields.price_book.lookupFilters[0].value.$record "account.s_${t}" ends at "s_${t}", a structured field `
+          + 'on object "crm_account"; a $record comparand is one value under a scalar operator.',
       );
+    });
+
+    it('reports a hop THROUGH a structured head once, as the family\'s not-a-relationship miss', () => {
+      const findings = validateObjectFieldRefs(stack([entry('s_address.city')]));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]!.message).toContain('not a relationship');
     });
 
     it('CONTROL: scalar paths beside the structured fields stay clean — head and leaf', () => {
