@@ -628,6 +628,50 @@ describe('a lookup-laned board under a list view counts and totals each whole la
     expect(within(lane('Cyan Corp')).queryByText('No cards')).toBeNull();
   });
 
+  /**
+   * objectstack#37516 — the "Uncategorized" lane past the page. Deals 60–69
+   * have no account, all past the first page: the lane read counts them under
+   * the empty key, and no card on the page draws the lane.
+   */
+  const NO_ACCOUNT_PAST_PAGE: Row[] = DEALS.map((d, i) => (i >= 60 ? { ...d, account: null } : d));
+  const laneNames = () => screen.queryAllByRole('group').map((g) => g.getAttribute('aria-label'));
+
+  it('a lane of records with no account, all past the page, is drawn last as "Uncategorized", counting its 10 records', async () => {
+    const ds = dealSource(true, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Uncategorized' })).toBeInTheDocument());
+    expect(laneBadge('Uncategorized')).toBe('10');
+    expect(within(lane('Uncategorized')).queryAllByRole('listitem')).toHaveLength(0);
+    expect(within(lane('Uncategorized')).getByText('Cards not loaded: 10')).toBeInTheDocument();
+    expect(laneNames().slice(-3)).toEqual(['acc-a', 'acc-b', 'Uncategorized']);
+  });
+
+  it('CONTROL: with two of them on the page, "Uncategorized" is drawn as before: its 2 cards, counting all 12', async () => {
+    const rows = DEALS.map((d, i) => (i >= 60 || i < 2 ? { ...d, account: null } : d));
+    mountBoard(dealSource(true, rows), BOARD_VIEW);
+
+    await waitFor(() => expect(cards()).toHaveLength(25));
+    await waitFor(() => expect(laneBadge('Uncategorized')).toBe('12'));
+    expect(within(lane('Uncategorized')).getAllByRole('listitem')).toHaveLength(2);
+    expect(laneNames().filter((name) => name === 'Uncategorized')).toHaveLength(1);
+  });
+
+  it.each([
+    ['has no grouped door', false],
+    ['refuses the read', 'refuse'],
+    ['cuts the read (hasMore)', 'cut'],
+  ] as const)('CONTROL: when the source %s, no "Uncategorized" lane is drawn from it', async (_, door) => {
+    const ds = dealSource(door, NO_ACCOUNT_PAST_PAGE);
+    mountBoard(ds, BOARD_VIEW);
+
+    await onePageDrawn();
+    if (door !== false) await waitFor(() => expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(laneBadge('acc-a')).toBe('13+'));
+    expect(screen.queryByRole('group', { name: 'Uncategorized' })).toBeNull();
+  });
+
   it('a board laned by a text field counts each whole lane but draws no lane past the page', async () => {
     const ds = dealSource();
     mountBoard(ds, { ...BOARD_VIEW, kanban: { ...BOARD_VIEW.kanban, groupByField: 'tier' } });

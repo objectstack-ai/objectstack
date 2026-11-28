@@ -186,7 +186,7 @@ export async function handleNotificationRequest(
     // discovery endpoint") pointed at a page that correctly does not list the
     // route. See ./unavailable.ts. The slot key is `notification`, singular.
     if (!service || !isServiceServeable(service)) {
-        return capabilityUnavailable(deps, 'notification');
+        return capabilityUnavailable(deps, context, 'notification');
     }
 
     const m = method.toUpperCase();
@@ -208,7 +208,7 @@ export async function handleNotificationRequest(
     if (segments[0] === 'devices') {
         // POST /notifications/devices — register or refresh this user's device.
         if (segments.length === 1 && m === 'POST') {
-            if (typeof service.registerDevice !== 'function') return capabilityUnavailable(deps, 'notification');
+            if (typeof service.registerDevice !== 'function') return capabilityUnavailable(deps, context, 'notification');
             // Validated against the declared contract (`RegisterDeviceRequestSchema`,
             // the catalog row's `requestSchema`), as mark-read is (#3899).
             const parsed = RegisterDeviceRequestSchema.safeParse(body ?? {});
@@ -227,7 +227,7 @@ export async function handleNotificationRequest(
         // the service's `NOT_FOUND` throw, which the dispatcher answers 404:
         // never a distinct "forbidden", so the id's existence is not disclosed.
         if (segments.length === 2 && m === 'DELETE') {
-            if (typeof service.unregisterDevice !== 'function') return capabilityUnavailable(deps, 'notification');
+            if (typeof service.unregisterDevice !== 'function') return capabilityUnavailable(deps, context, 'notification');
             const result = await service.unregisterDevice(userId, decodeDeviceSegment(segments[1]));
             return { handled: true, response: deps.success(result) };
         }
@@ -235,7 +235,7 @@ export async function handleNotificationRequest(
     }
 
     if (typeof service.listInbox !== 'function') {
-        return capabilityUnavailable(deps, 'notification');
+        return capabilityUnavailable(deps, context, 'notification');
     }
     // Narrowed for the routes below: the entry probe established `listInbox`.
     const inbox = service as INotificationService & Required<Pick<INotificationService, 'listInbox'>>;
@@ -264,7 +264,7 @@ export async function handleNotificationRequest(
 
     // POST /notifications/read — mark specific notifications read.
     if (subPath === 'read' && m === 'POST') {
-        if (typeof inbox.markRead !== 'function') return capabilityUnavailable(deps, 'notification');
+        if (typeof inbox.markRead !== 'function') return capabilityUnavailable(deps, context, 'notification');
         // [#3899] Validate against the declared contract
         // (`MarkNotificationsReadRequestSchema`, catalog `requestSchema`).
         // The old read was `Array.isArray(body?.ids) ? … : []`, so
@@ -287,7 +287,7 @@ export async function handleNotificationRequest(
 
     // POST /notifications/read/all — mark all of the user's inbox read.
     if (subPath === 'read/all' && m === 'POST') {
-        if (typeof inbox.markAllRead !== 'function') return capabilityUnavailable(deps, 'notification');
+        if (typeof inbox.markAllRead !== 'function') return capabilityUnavailable(deps, context, 'notification');
         const result = await inbox.markAllRead(userId);
         return { handled: true, response: deps.success(result) };
     }

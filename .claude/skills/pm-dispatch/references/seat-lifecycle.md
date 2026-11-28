@@ -2,7 +2,7 @@
 
 ## 开轮互斥
 
-- 开轮互斥:fire 开始、首个写动作之前读四个读数,未收班活动任一未满一轮 ⇒ 自退;现读 `round-open.mjs`。
+- 开轮互斥:fire 后首个写动作前读四个读数,未收班活动任一未满一轮 ⇒ 自退(一轮 60 分钟);现读 `round-open.mjs`。
 - 读数一、二:最近的收班简报,与晚于它的最新开轮标记。
 - 开轮标记是轮中会话在座位贴上的唯一痕迹;标记可漏写,认领不可省。
 - 读数三:本车道 `pm:dispatched` ∪ `pm:queue` 卡最新非本 session 同席号的 `Claim:` 评论。
@@ -15,7 +15,7 @@
 - 互斥清 ⇒ fetch 后 SKILL.md、阶段 references、本席章程的最新触碰 sha 走 `git-history.mjs touch`。
 - 异于上一开轮标记即先重读;留开轮标记(session ID + fire 时刻 + 该触碰,注明重读)再跑轮。
 - 同读 harness 载入面 `.claude/**` 的最新触碰与内容是否已在共享检出 HEAD。
-- 否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `scripts/pm/check-harness-current.mjs`。
+- 否 ⇒ 记座位贴,自然收班时换会话,⛔ 不中断批次;读数走 `check-harness-current.mjs`。
 
 ## 座位贴协议
 

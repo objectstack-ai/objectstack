@@ -418,6 +418,8 @@ describe('sharing write gate: the by-id branch is exactly the engine dispatch de
     return {
       admitsByIdWrite: vi.fn(async () => true),
       buildWriteFilter: vi.fn(async () => ({ owner_id: 'u_member' })),
+      // [#37535] The bulk branch asks the authored scope too; none here.
+      probeAuthoredRowWriteFilter: vi.fn(async () => null),
     };
   }
 

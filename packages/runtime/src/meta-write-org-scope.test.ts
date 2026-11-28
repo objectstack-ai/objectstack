@@ -256,6 +256,9 @@ function makeDispatcher(
     const services: Record<string, unknown> = {
         protocol,
         objectql: { registry: engine.registry },
+        // [ADR-0161 K4] The deployment mounts a knowledge service that admits every source: on one with
+        // none, an author's `knowledge_source` save is refused (ruled D), and this suite is about something else.
+        knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
         ...(metadataService ? { metadata: metadataService } : {}),
         auth: {
             api: {

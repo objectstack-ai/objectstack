@@ -472,6 +472,14 @@ describe('[ADR-0161 K4] a knowledge_source is written through /meta only beside 
 
     it('a holder of both saves, publishes, rolls back and resets — each reaching the store', async () => {
         const { rest, store, protocol } = boot(BOTH);
+        // [ADR-0161 K4] The deployment mounts a knowledge service that admits every source: on one with
+        // none, an author's `knowledge_source` save is refused (ruled D), and this suite is about something else.
+        (rest as any).kernelServiceProvider = async (name: string) => {
+            if (name === 'knowledge') return { admitAuthoredSource: async () => ({ admitted: true }) };
+            throw Object.assign(new Error(`Service '${name}' not found`), {
+                __objectstackServiceNotRegistered: true, code: 'SERVICE_NOT_REGISTERED', serviceName: name,
+            });
+        };
         const saved = await drive(rest, 'PUT', `${META}/:type/:name`, 'knowledge_source', 'faq', {}, FAQ);
         expect(saved.statusCode).toBe(200);
         expect(store.knowledge_source.faq).toEqual(FAQ);
