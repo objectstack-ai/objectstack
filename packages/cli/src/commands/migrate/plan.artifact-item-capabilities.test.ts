@@ -19,7 +19,6 @@ import '@objectstack/platform-objects/plugin';
 import '@objectstack/platform-objects/system';
 import '@objectstack/rest';
 import '@objectstack/service-datasource';
-import '@objectstack/service-knowledge';
 import '@objectstack/driver-sql';
 import '@objectstack/driver-turso';
 
