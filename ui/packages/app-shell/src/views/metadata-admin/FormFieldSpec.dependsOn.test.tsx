@@ -182,13 +182,15 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
     // `calls[0][0]` unreachable rather than merely unasserted.
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       void input;
-      return {
-        ok: true,
-        status: 200,
-        // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
-        headers: new Headers(),
-        json: async () => ({ fields: [{ name: 'amount', label: 'Amount' }] }),
-      } as unknown as Response;
+      // The served object read: the item envelope around the object document.
+      return new Response(
+        JSON.stringify({
+          type: 'object',
+          name: 'showcase_opportunity',
+          item: { name: 'showcase_opportunity', fields: { amount: { type: 'currency', label: 'Amount' } } },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -199,7 +201,7 @@ describe('objectui#5040 — a spec typed as `FormFieldSpec` configures its widge
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual([
-      '/api/v1/objects/showcase_opportunity/fields',
+      '/api/v1/meta/object/showcase_opportunity?preview=draft',
     ]);
   });
 

@@ -16,6 +16,7 @@ import type { OpenListLink } from '../recordLink';
 import type { RecordWrite, SampleDataCleanup, PackageRemoval } from '../mapMessages';
 import type {
   DatasetProvenance,
+  DraftReviewListParsed,
   ObjectQuerySource,
   RecordCitationParsed,
 } from '@objectstack/spec/ai';
@@ -63,6 +64,13 @@ export interface ChatbotEnhancedMessage {
    * cited record at its section through `onOpenRecord`.
    */
   recordCitations?: RecordCitationParsed[];
+  /**
+   * The drafts the turn saved, lifted from the message's `data-draft-review`
+   * part by `extractDraftReview`. Drawn as a review card under the answer,
+   * with Studio review links through `onOpenReviewLink`. Live only: a
+   * history rebuild does not carry it.
+   */
+  draftReview?: DraftReviewListParsed;
 }
 
 /**
@@ -462,6 +470,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * Absent → a list link keeps the default link-safety dialog.
    */
   onOpenList?: OpenListLink;
+  /**
+   * Open a Studio review route of the draft review card (a Console path such
+   * as `/studio/<package>/data?changes=review`) inside the app, so the live
+   * conversation stays. Absent → the card's links are ordinary anchors.
+   */
+  onOpenReviewLink?: (path: string) => void;
+  /**
+   * The anchor href for a review route — the router's basename joined to the
+   * path — so a new tab or a copied link opens the same page. Absent → the
+   * path itself.
+   */
+  reviewLinkHref?: (path: string) => string;
   /** cloud#1658 — the record hand-off card's title. */
   recordHandoffTitleLabel?: string;
   /** cloud#1658 — the record hand-off card's action label. */

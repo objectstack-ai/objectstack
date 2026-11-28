@@ -530,6 +530,30 @@ jobs:
       #                                 NEW major. ONE file, 5 s — reachable
       #                                 without the whole spec suite, which
       #                                 this comment used to say it was not.
+      #     build-migration-registry-entry.test.ts
+      #                                 the registry template's region pin: an
+      #                                 `os-generated` region per migration kind
+      #                                 for the spec package's major AND for
+      #                                 PROTOCOL_MAJOR — the majors a new entry
+      #                                 registers under. The version pass moves
+      #                                 the spec major, so on a boundary train
+      #                                 this is the first tree where the new
+      #                                 major is the package's own. The refusal
+      #                                 of a moved protocol-version.ts below
+      #                                 already stops that train; this names a
+      #                                 missing region in that same run, rather
+      #                                 than on the run after the refusal is
+      #                                 resolved. ONE file, local project, no
+      #                                 build, 2.3 s measured.
+      #                                 NOT the three files that reddened the
+      #                                 19 Version PR: the retired-keys
+      #                                 check-mode test is the region gap
+      #                                 itself, judged here by this pin
+      #                                 structurally, at 132 s; the runtime
+      #                                 mcp-authoring test needs a build; and
+      #                                 ui doc-version-claims reads the skill
+      #                                 pin check:skill-compatibility already
+      #                                 judges above.
       #     check:spec-changes, check:upgrade-guide
       #                                 the two projections DERIVED from
       #                                 PROTOCOL_MAJOR (2-3 s each). Before the
@@ -823,6 +847,7 @@ jobs:
           run_gate pnpm --filter create-objectstack --fail-if-no-match test
           run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:template-manifests
           run_gate pnpm --filter @objectstack/spec --fail-if-no-match exec vitest run --project local src/kernel/protocol-version.test.ts
+          run_gate pnpm --filter @objectstack/spec --fail-if-no-match exec vitest run --project local scripts/build-migration-registry-entry.test.ts
           run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:spec-changes
           run_gate pnpm --filter @objectstack/spec --fail-if-no-match check:upgrade-guide
 

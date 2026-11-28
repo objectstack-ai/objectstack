@@ -543,6 +543,50 @@ is the turn's last text, the card takes the composer's place:
   options. Copy still copies the full reply, and a pending question has no
   Regenerate.
 
+### Draft review card
+
+`DraftReviewCard` lists the drafts an ask turn saved, under the answer. A host
+whose admin skill saves metadata drafts from the chat ends such a turn with one
+`data-draft-review` part (`DRAFT_REVIEW_PART_TYPE`, whose data is a
+`DraftReviewListSchema` list from `@objectstack/spec/ai`). `ChatbotEnhanced`
+reads the part through that schema (`extractDraftReview`) and draws the card
+itself; a part the schema refuses draws nothing.
+
+```tsx
+import { DraftReviewCard } from '@object-ui/plugin-chatbot';
+import type { DraftReviewListParsed } from '@objectstack/spec/ai';
+
+export function TurnDrafts({ review, navigate }: {
+  review: DraftReviewListParsed;
+  navigate: (path: string) => void;
+}) {
+  return (
+    <DraftReviewCard
+      review={review}
+      onOpenReviewLink={navigate}                     // in-app navigation keeps the live conversation
+      reviewLinkHref={(path) => `/_console${path}`}  // the router's basename, for a new tab
+    />
+  );
+}
+```
+
+- One row per draft: its label (or name), its type, the verdict as a badge
+  ("Will publish", "N problems", or "Verdict withheld" when no verdict was
+  read) and a Review link to the draft's own review in Studio. A verdict read
+  by the save rather than at the turn's end says "checked when saved".
+- Rows are grouped by package, in save order; each package has one "Review and
+  publish" link to its Changes drawer. `omitted` shows as "+N more".
+- The card has no publish and no discard control: a person publishes or
+  discards in Studio, through the links.
+- A plain click on a link calls `onOpenReviewLink` with the Console path; a
+  modified or middle click keeps the browser's own behaviour, on the href
+  `reviewLinkHref` returns. Without either prop the links are ordinary anchors
+  on the path itself.
+- The card is drawn on a live answer only: the part is not one of
+  `STORED_ANSWER_DATA_PARTS`, so a conversation reloaded from history shows no
+  card.
+- Strings come from the `chatbot.draftReview.*` keys of `@object-ui/i18n`.
+
 ## Bundle considerations
 
 This package depends on `streamdown`, `shiki`, `mermaid`, and `katex`

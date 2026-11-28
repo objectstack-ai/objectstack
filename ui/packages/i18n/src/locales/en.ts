@@ -5543,6 +5543,25 @@ const en = {
     recordCitations: {
       title: 'Cited from records',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'Drafts saved in this turn',
+      hint: 'Nothing is published yet. Review the drafts and publish them in Studio.',
+      package: 'Package {{name}}',
+      reviewAndPublish: 'Review and publish',
+      reviewAndPublishAria: 'Review and publish the drafts of package {{name}} in Studio',
+      review: 'Review',
+      reviewAria: 'Review the draft {{name}} in Studio',
+      willPublish: 'Will publish',
+      verdictWithheld: 'Verdict withheld',
+      checkedAtSave: 'checked when saved',
+      problems: '{{count}} problems',
+      problems_one: '{{count}} problem',
+      problems_other: '{{count}} problems',
+      more: '+{{count}} more',
+      more_one: '+{{count}} more',
+      more_other: '+{{count}} more',
+    },
     // The question card the AI asks a clarifying question on, in the composer's place.
     questionCard: {
       aiAsks: 'AI asks:',
