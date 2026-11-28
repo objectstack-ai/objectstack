@@ -140,6 +140,18 @@ const WIDENER_SET = PermissionSetSchema.parse({
   objects: { [DEAL]: CRUD },
   rowLevelSecurity: [OPEN_DEALS_UPDATE, OPEN_DEALS_DELETE],
 });
+/** [#37535] The update widener alone: it widens update and never delete. */
+const UPDATE_WIDENER_SET = PermissionSetSchema.parse({
+  name: 'pwf_update_widener',
+  objects: { [DEAL]: CRUD },
+  rowLevelSecurity: [OPEN_DEALS_UPDATE],
+});
+/** [#37535] The delete widener alone: it widens delete and never update. */
+const DELETE_WIDENER_SET = PermissionSetSchema.parse({
+  name: 'pwf_delete_widener',
+  objects: { [DEAL]: CRUD },
+  rowLevelSecurity: [OPEN_DEALS_DELETE],
+});
 /** Modify All, under the same two wideners. */
 const MODIFY_ALL_WIDENER_SET = PermissionSetSchema.parse({
   name: 'pwf_modify_all_widener',
@@ -173,7 +185,7 @@ const EMEA_CHECK_SET = PermissionSetSchema.parse({
 });
 const SETS = [
   MEMBER_DEFAULT, REP_SET, MANAGER_SET, NARROW_SET, WIDENER_SET, EMEA_CHECK_SET,
-  MODIFY_ALL_WIDENER_SET, WIDENER_EMEA_CHECK_SET, MEMO_WIDENER_SET,
+  MODIFY_ALL_WIDENER_SET, WIDENER_EMEA_CHECK_SET, MEMO_WIDENER_SET, UPDATE_WIDENER_SET, DELETE_WIDENER_SET,
 ];
 
 /** The execution context `resolveAuthzContext` hands the middleware for an organization member holding the sets. */
@@ -491,6 +503,13 @@ async function expectPredicateMatchesById(
 /** A caller acting on behalf of `delegator` (ADR-0090 D10). */
 const onBehalfOf = (caller: object, delegator: string) => ({ ...caller, onBehalfOf: { userId: delegator } });
 
+/**
+ * [#37535] What ALICE under the wideners, acting on behalf of CAROL, writes by
+ * id: the authored-policy deferral abstains on a delegated write, so it is the
+ * rows both principals' own gates admit, and the predicate write must match.
+ */
+const DELEGATED_UNDER_WIDENERS: Record<'update' | 'delete', readonly Role[]> = { update: [], delete: [] };
+
 describe('[#35802] a predicate write composes the platform ownership floor per row, as the by-id write does', () => {
   describe('(a) the owner who created some of what they own — ALICE', () => {
     it('predicate update: the rows she owns, created by her or not (r1, r2)', async () => {
@@ -619,19 +638,18 @@ describe('[#35802] a predicate write composes the platform ownership floor per r
     it('an owner-creator under an authored widener still writes the closed row she created and owns, and no verdict is asked', async () => {
       // [#35917] The by-id write of r1 is admitted as well: replacing the
       // floor never takes it out of an OR an authored term stands in, so the
-      // floor still admits r1, which she created, closed or not. (By id, the
+      // floor still admits r1, which she created, closed or not. By id, the
       // open r3 and r4 are written too: an authored row-write policy that
-      // admits a row answers the sharing gate there, while the predicate
-      // path's bulk sharing scope stays the owner set. Not the floor's
-      // composition, and not this change's; the #35917 matrix below keeps
-      // such rows closed.)
+      // admits a row answers the sharing gate there. [#37535] And so they are
+      // by predicate: the sharing middleware ORs the authored policies' own
+      // scope into its bulk write scope (ruling record 7190344023, term (v)).
       const caller = memberOf(ALICE, WIDENER_SET.name);
       const overrides: Overrides = { r1: { stage: 'closed' } };
       const copy = await seedDeals(overrides);
       const from = verdictCalls.length;
       await predicateWrite(DEAL, 'update', copy.batch, caller);
       expect(verdictsAsked(from, copy.ids)).toEqual([]);
-      expect(await changedRows(DEAL, copy.ids, 'update')).toEqual(['r1', 'r2']);
+      expect(await changedRows(DEAL, copy.ids, 'update')).toEqual(['r1', 'r2', 'r3', 'r4']);
 
       const byIdCopy = await seedDeals(overrides);
       expect(await byIdAdmits(DEAL, 'update', byIdCopy.ids, caller)).toEqual(['r1', 'r2', 'r3', 'r4']);
@@ -796,11 +814,11 @@ describe('[#35917] beside an authored widener, the by-id write keeps the floor a
   // stays, so the replacement adds rows and never takes one away.
   //
   // The matrix keeps closed every row the caller neither owns nor holds a
-  // share on: an OPEN such row is admitted by id through the authored-policy
-  // lift of the sharing refusal, which the predicate path's bulk sharing
-  // scope does not take (the corner the test above records). Each case names
-  // its expected set and compares the two paths row for row, as the #35802
-  // cases do.
+  // share on, so these cases measure the floor's term alone: an OPEN such row
+  // is admitted through the authored-policy lift of the sharing refusal, by id
+  // and (since #37535) by predicate, and the #37535 matrix below measures
+  // that. Each case names its expected set and compares the two paths row for
+  // row, as the #35802 cases do.
   const ALL_CLOSED: Overrides = {
     r1: { stage: 'closed' }, r2: { stage: 'closed' }, r3: { stage: 'closed' }, r4: { stage: 'closed' },
   };
@@ -924,6 +942,127 @@ describe('[#35917] beside an authored widener, the by-id write keeps the floor a
         { ...caller } as never,
       )) as { record?: { visible?: boolean } };
       expect(other.record?.visible, `explain ${operation} of r4`).toBe(false);
+    }
+  });
+});
+
+describe('[#37535] a predicate write honours an app-authored update / delete policy, as the by-id write does', () => {
+  // Ruling record 7190344023 (2a). By id, a row an APP-AUTHORED `using` policy
+  // admits is written although the caller neither owns it nor holds a share on
+  // it: the sharing gate defers to `checkAuthoredRowWrite`. The predicate write
+  // now reaches the same rows: the sharing middleware ORs the authored
+  // policies' own scope (`getAuthoredRowWriteFilter`, floor taken out, tenant
+  // wall kept) into its bulk write scope, verb for verb; this plugin's own
+  // layers are untouched and still decide. Every case is the #35802
+  // comparison: the rows the predicate write changes, the rows the by-id
+  // write of each admits, and the set the case names.
+  describe('the authored policy widens the predicate write to the rows it admits', () => {
+    for (const verb of ['update', 'delete'] as const) {
+      it(`ALICE under the wideners, ${verb}, every deal open: r1 to r4 — r3 and r4 by the policy alone`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(ALICE, WIDENER_SET.name), ['r1', 'r2', 'r3', 'r4']);
+      });
+    }
+    it('BOB under the wideners, update, r1 closed: r3 and r4 (his) and the open r2 — not the closed r1', async () => {
+      await expectPredicateMatchesById('update', memberOf(BOB, WIDENER_SET.name), ['r2', 'r3', 'r4'], {
+        r1: { stage: 'closed' },
+      });
+    });
+    it('CAROL (owns nothing) under the wideners, delete, r2 closed: the open r1, r3 and r4 — not r2, which she created', async () => {
+      await expectPredicateMatchesById('delete', memberOf(CAROL, WIDENER_SET.name), ['r1', 'r3', 'r4'], {
+        r2: { stage: 'closed' },
+      });
+    });
+    it('the tenant wall stays in the authored scope: an open deal in another organization is not written', async () => {
+      await expectPredicateMatchesById('update', memberOf(ALICE, WIDENER_SET.name), ['r1', 'r2', 'r3'], {
+        r4: { organization_id: 'org_other' },
+      });
+    });
+  });
+
+  describe('verb for verb', () => {
+    it('an update policy widens update (r1 to r4) and not delete (r1, r2)', async () => {
+      await expectPredicateMatchesById('update', memberOf(ALICE, UPDATE_WIDENER_SET.name), ['r1', 'r2', 'r3', 'r4']);
+      await expectPredicateMatchesById('delete', memberOf(ALICE, UPDATE_WIDENER_SET.name), ['r1', 'r2']);
+    });
+    it('a delete policy widens delete (r1 to r4) and not update (r1, r2)', async () => {
+      await expectPredicateMatchesById('delete', memberOf(ALICE, DELETE_WIDENER_SET.name), ['r1', 'r2', 'r3', 'r4']);
+      await expectPredicateMatchesById('update', memberOf(ALICE, DELETE_WIDENER_SET.name), ['r1', 'r2']);
+    });
+  });
+
+  describe('CONTROLS: nothing is widened', () => {
+    for (const verb of ['update', 'delete'] as const) {
+      it(`a caller who holds no authored policy, ${verb}: ALICE r1 and r2, CAROL nothing — the scope answers none`, async () => {
+        await expectPredicateMatchesById(verb, memberOf(ALICE, REP_SET.name), ['r1', 'r2']);
+        await expectPredicateMatchesById(verb, memberOf(CAROL, REP_SET.name), []);
+        expect(await securityPlugin.getAuthoredRowWriteFilter(DEAL, verb, memberOf(ALICE, REP_SET.name))).toBeUndefined();
+      });
+    }
+    it('a check-only policy declares no rows: ALICE r1 and r2, and the scope answers none', async () => {
+      await expectPredicateMatchesById('update', memberOf(ALICE, EMEA_CHECK_SET.name), ['r1', 'r2']);
+      expect(await securityPlugin.getAuthoredRowWriteFilter(DEAL, 'update', memberOf(ALICE, EMEA_CHECK_SET.name))).toBeUndefined();
+    });
+    for (const verb of ['update', 'delete'] as const) {
+      it(`a delegated write, ${verb}: ALICE under the wideners on behalf of CAROL writes what her by-id write does, and the scope is never asked`, async () => {
+        const spy = vi.spyOn(securityPlugin, 'getAuthoredRowWriteFilter');
+        try {
+          const caller = onBehalfOf(memberOf(ALICE, WIDENER_SET.name), CAROL);
+          await expectPredicateMatchesById(verb, caller, DELEGATED_UNDER_WIDENERS[verb]);
+          expect(spy, 'the by-id probe abstains on a delegated write, and the bulk scope is not asked').not.toHaveBeenCalled();
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    }
+  });
+
+  describe("an absent or failing member leaves today's scope", () => {
+    /** The predicate update by ALICE under the wideners, every deal open, with the security service the sharing service sees replaced. */
+    async function predicateUpdateWithService(replace: (svc: Record<string, unknown>) => Record<string, unknown>): Promise<Role[]> {
+      const service = sharing as any;
+      const kept = service.securityService;
+      service.securityService = () => replace({ ...kept() });
+      try {
+        const copy = await seedDeals();
+        await predicateWrite(DEAL, 'update', copy.batch, memberOf(ALICE, WIDENER_SET.name));
+        return await changedRows(DEAL, copy.ids, 'update');
+      } finally {
+        service.securityService = kept;
+      }
+    }
+    it('a security service without the member: the sharing scope alone (r1, r2)', async () => {
+      expect(await predicateUpdateWithService((svc) => ({ ...svc, getAuthoredRowWriteFilter: undefined }))).toEqual(['r1', 'r2']);
+    });
+    it('a member that rejects: the sharing scope alone (r1, r2), and the write still answers', async () => {
+      expect(await predicateUpdateWithService((svc) => ({
+        ...svc,
+        getAuthoredRowWriteFilter: async () => { throw new Error('authored scope unavailable'); },
+      }))).toEqual(['r1', 'r2']);
+    });
+    it('an internal failure answers none, never a throw', async () => {
+      const spy = vi.spyOn(securityPlugin as any, 'computeLayeredRlsFilter').mockRejectedValueOnce(new Error('compile failed'));
+      try {
+        expect(await securityPlugin.getAuthoredRowWriteFilter(DEAL, 'update', memberOf(ALICE, WIDENER_SET.name))).toBeUndefined();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  it('one answer: a row matches the scope iff checkAuthoredRowWrite admits it, for both verbs', async () => {
+    const caller = memberOf(ALICE, WIDENER_SET.name);
+    const { batch, ids } = await seedDeals({ r1: { stage: 'closed' }, r3: { organization_id: 'org_other' } });
+    for (const verb of ['update', 'delete'] as const) {
+      const scope = await securityPlugin.getAuthoredRowWriteFilter(DEAL, verb, caller);
+      expect(scope, `the ${verb} scope`).toBeDefined();
+      const matched = (await engine.find(DEAL, { where: { $and: [{ batch }, scope] }, fields: ['id'], context: { isSystem: true } } as never)) as { id: string }[];
+      const byScope = ROLES.filter((role) => matched.some((row) => row.id === ids[role]));
+      const byVerdict: Role[] = [];
+      for (const role of ROLES) {
+        if ((await securityPlugin.checkAuthoredRowWrite(DEAL, ids[role], verb, caller)) === 'admit') byVerdict.push(role);
+      }
+      expect(byScope, `${verb}: the scope and the verdict name the same rows`).toEqual(byVerdict);
+      expect(byScope).toEqual(['r2', 'r4']);
     }
   });
 });
