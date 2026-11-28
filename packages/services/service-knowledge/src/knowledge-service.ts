@@ -4188,7 +4188,6 @@ interface IndexPlan {
   context(reason: NonNullable<AdapterContext['reason']>): AdapterContext;
 }
 
-/** A copy of a build record, so a caller never holds the live one. */
 /** One build's durable writes ({@link KnowledgeService.rebuildOf}): its id once its start is recorded, and their chain. */
 interface DurableBuild {
   buildId?: string;
@@ -4205,6 +4204,7 @@ export type KnowledgeRecordSyncQueueView = Pick<IQueueService, 'getQueueSize' | 
 /** The most dead letters a reconcile reads when it clears a source's repaired failures. */
 const DEAD_LETTER_SCAN_MAX = 100_000;
 
+/** A copy of a build record, so a caller never holds the live one. */
 function cloneBuildRecord(record: KnowledgeBuildRecord): KnowledgeBuildRecord {
   return { ...record, progress: { ...record.progress } };
 }
