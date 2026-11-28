@@ -448,6 +448,38 @@ function resolveMemberSource(
   return { key: member, source: BARE_IDENTIFIER.test(member) ? member : null };
 }
 
+/**
+ * [#35543] Refuse a `where` member that names no field — `INVALID_FIELD` / 400,
+ * the answer `/data` gives the same body — before any strategy compiles it.
+ *
+ * A member is a field name when it is a bare identifier (`status`) or a
+ * relationship path ending in one (`account.name`, `deal.stage`). An empty or
+ * blank key is never one. Any other spelling is refused only when it would
+ * reach SQL as written: undeclared, or minted by cube inference with the
+ * spelling itself as its `sql`. A cube that DECLARES the key over its own
+ * `sql` keeps it, since the strategies compile that `sql`, not the key.
+ */
+function assertWhereMemberIsFieldName(cube: Cube, member: string): void {
+  const blank = member.trim() === '';
+  if (!blank) {
+    if (BARE_IDENTIFIER.test(member) || IDENTIFIER_PATH.test(member)) return;
+    const entry = declaredMemberEntry(cube, member, 'any');
+    if (entry && entry.sql !== member) return;
+  }
+  const err = new Error(
+    `Filter member '${member}' in 'where' on cube '${cube.name}' names no field: a filter key is a field name ` +
+      `or a relationship path ending in one (such as 'account.name'), and ` +
+      `${member === '' ? 'an empty key' : blank ? 'a blank key' : `'${member}'`} is not. ` +
+      `The query was refused before it reached the database.`,
+  ) as Error & { code?: string; status?: number; field?: string; param?: string; member?: string };
+  err.code = 'INVALID_FIELD';
+  err.status = 400;
+  err.field = member;
+  err.param = 'where';
+  err.member = member;
+  throw err;
+}
+
 /** [#20917] A dotted identifier path: relationship hops, then one column — `NativeSQLStrategy`'s own test. */
 const IDENTIFIER_PATH = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
@@ -5045,16 +5077,8 @@ export class AnalyticsService implements IAnalyticsService {
    * for both spellings of one filter.
    */
   private assertWhereFields(query: AnalyticsQuery, cube: Cube, declaredDimensions: string[]): void {
-    const probe = this.getObjectFieldNames;
-    if (!probe) return;
     const where = (query as { where?: unknown }).where;
     if (!where || typeof where !== 'object') return;
-
-    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
-    if (!object || !BARE_IDENTIFIER.test(object)) return;
-    const fieldNames = probe(object);
-    if (!fieldNames || fieldNames.length === 0) return;
-    const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
 
     /** Every member the compiled predicate will bind against, structure discarded. */
     let members: string[];
@@ -5070,6 +5094,22 @@ export class AnalyticsService implements IAnalyticsService {
       return;
     }
     if (members.length === 0) return;
+
+    // [#35543] A filter key that is no field name at all — empty, blank, or a
+    // spelling that would reach SQL as a column it cannot be — is refused
+    // first. It needs no field probe: no object has such a field. Before, the
+    // empty key compiled `WHERE  = $1` (500 DATABASE_ERROR) and the blank one
+    // reached the field-read gate (403 PERMISSION_DENIED), where `/data`
+    // answers both `400 INVALID_FIELD`.
+    for (const member of members) assertWhereMemberIsFieldName(cube, member);
+
+    const probe = this.getObjectFieldNames;
+    if (!probe) return;
+    const object = typeof cube.sql === 'string' ? cube.sql.trim() : '';
+    if (!object || !BARE_IDENTIFIER.test(object)) return;
+    const fieldNames = probe(object);
+    if (!fieldNames || fieldNames.length === 0) return;
+    const known = new Set<string>([...fieldNames, 'id', 'created_at', 'updated_at']);
 
     // Two passes, for the reason the measure and dimension gates have two: on the
     // auto-inference path `inferCubeFromQuery` mints the `where`'s own field keys
