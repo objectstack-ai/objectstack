@@ -194,7 +194,7 @@ export const SAMPLES: Record<string, Record<string, unknown>> = {
     // Spec-17 placement vocabulary; the pre-17 `record`/`list` shorthands are
     // not in the enum (and the ActionPreview placement mock renders nothing
     // for them, so the "Where it appears" section was empty).
-    locations: ['record_header', 'list_toolbar'],
+    locations: ['record_page', 'list'],
     confirmText: 'Close this order? This cannot be undone.',
     successMessage: 'Order closed.',
     // No `bulkEnabled`: RETIRED in spec 17 (objectstack#3896). The multi-select

@@ -7,10 +7,10 @@
  * #27219 rebuilt the platform record pages as `kind: 'full'` pages whose
  * `page:header` named the platform's own action ids, and an authored id list
  * is the whole set (#11592), so a `type: 'url'` action an installed package
- * places on `sys_user` at `record_header` stopped drawing in the 18.3 Console.
+ * places on `sys_user` at `record_page` stopped drawing in the 18.3 Console.
  * Ruling A (record 6624172200) gave the header an opt-in instead,
  * `placedActions: true` (objectstack#30018): every action of the page's object
- * placed at `record_header` / `record_more`, read live. The three platform
+ * placed at `record` / `record_page`, read live. The three platform
  * pages now ship exactly `{ type: 'page:header', properties: { placedActions:
  * true } }` (pinned in platform-objects' `record-page-header-actions.test.ts`
  * and plugin-approvals' `sys-approval-request-page.test.ts`; that package is
@@ -22,7 +22,7 @@
  * object and record handed in).
  *
  *   - The card's pin: on the shipped header node, the packaged url action
- *     draws inline and the packaged `record_more` one in the ⋯ menu, beside
+ *     draws inline and the packaged folded (`component: 'action:menu'`) one in the ⋯ menu, beside
  *     the platform's own; actions placed elsewhere do not draw. On the frozen
  *     #27219 header (an id list, no opt-in) the same object draws neither
  *     packaged action, which is the regression this pin is red on.
@@ -71,14 +71,14 @@ import { FavoritesProvider } from '../context/FavoritesProvider';
 const RECORD_ID = 'rec-1';
 
 // The platform's own header actions, as `sys_user` places them.
-const BAN_USER = { name: 'ban_user', label: 'Ban User', type: 'api', target: '/api/v1/x', locations: ['list_item', 'record_header'] };
-const IMPERSONATE = { name: 'impersonate_user', label: 'Impersonate User', type: 'api', target: '/api/v1/y', locations: ['record_more'] };
+const BAN_USER = { name: 'ban_user', label: 'Ban User', type: 'api', target: '/api/v1/x', locations: ['record'] };
+const IMPERSONATE = { name: 'impersonate_user', label: 'Impersonate User', type: 'api', target: '/api/v1/y', locations: ['record_page'], component: 'action:menu' };
 // Placed elsewhere: never a header action.
-const LIST_ONLY = { name: 'export_users', label: 'Export Users', type: 'api', target: '/api/v1/z', locations: ['list_toolbar'] };
+const LIST_ONLY = { name: 'export_users', label: 'Export Users', type: 'api', target: '/api/v1/z', locations: ['list'] };
 const SECTION_ONLY = { name: 'reset_mfa', label: 'Reset MFA', type: 'api', target: '/api/v1/w', locations: ['record_section'] };
 // What another package adds to `sys_user` (the folded registry appends it).
-const PACKAGED_URL = { name: 'qa_open_profile', label: 'Open Profile', type: 'url', target: 'https://example.com/u', locations: ['record_header'], _packageId: 'com.qa.hdr' };
-const PACKAGED_MORE = { name: 'qa_profile_link', label: 'Copy Profile Link', type: 'url', target: 'https://example.com/l', locations: ['record_more'], _packageId: 'com.qa.hdr' };
+const PACKAGED_URL = { name: 'qa_open_profile', label: 'Open Profile', type: 'url', target: 'https://example.com/u', locations: ['record_page'], _packageId: 'com.qa.hdr' };
+const PACKAGED_MORE = { name: 'qa_profile_link', label: 'Copy Profile Link', type: 'url', target: 'https://example.com/l', locations: ['record_page'], component: 'action:menu', _packageId: 'com.qa.hdr' };
 
 const ACTIONS = [BAN_USER, IMPERSONATE, LIST_ONLY, SECTION_ONLY, PACKAGED_URL, PACKAGED_MORE];
 

@@ -140,6 +140,7 @@ import { validateFormConsumers, validateFormPublicAddresses } from './validate-f
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateAiContext } from './validate-ai-context.js';
+import { validateKnowledgeSource } from './validate-knowledge-source.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -2083,6 +2084,46 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['ai_context'],
     run: (stack, ctx) => validateAiContext(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+  },
+  // [ADR-0161 K4, row 4] Knowledge sources whose object or a listed field the
+  // stack does not have, whose object the API does not serve for `search`, or
+  // that index a system object which does not opt into AI reads (the gates of
+  // the knowledge service's admission that need no principal), and a listed
+  // credential-class or `internal` field, which the index never carries.
+  //
+  // GATING, and on the runtime publish door for `knowledge_source`: ADR-0161
+  // K4 says an item "is refused when the object or a named field does not
+  // exist" and that "a packaged item meets the gates that need no principal in
+  // `os validate` and at publish". That is the departure from the
+  // `validateAiContext` row above, which only advises at publish because a
+  // context pack still reads what resolves; a source that fails one of these
+  // has nothing to index (a missing object), indexes no text for a member (a
+  // missing field), or is never searched for a caller the service judges (a
+  // gated object). The rule reads `knowledgeSources`, `objects` (and the
+  // stack's own extensions), `manifest.dependencies` and no other collection;
+  // `objects` is the context every per-write snapshot carries, and the
+  // written source is the sole member of its own collection. Under a stated
+  // package scope that `objects` is the write's closure, so the scope is
+  // passed through and an object outside it is worded for the closure with
+  // `closureDependencyRemedy`. With no scope `objects` is the whole
+  // collection the host serves (`wholeCollection`), so an unresolved object
+  // is an error there too; only the CLI, where a manifest dependency the
+  // artifact does not carry may define it, hedges it as a warning (the
+  // `flow-trigger-unknown-object` split). An `error` refuses the publish
+  // (422), the `warning`s ride the 2xx `advisories`.
+  {
+    name: 'validateKnowledgeSource',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-knowledge-source.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['knowledge_source'],
+    run: (stack, ctx) =>
+      validateKnowledgeSource(stack, {
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+        wholeCollection: ctx.runtimeWriteType !== undefined && !ctx.packageScope,
+      }),
   },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and

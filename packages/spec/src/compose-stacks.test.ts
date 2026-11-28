@@ -530,7 +530,7 @@ describe('composeStacks + defineStack integration', () => {
 
 // ─── Action `order` sorting (mergeActionsIntoObjects) ───────────────
 // Regression coverage for #2670: the record-header primary button is the first
-// visible `record_header` action, so `order` must control which action lands
+// visible `record_page` action, so `order` must control which action lands
 // first — instead of fragile cross-file registration order.
 
 describe('Action order sorting', () => {
@@ -543,9 +543,9 @@ describe('Action order sorting', () => {
           name: 'deal',
           fields: { title: { type: 'text' } },
           actions: [
-            { name: 'close_deal', label: 'Close', locations: ['record_header'] },
-            { name: 'print', label: 'Print', locations: ['record_header'], order: 5 },
-            { name: 'approve', label: 'Approve', locations: ['record_header'], order: -10 },
+            { name: 'close_deal', label: 'Close', locations: ['record_page'] },
+            { name: 'print', label: 'Print', locations: ['record_page'], order: 5 },
+            { name: 'approve', label: 'Approve', locations: ['record_page'], order: -10 },
           ],
         },
       ],
@@ -627,14 +627,14 @@ describe('Action order sorting', () => {
         {
           name: 'deal',
           fields: { title: { type: 'text' } },
-          actions: [{ name: 'app_action', label: 'App', locations: ['record_header'] }],
+          actions: [{ name: 'app_action', label: 'App', locations: ['record_page'] }],
         },
       ],
     });
     // A plugin (e.g. plugin-approvals) contributes a high-priority decision.
     const approvals = makeStack({
       actions: [
-        { name: 'approve', label: 'Approve', objectName: 'deal', locations: ['record_header'], order: -100 },
+        { name: 'approve', label: 'Approve', objectName: 'deal', locations: ['record_page'], order: -100 },
       ],
     });
     const combined = composeStacks([base, approvals]);

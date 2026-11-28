@@ -11,7 +11,7 @@
  *
  * `record_related` is ROW placement scoped to a parent record, and this block
  * only ever draws inside one, so the placement rule the channel applies reads
- * three locations: `list_toolbar` (header), `list_item` and `record_related`
+ * three locations: `list` (header), `record_row` and `record_related`
  * (each row's menu). The DOM half, through the real host bridge and the real
  * renderer, is `RelatedRecordActionsBridge.recordRelated-11270.test.tsx` in
  * `@object-ui/app-shell`.
@@ -25,10 +25,10 @@ import {
 
 const REGISTERED = [
   { name: 'log_time', locations: ['record_related'] },
-  { name: 'send_reminder', locations: ['list_item'] },
-  { name: 'archive', locations: ['list_item', 'record_related'] },
-  { name: 'invite', locations: ['list_toolbar'] },
-  { name: 'header_only', locations: ['record_header'] },
+  { name: 'send_reminder', locations: ['record_row'] },
+  { name: 'archive', locations: ['record_row', 'record_related'] },
+  { name: 'invite', locations: ['list'] },
+  { name: 'header_only', locations: ['record_page'] },
 ];
 
 const names = (actions: ReadonlyArray<{ name?: unknown }>) => actions.map((a) => a.name);
@@ -41,14 +41,14 @@ describe('placeAuthoredRelatedListActions — `record_related` (objectui#11270)'
     expect(placed.refused).toEqual([]);
   });
 
-  it('CONTROL: `list_item` is still placed on the row and `list_toolbar` in the header', () => {
+  it('CONTROL: `record_row` is still placed on the row and `list` in the header', () => {
     const placed = placeAuthoredRelatedListActions(['invite', 'send_reminder'], REGISTERED);
     expect(names(placed.row)).toEqual(['send_reminder']);
     expect(names(placed.toolbar)).toEqual(['invite']);
     expect(placed.refused).toEqual([]);
   });
 
-  it('a `record_related` id shares the row with `list_item` ids, in authored order', () => {
+  it('a `record_related` id shares the row with `record_row` ids, in authored order', () => {
     const placed = placeAuthoredRelatedListActions(['log_time', 'invite', 'send_reminder'], REGISTERED);
     expect(names(placed.row)).toEqual(['log_time', 'send_reminder']);
     expect(names(placed.toolbar)).toEqual(['invite']);
@@ -72,8 +72,8 @@ describe('describeRelatedListActionRefusals — the notice names the three relat
   it('an unplaced id is told every location this list draws', () => {
     const text = describeRelatedListActionRefusals([{ kind: 'unplaced', id: 'header_only' }], 'task', true);
     expect(text).toContain('"header_only"');
-    expect(text).toMatch(/list_toolbar/);
-    expect(text).toMatch(/list_item/);
+    expect(text).toMatch(/list/);
+    expect(text).toMatch(/record_row/);
     expect(text).toMatch(/record_related/);
   });
 });

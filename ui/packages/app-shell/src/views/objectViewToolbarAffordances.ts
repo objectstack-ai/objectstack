@@ -63,7 +63,7 @@ export function useObjectViewToolbarAffordances({
     // provider's verdict, so the memo below keys on a primitive (AGENTS.md #10).
     const listActionsReadable = mayReadObject(perms.can, objectDef.name);
     const listActions = listActionsReadable ? objectDef.actions : undefined;
-    // Localized `list_toolbar` actions, shared by the generic action bar and the
+    // Localized `list` actions, shared by the generic action bar and the
     // environment-aware toolbar (the action:bar renderer filters by location).
     // The header reads them through `headerToolbarActions`, which drops the
     // selection bar's duplicates once the active view is resolved (objectui#12462).
@@ -111,7 +111,7 @@ export function useObjectViewToolbarAffordances({
 
     /**
      * objectui#11687 — does this page offer a way to add a row? The New button
-     * above, or a `list_toolbar` action the schema-driven toolbar draws (Invite
+     * above, or a `list` action the schema-driven toolbar draws (Invite
      * User, Register OAuth Application, …), each by the verdict its own control
      * renders on. The managed-by empty state reads it: a `better-auth` list
      * must not say rows are "not added by hand here" beside such a button.

@@ -77,7 +77,7 @@ const PRESCRIPTION: Readonly<Record<CustomArrangementKey, string>> = Object.free
     fieldGroups: "place what this package brings with `place`, e.g. `place: [{ field: 'tax_id', group: 'basic', after: 'industry' }]`",
     relatedLists: "place what this package brings with `place`, e.g. `place: [{ list: 'contract', after: 'opportunity' }]`",
     actionLayout: "place an action this package brings by the action's own `locations` and `order`, e.g. "
-        + "`{ name: 'send_quote', objectName: 'crm_lead', locations: ['record_more'], order: 50 }`",
+        + "`{ name: 'send_quote', objectName: 'crm_lead', locations: ['record_page'], component: 'action:menu', order: 50 }`",
 });
 
 /** The sentence. Prescription inside the first 500 characters: a 4xx message crosses the REST boundary capped there. */

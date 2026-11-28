@@ -770,7 +770,7 @@ export interface BulkActionDef {
    * Presence of this key changes what `operation: 'custom'` means: instead of
    * a per-row no-op, the executor dispatches THIS action through the action
    * runner once per selected record, with the row attached as `_rowRecord` so
-   * `recordIdParam` injection works exactly as it does for a `list_item` row
+   * `recordIdParam` injection works exactly as it does for a `record_row` row
    * action — or once for the whole selection under `execution: 'aggregate'`.
    * Params and confirmation are collected once by the BulkActionDialog
    * and handed to the runner as values, so it never re-prompts per record.

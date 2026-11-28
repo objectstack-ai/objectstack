@@ -131,7 +131,7 @@ describe('API Keys: Create Key through the existing mint route', () => {
 
   it('is declared as a primary list-toolbar action', () => {
     expect(create, 'sys_api_key declares no create_api_key action').toBeDefined();
-    expect(create?.locations).toEqual(['list_toolbar']);
+    expect(create?.locations).toEqual(['list']);
     expect(create?.variant).toBe('primary');
     expect(nonEmptyString(create?.label)).toBe(true);
   });
