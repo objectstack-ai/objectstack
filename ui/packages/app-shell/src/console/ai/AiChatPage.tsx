@@ -214,6 +214,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     ensureConversation,
     createError: conversationCreateError,
     conversationMetadata,
+    createdConversationId,
   } = useChatConversation({
     // Gate resolution on the agent being known: resolving while `activeAgent`
     // is still undefined (catalog loading) would bind a SCOPELESS conversation
@@ -260,9 +261,11 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     conversationCreateError,
     null,
     scopeMatched ? conversationMetadata : undefined,
+    undefined,
+    createdConversationId,
   );
-  // A first send creates the conversation: the id it mints takes the focus
-  // the conversation had at that send (and no other arriving id does).
+  // A first send creates the conversation: the id its create mints takes the
+  // focus the conversation had at that send (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = useCallback(() => {
     // With no user there is nothing to create: no mark, so no id that

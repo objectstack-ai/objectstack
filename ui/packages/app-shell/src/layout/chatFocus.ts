@@ -159,9 +159,11 @@ export interface ConversationFocus {
   /**
    * The host is creating the conversation for a first send (it calls this
    * beside `ensureConversation`, and only while it has a user to create it
-   * for): the id that arrives next is the one that send goes to, so it takes
-   * the focus the conversation had at this moment. A create that fails spends
-   * the mark (see the hook's `createError`).
+   * for): the id that create mints takes the focus the conversation had at
+   * this moment. Only that id: one the host resolves or is handed instead (a
+   * found thread the send joins, a history row) restores its own. A create
+   * that fails spends the mark (see the hook's `createError`), and so does
+   * another target while unsent.
    */
   markSending: () => void;
 }
@@ -175,6 +177,17 @@ interface FocusState {
   label?: string;
   /** What the host was asked to show when the state last moved (see `origin`). */
   origin: string | undefined;
+  /**
+   * How many times another target started another unsent conversation. A
+   * first-send mark is good only for the unsent conversation it was made in.
+   */
+  epoch: number;
+}
+
+/** A first send's mark: the entry it fixes, for the unsent conversation it was made in. */
+interface SendingMark {
+  entry: ChatFocusEntry;
+  epoch: number;
 }
 
 /** The entry a conversation the host arrives at restores: this tab's copy, else its metadata's. */
@@ -182,40 +195,54 @@ function restoredState(
   key: string | undefined,
   origin: string | undefined,
   fromMetadata: ChatFocusFromMetadata | null,
+  epoch: number,
 ): FocusState {
   const stored = readStoredEntry(key);
-  if (stored) return { key, entry: stored, origin };
+  if (stored) return { key, entry: stored, origin, epoch };
   if (key !== undefined && fromMetadata) {
     return {
       key,
       entry: { focus: { object: fromMetadata.object, id: fromMetadata.id }, dismissed: false },
       label: fromMetadata.label,
       origin,
+      epoch,
     };
   }
-  return { key, entry: EMPTY_ENTRY, origin };
+  return { key, entry: EMPTY_ENTRY, origin, epoch };
 }
 
 /**
- * The state the host's props move `state` to. `undefined` → an id is the
- * first send's id arriving: it takes the mark `sending` holds. Every other
- * arrival restores that conversation's own entry.
+ * The state the host's props move `state` to. `undefined` → the id the first
+ * send's own create minted (`createdId`) takes the mark `sending` holds, when
+ * that mark was made in this unsent conversation. Every other arrival of an
+ * id restores that conversation's own entry: a thread the resolve found, which
+ * a send made during the resolve joins, and a history row opened while the
+ * create was on the wire, keep the focus they were fixed on.
  */
 function nextFocusState(
   state: FocusState,
   conversationId: string | undefined,
   origin: string | undefined,
   fromMetadata: ChatFocusFromMetadata | null,
-  sending: { readonly current: ChatFocusEntry | null },
+  createdId: string | undefined,
+  sending: { readonly current: SendingMark | null },
 ): FocusState {
   if (state.key !== conversationId) {
-    const mark = state.key === undefined && conversationId !== undefined ? sending.current : null;
-    return mark ? { key: conversationId, entry: mark, origin } : restoredState(conversationId, origin, fromMetadata);
+    const mark =
+      state.key === undefined && conversationId !== undefined && conversationId === createdId
+        ? sending.current
+        : null;
+    return mark && mark.epoch === state.epoch
+      ? { key: conversationId, entry: mark.entry, origin, epoch: state.epoch }
+      : restoredState(conversationId, origin, fromMetadata, state.epoch);
   }
   if (state.origin !== origin) {
     // Another target while unsent is another conversation: × on the last one
-    // does not carry over. A sent conversation keeps its own entry.
-    return state.key === undefined ? { key: undefined, entry: EMPTY_ENTRY, origin } : { ...state, origin };
+    // does not carry over, nor does a first send's mark. A sent conversation
+    // keeps its own entry.
+    return state.key === undefined
+      ? { key: undefined, entry: EMPTY_ENTRY, origin, epoch: state.epoch + 1 }
+      : { ...state, origin };
   }
   if (
     state.key !== undefined &&
@@ -226,7 +253,7 @@ function nextFocusState(
   ) {
     // The conversation's row arrived after its id: its metadata restores the
     // chip this tab never held.
-    return restoredState(state.key, origin, fromMetadata);
+    return restoredState(state.key, origin, fromMetadata, state.epoch);
   }
   return state;
 }
@@ -235,8 +262,9 @@ function nextFocusState(
  * The focus of the conversation `conversationId` names, held by the chat
  * host. `undefined` is a conversation the host has no id for yet: it has sent
  * nothing, so its focus is `pageRecord` unless the user dismissed it. The
- * first send fixes that focus onto the id it mints, in the same render, so the
- * first turn, sent by the pane that remounts on that id, already carries it.
+ * first send fixes that focus onto the id its create mints (`createdId`), in
+ * the same render, so the first turn, sent by the pane that remounts on that
+ * id, already carries it.
  * Every other arrival of an id (a resumed thread resolving, a history row, the
  * scope blanking the id between apps) restores that conversation's own focus:
  * this tab's stored copy, else `metadata.focus` from the conversation's row.
@@ -255,18 +283,24 @@ export function useConversationFocus(
    * dropped. A host that passes none keeps it until an id arrives.
    */
   origin?: string,
+  /**
+   * The id of the row the host's own create minted last
+   * (`useChatConversation().createdConversationId`): the one id a first
+   * send's mark goes to.
+   */
+  createdId?: string,
 ): ConversationFocus {
   const fromMetadata = React.useMemo(() => chatFocusFromMetadata(conversationMetadata), [conversationMetadata]);
-  const [state, setState] = React.useState<FocusState>(() => restoredState(conversationId, origin, fromMetadata));
+  const [state, setState] = React.useState<FocusState>(() => restoredState(conversationId, origin, fromMetadata, 0));
   // The focus a first send in flight fixes: a ref, not state, so marking it
   // re-renders nothing while the pane holds the message it is creating the
   // row for.
-  const sendingRef = React.useRef<ChatFocusEntry | null>(null);
-  const current = nextFocusState(state, conversationId, origin, fromMetadata, sendingRef);
+  const sendingRef = React.useRef<SendingMark | null>(null);
+  const current = nextFocusState(state, conversationId, origin, fromMetadata, createdId, sendingRef);
   // Derived state set during render: React re-renders before committing, so
   // no child of this commit sees the previous conversation's focus.
   if (current !== state) setState(current);
-  const { key, entry, label } = current;
+  const { key, entry, label, epoch } = current;
 
   React.useEffect(() => {
     if (key !== undefined) writeStoredChatFocus(key, entry);
@@ -277,8 +311,9 @@ export function useConversationFocus(
   }, [key]);
   // The send's create failed: no id is coming for it, so the mark is spent
   // and the next id to arrive (a history row) restores its own focus. A send
-  // made while the host is still resolving is not spent: the resolve fulfils
-  // it, and the id that arrives is the one that send goes to.
+  // made while the host is still resolving is not spent: a resolve that
+  // settles on nothing creates the row, whose id takes it; one that finds a
+  // thread hands an id no create minted, which keeps its own.
   React.useEffect(() => {
     if (createError) sendingRef.current = null;
   }, [createError]);
@@ -295,16 +330,17 @@ export function useConversationFocus(
   // What the conversation has as of this commit, for `markSending`, which runs
   // in an event or a child's effect after it. An insertion effect runs before
   // every layout and passive effect of the commit, the children's included.
-  const effectiveRef = React.useRef<ChatFocusEntry>(EMPTY_ENTRY);
+  const effectiveRef = React.useRef<SendingMark>({ entry: EMPTY_ENTRY, epoch: 0 });
   React.useInsertionEffect(() => {
-    effectiveRef.current = { focus: effective, dismissed: entry.dismissed };
-  }, [effective, entry.dismissed]);
+    effectiveRef.current = { entry: { focus: effective, dismissed: entry.dismissed }, epoch };
+  }, [effective, entry.dismissed, epoch]);
 
   const dismiss = React.useCallback(() => {
     setState((s) => (s.entry.dismissed && !s.entry.focus ? s : { ...s, entry: { focus: null, dismissed: true }, label: undefined }));
   }, []);
   const markSending = React.useCallback(() => {
-    sendingRef.current = { ...effectiveRef.current };
+    const { entry: now, epoch: madeIn } = effectiveRef.current;
+    sendingRef.current = { entry: { ...now }, epoch: madeIn };
   }, []);
 
   return React.useMemo(

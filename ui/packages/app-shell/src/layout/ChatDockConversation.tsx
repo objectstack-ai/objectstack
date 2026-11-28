@@ -187,6 +187,7 @@ export function ChatDockConversation({
     ensureConversation,
     createError,
     conversationMetadata,
+    createdConversationId,
   } = useChatConversation({
     userId: conversationUserId,
     scope,
@@ -244,9 +245,10 @@ export function ChatDockConversation({
     pageRecord,
     scopeMatched ? conversationMetadata : undefined,
     focusOrigin,
+    createdConversationId,
   );
-  // A first send creates the conversation: the id it mints takes the focus
-  // the conversation had at that send (and no other arriving id does).
+  // A first send creates the conversation: the id its create mints takes the
+  // focus the conversation had at that send (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = React.useCallback(() => {
     // With no user there is nothing to create: no mark, so no id that

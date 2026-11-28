@@ -141,6 +141,14 @@ export interface UseChatConversationReturn {
    * while no conversation is held, or for a row served without one.
    */
   conversationMetadata: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * objectstack#37861 — the id of the row this hook's own create minted last
+   * (a first send, through `ensureConversation`), `undefined` before any. It
+   * tells a host the conversation its first send created from one it resolved
+   * or was handed: a thread a send made during the resolve joins, a history
+   * row opened while the create was on the wire.
+   */
+  createdConversationId: string | undefined;
   isLoading: boolean;
   /**
    * Create the conversation on the FIRST SEND. The hook never mints a row on
@@ -770,6 +778,7 @@ export function useChatConversation(
   const [heldMetadata, setHeldMetadata] = useState<
     { id: string; metadata: Readonly<Record<string, unknown>> | undefined } | undefined
   >(undefined);
+  const [createdConversationId, setCreatedConversationId] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(userId));
   const [createError, setCreateError] = useState<Error | undefined>(undefined);
   const mountedRef = useRef(true);
@@ -829,6 +838,7 @@ export function useChatConversation(
             resolvedForUserRef.current = forUser;
             resolvedScopeRef.current = forScope;
             setConversationId(fresh.id);
+            setCreatedConversationId(fresh.id);
             setHeldMetadata({ id: fresh.id, metadata: fresh.metadata });
             setInitialMessages(toUIMessages(fresh.messages));
           }
@@ -1067,6 +1077,7 @@ export function useChatConversation(
           if (createdId) {
             conversationIdRef.current = createdId;
             setConversationId(createdId);
+            setCreatedConversationId(createdId);
             setInitialMessages([]);
             resolvedForUserRef.current = userId;
             resolvedScopeRef.current = scope;
@@ -1231,6 +1242,7 @@ export function useChatConversation(
     initialMessages,
     conversationMetadata:
       conversationId && heldMetadata?.id === conversationId ? heldMetadata.metadata : undefined,
+    createdConversationId,
     isLoading,
     ensureConversation,
     createError: conversationId ? undefined : createError,

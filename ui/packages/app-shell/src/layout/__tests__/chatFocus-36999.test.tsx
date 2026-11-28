@@ -53,7 +53,20 @@ const state = {
   failCreate: false,
   /** The `metadata` each existing conversation's row is served with. */
   rows: {} as Record<string, Record<string, unknown> | undefined>,
+  /** While set, a create waits on it before the server answers. */
+  holdCreate: null as Promise<void> | null,
+  /** A row's read waits on its entry before the server answers. */
+  holdRead: {} as Record<string, Promise<void>>,
 };
+
+/** A gate a stub waits on, and the call that opens it. */
+function gate(): { wait: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -143,6 +156,7 @@ function installFetch(): void {
       }
       if (/\/conversations$/.test(url) && method === 'POST') {
         state.createAttempts += 1;
+        if (state.holdCreate) await state.holdCreate;
         if (state.failCreate) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
@@ -155,6 +169,7 @@ function installFetch(): void {
       const one = /\/conversations\/([^/?]+)$/.exec(url);
       if (one && method === 'GET') {
         const id = decodeURIComponent(one[1]);
+        if (state.holdRead[id]) await state.holdRead[id];
         const metadata = state.rows[id];
         return json({ id, messages: [], ...(metadata ? { metadata } : {}) });
       }
@@ -248,6 +263,8 @@ beforeEach(() => {
   state.createAttempts = 0;
   state.failCreate = false;
   state.rows = {};
+  state.holdCreate = null;
+  state.holdRead = {};
   window.localStorage.clear();
   window.sessionStorage.clear();
   installFetch();
@@ -401,6 +418,59 @@ describe('the console dock — an unsent conversation is about the record on the
 });
 
 describe('the console dock — a conversation opened again restores its own focus (objectstack#37861)', () => {
+  it('a send made while the dock resolves a thread joins it, and the thread keeps its own focus: × there stays ×', async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: null, dismissed: true }));
+    const read = gate();
+    state.holdRead['conv-old'] = read.wait;
+    mountDock();
+    await composerReady();
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await composerReady();
+    // Still resolving: no id yet, so the composer shows the page's record.
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1');
+
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('asked during the resolve');
+    });
+    await act(async () => {
+      read.open();
+    });
+    await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
+    // The send joined the thread the resolve found; no create minted a row.
+    expect(state.minted).toBe(0);
+    expect(state.sent[before].context).not.toHaveProperty('focus');
+    expect(readStoredChatFocus('conv-old')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+    expect(pageChip()).toBeInTheDocument();
+  });
+
+  it("a history row opened while the first send's create is on the wire keeps its own focus", async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
+    const create = gate();
+    state.holdCreate = create.wait;
+    mountDock();
+    await composerReady();
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('first');
+    });
+    await waitFor(() => expect(state.createAttempts).toBe(1));
+
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9'));
+    await act(async () => {
+      create.open();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-old')).toEqual({ focus: ACCOUNT_9, dismissed: false });
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9');
+    // No turn the dock sent since carries the page's record.
+    expect(state.sent.slice(before).map((body) => body.context?.focus)).not.toContainEqual([ACCOUNT_1]);
+    await composerReady();
+    expect((await send('and now?')).focus).toEqual([ACCOUNT_9]);
+  });
+
   it('from this tab: a history row keeps its focus, and a sent one without a focus shows none', async () => {
     window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
     mountDock();
