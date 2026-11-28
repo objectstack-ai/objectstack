@@ -3,6 +3,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { FileI18nAdapter } from './file-i18n-adapter.js';
 import type { II18nService } from '@objectstack/spec/contracts';
+import { TranslationConfigSchema } from '@objectstack/spec/system';
+import { createMemoryI18n } from '@objectstack/core';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -545,5 +547,46 @@ describe('FileI18nAdapter reports a translation fallback once (#28109)', () => {
     expect(perKey).toHaveLength(bound);
     expect(lines).toHaveLength(bound + 1);
     expect(lines[bound].level).toBe('warn');
+  });
+});
+
+describe('the retired `messageFormat` guidance names the placeholder `t()` fills (#37894)', () => {
+  // The tombstone is what an author upgrading from <17 reads when the key is
+  // refused, and the spelling it names is the one they will write into every
+  // bundle. Both spellings are taken from the refusal itself, never retyped
+  // here, so the sentence cannot drift from the two server `t()` paths again:
+  // the adapter (this package) and the kernel's in-memory fallback.
+  function guidance(): string {
+    const result = TranslationConfigSchema.safeParse({
+      defaultLocale: 'en',
+      supportedLocales: ['en'],
+      messageFormat: 'icu',
+    });
+    expect(result.success).toBe(false);
+    const message = result.error?.issues.find((i) => i.code === 'unrecognized_keys')?.message ?? '';
+    const line = message.split('\n').find((l) => l.includes('`messageFormat` was removed'));
+    expect(line, 'the refusal carries the messageFormat tombstone').toBeDefined();
+    return line!;
+  }
+
+  const servers: Array<[string, () => II18nService]> = [
+    ['FileI18nAdapter', () => new FileI18nAdapter()],
+    ['createMemoryI18n', () => createMemoryI18n() as unknown as II18nService],
+  ];
+
+  it.each(servers)('%s fills the spelling the guidance names', (_name, make) => {
+    const spelling = /simple `([^`]+)` substitution/.exec(guidance())?.[1];
+    expect(spelling, 'the guidance names the spelling t() fills').toBeDefined();
+    const i18n = make();
+    i18n.loadTranslations('en', { greeting: `Hello, ${spelling}!` });
+    expect(i18n.t('greeting', 'en', { variable: 'Ada' })).toBe('Hello, Ada!');
+  });
+
+  it.each(servers)('%s leaves the spelling the guidance warns about as written', (_name, make) => {
+    const spelling = /a single-brace `([^`]+)` is left as written/.exec(guidance())?.[1];
+    expect(spelling, 'the guidance names the spelling t() leaves alone').toBeDefined();
+    const i18n = make();
+    i18n.loadTranslations('en', { greeting: `Hello, ${spelling}!` });
+    expect(i18n.t('greeting', 'en', { variable: 'Ada' })).toBe('Hello, {variable}!');
   });
 });

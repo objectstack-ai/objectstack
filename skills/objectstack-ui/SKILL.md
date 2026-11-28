@@ -133,7 +133,7 @@ reports success and changes nothing. Call the API, with the option `value`,
 never its label ([Actions](./rules/actions.md)):
 
 ```json
-{ "name": "mark_done", "label": "Mark as done", "objectName": "task",
+{ "name": "mark_done", "label": "Mark as done", "objectName": "task", "locations": ["record"],
   "type": "script", "body": { "language": "js", "capabilities": ["api.write"],
     "source": "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });" } }
 ```

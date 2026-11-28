@@ -136,7 +136,7 @@
     {
       "id": 14,
       "prompt": "Our app ships no knowledge source in its package: admins will create them at run time in Studio, and an agent of ours saves them over MCP. What does `objectstack.config.ts` need so those sources are indexed and searchable? Answer from what is stated here.",
-      "expected_output": "Adds `requires: ['knowledge']` to the stack: a source the app ships in `knowledgeSources` mounts the knowledge service and its store by itself, but an app that ships none and authors its sources at run time must list the token, or a saved source is never indexed and no search tool serves it. Names no `adapter` requirement (the deployment's store is used) and adds no `knowledgeSources` entry the prompt did not ask for. Says that creating or changing a source at run time needs `manage_knowledge_sources` beside `manage_metadata`.",
+      "expected_output": "Adds `requires: ['knowledge']` to the stack: a source the app ships in `knowledgeSources` mounts the knowledge service and its store by itself, but an app that ships none and authors its sources at run time must list the token, or a run-time save is refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack declares it and the server restarts. Names no `adapter` requirement (the deployment's store is used) and adds no `knowledgeSources` entry the prompt did not ask for. Says that creating or changing a source at run time needs `manage_knowledge_sources` beside `manage_metadata`.",
       "files": [],
       "assertions": {
         "must_contain_any": [["requires: ['knowledge']", "requires: [\"knowledge\"]"]],

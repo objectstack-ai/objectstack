@@ -1984,8 +1984,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // search what it would index — the knowledge service's search-time
             // gates, asked for the author before anything is written
             // (`authoredKnowledgeSourceRefusal`, the predicate `RestServer`'s
-            // `PUT` and the MCP draft save ask). Every other type passes
-            // untouched.
+            // `PUT` and the MCP draft save ask). On a deployment with no
+            // knowledge service the author's save is refused `503
+            // SERVICE_UNAVAILABLE`, naming the remedy. Every other type
+            // passes untouched.
             {
                 const refused = await authoredKnowledgeSourceRefusal({
                     type,
@@ -1993,7 +1995,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     executionContext: _context.executionContext,
                     // The classified lookup, not the `resolveService` probe:
                     // a name nothing registered answers `undefined` (no
-                    // knowledge service, nothing to ask), and a service that
+                    // knowledge service: the save is refused), and a service that
                     // is registered and cannot be resolved rejects, which the
                     // predicate answers `503`.
                     resolveKnowledgeService: () =>

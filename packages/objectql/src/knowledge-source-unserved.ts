@@ -16,6 +16,16 @@
  * A statement at `warn`, never a boot refusal: a package may ship a source to
  * a deployment that chose not to run retrieval, and its objects, pages and
  * flows must keep serving there.
+ *
+ * The remedy it names is the one an author's save is refused with on such a
+ * deployment (`authoredKnowledgeSourceRefusal`, `@objectstack/metadata-core`):
+ * `requires: ['knowledge']` in the stack, then a restart, since the service is
+ * composed at boot and never while the process runs. The items this line
+ * finds are ones the stack does not ship, since a `knowledgeSources` entry
+ * mounts the service by itself: they arrived by the engine's own write,
+ * which is never refused (a package
+ * installed after the boot, a seed, a migration), or were saved before the
+ * save refused them.
  */
 
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
@@ -40,11 +50,20 @@ export function describeUnservedKnowledgeSources(names: readonly string[], servi
   return (
     `[ObjectQLPlugin] this deployment holds ${count} knowledge_source ${count === 1 ? 'item' : 'items'} ` +
     `(${shown}${rest > 0 ? `, and ${rest} more` : ''}), but no '${KNOWLEDGE_SERVICE}' service is registered, so ` +
-    `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched. Add KnowledgeServicePlugin ` +
-    '(@objectstack/service-knowledge) and a knowledge adapter to the composition, or remove the ' +
+    `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched. ${UNSERVED_REMEDY} or remove the ` +
     `${count === 1 ? 'item' : 'items'}.`
   );
 }
+
+/**
+ * What mounts the service for an item on a deployment that runs none: the
+ * token (or the plugin, for a host that composes its own kernel), then a
+ * restart. The same remedy an author's save there is refused with.
+ */
+const UNSERVED_REMEDY =
+  "Declare requires: ['knowledge'] in the stack and restart — the service and the deployment's store are mounted " +
+  'at boot, never while the process runs — or, on a host that composes its own kernel, add KnowledgeServicePlugin ' +
+  '(@objectstack/service-knowledge) and a knowledge store;';
 
 /** What {@link announceUnservedKnowledgeSources} reads of its host. */
 export interface UnservedKnowledgeSourcesHost {

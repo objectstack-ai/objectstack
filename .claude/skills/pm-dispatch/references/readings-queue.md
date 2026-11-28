@@ -13,7 +13,7 @@
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open;两种退出的 actor 同为 `github-merge-queue[bot]`。
 - 不在 `origin/main` 二义(在队等/没入队)⇒ 落地检查恒读两数:队列成员资格与 `origin/main`。
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
-- 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
+- 队列落的是另一个提交:`git-history.mjs ancestor --commit=<pr-head>` 对已完全合入的 PR 答 no。
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
 - `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
