@@ -22,6 +22,7 @@ import {
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
+  LIST_VIEW_FILTER_FIELD_VIRTUAL,
   listViewWalkedPositions,
   type ListViewFieldRefFinding,
 } from './validate-list-view-field-refs.js';
@@ -1757,5 +1758,65 @@ describe('[#36370] the lane foot statistic of a board', () => {
     expect(withSummary({ type: 'sum', field: 'estimate' })).toEqual([]);
     expect(withSummary({ type: 'count' })).toEqual([]);
     expect(withSummary({ type: 'none' })).toEqual([]);
+  });
+});
+
+// [#35143] A list view filter keyed on a field computed on read. The engine's
+// filter seam (`assertFilterIsMaterializable`) refuses the query 400
+// INVALID_FIELD, so the view opens on that error; the rule says so at publish.
+describe('[#35143] a list view filter on a formula field', () => {
+  const virtualFindings = (listView: AnyRec) =>
+    validateListViewFieldRefs(stackWith(listView)).filter((f) => f.rule === LIST_VIEW_FILTER_FIELD_VIRTUAL);
+  const on = (field: string) => [{ field, operator: 'equals', value: 1 }];
+
+  it('a filter on a stored field is silent', () => {
+    expect(virtualFindings(FULL_LIST_VIEW)).toEqual([]);
+  });
+
+  it.each([
+    ['the rule-array shape', { filter: on('score') }, 'views[0].list.filter[0].field'],
+    ['the condition-object shape', { filter: { score: { $gt: 1 } } }, 'views[0].list.filter.score'],
+    ['a `userFilters.tabs[]` preset', { userFilters: { tabs: [{ name: 'hot', filter: on('score') }] } }, 'views[0].list.userFilters.tabs[0].filter[0].field'],
+  ])('an error in %s, naming the fix in one line', (_label, patch, path) => {
+    const findings = virtualFindings(mutate(patch as AnyRec));
+    expect(findings.map((f) => [f.severity, f.path])).toEqual([['error', path]]);
+    expect(findings[0].message).toContain('400 INVALID_FIELD');
+    for (const line of [findings[0].message, findings[0].hint]) {
+      expect(line).not.toContain('\n');
+      expect(line.length, line).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('a dotted key whose head is a formula stays the dotted verdict, and the filter-bar field list is not judged', () => {
+    expect(virtualFindings(mutate({ filter: on('score.x') }))).toEqual([]);
+    expect(virtualFindings(mutate({ userFilters: { fields: [{ field: 'score' }] } }))).toEqual([]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: stackWith(mutate({ filter: on('score') })) }));
+      expect(errors.map((f) => f.rule)).toContain(LIST_VIEW_FILTER_FIELD_VIRTUAL);
+    });
+  }
+
+  it('is refused at the runtime `view` door, and passes once the filter names a stored field', () => {
+    const item = (filter: unknown) => ({ name: 'duly_task', object: 'duly_task', list: mutate({ filter }) });
+    const refused = runRuntimeAuthoringRules({ type: 'view', item: item(on('score')), context: { objects: OBJECTS } });
+    expect(refused.errors.map((f) => f.rule)).toEqual([LIST_VIEW_FILTER_FIELD_VIRTUAL]);
+    const clean = runRuntimeAuthoringRules({ type: 'view', item: item(on('estimate')), context: { objects: OBJECTS } });
+    expect(clean.errors).toEqual([]);
+  });
+
+  it('reaches an object write through its own `listViews` (the `object` door)', () => {
+    const findings = validateReferenceIntegrity(
+      { objects: [{ ...OBJECTS[0], listViews: { hot: { type: 'grid', columns: ['title'], filter: on('score') } } }, OBJECTS[1]] },
+      { runtimeWriteType: 'object' },
+    );
+    expect(findings.map((f) => [f.rule, f.path])).toContainEqual([LIST_VIEW_FILTER_FIELD_VIRTUAL, 'objects[0].listViews.hot.filter[0].field']);
+  });
+
+  it('`os explain` carries the reasoning', () => {
+    const text = explainRule(LIST_VIEW_FILTER_FIELD_VIRTUAL)!.paragraphs.join('\n');
+    for (const fact of ['400 INVALID_FIELD', 'stored field', '`list-view-field-dotted`']) expect(text, fact).toContain(fact);
   });
 });

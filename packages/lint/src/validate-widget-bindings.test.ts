@@ -27,7 +27,9 @@ import {
   WIDGET_FILTER_FIELD_UNKNOWN,
   WIDGET_FILTER_FIELD_NOT_INCLUDED,
   WIDGET_SORTBY_UNSELECTED,
+  DASHBOARD_WITHOUT_WIDGETS,
 } from './validate-widget-bindings.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { explainRule } from './rule-explanations.js';
 
 // [#22161] Each finding of the rule ids this file's rule shortened is one
@@ -2335,5 +2337,52 @@ describe('[#22161] one-line fix — the rule ids whose `fix:` line this file sho
     expect(explanation, `no \`os explain ${rule}\` entry`).toBeDefined();
     const text = explanation!.paragraphs.join('\n');
     for (const fact of MOVED_FROM_HINT[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#35143] A dashboard with no widgets publishes and opens on its header over
+// an empty canvas. An error on the CLI; a warning at the runtime door, where
+// Studio creates a dashboard with `widgets: []` and fills it afterwards.
+describe('[#35143] a dashboard with no widgets', () => {
+  const EMPTY = { name: 'ops_board', label: 'Ops', widgets: [] };
+  const datasets = [{ name: 'task_stats', object: 'task', measures: [{ name: 'n', aggregate: 'count' }] }];
+  const objects = [{ name: 'task', fields: { title: { type: 'text' } } }];
+  const FILLED = {
+    ...EMPTY,
+    widgets: [{ id: 'w1', type: 'metric', dataset: 'task_stats', values: ['n'], layout: { x: 0, y: 0, w: 3, h: 2 } }],
+  };
+  const emptyFindings = (stack: Record<string, unknown>, atPublishDoor?: boolean) =>
+    validateWidgetBindingsUnrecorded(stack, { atPublishDoor }).filter((f) => f.rule === DASHBOARD_WITHOUT_WIDGETS);
+
+  it('is an error at `widgets` on the CLI, naming the fix', () => {
+    const findings = emptyFindings({ objects, datasets, dashboards: [EMPTY] });
+    expect(findings.map((f) => [f.severity, f.path])).toEqual([['error', 'dashboards[0].widgets']]);
+    expect(findings[0].hint).toContain('Add a widget');
+  });
+
+  it('is silent on a dashboard with a widget, and on one with no `widgets` array (the schema refuses that)', () => {
+    expect(emptyFindings({ objects, datasets, dashboards: [FILLED] })).toEqual([]);
+    expect(emptyFindings({ objects, datasets, dashboards: [{ name: 'x', label: 'X' }] })).toEqual([]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: { objects, datasets, dashboards: [EMPTY] } }));
+      expect(errors.map((f) => f.rule)).toContain(DASHBOARD_WITHOUT_WIDGETS);
+    });
+  }
+
+  it('is an advisory at the runtime `dashboard` door, never a refusal, and silent once a widget is added', () => {
+    const empty = runRuntimeAuthoringRules({ type: 'dashboard', item: EMPTY, context: { objects, datasets } });
+    expect(empty.errors).toEqual([]);
+    expect(empty.advisories.map((f) => f.rule)).toEqual([DASHBOARD_WITHOUT_WIDGETS]);
+    const filled = runRuntimeAuthoringRules({ type: 'dashboard', item: FILLED, context: { objects, datasets } });
+    expect(filled.errors).toEqual([]);
+    expect(filled.advisories.map((f) => f.rule)).not.toContain(DASHBOARD_WITHOUT_WIDGETS);
+  });
+
+  it('`os explain` carries the split severity', () => {
+    const text = explainRule(DASHBOARD_WITHOUT_WIDGETS)!.paragraphs.join('\n');
+    for (const fact of ['`widgets: []`', 'runtime publish door', 'Studio']) expect(text, fact).toContain(fact);
   });
 });

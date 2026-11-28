@@ -13,7 +13,9 @@ import {
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
+  LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL,
 } from './validate-list-view-field-refs.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { explainRule } from './rule-explanations.js';
 
 type AnyRec = Record<string, unknown>;
@@ -145,5 +147,86 @@ describe('#28018 — kanban.lanes judged against the group field', () => {
         expect(line.length, line).toBeLessThanOrEqual(200);
       }
     }
+  });
+});
+
+describe('#35143 — a board grouped by a field with no lanes of its own', () => {
+  const GROUP_OBJECTS = [
+    {
+      name: 'crm_task',
+      label: 'Task',
+      fields: {
+        subject: { type: 'text', label: 'Subject' },
+        status: { type: 'select', label: 'Status', options: STATUS_OPTIONS },
+        stage: { type: 'radio', label: 'Stage', options: STATUS_OPTIONS },
+        is_completed: { type: 'boolean', label: 'Completed' },
+        owner: { type: 'lookup', label: 'Owner', reference: 'sys_user' },
+        amount: { type: 'number', label: 'Amount' },
+        due_date: { type: 'date', label: 'Due' },
+        tags: { type: 'multiselect', label: 'Tags', options: STATUS_OPTIONS },
+        watchers: { type: 'lookup', label: 'Watchers', reference: 'sys_user', multiple: true },
+      },
+    },
+  ];
+  const groupedBy = (groupByField: string, type = 'kanban'): AnyRec => ({
+    ...TASK_BOARD,
+    type,
+    kanban: { groupByField, columns: ['subject'] },
+  });
+  const groupFindings = (listView: AnyRec) =>
+    validateListViewFieldRefs(stackWith(listView, GROUP_OBJECTS)).filter(
+      (f) => f.rule === LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL,
+    );
+
+  it.each(['status', 'stage', 'is_completed', 'owner'])('a board grouped by `%s` (a fixed set of lanes) is silent', (field) => {
+    expect(groupFindings(groupedBy(field))).toEqual([]);
+  });
+
+  it.each([
+    ['amount', 'number', 'distinct value'],
+    ['due_date', 'date', 'distinct value'],
+    ['subject', 'text', 'distinct value'],
+    ['tags', 'multiselect', 'multi-valued'],
+    ['watchers', 'lookup', 'multi-valued'],
+  ])('a board grouped by `%s` (a %s field) is a warning at groupByField that names the fix', (field, type, phrase) => {
+    const findings = groupFindings(groupedBy(field));
+    expect(findings.map((f) => [f.severity, f.path])).toEqual([['warning', 'views[0].list.kanban.groupByField']]);
+    expect(findings[0].message).toContain(`\`${type}\``);
+    expect(findings[0].message).toContain(phrase);
+    expect(findings[0].hint).toContain('`select`');
+    for (const line of [findings[0].message, findings[0].hint]) expect(line.length, line).toBeLessThanOrEqual(200);
+  });
+
+  it('a kanban block on a non-kanban view, a dotted and an unknown group field are not judged', () => {
+    expect(groupFindings(groupedBy('amount', 'grid'))).toEqual([]);
+    expect(groupFindings(groupedBy('owner.name'))).toEqual([]);
+    expect(groupFindings(groupedBy('nothing_here'))).toEqual([]);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`is advisory on \`${command}\`: reported, never an error`, () => {
+      const findings = runAuthoringRules(command, { normalized: stackWith(groupedBy('amount'), GROUP_OBJECTS) });
+      const { errors, advisories } = splitBySeverity(findings);
+      expect(advisories.map((f) => f.rule)).toContain(LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL);
+      expect(errors.map((f) => f.rule)).not.toContain(LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL);
+    });
+  }
+
+  it('rides the runtime `view` door as an advisory, and is silent once grouped by a select', () => {
+    const item = { name: 'crm_task', object: 'crm_task', list: groupedBy('amount') };
+    const lit = runRuntimeAuthoringRules({ type: 'view', item, context: { objects: GROUP_OBJECTS } });
+    expect(lit.errors).toEqual([]);
+    expect(lit.advisories.map((f) => f.rule)).toEqual([LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL]);
+    const fixed = runRuntimeAuthoringRules({
+      type: 'view',
+      item: { ...item, list: groupedBy('status') },
+      context: { objects: GROUP_OBJECTS },
+    });
+    expect(fixed.advisories.map((f) => f.rule)).not.toContain(LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL);
+  });
+
+  it('`os explain` carries the reasoning', () => {
+    const text = explainRule(LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL)!.paragraphs.join('\n');
+    for (const fact of ['`select`', 'multi-valued', 'dragged']) expect(text, fact).toContain(fact);
   });
 });

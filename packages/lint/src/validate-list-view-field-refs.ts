@@ -1477,14 +1477,13 @@ export function validateListViewFieldRefs(
       where: `${where} › kanban`,
       path: `${path}.kanban.groupByField`,
       message: multi
-        ? `the board is grouped by "${object}.${groupBy}", a multi-valued \`${type}\` field: a card holding ` +
-          'several values falls into one lane named by all of them together, not into a lane per value'
-        : `the board is grouped by "${object}.${groupBy}", a \`${type}\` field with no fixed set of values: the ` +
-          'board draws one lane per distinct value among the cards it has loaded, no lane for a value no card ' +
-          'holds (so no card can be dragged there), and no lanes at all while the list is empty',
+        ? `"${object}.${groupBy}" is a multi-valued \`${type}\` field: a card holding several values falls into ` +
+          'one lane named by all of them together'
+        : `"${object}.${groupBy}" is a \`${type}\` field: the board draws a lane per distinct value on its loaded ` +
+          'cards, none for a value no card holds, and none on an empty list',
       hint:
-        `Group the board by a single-valued \`select\` field of "${object}" (one lane per option), a boolean or a ` +
-        `lookup; or show "${groupBy}" as a grid column or grouping instead of board lanes`,
+        `Group the board by a single-valued \`select\` (one lane per option), a boolean or a lookup, or show ` +
+        `"${groupBy}" as a grid grouping`,
     });
   };
 
@@ -1781,12 +1780,11 @@ export function validateListViewFieldRefs(
         where: filterWhere,
         path: at,
         message:
-          `filter key "${written}" is a \`${type}\` field of "${object}": its value is computed on read and no store ` +
-          'keeps a column for it, so the engine refuses the list\'s query (400 INVALID_FIELD) and the view opens on ' +
-          'that error with no records',
+          `filter key "${written}" is a \`${type}\` field of "${object}": it has no stored column, so the engine ` +
+          'refuses the list\'s query (400 INVALID_FIELD) and the view opens on that error',
         hint:
-          `Filter on the stored fields of "${object}" that the formula reads, or keep the value in a stored field ` +
-          `written when its sources change and filter on that; or remove the "${written}" condition`,
+          'Filter on the stored fields the formula reads, or keep the value in a stored field written when its ' +
+          `sources change; or remove the "${written}" condition`,
       });
     };
 

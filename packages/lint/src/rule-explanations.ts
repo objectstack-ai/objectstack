@@ -1625,7 +1625,7 @@ const OBJECT_UNREACHABLE_FROM_NAVIGATION_EXPLANATION: RuleExplanation = {
 
 const OBJECT_WITHOUT_VIEW_EXPLANATION: RuleExplanation = {
   rule: 'object-without-view',
-  covers: 'what an object opened from navigation shows without a list view',
+  covers: 'what an object opened from navigation shows with no view',
   paragraphs: [
     'An object a navigation entry opens, with no `list`, no `listViews` entry and no `views` item bound to it, ' +
       'opens on an "All records" tab the console builds itself: the name field followed by `highlightFields`, ' +
