@@ -4000,6 +4000,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.owd.none': 'This package declares no objects.',
   'engine.studio.owd.loadFailed': 'Failed to load this package’s objects.',
   'engine.studio.owd.unsaved': 'Unsaved',
+  // objectstack#36660 — a row whose object holds the AI assistant's unpublished
+  // draft: a Save here publishes that whole draft, not only its sharing, and
+  // the row's discard drops all of it.
+  'engine.studio.owd.aiDraftNotice':
+    'This object has unpublished changes from the AI assistant. Saving this row makes all of them live too.',
+  'engine.studio.owd.aiDraftDiscardConfirmUnsaved':
+    'Discarding the AI’s changes drops all of this object’s unpublished changes, and this row’s change that you have not saved. Discard anyway?',
   'engine.studio.owd.byParent': 'Follows its {master}',
   'engine.studio.owd.cbpPrereqTitle': 'Make the relationship required?',
   'engine.studio.owd.cbpPrereqDesc':

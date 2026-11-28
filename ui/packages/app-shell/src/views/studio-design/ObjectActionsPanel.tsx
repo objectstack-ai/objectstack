@@ -97,6 +97,7 @@ import type { PairActionsDoor, PairObjectActions } from './pairObjectActions.js'
 import { RailCustomizationFilter, RailCustomizationMark, useRailCustomizationsOnly } from './StudioRailCustomizations.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { isStudioOrgScope } from './studioScope.js';
+import { StudioAiDraftNotice } from './StudioAiDraftNotice.js';
 import { useActionLedger } from '../setup/packagedActionLedger.js';
 
 interface ActionItem {
@@ -160,6 +161,8 @@ const NO_PAIR_ACTIONS: PairObjectActions = {
   patch: () => undefined,
   remove: async () => undefined,
   reportBlocking: () => undefined,
+  discardAiDraft: () => undefined,
+  discardingAiDraft: null,
   dialog: <></>,
 };
 
@@ -819,6 +822,17 @@ export function ObjectActionsPanel({
               >
                 {tFormat('engine.studio.actions.renameHeld', locale, { name: selRenamedFrom })}
               </p>
+            )}
+            {/* objectstack#36660 — the AI assistant's draft of this pair action is
+                what the row holds: Save makes it live too, and its discard
+                drops that one action's draft at the pair, the designers' line. */}
+            {selRow?.aiDraft && (
+              <StudioAiDraftNotice
+                locale={locale}
+                onDiscard={editable(sel.name) ? () => added.discardAiDraft(selRow.name) : undefined}
+                busy={added.discardingAiDraft !== null || added.saving}
+                className="m-2 mb-0"
+              />
             )}
             {/* eslint-disable-next-line react-hooks/static-components -- useRegisteredMetadataDefaultInspector returns a registered component (stable), not one created during render */}
             <Inspector

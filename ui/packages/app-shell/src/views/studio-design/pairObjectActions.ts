@@ -27,6 +27,10 @@
  *    item's write is pinned `ifNoneMatch: '*'`. ⛔ The pair a write names is
  *    the door's answer, never a `<base>.custom` spelled here. Cancel drops it
  *    all and reads the pair again.
+ *  - objectstack#36660 — a row whose pending draft the AI assistant wrote
+ *    (copilot or MCP) is `aiDraft`: its editor draws the designers' line, and
+ *    `discardAiDraft` drops that one action's draft at the door's pair,
+ *    asking first only over the row's unsaved edit.
  *  - The Save is held while a row's name differs from the one it is stored
  *    under (an item is stored under its name; `renamedFrom`), or while its
  *    editor reports an expression error (`reportBlocking`).
@@ -51,7 +55,13 @@
 
 import * as React from 'react';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
-import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
+import {
+  authoredBuffer,
+  extractDraftBody,
+  formatMetadataError,
+  readDraftChanges,
+  type AuthoredLayers,
+} from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { t as tStudio, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import {
@@ -63,6 +73,7 @@ import {
 } from '../metadata-admin/DraftConflictDialog.js';
 import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
+import { isAgentDraftSurface } from './StudioDraftMark.js';
 import type { RailCustomizations } from './StudioRailCustomizations.js';
 import type { StudioSavedDraft } from './StudioPillarKit.js';
 
@@ -90,6 +101,12 @@ export interface PairActionRow {
   body: Record<string, unknown>;
   published: boolean;
   draft: boolean;
+  /**
+   * objectstack#36660 — the pending draft was written by the AI assistant (a
+   * `copilot` or `mcp` entry in its read's `draftChanges`): the editor draws
+   * the designers' line, and `discardAiDraft` drops it.
+   */
+  aiDraft?: true;
   /**
    * objectstack#35054 — the layered read served no stored copy of this row
    * (a pending draft it did not serve, or nothing at all): `body` is the
@@ -119,6 +136,10 @@ export interface PairObjectActions {
   remove(name: string): Promise<void>;
   /** The open action editor's expression errors for a row, by its name. */
   reportBlocking(name: string, count: number): void;
+  /** Drop a row's AI draft at the pair, back to its published action; asks first over its unsaved edit. */
+  discardAiDraft(name: string): void;
+  /** The row whose AI draft is being discarded, or `null`. */
+  discardingAiDraft: string | null;
   /** The draft conflict dialog; render it once. */
   dialog: React.ReactElement;
 }
@@ -136,6 +157,12 @@ function ownBody(raw: unknown): Record<string, unknown> {
     if (!key.startsWith('_')) body[key] = value;
   }
   return body;
+}
+
+/** A row with no pending draft left: published, or (never published) about to leave the read. */
+function liveRow(row: PairActionRow): PairActionRow {
+  const { aiDraft: _ai, ...rest } = row;
+  return { ...rest, draft: false };
 }
 
 /** The order the pair's actions save in, after the object and its extension. */
@@ -263,7 +290,8 @@ export function usePairObjectActions(
           const served = extractDraftBody(read.answer);
           const body = served ? ownBody(served) : null;
           if (!body || body.objectName !== objectName) return;
-          byName.set(name, { name, body, published: byName.has(name), draft: true });
+          const byAgent = (readDraftChanges(read.answer) ?? []).some((change) => isAgentDraftSurface(change.by));
+          byName.set(name, { name, body, published: byName.has(name), draft: true, ...(byAgent ? { aiDraft: true as const } : {}) });
           servedDrafts.set(name, served!);
           pins.set(name, read.pin);
         });
@@ -379,6 +407,50 @@ export function usePairObjectActions(
 
   const dirty = edited.size > 0 || created.size > 0 || removed.size > 0;
 
+  // objectstack#36660 (epic objectstack#36510 decision 1) — 放弃 AI 的改动 on a
+  // row: its pending draft is dropped at the pair the ensure door answers
+  // (`DELETE /meta/action/NAME?state=draft&package=PAIR`), never the pair's
+  // batch, and the pair's read installs the published action (none, for an
+  // action never published). The row's unsaved edit goes with it, asked first.
+  const [discardingAiDraft, setDiscardingAiDraft] = React.useState<string | null>(null);
+  const discardAiDraft = React.useCallback(
+    (name: string) => {
+      if (doorRef.current?.walled) return;
+      if (!allRef.current.find((r) => r.name === name)?.aiDraft) return;
+      if (
+        pendingRef.current.edited.has(name) &&
+        !window.confirm(tStudio('engine.studio.aiDraft.discardConfirmUnsaved', localeRef.current))
+      ) {
+        return;
+      }
+      setDiscardingAiDraft(name);
+      setError(null);
+      void (async () => {
+        try {
+          const pair = await pairForWrite();
+          await client.reset('action', name, { state: 'draft', packageId: pair });
+          setEdited((prev) => {
+            if (!prev.has(name)) return prev;
+            const next = new Set(prev);
+            next.delete(name);
+            return next;
+          });
+          setRows((prev) =>
+            prev === null ? prev : { ...prev, list: prev.list.map((r) => (r.name === name ? liveRow(r) : r)) },
+          );
+          reload();
+          // The ledger behind Changes re-reads, one item fewer.
+          emitMetadataRefresh();
+        } catch (e) {
+          setError(tFormat('engine.studio.aiDraft.discardFailed', localeRef.current, { reason: formatMetadataError(e) }));
+        } finally {
+          setDiscardingAiDraft(null);
+        }
+      })();
+    },
+    [client, pairForWrite, reload],
+  );
+
   // objectstack#36511 — the top bar's Save: each removed row's draft and
   // published item deleted at the pair, then each added or edited row's draft
   // written there and that one action published, so it is live at once.
@@ -467,7 +539,7 @@ export function usePairObjectActions(
           setRows((prev) =>
             prev === null
               ? prev
-              : { ...prev, pair, list: prev.list.map((r) => (r.name === name ? { ...r, draft: false, published: true } : r)) },
+              : { ...prev, pair, list: prev.list.map((r) => (r.name === name ? { ...liveRow(r), published: true } : r)) },
           );
           const sentBody = row.body;
           const unmoved = JSON.stringify(allRef.current.find((r) => r.name === name)?.body) === JSON.stringify(sentBody);
@@ -547,6 +619,8 @@ export function usePairObjectActions(
     patch,
     remove,
     reportBlocking,
+    discardAiDraft,
+    discardingAiDraft,
     dialog,
   };
 }

@@ -30,10 +30,15 @@
  *    published hook pinned so is buffered from that same answer, so the pin
  *    always describes the body it publishes. A new hook's publish asserts no
  *    published row.
+ *  - objectstack#36660 — a pending draft the AI assistant wrote (a `copilot`
+ *    or `mcp` entry in its read's `draftChanges`) is `aiDraft` on the open
+ *    hook, so the panel draws the designers' line; `discardAiDraft` drops that
+ *    one hook's draft at the package, asking first only over an unsaved edit.
+ *    A person's own draft, or one whose read recorded nothing, is not marked.
  */
 
 import * as React from 'react';
-import { authoredPublished, extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
+import { authoredPublished, extractDraftBody, formatMetadataError, readDraftChanges } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import {
   draftReceiptVersion,
@@ -47,6 +52,8 @@ import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { loadPackageSurfaces } from './packageSurfaces.js';
 import { confirmDropUnsavedWork } from './StudioPillarKit.js';
 import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { isAgentDraftSurface } from './StudioDraftMark.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 
 export interface HookItem {
   name?: string;
@@ -78,6 +85,14 @@ function nextHookName(objectName: string, existing: string[]): string {
   return name;
 }
 
+/** `set` without `name`, or `set` itself when it holds no such entry. */
+function without(set: ReadonlySet<string>, name: string): ReadonlySet<string> {
+  if (!set.has(name)) return set;
+  const next = new Set(set);
+  next.delete(name);
+  return next;
+}
+
 /** The order the hooks buffer saves in, after the object and its extension: a hook reads the object's fields. */
 const HOOKS_SAVE_ORDER = 3;
 
@@ -99,6 +114,12 @@ export interface ObjectHooksBuffer {
   renamedFrom: string | null;
   /** The open hook's expression errors, as its inspector last reported them. */
   blockingIssues: number;
+  /** The open hook's pending draft was written by the AI assistant (copilot or MCP). */
+  aiDraft: boolean;
+  /** Drop the open hook's AI draft at the package; asks first over an unsaved edit. */
+  discardAiDraft: () => void;
+  /** That discard is in flight. */
+  discardingAiDraft: boolean;
   /** The package's objects, for the target picker (objectui#11820); `null` until read. */
   hookTargetScope: HookTargetScope | null;
   /** Open a hook; asks first over an unsaved edit of another. */
@@ -144,6 +165,9 @@ export function useObjectHooksBuffer({
   // The listed hooks with a pending draft at this package: a refused Save keeps such a draft.
   const [drafted, setDrafted] = React.useState<ReadonlySet<string>>(() => new Set());
   const [refusedHooks, setRefusedHooks] = React.useState<ReadonlyMap<string, unknown>>(() => new Map());
+  // The listed hooks whose pending draft the AI assistant wrote (a `copilot`
+  // or `mcp` entry in the draft read's `draftChanges`).
+  const [aiDrafted, setAiDrafted] = React.useState<ReadonlySet<string>>(() => new Set());
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
@@ -234,6 +258,7 @@ export function useObjectHooksBuffer({
     setCreated(null);
     setSelected(null);
     setDrafted(new Set());
+    setAiDrafted(new Set());
     setRefusedHooks(new Map());
     setError(null);
     setLoading(true);
@@ -262,6 +287,7 @@ export function useObjectHooksBuffer({
         const pins = new Map<string, DraftPin | null>();
         const refused = new Map<string, unknown>();
         const pending = new Set<string>();
+        const byAgent = new Set<string>();
         for (const h of pub || []) {
           if (h?.name && targetsObject(h, objectName)) {
             byName.set(String(h.name), h);
@@ -283,6 +309,7 @@ export function useObjectHooksBuffer({
           if (byName.has(n)) {
             pins.set(n, read.pin);
             if (read.answer !== null) pending.add(n);
+            if ((readDraftChanges(read.answer) ?? []).some((change) => isAgentDraftSurface(change.by))) byAgent.add(n);
           }
         });
         // objectstack#36726 — each listed hook's layers at the package its
@@ -313,6 +340,7 @@ export function useObjectHooksBuffer({
         setListed([...byName.values()]);
         setRefusedHooks(refused);
         setDrafted(pending);
+        setAiDrafted(byAgent);
         // A hook whose buffer holds an unsent edit keeps the pins that edit was built on.
         const open = bufferRef.current;
         for (const [n, pin] of pins) {
@@ -441,12 +469,8 @@ export function useObjectHooksBuffer({
       }
       // Live: no draft is left, so the next save asserts none.
       recordHookRead('hook', name, packageId, { ifNoneMatch: '*' });
-      setDrafted((prev) => {
-        if (!prev.has(name)) return prev;
-        const next = new Set(prev);
-        next.delete(name);
-        return next;
-      });
+      setDrafted((prev) => without(prev, name));
+      setAiDrafted((prev) => without(prev, name));
       // The list now holds what was saved; a hook no longer aimed at this object leaves it.
       setListed((list) => {
         const kept = list.filter((h) => h.name !== name);
@@ -465,6 +489,36 @@ export function useObjectHooksBuffer({
       setSaving(false);
     }
   }, [client, draft, draftFor, created, drafted, packageId, objectName, saveHookDraft, recordHookRead, recordHookPublished, publishHook, heldHookDraftVersion]);
+
+  // objectstack#36660 (epic objectstack#36510 decision 1) — 放弃 AI 的改动: the
+  // open hook's pending draft is dropped at the package its saves write
+  // (`DELETE /meta/hook/NAME?state=draft`), never the package's batch, and the
+  // list re-read installs the live hook (none, for a hook never published).
+  // An unsaved edit of the hook goes with it, so it is asked about first.
+  const [discardingAiDraft, setDiscardingAiDraft] = React.useState(false);
+  const discardAiDraft = React.useCallback(() => {
+    const name = bufferRef.current.hook;
+    if (name === null || !aiDrafted.has(name)) return;
+    if (bufferRef.current.dirty && !window.confirm(t('engine.studio.aiDraft.discardConfirmUnsaved', locale))) return;
+    setDiscardingAiDraft(true);
+    setError(null);
+    void (async () => {
+      try {
+        await client.reset('hook', name, { state: 'draft', packageId });
+        setEdited(false);
+        setDrafted((prev) => without(prev, name));
+        setAiDrafted((prev) => without(prev, name));
+        reloadHooks();
+        // The ledger behind Changes re-reads, one item fewer.
+        emitMetadataRefresh();
+      } catch (e) {
+        setError(tFormat('engine.studio.aiDraft.discardFailed', locale, { reason: formatMetadataError(e) }));
+      } finally {
+        setDiscardingAiDraft(false);
+      }
+    })();
+  }, [aiDrafted, client, locale, packageId, reloadHooks]);
+  const aiDraft = draftFor !== null && !isCreated && aiDrafted.has(draftFor);
 
   const cancel = React.useCallback(() => {
     setError(null);
@@ -502,6 +556,9 @@ export function useObjectHooksBuffer({
     saving,
     renamedFrom,
     blockingIssues,
+    aiDraft,
+    discardAiDraft,
+    discardingAiDraft,
     hookTargetScope,
     select,
     patch,
