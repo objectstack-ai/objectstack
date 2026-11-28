@@ -321,7 +321,15 @@ re-check name fewer than `topK` records (several passages of one record
 count once), every source that answered as many hits as it was
 asked is asked once more, for `topK × 20`. That is the cap: a caller who may
 read fewer than `topK` of the rows within the cap gets fewer than `topK`
-hits. An
+hits. So before the first round the service reads, as the caller, the ids of
+the source's records they may read (under the source's `where`, ids only, at
+most 501). When there are 500 or fewer, the source is handed them as a
+`record` term of the [record scope](#record-scope) — intersected with the
+caller's own scope, never added to it — and the adapter ranks only those
+rows, so a caller who may read 20 of 1,000 records is answered from their 20
+wherever they rank. More than 500, a scope with a parent term, a read that
+fails, or no readable record in scope, and the source is searched as above.
+Every hit is still re-checked, and the organization filter is unchanged. An
 adapter that answers fewer than it was asked (one that caps `topK`) is not
 asked again. For the system identity every source is asked for `topK`
 once. The answer is at most `topK` hits.
@@ -698,7 +706,10 @@ an exact scan.
   `organization_id` column, which every search filters on before ranking.
 - **Where the tables are.** In their own schema, `os_knowledge` (option
   `schema`): `knowledge_generation`, one row per source and generation, and
-  one passage table per vector width, `knowledge_vec_d<width>`. Object
+  one passage table per vector width, `knowledge_vec_d<width>`, indexed on
+  each passage's record so a search narrowed to a caller's few readable
+  records reads only their passages (made with the table, or on the first
+  write after an upgrade for a table made before). Object
   tables live in the connection's own schema, and the platform's drift
   checks read only that one — so no store table can collide with an object
   table or be reported as drift.
@@ -774,7 +785,9 @@ the `embedder` it is given), and answers a search by an exact scan.
   way when its fingerprint is the same, and replaces it otherwise, so the
   first builder's writes are then refused), and one passage table per source and generation,
   `knowledge_<source>_g<n>`, its vector column sized for that generation
-  (`<source>` is the source's index key). A key that is not snake_case is
+  (`<source>` is the source's index key) and indexed on `source_record_id`, so
+  a search narrowed to a caller's few readable records reads only their
+  passages; a generation made before carries the index from its next build. A key that is not snake_case is
   refused before any SQL.
 - **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
   at most `topK`) before the service's re-check: an exact scan by cosine

@@ -148,6 +148,9 @@ export function passageTableDdl(table: string, dimensions: number): string[] {
   embedding F32_BLOB(${dimensions}) NOT NULL
 )`,
     `CREATE INDEX ${quoted(`${table}_document`)} ON ${quoted(table)} (document_id)`,
+    // A search narrowed to the records its caller may read (a `record` scope
+    // term) reads only those records' passages, never the whole table.
+    `CREATE INDEX ${quoted(`${table}_record`)} ON ${quoted(table)} (source_record_id)`,
     ...keywordIndexDdl(table),
   ];
 }

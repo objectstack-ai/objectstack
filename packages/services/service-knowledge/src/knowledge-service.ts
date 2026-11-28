@@ -53,7 +53,14 @@ import {
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
 } from './knowledge-source-admission.js';
-import { readSearchScope, scopeCheck, scopeTermsFor, type SearchScopeEntry } from './knowledge-search-scope.js';
+import {
+  narrowToVisible,
+  readSearchScope,
+  scopeCheck,
+  scopeTermsFor,
+  SEARCH_VISIBLE_IDS_MAX,
+  type SearchScopeEntry,
+} from './knowledge-search-scope.js';
 import {
   BUILD_LEASE_MS,
   BUILD_PROGRESS_LOG_INTERVAL_MS,
@@ -1809,6 +1816,18 @@ export class KnowledgeService implements IKnowledgeService {
    * The system identity gets one round of `topK`. A caller the service cannot
    * re-check (no context, no engine) is served no source at all.
    *
+   * ## Ranking only what the caller may read
+   *
+   * The refill is a cap: a caller whose readable rows all rank below
+   * `topK × SEARCH_REFILL_FACTOR` would get none of them. So before the first
+   * round, each source of a caller who is re-checked is narrowed to the records
+   * that caller may read ({@link sourcesNarrowedToVisible}): when they number
+   * no more than `SEARCH_VISIBLE_IDS_MAX`, their ids become the source's
+   * `record` term — intersected with the caller's own scope, never added to
+   * it — and the adapter ranks only those rows. More than that, a parent term
+   * in the caller's scope, or a read that fails, and the source is searched as
+   * above. The rounds, the refill and the re-check are the same either way.
+   *
    * ## Records, not chunks (`granularity: 'record'`, `groupBy`)
    *
    * Several passages of one record would fill `topK` with one record, so
@@ -1906,6 +1925,11 @@ export class KnowledgeService implements IKnowledgeService {
       await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
     if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
     if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
+    const engine = this.options.dataEngine;
+    const filtered = ctx !== undefined && ctx.isSystem !== true && engine !== undefined;
+    // A caller the re-check can remove hits for: each source ranks only the
+    // records they may read, when those are few enough to name.
+    if (filtered && admitted.length > 0) admitted = await this.sourcesNarrowedToVisible(admitted, ctx, engine);
     if (admitted.length === 0) return { hits: [], refused: [] };
     const refused: KnowledgeSearchRefusal[] = [];
     const sources = await this.planSearches(admitted, refused);
@@ -1915,7 +1939,6 @@ export class KnowledgeService implements IKnowledgeService {
     const served = async (hits: KnowledgeHit[]): Promise<KnowledgeHit[]> =>
       verified.size === 0 ? hits : this.dropUnverifiedHits(hits, verified);
 
-    const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = byRecord || filtered;
     const firstAsk = (_source: KnowledgeSource): number =>
       widened ? topK * SEARCH_FIRST_ROUND_FACTOR : topK;
@@ -2573,6 +2596,97 @@ export class KnowledgeService implements IKnowledgeService {
       out.push({ ...entry, scope: terms });
     }
     return out;
+  }
+
+  /**
+   * Narrow each source's search to the records a non-system caller may read
+   * ({@link narrowToVisible}). Per source, the ids of the records it indexes
+   * that the caller may read are read first — as the caller, under the
+   * source's `where`, ids only, at most {@link SEARCH_VISIBLE_IDS_MAX} + 1 —
+   * once per object and `where` the search asks. When the caller may read no
+   * more than {@link SEARCH_VISIBLE_IDS_MAX}, the source is handed them as a
+   * `record` term, intersected with the caller's own scope, so its adapter
+   * ranks only those rows and a narrow caller's answers are not crowded out of
+   * the refill cap by rows they could never be served.
+   *
+   * A source is searched as before — on the caller's own scope, its hits
+   * re-checked within the refill cap — when the caller may read more than
+   * that, when the caller's scope holds a parent (`metadata`) term, when the
+   * narrowing names no record (the caller may read none of what the source
+   * could answer: answered as before, no hit or the source's refusal, never a
+   * new kind of empty), or when the read fails (logged at `warn`). Nothing here decides access: every hit is
+   * still re-checked as the caller ({@link applyPermissionFilter}), and the
+   * organization filter each source carries is not touched.
+   */
+  private async sourcesNarrowedToVisible<T extends { source: KnowledgeSource; scope?: AdapterScopeTerm[] }>(
+    sources: T[],
+    ctx: ExecutionContext,
+    engine: IDataEngine,
+  ): Promise<T[]> {
+    const reads = new Map<string, Promise<string[] | undefined>>();
+    const visibleOf = (objSource: ObjectKnowledgeSource): Promise<string[] | undefined> => {
+      const key = JSON.stringify([objSource.object, objSource.where ?? null]);
+      let read = reads.get(key);
+      if (read === undefined) {
+        read = this.readVisibleIds(objSource, ctx, engine);
+        reads.set(key, read);
+      }
+      return read;
+    };
+    const visible = sources.map((entry) =>
+      entry.scope?.some((term) => term.kind !== 'record') === true
+        ? Promise.resolve(undefined)
+        : visibleOf(entry.source.source));
+    const out: T[] = [];
+    for (const [i, entry] of sources.entries()) {
+      const ids = await visible[i];
+      const narrowed = ids === undefined ? undefined : narrowToVisible(entry.scope, ids);
+      // A narrowing that names no record is not applied: the source is
+      // searched as before, so a caller who may read none of its records is
+      // answered as before too — no hit, or the source's refusal.
+      if (narrowed === undefined || narrowed.every((term) => term.ids.length === 0)) {
+        out.push(entry);
+        continue;
+      }
+      out.push({ ...entry, scope: narrowed });
+    }
+    return out;
+  }
+
+  /**
+   * The ids of the records of `objSource` the caller may read, read as the
+   * caller under the source's `where`; `undefined` when there are more than
+   * {@link SEARCH_VISIBLE_IDS_MAX} or the read fails.
+   */
+  private async readVisibleIds(
+    objSource: ObjectKnowledgeSource,
+    ctx: ExecutionContext,
+    engine: IDataEngine,
+  ): Promise<string[] | undefined> {
+    let rows: unknown;
+    try {
+      // As the caller, in the query, as the permission re-read asks.
+      rows = await engine.find(objSource.object, {
+        ...(objSource.where === undefined ? {} : { where: objSource.where }),
+        fields: ['id'],
+        limit: SEARCH_VISIBLE_IDS_MAX + 1,
+        context: ctx,
+      } as never);
+      if (!Array.isArray(rows)) throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
+    } catch (err) {
+      this.options.logger?.warn?.(
+        `[knowledge] the caller's readable records of object='${objSource.object}' could not be read ` +
+          `(${errorText(err)}); its sources are searched unnarrowed, every hit re-checked.`,
+      );
+      return undefined;
+    }
+    if (rows.length > SEARCH_VISIBLE_IDS_MAX) return undefined;
+    const ids: string[] = [];
+    for (const row of rows as Array<{ id?: unknown } | null | undefined>) {
+      const id = row?.id;
+      if ((typeof id === 'string' && id.length > 0) || typeof id === 'number') ids.push(String(id));
+    }
+    return ids;
   }
 
   /**
