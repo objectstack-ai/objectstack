@@ -10,7 +10,7 @@ import {
 import { explainRule } from './rule-explanations.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { SEMANTIC_ROLE_FIELD_UNKNOWN, validateSemanticRoles } from './validate-semantic-roles.js';
-import { FieldSchema } from '@objectstack/spec/data';
+import { FieldSchema, STRUCTURED_JSON_TYPES } from '@objectstack/spec/data';
 
 const obj = (over: Record<string, unknown> = {}) => ({
   name: 'proj_task',
@@ -927,6 +927,57 @@ describe('validateObjectFieldRefs — lookupFilters[].value.$record (the RECORD 
         entry('stage'),
         entry('account.created_at', 'valid_to'),
       ], multi))).toEqual([]);
+    });
+  });
+
+  // [#34562] A STRUCTURED field — a member of `STRUCTURED_JSON_TYPES`, taken
+  // from `@objectstack/spec/data`, never re-listed — holds an OBJECT, so a
+  // path that names one (the head) or ends at one behind a hop (the leaf) has
+  // no scalar value either: refused by the same rule with the same hint.
+  describe('a path to a structured field (#34562)', () => {
+    const structural = [...STRUCTURED_JSON_TYPES];
+    const fieldsOf = Object.fromEntries(structural.map((t) => [`s_${t}`, { type: t }]));
+    const stack = (filters: unknown[]) => {
+      const s = quote(filters, fieldsOf);
+      Object.assign((s.objects[1] as { fields: Record<string, unknown> }).fields, fieldsOf);
+      return s;
+    };
+    const refused = (path: string) => {
+      const findings = validateObjectFieldRefs(stack([entry(path)]));
+      expect(findings.map((f) => f.path)).toEqual([at(0)]);
+      expect(findings[0]).toMatchObject({ severity: 'error', rule: OBJECT_FIELD_REF_UNKNOWN });
+      expect(findings[0]!.hint).toBe(
+        'Point `$record` at a single-valued field: a multi-valued field holds a list, and no scalar comparison '
+          + 'takes one. Copy the value you mean onto a single-valued field and reference that.',
+      );
+      return findings[0]!.message;
+    };
+
+    it('covers the five the card names, and the spec set is what is judged', () => {
+      for (const t of ['json', 'repeater', 'location', 'address', 'vector']) expect(structural).toContain(t);
+    });
+
+    it.each(structural)('REFUSES a plain path to a `%s` field (the head)', (t) => {
+      expect(refused(`s_${t}`)).toBe(
+        `fields.price_book.lookupFilters[0].value.$record "s_${t}" names "s_${t}", a structured ${t} field on `
+          + 'object "sales_quote"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it.each(structural)('REFUSES a `%s` leaf behind a single-valued hop, naming the leaf and its object', (t) => {
+      expect(refused(`account.s_${t}`)).toBe(
+        `fields.price_book.lookupFilters[0].value.$record "account.s_${t}" ends at "s_${t}", a structured ${t} `
+          + 'field on object "crm_account"; a $record comparand is one value under a scalar operator.',
+      );
+    });
+
+    it('CONTROL: scalar paths beside the structured fields stay clean — head and leaf', () => {
+      expect(validateObjectFieldRefs(stack([
+        { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' } },
+        entry('notes'),
+        entry('account.cb_market'),
+        entry('account.name'),
+      ]))).toEqual([]);
     });
   });
 });

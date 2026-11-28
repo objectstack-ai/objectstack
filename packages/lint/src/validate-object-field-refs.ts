@@ -119,8 +119,12 @@
  *    one behind a single-valued hop — is refused too: the comparand is ONE
  *    value under a scalar operator, and a list has no such value. The
  *    predicate is `isMultiValueField` (`@objectstack/spec/data`), the one
- *    `FieldSchema` reads. A registry-injected column, and a leaf on an object
- *    outside this stack, stay unjudged. A `{ $record }` nested
+ *    `FieldSchema` reads. A plain path to, or a leaf behind a hop at, a
+ *    STRUCTURED field (#34562) — a member of `STRUCTURED_JSON_TYPES`
+ *    (`@objectstack/spec/data`): json, address, location, … — is refused the
+ *    same way, with the same hint: it holds an object, not one value. A
+ *    registry-injected column, and a leaf on an object outside this stack,
+ *    stay unjudged. A `{ $record }` nested
  *    deeper inside a literal (`value: { any: { $record: 'x' } }`) is an
  *    opaque literal to the parse, and this rule does not name it either: no
  *    reader resolves that shape, nothing first-party writes it, and the
@@ -302,7 +306,12 @@ import {
   type GraphField,
   type ObjectGraph,
 } from './object-graph.js';
-import { classifyDottedFilterHead, isMultiValueField, isVirtualSearchField } from '@objectstack/spec/data';
+import {
+  classifyDottedFilterHead,
+  isMultiValueField,
+  isVirtualSearchField,
+  STRUCTURED_JSON_TYPES,
+} from '@objectstack/spec/data';
 
 /**
  * A field-name list entry — object-level, or on one of the object's fields —
@@ -494,7 +503,8 @@ interface FieldNameSlot {
   ownFinding?: boolean;
   /**
    * [#34378] `true` when the path must read ONE value: its first segment and,
-   * behind a hop, its leaf may not be multi-valued (`isMultiValueField`). A
+   * behind a hop, its leaf may not be multi-valued (`isMultiValueField`) or
+   * structured (`STRUCTURED_JSON_TYPES`, #34562). A
    * path whose head is multi-valued is refused whether it ends there or hops
    * through it, at the head; a multi-valued leaf behind a single-valued hop is
    * refused at the leaf. Judged only on a path the family's resolution did
@@ -727,23 +737,37 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
    * [#34378] Where a path that resolved stops reading ONE value: its AUTHORED
    * first segment on `objectName` when that is multi-valued (a plain path to
    * it, or a hop through it), else — behind a single-valued hop — its
-   * authored leaf when that is. `undefined` = single-valued, or not
-   * judgeable here (a registry-injected column, an object outside the stack).
+   * authored leaf when that is. A STRUCTURED field (#34562: a member of
+   * `STRUCTURED_JSON_TYPES`, `@objectstack/spec/data` — json, address,
+   * location, …) holds an object, so it has no scalar value either and is
+   * named at the same two positions. `what` is the finding's noun for the
+   * field. `undefined` = one scalar value, or not judgeable here (a
+   * registry-injected column, an object outside the stack).
    */
   const multiValuedSegment = (
     objectName: string,
     segments: readonly string[],
-  ): { how: string; field: string; object: string } | undefined => {
-    const isMulti = (m: GraphField | undefined): boolean =>
-      typeof m?.type === 'string' && isMultiValueField({ type: m.type, multiple: m.multiple === true });
+  ): { how: string; field: string; object: string; what: string } | undefined => {
+    const nonScalar = (m: GraphField | undefined): string | undefined => {
+      if (typeof m?.type !== 'string') return undefined;
+      if (isMultiValueField({ type: m.type, multiple: m.multiple === true })) return 'a multi-valued field';
+      return STRUCTURED_JSON_TYPES.has(m.type) ? `a structured ${m.type} field` : undefined;
+    };
     const head = graph.get(objectName)?.fields.get(segments[0]!);
-    if (isMulti(head)) {
-      return { how: segments.length > 1 ? 'goes through' : 'names', field: segments[0]!, object: objectName };
+    const headWhat = nonScalar(head);
+    if (headWhat) {
+      return {
+        how: segments.length > 1 ? 'goes through' : 'names',
+        field: segments[0]!,
+        object: objectName,
+        what: headWhat,
+      };
     }
     if (segments.length < 2) return undefined;
     const verdict = resolveFieldPath(graph, objectName, segments.join('.'));
-    if (verdict?.kind !== 'ok' || verdict.injected || !isMulti(verdict.meta)) return undefined;
-    return { how: 'ends at', field: verdict.field, object: verdict.object };
+    if (verdict?.kind !== 'ok' || verdict.injected) return undefined;
+    const leafWhat = nonScalar(verdict.meta);
+    return leafWhat ? { how: 'ends at', field: verdict.field, object: verdict.object, what: leafWhat } : undefined;
   };
 
   /** The declared slice of `name` on `objectName` — authored, else registry-injected. */
@@ -1063,14 +1087,15 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
           }
 
           // [#34378] A path that names real fields can still read a LIST: a
-          // multi-valued head, or a multi-valued leaf behind one hop. The
-          // comparand is one value under a scalar operator, so it is refused.
+          // multi-valued head, or a multi-valued leaf behind one hop — or
+          // (#34562) an OBJECT: a structured head or leaf. The comparand is
+          // one value under a scalar operator, so it is refused.
           if (!hit && slot.singleValued) {
             const multi = multiValuedSegment(against, segments);
             if (multi) {
               refuseKey(
                 { where, path },
-                `${subject} "${read.name}" ${multi.how} "${multi.field}", a multi-valued field on object `
+                `${subject} "${read.name}" ${multi.how} "${multi.field}", ${multi.what} on object `
                   + `"${multi.object}"; a $record comparand is one value under a scalar operator.`,
                 slot.singleValuedPrescription ?? slot.prescription,
               );
