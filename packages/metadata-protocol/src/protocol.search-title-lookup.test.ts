@@ -119,8 +119,17 @@ function harness(opts: {
             if (scope) out = out.filter((r) => scope.has(String(r.id)));
             const ids = options?.where?.id?.$in;
             if (Array.isArray(ids)) out = out.filter((r) => ids.includes(r.id));
+            // The engine's `$search` expansion over an object that declares
+            // its searchable columns: those columns, case-folded substring
+            // (ADR-0061), nothing else. An object declaring none is answered
+            // whole, as these pins never search one by its auto default.
+            const cols = objects.find((o) => o.name === object)?.searchableFields as string[] | undefined;
+            if (typeof options?.search === 'string' && cols) {
+                const needle = options.search.toLowerCase();
+                out = out.filter((r) => cols.some((c) => typeof r[c] === 'string' && (r[c] as string).toLowerCase().includes(needle)));
+            }
             const hidden = opts.hiddenColumns?.[object];
-            return out.map((r) => {
+            const projectedRows = out.map((r) => {
                 const projected: Row = {};
                 for (const [k, v] of Object.entries(r)) {
                     if (hidden?.has(k)) continue;
@@ -129,6 +138,36 @@ function harness(opts: {
                 }
                 return projected;
             });
+            // The engine's `$expand` (objectql `expandRelatedRecords`): a target
+            // the caller may read is expanded; one it is refused stays the bare
+            // id, unless the field declares `referenceNameVisible`, which
+            // `serveReferenceNames` answers `{ id, name, readRefused: true }`,
+            // the name floored to `Record #<id>` when field-level security keeps
+            // the name column from the caller.
+            for (const [field, nested] of Object.entries((options?.expand ?? {}) as Record<string, any>)) {
+                const source = objects.find((o) => o.name === object);
+                const def = (source?.fields as Record<string, any> | undefined)?.[field];
+                const target: string | undefined = nested?.object ?? def?.reference ?? (def?.type === 'user' ? 'sys_user' : undefined);
+                if (!def || !target) continue;
+                const targetMeta = objects.find((o) => o.name === target);
+                const nameColumn = targetMeta?.nameField as string | undefined;
+                const answer = (id: unknown): unknown => {
+                    if (id == null || typeof id === 'object') return id;
+                    const row = (rows[target] ?? []).find((r) => String(r.id) === String(id));
+                    if (!row) return id;
+                    const inScope = !opts.rowScope?.[target] || opts.rowScope[target].has(String(id));
+                    if (admits(target) && inScope) return { id: row.id };
+                    if (def.referenceNameVisible !== true) return id;
+                    const hiddenName = !nameColumn || opts.hiddenColumns?.[target]?.has(nameColumn);
+                    const name = hiddenName ? `Record #${String(id)}` : String(row[nameColumn!]);
+                    return { id: String(id), name, readRefused: true };
+                };
+                for (const r of projectedRows) {
+                    const v = r[field];
+                    r[field] = Array.isArray(v) ? v.map(answer) : answer(v);
+                }
+            }
+            return projectedRows;
         }),
     };
     const canReadObject = vi.fn(async (o: string) => admits(o));
@@ -136,7 +175,7 @@ function harness(opts: {
     if (opts.withSecurity !== false) services.set('security', { canReadObject });
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => services as Map<string, any>);
     const targetReads = () => reads.filter(([o]) => o !== 'project_member');
-    return { protocol, reads, targetReads, canReadObject };
+    return { protocol, reads, targetReads, canReadObject, engine };
 }
 
 /** Sweeps the source object only, so every hit is a `project_member` row. */
@@ -282,5 +321,140 @@ describe('searchAll titles a reference-typed nameField by the target record titl
 
         expect(titles(hits)).toEqual({ pn_1: 'Lead time review' });
         expect(reads.map(([o]) => o)).toEqual(['project_note']);
+    });
+});
+
+// [#35308] Ruling 7077827375 (letter B): a pointer declaring
+// `referenceNameVisible` titles a hit whose target the searcher is REFUSED by
+// the name the engine's `$expand` serves such a reader, never by a read of the
+// protocol's own. The engine double above answers the expansion as objectql's
+// `serveReferenceNames` does; `packages/rest/src/search-title-reference-name-visible.test.ts`
+// holds the same pins over the real security layer and driver.
+describe('searchAll titles a refused target by the name referenceNameVisible serves', () => {
+    const memberVisible: ObjectMeta = {
+        ...projectMember,
+        fields: {
+            member_id: { name: 'member_id', type: 'lookup', reference: 'person', referenceNameVisible: true },
+            role: text('role'),
+        },
+    };
+    /** The reads of the SOURCE object that carry an `expand`: the name ask. */
+    const nameAsks = (reads: Array<[string, Record<string, any>]>) =>
+        reads.filter(([o, options]) => o === 'project_member' && options?.expand !== undefined);
+
+    it('PIN 1 — the switch and an object-level refusal: the hit is titled by the target name', async () => {
+        const { protocol, reads } = harness({ objects: [memberVisible, person], readable: new Set(['project_member']) });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'Ada Lovelace', pm_2: 'Grace Hopper', pm_3: 'Ada Lovelace' });
+        // One ask, as the searcher, of the source rows holding the refused ids,
+        // `id` and the pointer only, expanding the pointer: the engine names them.
+        const asks = nameAsks(reads);
+        expect(asks).toHaveLength(1);
+        const [, options] = asks[0];
+        expect([...options.where.id.$in].sort()).toEqual(['pm_1', 'pm_2', 'pm_3']);
+        expect(options.fields).toEqual(['id', 'member_id']);
+        expect(options.expand).toEqual({ member_id: { object: 'person', fields: ['id'] } });
+        expect(options.context).toBe(MEMBER);
+        // No read of the target is made by the protocol itself, and none without the caller's context.
+        expect(reads.filter(([o]) => o === 'person')).toEqual([]);
+        expect(reads.every(([, o]) => o.context === MEMBER)).toBe(true);
+    });
+
+    it('PIN 1 — the switch and a row-scope refusal: only the refused id is asked and named', async () => {
+        const { protocol, reads } = harness({ objects: [memberVisible, person], rowScope: { person: new Set(['per_1']) } });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'Ada Lovelace', pm_2: 'Grace Hopper', pm_3: 'Ada Lovelace' });
+        expect(nameAsks(reads).map(([, o]) => o.where.id.$in)).toEqual([['pm_2']]);
+    });
+
+    it('PIN 2 — without the switch, a refused target keeps the bare id and no name is asked', async () => {
+        const { protocol, reads } = harness({ readable: new Set(['project_member']) });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'per_1', pm_2: 'per_2', pm_3: 'per_1' });
+        expect(nameAsks(reads)).toEqual([]);
+    });
+
+    it('PIN 3 — a name column field-level security keeps from the searcher is the engine floor, never the name', async () => {
+        const { protocol } = harness({
+            objects: [memberVisible, person],
+            readable: new Set(['project_member']),
+            hiddenColumns: { person: new Set(['display_name']) },
+        });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'Record #per_1', pm_2: 'Record #per_2', pm_3: 'Record #per_1' });
+    });
+
+    it('PIN 4 — a search by the target name finds nothing: the name is display only', async () => {
+        const { protocol, reads } = harness({ objects: [memberVisible, person], readable: new Set(['project_member']) });
+
+        const { hits, totalHits } = await protocol.searchAll({ ...SWEEP, q: 'Grace' });
+
+        expect(hits).toEqual([]);
+        expect(totalHits).toBe(0);
+        expect(nameAsks(reads)).toEqual([]);
+    });
+
+    it('the hit wire shape does not move: record keeps the stored id, the name only titles it', async () => {
+        const { protocol } = harness({ objects: [memberVisible, person], readable: new Set(['project_member']) });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        const hit = hits.find((h) => h.id === 'pm_2')!;
+        expect(Object.keys(hit).sort()).toEqual(['id', 'object', 'record', 'snippet', 'title']);
+        expect(hit.record).toEqual({ id: 'pm_2', member_id: 'per_2', role: 'Lead designer' });
+    });
+
+    it('CONTROL — a readable target is titled by the searcher read and is not asked again', async () => {
+        const { protocol, reads } = harness({ objects: [memberVisible, person] });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'Ada Lovelace', pm_2: 'Grace Hopper', pm_3: 'Ada Lovelace' });
+        expect(nameAsks(reads)).toEqual([]);
+    });
+
+    it('CONTROL — a readable target whose title column is stripped keeps the bare id: the switch lifts no field rule', async () => {
+        const { protocol } = harness({ objects: [memberVisible, person], hiddenColumns: { person: new Set(['display_name']) } });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'per_1', pm_2: 'per_2', pm_3: 'per_1' });
+    });
+
+    it('CONTROL — a target whose declared exposure does not serve get is never named and keeps the bare id', async () => {
+        const listOnly: ObjectMeta = { ...person, enable: { apiMethods: ['list'] } };
+        const { protocol, reads } = harness({ objects: [memberVisible, listOnly], readable: new Set(['project_member']) });
+
+        const { hits } = await protocol.searchAll(SWEEP);
+
+        expect(titles(hits)).toEqual({ pm_1: 'per_1', pm_2: 'per_2', pm_3: 'per_1' });
+        expect(nameAsks(reads)).toEqual([]);
+    });
+
+    it('a name ask that FAILS (not a refusal) fails the search with its own envelope', async () => {
+        const outage = Object.assign(new Error('connection reset'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+        const { protocol, engine } = harness({ objects: [memberVisible, person], readable: new Set(['project_member']) });
+        const find = engine.find.getMockImplementation()!;
+        engine.find.mockImplementation(async (object: string, options: Record<string, any>) => {
+            if (options?.expand !== undefined) throw outage;
+            return find(object, options);
+        });
+
+        let caught: any;
+        try {
+            await protocol.searchAll(SWEEP);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(caught?.status).toBe(503);
     });
 });
