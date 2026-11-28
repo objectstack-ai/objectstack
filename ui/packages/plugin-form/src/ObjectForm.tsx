@@ -21,7 +21,7 @@ import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSou
 import { useRecordInvalidation } from './recordInvalidation';
 import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
-import { fieldStaticallyReadOnlyByHand, isExpressionComputedField } from '@object-ui/core';
+import { effectiveUiReadonlyWhen, fieldStaticallyReadOnlyByHand, isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast, FormSectionNavContext } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
@@ -1020,8 +1020,10 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // engine (same dialect the server enforces). Undefined when absent.
           visibleWhen: field.visibleWhen,
           readonlyWhen: field.readonlyWhen,
-          // The hand lock's predicate, folded with `readonlyWhen` by the form renderer.
-          uiReadonlyWhen: field.uiReadonlyWhen,
+          // The hand lock's predicate, folded with `readonlyWhen` by the form
+          // renderer: the EFFECTIVE one, so a field that declares none of its
+          // own carries the object's whole-record `uiReadonlyWhen`.
+          uiReadonlyWhen: effectiveUiReadonlyWhen(field, objectSchema),
           requiredWhen: field.requiredWhen,
           // Field-group membership (Field.group → object.fieldGroups[].key).
           // Carried through so the form can auto-derive sections from the

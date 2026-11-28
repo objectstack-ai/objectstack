@@ -12,7 +12,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, DependsOnInput, ViewData } from '@object-ui/types';
 import { useDataInvalidation, type OwnWrites } from '@object-ui/react';
 import { recordCurrencyReadField } from '@object-ui/i18n';
-import { resolveDependsOnFields, shownQuantityUnitReads, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, type QuerySortEntry } from '@object-ui/core';
+import { resolveDependsOnFields, shownQuantityUnitReads, declaredNameField, buildExpandFields, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, isProjectableField, convertSortToQueryParams, normalizeSortEntries, readWithheldFieldNames, refersToWithheldField, fieldLockPredicates, type FieldHandLockDef, type QuerySortEntry } from '@object-ui/core';
 import type { usePermissions } from '@object-ui/permissions';
 import { findParamsSignature } from './objectGridQuery';
 import { normalizeColumns } from './objectGridColumns';
@@ -450,13 +450,15 @@ export function useObjectGridRowLoad({
             // fetched rows without it and CEL faulted `No such key` — open for
             // `readonlyWhen` (the server drops the write), locked for the hand
             // lock (nothing behind it judges one). Read them, so each row is
-            // judged as it is. The same two gates as the harvests above.
+            // judged as it is. The same two gates as the harvests above. The
+            // hand lock is the EFFECTIVE one (`fieldLockPredicates`): a field
+            // that declares none of its own inherits the object's
+            // `uiReadonlyWhen`, whose operands every such column needs too.
             const lockOperandFields = declared
               ? collectPredicateFieldRefs(
                   shownColumns
-                    .map((entry) => (declared as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined>)[columnIdentity(entry) ?? ''])
-                    .flatMap((def) => [def?.readonlyWhen, def?.uiReadonlyWhen])
-                    .filter((pred) => pred != null),
+                    .map((entry) => (declared as Record<string, FieldHandLockDef | undefined>)[columnIdentity(entry) ?? ''])
+                    .flatMap((def) => fieldLockPredicates(def, resolvedSchema)),
                 )
                   .filter((f) => isProjectableField(f, declared as Record<string, unknown>))
                   .filter((f) => passesProjectionGate(f))

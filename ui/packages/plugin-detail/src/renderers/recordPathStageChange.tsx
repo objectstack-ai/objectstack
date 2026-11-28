@@ -256,7 +256,7 @@ export function useStageChange(
     && !inline.editing
     // The one hand-lock verdict over the stored record (`fieldReadOnlyByHand`):
     // a status that moves only through actions (`uiReadonly`) offers no stage.
-    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined, { scope: predicateScope })
+    && !fieldReadOnlyByHand(fieldDef, ctx?.data as Record<string, unknown> | undefined, { object: objectSchema, scope: predicateScope })
     && !isComputedDetailField(undefined, fieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(statusField)
     && resolveFieldAffordance('recordEdit', perms, objectName, statusField);
@@ -271,7 +271,7 @@ export function useStageChange(
   // fill-in asks the same one).
   const fillable = (name: string, def: Record<string, unknown>): boolean =>
     name !== statusField
-    && !fieldReadOnlyByHand(def, record, { scope: predicateScope })
+    && !fieldReadOnlyByHand(def, record, { object: objectSchema, scope: predicateScope })
     && !isComputedDetailField(undefined, def as FieldDef)
     && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
     && !!objectName

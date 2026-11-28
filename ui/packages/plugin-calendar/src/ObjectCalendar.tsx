@@ -1362,8 +1362,8 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     // array identity puts the event back where the record has it.
     const lockDefs = objectSchema?.fields as Record<string, Record<string, unknown> | undefined> | undefined;
     if (
-      fieldReadOnlyByHand(lockDefs?.[startDateField], record, { scope: predicateScope }) ||
-      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record, { scope: predicateScope }))
+      fieldReadOnlyByHand(lockDefs?.[startDateField], record, { object: objectSchema, scope: predicateScope }) ||
+      (writesEnd && fieldReadOnlyByHand(lockDefs?.[endDateField as string], record, { object: objectSchema, scope: predicateScope }))
     ) {
       setData((prev) => prev.slice());
       return;

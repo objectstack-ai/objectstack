@@ -20,6 +20,7 @@ import { RICH_TEXT_FIELD_TYPES, hasInCellPanelEditWidget } from '@object-ui/fiel
 
 const OPEN: CellReadOnlyInputs = {
   fieldDef: { type: 'text' },
+  object: null,
   fieldWritable: true,
   gridEditable: true,
   objectEditable: true,

@@ -60,6 +60,7 @@ async function bridgeFor(kernel: any, executionContext: Record<string, unknown>)
 }
 
 const OBJ = 'mcp_hand_order';
+const LOCKED = 'mcp_hand_locked_order';
 const STAFF = { userId: 'usr_staff', positions: [] as string[], permissions: ['mcp_hand_staff'], systemPermissions: [] as string[] };
 
 const prevMcp = process.env.OS_MCP_SERVER_ENABLED;
@@ -103,6 +104,17 @@ describe('[#36806] HTTP MCP describe_object reports uiReadonly / uiReadonlyWhen 
                         status: { name: 'status', type: 'text', label: 'Status', uiReadonly: true },
                         note: { name: 'note', type: 'text', label: 'Note', uiReadonlyWhen: "record.status != 'draft'" },
                         locked: { name: 'locked', type: 'text', label: 'Locked', readonly: true },
+                    },
+                },
+                {
+                    // [#37402] The whole-record hand lock on the object.
+                    name: LOCKED,
+                    label: 'Locked order',
+                    sharingModel: 'public_read_write',
+                    uiReadonlyWhen: "record.status in ['confirmed', 'done']",
+                    fields: {
+                        status: { name: 'status', type: 'text', label: 'Status' },
+                        notes: { name: 'notes', type: 'text', label: 'Notes', uiReadonlyWhen: 'false' },
                     },
                 },
             ],
@@ -164,5 +176,19 @@ describe('[#36806] HTTP MCP describe_object reports uiReadonly / uiReadonlyWhen 
         expect('uiReadonly' in subject || 'uiReadonlyWhen' in subject).toBe(false);
         expect(field(described, 'locked')).toMatchObject({ readonly: true });
         expect('uiReadonly' in field(described, 'locked')).toBe(false);
+    });
+
+    // [#37402] The object level of the same model, through the real security layer.
+    it('an object-level `uiReadonlyWhen` is reported on the answer, and no field reads readonly for it', async () => {
+        const described = await (await bridgeFor(kernelOver(services), STAFF)).describeObject(LOCKED);
+        expect(described.uiReadonlyWhen).toBe("record.status in ['confirmed', 'done']");
+        expect(field(described, 'status')).toMatchObject({ readonly: false });
+        expect('uiReadonlyWhen' in field(described, 'status')).toBe(false);
+        expect(field(described, 'notes')).toMatchObject({ readonly: false, uiReadonlyWhen: 'false' });
+    });
+
+    it('CONTROL — an object that authors no object-level predicate carries no key', async () => {
+        const described = await (await bridgeFor(kernelOver(services), STAFF)).describeObject(OBJ);
+        expect('uiReadonlyWhen' in described).toBe(false);
     });
 });

@@ -64,7 +64,7 @@ import { useDensityMode, resolveInlineAriaProps } from '@object-ui/react';
 import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig } from '@object-ui/types';
 import { AUDIT_FIELD_NAMES, detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
-import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick, shownQuantityUnitReads } from '@object-ui/core';
+import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, isObjectExportOffered, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, toFilterNodeSafely, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes, csvBlob, readWithheldFieldNames, refersToWithheldField, withHeaderSortPick, shownQuantityUnitReads, fieldLockPredicates, type FieldHandLockDef } from '@object-ui/core';
 import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -4576,7 +4576,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // viewer is never served the predicate either: the definition's FLS
           // scrub (`@objectstack/metadata-core`) deletes it and serves the
           // field `uiReadonly: true` in its place, so it stays locked by hand.
-          const lockDefs = objectDef?.fields as Record<string, { readonlyWhen?: unknown; uiReadonlyWhen?: unknown } | undefined> | undefined;
+          // The hand lock is the EFFECTIVE one (`fieldLockPredicates`): a field
+          // that declares none of its own inherits the object's `uiReadonlyWhen`.
+          const lockDefs = objectDef?.fields as Record<string, FieldHandLockDef | undefined> | undefined;
           const editedInPlace = [
             ...cols,
             kanbanLaneFieldOf(schema, objectDef),
@@ -4585,8 +4587,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           ].filter((name): name is string => typeof name === 'string' && name.length > 0);
           for (const f of collectPredicateFieldRefs(
             editedInPlace
-              .flatMap((name) => [lockDefs?.[name]?.readonlyWhen, lockDefs?.[name]?.uiReadonlyWhen])
-              .filter((pred) => pred != null),
+              .flatMap((name) => fieldLockPredicates(lockDefs?.[name], objectDef)),
           )) addSpeculative(f);
 
           // [objectui#13036] A shown `referenceVia` pointer column's TYPE

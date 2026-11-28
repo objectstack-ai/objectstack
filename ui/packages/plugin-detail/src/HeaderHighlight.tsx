@@ -226,7 +226,7 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
             // The object field's lock is the one hand-lock verdict over this
             // record (`fieldReadOnlyByHand`), as the details body reads it.
             const isReadonly =
-              field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { scope: predicateScope });
+              field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { object: objectSchema, scope: predicateScope });
             const isSystem = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
             // Same shared exclusion the details body and the grid consult, so a
             // credential chip never opens the plain text editor that would show

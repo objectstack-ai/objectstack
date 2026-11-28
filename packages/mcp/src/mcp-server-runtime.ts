@@ -99,6 +99,8 @@ export interface ServedObjectDef {
   fields?: Record<string, ServedFieldDef>;
   validations?: unknown[];
   enable?: Record<string, unknown>;
+  /** The whole-record hand lock (`ObjectSchema.uiReadonlyWhen`), CEL text or its envelope. */
+  uiReadonlyWhen?: unknown;
 }
 
 /** One field of a served object definition: the keys {@link describeServedObject} reads. */
@@ -177,6 +179,9 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
     })),
     validations: describedRules(def.validations),
     enableFeatures: def.enable ?? {},
+    // The whole-record hand lock, off the served object (the object level of
+    // the two-tier field-lock model): its predicate text, where authored.
+    ...describedHandLockPredicate(def),
   };
 }
 
@@ -193,13 +198,32 @@ export function describeServedObject(def: ServedObjectDef, declared: ServedObjec
  * The twin is `describedHandLock` in `packages/runtime/src/domains/mcp.ts`.
  */
 function describedHandLock(f: unknown): { uiReadonly?: true; uiReadonlyWhen?: string } {
-  const field = (f ?? {}) as { uiReadonly?: unknown; uiReadonlyWhen?: unknown };
-  const when = field.uiReadonlyWhen as string | { source?: unknown } | undefined;
-  const source = typeof when === 'string' ? when : typeof when?.source === 'string' ? when.source : undefined;
+  const field = (f ?? {}) as { uiReadonly?: unknown };
   return {
     ...(field.uiReadonly === true ? { uiReadonly: true as const } : {}),
-    ...(source !== undefined && source.trim() !== '' ? { uiReadonlyWhen: source } : {}),
+    ...describedHandLockPredicate(f),
   };
+}
+
+/**
+ * A `uiReadonlyWhen` predicate's text as `describe_object` serves it, on a
+ * field or on the object: `{ uiReadonlyWhen }` where the definition, as the
+ * caller is served it, authors a non-blank one, and nothing otherwise. On the
+ * object it is the whole-record hand lock — the default of every field that
+ * declares no hand lock of its own, which `describe_object` leaves for the
+ * reader to apply: a field's own key, where listed, wins. Like the field key it
+ * locks a person at the console only; an agent's write still sets every field,
+ * judged by the validations.
+ *
+ * The twin is `describedHandLockPredicate` in `packages/runtime/src/domains/mcp.ts`.
+ */
+function describedHandLockPredicate(def: unknown): { uiReadonlyWhen?: string } {
+  const raw = (def as { uiReadonlyWhen?: unknown } | null | undefined)?.uiReadonlyWhen as
+    | string
+    | { source?: unknown }
+    | undefined;
+  const source = typeof raw === 'string' ? raw : typeof raw?.source === 'string' ? raw.source : undefined;
+  return source !== undefined && source.trim() !== '' ? { uiReadonlyWhen: source } : {};
 }
 
 /**

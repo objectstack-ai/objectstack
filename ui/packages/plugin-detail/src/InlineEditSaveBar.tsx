@@ -423,12 +423,12 @@ export const InlineEditSaveBar: React.FC<InlineEditSaveBarProps> = ({
   const fillable = React.useCallback(
     (name: string, def: Record<string, unknown>) =>
       // The one hand-lock verdict over this record (`fieldReadOnlyByHand`).
-      !fieldReadOnlyByHand(def, data, { scope: predicateScope })
+      !fieldReadOnlyByHand(def, data, { object: objectSchema, scope: predicateScope })
       && !isComputedDetailField(undefined, def as never)
       && !NON_EDITABLE_SYSTEM_FIELDS.has(name)
       && !!objectName
       && resolveFieldAffordance('recordEdit', perms, objectName, name),
-    [objectName, perms, data, predicateScope],
+    [objectName, perms, data, predicateScope, objectSchema],
   );
 
   /**

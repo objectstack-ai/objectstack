@@ -1842,6 +1842,46 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
     });
 
+    // [#37402] The object level of the same lock — the whole-record hand lock
+    // — has no server judge either, so it is checked as the field slot is.
+    describe('the object-level `uiReadonlyWhen` is checked as the field slot is (#37402)', () => {
+      const lint = (uiReadonlyWhen: string) =>
+        validateStackExpressions({
+          objects: [{
+            name: 'hlk_locked_order',
+            uiReadonlyWhen,
+            fields: {
+              status: { type: 'select', options: [{ value: 'draft', label: 'Draft' }, { value: 'confirmed', label: 'Confirmed' }] },
+              notes: { type: 'text', uiReadonlyWhen: 'false' },
+            },
+          }],
+        }).filter(i => i.where === "object 'hlk_locked_order' uiReadonlyWhen");
+
+      it('accepts a predicate over the record\'s own columns', () => {
+        expect(lint("record.status in ['confirmed', 'done']")).toEqual([]);
+      });
+
+      it('refuses a bare field reference', () => {
+        const found = lint("status == 'confirmed'");
+        expect(found.map(i => i.severity)).toContain('error');
+        expect(found.some(i => /bare reference `status`/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a predicate that does not parse', () => {
+        expect(lint('record.(').some(i => i.severity === 'error')).toBe(true);
+      });
+
+      it('refuses a field the object does not declare', () => {
+        expect(lint("record.stage == 'won'").some(i => i.severity === 'error' && /stage/.test(i.message))).toBe(true);
+      });
+
+      it('refuses a root the field level does not bind, naming the console\'s locked outcome', () => {
+        const found = lint("current_user.id == 'u1'");
+        expect(found.map(i => i.severity)).toEqual(['error']);
+        expect(found[0]!.message).toMatch(/resolves a hand lock it cannot evaluate to LOCKED/);
+      });
+    });
+
     // `qty` carries `required` + `defaultValue` so it can never be null. That
     // is not decoration: it mirrors the real `showcase_invoice_line.quantity`,
     // and without it `record.qty >= 100` is a genuine #4811 finding — `>=` on a
