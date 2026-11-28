@@ -3,8 +3,8 @@
 # ObjectStack framework BUILD BASE image
 #   ghcr.io/objectstack-ai/framework-build-base:<full framework commit sha>
 #
-# Built and pushed by .github/workflows/framework-build-base.yml, on demand,
-# for one framework commit on `main`. NOT the runtime image: that one is
+# Built and pushed by .github/workflows/framework-build-base.yml, on every
+# push to `main` and on demand, for one framework commit on `main`. NOT the runtime image: that one is
 # ghcr.io/objectstack-ai/objectstack (docker/Dockerfile), a global npm install
 # of a RELEASED @objectstack/cli. This one is a builder stage frozen at a
 # commit: the framework source tree at /repo/objectstack with its workspace
