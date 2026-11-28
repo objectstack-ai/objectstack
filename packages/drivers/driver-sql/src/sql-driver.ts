@@ -6270,12 +6270,6 @@ export class SqlDriver implements IDataDriver {
    *   neither branch and took the boot down carrying the UNKEYABLE-COLUMN
    *   refusal instead of the duplicate rows. Measured on live MySQL 8.0.46 in
    *   `sql-driver-15479-shadow-plain-unique-duplicates.test.ts`.
-   * - #35862: a PLAIN (non-unique) index MySQL refuses to key
-   *   (`ER_BLOB_KEY_WITHOUT_LENGTH` / `ER_TOO_LONG_KEY`, a TEXT or over-wide
-   *   key column) is NOT created and NOT substituted, logged at `error` on
-   *   {@link logDurabilityFailure} with the field-level remedy, and the sync
-   *   goes on: the remaining indexes and the object's remaining boot steps
-   *   still run. A UNIQUE index the shadow route could not carry still throws.
    */
   protected syncDeclaredIndexes(
     tableName: string,
