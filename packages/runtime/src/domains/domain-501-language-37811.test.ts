@@ -204,12 +204,13 @@ function codeOnly(source: string): string {
     return out.join('');
 }
 
-/** Every `501` written in code in `source`, each with the code just before it. */
+/** Every `501` written in code in `source`, each with the last 160 characters of code up to it (whitespace collapsed). */
 function code501Sites(source: string): string[] {
     const code = codeOnly(source);
     const out: string[] = [];
     for (const m of code.matchAll(/(?<![\w.])501(?![\w.])/g)) {
-        out.push(code.slice(Math.max(0, m.index! - 200), m.index! + 3).replace(/\s+/g, ' ').trim());
+        const before = code.slice(0, m.index! + 3).replace(/\s+/g, ' ');
+        out.push(before.slice(-160).trim());
     }
     return out;
 }
@@ -227,12 +228,12 @@ describe('#37811 · 2 · no fixed-English 501 is left in the domain modules', ()
     const EXEMPT: ReadonlyArray<{ file: string; before: RegExp; reason: string }> = [
         {
             file: 'meta.ts',
-            before: /deps\.errorFromThrown\(e, 501\)$/,
+            before: /deps\.errorFromThrown\(e, 501$/,
             reason: 'the metadata service threw: the message is that error\'s own, 501 only its fallback status',
         },
         {
             file: 'mcp.ts',
-            before: /throw resumeDoorError\( deps, \+? *501$/,
+            before: /throw resumeDoorError\( deps,[ +,]*501$/,
             reason: 'thrown into the resume tool\'s error mapping and read by the calling agent beside the door\'s other English refusals: it stays English',
         },
         {

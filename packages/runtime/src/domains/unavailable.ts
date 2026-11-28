@@ -66,8 +66,10 @@ import { catalogNotImplemented, requestLocaleOf } from './own-door-bridge.js';
  * the shared table said "nothing ships" for a slot that Cloud/Enterprise does
  * provide. Teaching the table to say the accurate thing fixed the domain AND
  * discovery, which the override could only ever have fixed here. A slot whose
- * sentence is wrong needs the table corrected, not a local exception.
+ * sentence is wrong needs the table corrected, not a local exception, and
+ * its catalog key with it (the pin above fails until both say the same).
  *
+ * @param context the request, whose top `Accept-Language` tag picks the language.
  * @param slot the `CoreServiceName` key, NOT the route segment — `/notifications`
  *             is served by the `notification` slot, and the remedy is looked up
  *             by slot.
