@@ -4860,6 +4860,25 @@ const zh = {
     recordCitations: {
       title: '引自记录',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: '本轮保存的草稿',
+      hint: '还没有发布。请在 Studio 中审阅并发布这些草稿。',
+      package: '包 {{name}}',
+      reviewAndPublish: '审阅并发布',
+      reviewAndPublishAria: '在 Studio 中审阅并发布包 {{name}} 的草稿',
+      review: '审阅',
+      reviewAria: '在 Studio 中审阅草稿 {{name}}',
+      willPublish: '可以发布',
+      verdictWithheld: '未给出判定',
+      checkedAtSave: '保存时的判定',
+      problems: '{{count}} 个问题',
+      problems_one: '{{count}} 个问题',
+      problems_other: '{{count}} 个问题',
+      more: '还有 {{count}} 个',
+      more_one: '还有 {{count}} 个',
+      more_other: '还有 {{count}} 个',
+    },
     questionCard: {
       aiAsks: 'AI 问：',
       progress: '第 {{current}}/{{total}} 题',

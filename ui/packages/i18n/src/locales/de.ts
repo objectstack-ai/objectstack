@@ -4606,6 +4606,25 @@ const de = {
     recordCitations: {
       title: 'Zitiert aus Datensätzen',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'In dieser Runde gespeicherte Entwürfe',
+      hint: 'Noch ist nichts veröffentlicht. Prüfen und veröffentlichen Sie die Entwürfe in Studio.',
+      package: 'Paket {{name}}',
+      reviewAndPublish: 'Prüfen und veröffentlichen',
+      reviewAndPublishAria: 'Die Entwürfe des Pakets {{name}} in Studio prüfen und veröffentlichen',
+      review: 'Prüfen',
+      reviewAria: 'Den Entwurf {{name}} in Studio prüfen',
+      willPublish: 'Wird veröffentlicht',
+      verdictWithheld: 'Kein Urteil verfügbar',
+      checkedAtSave: 'beim Speichern geprüft',
+      problems: '{{count}} Probleme',
+      problems_one: '{{count}} Problem',
+      problems_other: '{{count}} Probleme',
+      more: '+{{count}} weitere',
+      more_one: '+{{count}} weiterer',
+      more_other: '+{{count}} weitere',
+    },
     questionCard: {
       aiAsks: 'KI fragt:',
       progress: 'Frage {{current}} von {{total}}',
