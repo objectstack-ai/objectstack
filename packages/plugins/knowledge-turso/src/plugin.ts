@@ -58,6 +58,14 @@ export interface KnowledgeTursoPluginOptions {
   requestTimeoutMs?: number;
   /** Text put before every query before it is embedded (see the adapter's option). */
   queryPrefix?: string;
+  /**
+   * The passage count at or above which a complete build makes a source's
+   * approximate vector index (see the adapter's option); `Infinity` never
+   * makes one. @default 20000
+   */
+  vectorIndexThreshold?: number;
+  /** How many approximate-index candidates the vector leg reads per hit, 8 or more (see the adapter's option). @default 40 */
+  vectorIndexOverfetch?: number;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
   embedder?: IEmbedder;
   /**
@@ -428,7 +436,17 @@ export class KnowledgeTursoPlugin implements Plugin {
     // The two settings this store reads join the Knowledge page here, and only
     // here: a deployment that does not mount this store, or mounts it with a
     // `url` or `client` of its own, reads neither, so its page offers neither.
-    contributeKnowledgeTursoSettings(ctx);
+    // Where they cannot join it, the read below finds nothing saved and the
+    // store opens its default file, which would otherwise go unsaid.
+    if (!contributeKnowledgeTursoSettings(ctx)) {
+      ctx.logger.warn?.(
+        'KnowledgeTursoPlugin: the store reads its URL from the Knowledge settings, but that page does not ' +
+          'carry turso_url and turso_auth_token (no settings service, no knowledge page, or a knowledge page ' +
+          'that declares one of the Turso group\'s ids without both keys), so nothing can be saved there and ' +
+          `the store opens its default file (${defaultStoreUrl(this.opts.projectRoot, this.opts.stateDir)}). Mount the knowledge service ` +
+          'and the settings service, or pass the plugin a `url`.',
+      );
+    }
     ctx.hook('kernel:bootstrapped', async () => {
       await this.openFromSettings(ctx);
     });
@@ -531,6 +549,8 @@ export class KnowledgeTursoPlugin implements Plugin {
       ...(store.client ? { client: store.client } : { unavailable: store.unavailable }),
       embedder,
       queryPrefix: this.opts.queryPrefix,
+      ...(this.opts.vectorIndexThreshold === undefined ? {} : { vectorIndexThreshold: this.opts.vectorIndexThreshold }),
+      ...(this.opts.vectorIndexOverfetch === undefined ? {} : { vectorIndexOverfetch: this.opts.vectorIndexOverfetch }),
       ...(store.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: store.requestTimeoutMs }),
     });
   }

@@ -3067,6 +3067,10 @@ const en = {
         ctaUpgrade: 'Upgrade to keep going',
         ctaTopUp: 'Add credits to continue',
         ariaLabel: 'AI usage: {{status}}',
+        // cloud#5159 — a paid plan's two allowance tiers, one popover row each,
+        // shown only when the usage answer carries `tiers`.
+        tierPersonal: 'Personal allowance',
+        tierTeamPool: 'Team pool',
       },
       openChats: 'Open chats',
       chats: 'Chats',

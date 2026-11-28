@@ -1770,8 +1770,42 @@ export function firstDateTextCall(
   }
 }
 
-/** cel-js temporal functions that return a calendar Timestamp (for #3183). */
-const TEMPORAL_FNS = new Set(['today', 'daysFromNow', 'daysAgo', 'now']);
+/** The CEL type name of a Timestamp, as a function declaration spells its return. */
+const TIMESTAMP_CEL_TYPE = 'google.protobuf.Timestamp';
+
+/**
+ * [#38135] The global functions whose every overload the engine's own
+ * environment DECLARES as returning a Timestamp: `today`, `now`, `daysFromNow`,
+ * `daysAgo`, `addDays`, `addMonths`, `date`, `datetime`, the working-day pair
+ * `addWorkingDays` / `addWorkingHours`, and cel-js's built-in `timestamp`.
+ *
+ * Read off `getDefinitions()` of an environment built by the one constructor the
+ * engine evaluates on, never kept by hand. Both rewrites that coerce a date
+ * field's `YYYY-MM-DD` text to meet a Timestamp ask this set through
+ * {@link isTimestampCall}: the ADR-0032 §1c ordering retry ({@link operandKind})
+ * and the #3183 equality rewrite ({@link rewriteTemporalCallEquality}). Each used
+ * to keep its own list (`today` / `now` / `daysFromNow` / `daysAgo`, the retry
+ * adding `date` / `datetime`), so a field compared with `addDays(today(), 30)`
+ * faulted on every run under `<` and answered a silent `false` under `==`, while
+ * the same comparison with `daysFromNow(30)` evaluated. A function registered
+ * later with a Timestamp return joins both rewrites with no edit here.
+ *
+ * A name with ANY overload returning something else is left out: the AST names
+ * the function, not the overload, so such a call cannot be proved a Timestamp.
+ * Built on first use, as the shared evaluation environment is.
+ */
+let timestampReturningFns: ReadonlySet<string> | undefined;
+export function timestampReturningFunctions(): ReadonlySet<string> {
+  if (timestampReturningFns) return timestampReturningFns;
+  const returns = new Map<string, boolean>();
+  const defs = buildEnvReading(() => UNBOUND).getDefinitions().functions;
+  for (const fn of defs) {
+    if (fn.receiverType !== null) continue;
+    returns.set(fn.name, (returns.get(fn.name) ?? true) && fn.returnType === TIMESTAMP_CEL_TYPE);
+  }
+  timestampReturningFns = new Set([...returns].filter(([, ts]) => ts).map(([name]) => name));
+  return timestampReturningFns;
+}
 
 /** A cel-js AST node is `{ op, args }`; `args` is a node[], or a leaf string. */
 type CelNode = { op: string; args: unknown };
@@ -1780,11 +1814,15 @@ function isCelNode(v: unknown): v is CelNode {
   return typeof v === 'object' && v !== null && typeof (v as CelNode).op === 'string';
 }
 
-/** True when `node` is a call to a temporal function (`today()`/`daysFromNow(…)`/…). */
-function isTemporalCall(node: unknown): boolean {
+/**
+ * True when `node` is a global call that returns a Timestamp (`today()`,
+ * `addDays(today(), 30)`, `date("2026-06-20")`, …) — see
+ * {@link timestampReturningFunctions}.
+ */
+function isTimestampCall(node: unknown): boolean {
   return isCelNode(node) && node.op === 'call'
     && Array.isArray(node.args) && typeof node.args[0] === 'string'
-    && TEMPORAL_FNS.has(node.args[0]);
+    && timestampReturningFunctions().has(node.args[0]);
 }
 
 /**
@@ -1816,7 +1854,9 @@ function wrapInDate(node: CelNode): CelNode {
  * `YYYY-MM-DD` string and cel-js equality never matches a string against the
  * Timestamp that `today()` etc. return, so the bare comparison silently misses;
  * `date(record.d) == today()` compares two Timestamps and matches on the calendar
- * day. The rewrite is:
+ * day. The counterpart is any call {@link isTimestampCall} proves a Timestamp
+ * (#38135: `addDays(today(), 1)`, `date("2026-06-20")` and `timestamp(…)` too,
+ * which this arm once missed and answered a silent `false` on). The rewrite is:
  *   - **per-occurrence** — only the operand paired with a temporal call is wrapped,
  *     so `record.d == "2026-06-20" || record.d == today()` keeps the string-literal
  *     comparison intact while fixing the temporal one (no field-wide trade-off);
@@ -1840,10 +1880,9 @@ function rewriteTemporalCallEquality(source: string): string {
   if (typeof source !== 'string' || !source.trim()) return source;
   const cached = temporalRewriteCache.get(source);
   if (cached !== undefined) return cached;
-  // Cheap gate: a rewrite needs an equality operator AND a temporal call.
+  // Cheap gate: a rewrite needs an equality operator AND a Timestamp-returning call.
   const gated = (source.includes('==') || source.includes('!='))
-    && (source.includes('today') || source.includes('daysFromNow')
-      || source.includes('daysAgo') || source.includes('now'));
+    && [...timestampReturningFunctions()].some((fn) => source.includes(fn));
   if (!gated) { rememberRewrite(source, source); return source; }
 
   let ast: unknown;
@@ -1859,10 +1898,10 @@ function rewriteTemporalCallEquality(source: string): string {
     if ((node.op === '==' || node.op === '!=') && Array.isArray(node.args) && node.args.length === 2) {
       const args = node.args as unknown[];
       const [left, right] = args;
-      // Wrap the field operand paired with a temporal call. Guard `fieldRefName`
+      // Wrap the field operand paired with a Timestamp-returning call. Guard `fieldRefName`
       // so we never wrap a literal, another call, or an arithmetic sub-tree.
-      if (isTemporalCall(left) && isCelNode(right) && fieldRefName(right)) { args[1] = wrapInDate(right); changed = true; }
-      else if (isTemporalCall(right) && isCelNode(left) && fieldRefName(left)) { args[0] = wrapInDate(left); changed = true; }
+      if (isTimestampCall(left) && isCelNode(right) && fieldRefName(right)) { args[1] = wrapInDate(right); changed = true; }
+      else if (isTimestampCall(right) && isCelNode(left) && fieldRefName(left)) { args[0] = wrapInDate(left); changed = true; }
     }
     if (Array.isArray(node.args)) for (const child of node.args) visit(child);
   };
@@ -2405,10 +2444,10 @@ function valueKind(v: unknown): OperandKind {
 function operandKind(node: unknown, scope: Record<string, unknown>): OperandKind {
   if (!isCelNode(node)) return 'unknown';
   if (node.op === 'value') return valueKind(node.args);
-  if (isTemporalCall(node)) return 'temporal';
+  // #38135 — every call the environment declares a Timestamp, `addDays(today(), 30)` included.
+  if (isTimestampCall(node)) return 'temporal';
   if (node.op === 'call' && Array.isArray(node.args) && typeof node.args[0] === 'string') {
     const fn = node.args[0];
-    if (fn === 'date' || fn === 'datetime') return 'temporal';
     if (fn === 'double' || fn === 'int' || fn === 'uint') return 'number';
     return 'unknown';
   }

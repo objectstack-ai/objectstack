@@ -2251,6 +2251,8 @@ const de = {
         ctaUpgrade: "Upgraden, um weiterzumachen",
         ctaTopUp: "Credits hinzufügen, um fortzufahren",
         ariaLabel: "KI-Nutzung: {{status}}",
+        tierPersonal: "Persönliches Kontingent",
+        tierTeamPool: "Team-Pool",
       },
       openChats: "Chats öffnen",
       chats: "Chats",

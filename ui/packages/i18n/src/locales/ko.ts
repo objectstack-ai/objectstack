@@ -2251,6 +2251,8 @@ const ko = {
         ctaUpgrade: "업그레이드하고 계속하기",
         ctaTopUp: "크레딧을 추가하고 계속하기",
         ariaLabel: "AI 사용량: {{status}}",
+        tierPersonal: "개인 할당량",
+        tierTeamPool: "팀 공유 풀",
       },
       openChats: "채팅 열기",
       chats: "채팅",

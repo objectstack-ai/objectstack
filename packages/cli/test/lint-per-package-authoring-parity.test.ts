@@ -144,6 +144,11 @@ const ordersManifest = {
   id: 'com.example.ppflip.orders', name: 'ppflip orders', namespace: 'pp',
   version: '1.0.0', type: 'module', engines: { protocol: '^19' },
   dependencies: { 'com.example.ppflip.core': '^1.0.0' },
+  // [#35143] Orders puts its object into core's app (ADR-0029 D7), so the
+  // union run reaches \`pp_order\` and raises nothing for it.
+  navigationContributions: [
+    { app: 'pp_crm', items: [{ id: 'nav_orders', type: 'object', objectName: 'pp_order', label: 'Orders' }] },
+  ],
 };
 const ordersObjects = [{
   name: 'pp_order', label: 'Order', pluralLabel: 'Orders', sharingModel: 'private',

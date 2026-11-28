@@ -450,6 +450,17 @@ export const TABLE_COUNT_ONLY = 'table-count-only';
 export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
+/**
+ * [#35143] A dashboard that declares no widget: it publishes and opens on its
+ * header over an empty canvas (`DashboardRenderer.tsx` in objectui draws no
+ * empty state for it). A `warning` at every door: the shape breaks no request,
+ * and the platform's own create steps write it and fill it afterwards (the
+ * spec's dashboard create seed, Studio's `newItemBody` in
+ * `designModeMenuCreate.ts` and the `dashboard` resource's `createDefaults` in
+ * `anchors.ts`, and `os generate dashboard`), so a tree still being built
+ * meets it as a step, not a defect.
+ */
+export const DASHBOARD_WITHOUT_WIDGETS = 'dashboard-without-widgets';
 export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
 export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unprovisioned';
 /**
@@ -1170,6 +1181,22 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     const dash = dashboards[i];
     const dashName = typeof dash.name === 'string' ? dash.name : `(dashboard ${i})`;
     const widgets = Array.isArray(dash.widgets) ? (dash.widgets as AnyRec[]) : [];
+    // [#35143] No widget at all — see DASHBOARD_WITHOUT_WIDGETS. Judged on an array only: a missing or malformed `widgets` is
+    // the schema's refusal, not this rule's.
+    if (Array.isArray(dash.widgets) && dash.widgets.length === 0) {
+      findings.push({
+        severity: 'warning',
+        rule: DASHBOARD_WITHOUT_WIDGETS,
+        where: `dashboard "${dashName}"`,
+        path: `dashboards[${i}].widgets`,
+        message:
+          `dashboard "${dashName}" declares no widgets, so it opens on its header over an empty canvas: there is ` +
+          'nothing on it to show',
+        hint:
+          'Add a widget bound to a dataset (`widgets: [{ id, type, dataset, values }]`), or remove the dashboard ' +
+          'and any navigation entry that opens it',
+      });
+    }
     // Dashboard-level filters (`dateRange` + `globalFilters`) are broadcast into
     // every widget's query (#2501) — resolved once here, checked per widget below.
     const dashFilterDefs = dashboardFilterDefs(dash);

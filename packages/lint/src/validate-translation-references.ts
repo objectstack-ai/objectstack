@@ -276,9 +276,15 @@ import {
   pageTabItemKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
-import { isRecordPageBuiltinTab, relatedListEntryHidden, relatedListEntryName, relatedListNameCovers } from '@objectstack/spec/data';
+import { isRecordPageBuiltinTab, relatedListNameCovers } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
 import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import {
+  addOwnerRelatedLists,
+  emptyRelatedListTitles,
+  foldRelatedListExtensions,
+  type RelatedListTitles,
+} from './related-list-titles.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -490,29 +496,16 @@ interface ObjectFacts {
    */
   tabs: Set<string>;
   /**
-   * `_relatedLists` names — the `list` of every object-form `relatedLists`
-   * entry this object declares WITH a `label`, the only entries
-   * `translateObject` overlays `objects.<obj>._relatedLists.<list>.label` onto.
+   * `_relatedLists` — the object's record-page tab titles as the registry
+   * serves them: the owner's `relatedLists`, then every list placement, then
+   * the paired `.custom` arrangement (ADR-0146 D10), folded by the ONE fold
+   * `os i18n extract` also reads ({@link foldRelatedListExtensions}). A key
+   * resolves only over a list in its `labels`, the only entries
+   * `translateObject` overlays `objects.<obj>._relatedLists.<list>.label`
+   * onto; `names`, `hidden` and `stripped` are read only to say WHY a key
+   * over any other list resolves nothing.
    */
-  relatedListLabels: Set<string>;
-  /**
-   * Every list this object's `relatedLists` names, labelled or not (a bare
-   * string, an object entry, a built-in tab) — read only to say WHY a
-   * `_relatedLists` key over a named but unlabelled entry resolves nothing.
-   */
-  relatedListNames: Set<string>;
-  /**
-   * The lists a paired `.custom` arrangement hides (`{ list, hidden: true }`,
-   * ADR-0146 D10): no tab shows them, so their title is read nowhere — read
-   * only to say so.
-   */
-  relatedListHidden: Set<string>;
-  /**
-   * The lists whose label (from the owner or a placement) a `.custom`
-   * arrangement entry replaced with none: the tab shows, untitled by any
-   * `label` — read only to name the arrangement in the finding.
-   */
-  relatedListStripped: Set<string>;
+  relatedListTitles: RelatedListTitles;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -687,10 +680,7 @@ function emptyFacts(): ObjectFacts {
     validations: new Set(),
     milestones: new Map(),
     tabs: new Set(),
-    relatedListLabels: new Set(),
-    relatedListNames: new Set(),
-    relatedListHidden: new Set(),
-    relatedListStripped: new Set(),
+    relatedListTitles: emptyRelatedListTitles(),
   };
 }
 
@@ -1377,12 +1367,7 @@ function buildUniverse(stack: AnyRec): Universe {
     // literal `list` (`object.field` is one key), and resolves only over an
     // entry that authors a `label`: `translateObject` overlays that label and
     // swaps nothing in for an entry without one.
-    for (const entry of Array.isArray(obj.relatedLists) ? obj.relatedLists : []) {
-      const list = typeof entry === 'string' ? entry : isRec(entry) ? strName(entry.list) : undefined;
-      if (!list) continue;
-      facts.relatedListNames.add(list);
-      if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
-    }
+    addOwnerRelatedLists(facts.relatedListTitles, obj.relatedLists);
   };
 
   for (const obj of recordsOf(stack.objects)) {
@@ -1459,61 +1444,20 @@ function buildUniverse(stack: AnyRec): Universe {
         const key = strName(group.key);
         if (key) facts.sections.add(key);
       }
-      // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a list
-      // placement's `place` entry titles a tab of the target, and where the
-      // target declares `relatedLists` the served target carries that entry,
-      // which `translateObject` translates as it does the target's own (a
-      // placed entry is part of the packaged base it is compared with,
-      // `getPackagedObjectBase`). A placement on a target that declares none
-      // is not applied, and its key is accepted here all the same: this fold
-      // does not read whether the target declares the list. The `.custom`
-      // arrangement's entries are folded after every placement, below.
-      const arranged = new Set<unknown>(extension.relatedListArrangement ?? []);
-      for (const entry of extension.relatedListEntries) {
-        if (arranged.has(entry)) continue;
-        const list = strName(entry.list);
-        if (!list) continue;
-        facts.relatedListNames.add(list);
-        if (typeof entry.label === 'string' && entry.label.length > 0) facts.relatedListLabels.add(list);
-      }
     }
-    // [#36595] The `.custom` arrangement (ADR-0146 D10) is applied after the
-    // owner's list and every placement, as the registry applies it
-    // (`registry-custom-arrangement.ts`): each of its entries REPLACES every
-    // entry it covers (`relatedListNameCovers`: the same list, or a bare child
-    // for each list of that child). So a labelled entry titles the tab, a
-    // bare name or an unlabelled entry leaves it the child FK's
-    // `relatedListTitle`, and `{ list, hidden: true }` leaves no tab, whatever
-    // label the owner or a placement gave the lists it covers. Lists it does
-    // not cover keep what they had.
-    //
-    // Two passes per arrangement, as the registry reads one: it collects the
-    // arrangement's entries first and only then drops what they cover from the
-    // tab list steps 1–2 gave, so one entry never strips a label or a `hidden`
-    // a sibling entry of the SAME arrangement wrote, in either order.
-    for (const extension of extensions) {
-      const arrangement = (extension.relatedListArrangement ?? [])
-        .map((entry) => ({ entry, list: relatedListEntryName(entry) }))
-        .filter((e): e is { entry: unknown; list: string } => typeof e.list === 'string' && e.list !== '');
-      for (const { list } of arrangement) {
-        facts.relatedListNames.add(list);
-        for (const labelled of [...facts.relatedListLabels]) {
-          if (!relatedListNameCovers(list, labelled)) continue;
-          facts.relatedListLabels.delete(labelled);
-          facts.relatedListStripped.add(labelled);
-        }
-        for (const hidden of [...facts.relatedListHidden]) {
-          if (relatedListNameCovers(list, hidden)) facts.relatedListHidden.delete(hidden);
-        }
-      }
-      for (const { entry, list } of arrangement) {
-        if (relatedListEntryHidden(entry)) facts.relatedListHidden.add(list);
-        else if (isRec(entry) && typeof entry.label === 'string' && entry.label.length > 0) {
-          facts.relatedListLabels.add(list);
-          facts.relatedListStripped.delete(list);
-        }
-      }
-    }
+    // `_relatedLists.<list>` is keyed by a labelled entry's `list`: a list
+    // placement's `place` entry titles a tab of the target, and where the
+    // target declares `relatedLists` the served target carries that entry,
+    // which `translateObject` translates as it does the target's own (a
+    // placed entry is part of the packaged base it is compared with,
+    // `getPackagedObjectBase`). A placement on a target that declares none
+    // is not applied, and its key is accepted here all the same: this fold
+    // does not read whether the target declares the list. [#36595] The
+    // `.custom` arrangement (ADR-0146 D10) is applied after every placement,
+    // as the registry applies it (`registry-custom-arrangement.ts`), each of
+    // its entries replacing every entry it covers. [#37622] One fold for this
+    // rule and for `os i18n extract` / `os i18n check` (`i18n-walk.ts`).
+    foldRelatedListExtensions(facts.relatedListTitles, extensions);
   }
 
   // ── Stack-level views: `_views` names + form-section names ──
@@ -2239,8 +2183,9 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
         // object-form `relatedLists` entry. A key over a list the object names
         // without a `label` translates nothing: that tab's title is the child
         // FK's `relatedListTitle`, keyed on the child.
+        const titles = facts.relatedListTitles;
         for (const listName of Object.keys(asRecord(rawNode._relatedLists))) {
-          if (facts.relatedListLabels.has(listName)) continue;
+          if (titles.labels.has(listName)) continue;
           const listWhere = `${inLocale} · object "${objectName}" · related list "${listName}"`;
           const listPath = `${objPath}._relatedLists${memberPath(listName)}`;
           if (isRecordPageBuiltinTab(listName)) {
@@ -2250,21 +2195,27 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `Drop this key: a built-in tab takes no \`label\` here.`);
             continue;
           }
-          if ([...facts.relatedListHidden].some((hidden) => relatedListNameCovers(hidden, listName))) {
+          // [#37622] The remedy names the list the key addresses: where a bare
+          // child (`event`) hides or strips a dotted list (`event.related_to`),
+          // the entry to write is the dotted list's own, and the label it
+          // carries is whichever the arrangement should serve — the owner's,
+          // a placement's or a new one.
+          if ([...titles.hidden].some((hidden) => relatedListNameCovers(hidden, listName))) {
             orphan(listWhere, listPath,
               `Related list "${listName}" of object "${objectName}" is hidden by the \`.custom\` ` +
               `arrangement (\`hidden: true\`), so no tab shows a title from this key.`,
-              `Drop this key, or show the tab (drop \`hidden\`) with the owner's \`label\` on the entry.`);
+              `Drop this key, or show the tab: drop \`hidden\` and give the arrangement a ` +
+              `{ list: '${listName}', label } entry.`);
             continue;
           }
-          if (facts.relatedListStripped.has(listName)) {
+          if (titles.stripped.has(listName)) {
             orphan(listWhere, listPath,
               `Related list "${listName}" of object "${objectName}" carries no \`label\` in the \`.custom\` ` +
-              `arrangement, which replaces the owner's entry, so no title reads this key.`,
-              `Drop this key, or re-state the arrangement's entry with the owner's \`label\` ({ list, label }).`);
+              `arrangement, which replaces the entry that labelled it, so no title reads this key.`,
+              `Drop this key, or give the arrangement a { list: '${listName}', label } entry to title the tab.`);
             continue;
           }
-          const named = facts.relatedListNames.has(listName);
+          const named = titles.names.has(listName);
           orphan(
             listWhere,
             listPath,
@@ -2273,7 +2224,7 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 `\`relatedLists\`, so no title reads this key.`
               : `Translations are keyed to related list "${listName}", which no \`relatedLists\` entry ` +
                 `of object "${objectName}" names, so nothing reads this key.` +
-                suggest(listName, facts.relatedListLabels),
+                suggest(listName, titles.labels.keys()),
             named
               ? `Give the entry a \`label\` ({ list, label }) to title it here, or translate the ` +
                 `child lookup field's \`relatedListTitle\` instead, and drop this key.`

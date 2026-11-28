@@ -331,10 +331,16 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // wired-onto-nothing shape wearing this pin's clothes.
     // #28663 — `app` writes also reach the visibility-predicate family (a nav
     // entry's `visible` that does not parse), ahead of this rule in registry
-    // order; `position` reaches this rule alone.
+    // order; `position` reaches this rule alone. #35143 — and the advisory
+    // `validateAppNavigationPresent` after it.
     const expected: Record<string, string[]> = {
       position: ['validateSecurityRoleWord'],
-      app: ['validateVisibilityPredicates', 'validatePredicatePathRefs', 'validateSecurityRoleWord'],
+      app: [
+        'validateVisibilityPredicates',
+        'validatePredicatePathRefs',
+        'validateSecurityRoleWord',
+        'validateAppNavigationPresent',
+      ],
     };
     for (const type of ['position', 'app']) {
       expect(
@@ -512,14 +518,25 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(labelled.errors[0].path).toBe('apps[0].label');
 
     // ⭐ The lit control, same job as the position one above.
+    // #35143 — the control carries a navigation entry, or it would draw the
+    // `app-navigation-empty` advisory.
     const clean = runRuntimeAuthoringRules({
       type: 'app',
-      item: { name: 'ops_hub', label: 'Operations Hub' },
+      item: {
+        name: 'ops_hub',
+        label: 'Operations Hub',
+        navigation: [{ id: 'nav_home', type: 'url', label: 'Home', url: 'https://example.com' }],
+      },
     });
     expect(clean.errors).toEqual([]);
     expect(clean.advisories).toEqual([]);
     // #28663 — the visibility-predicate family runs on an app write too.
-    expect(clean.rulesRun).toEqual(['validateVisibilityPredicates', 'validatePredicatePathRefs', 'validateSecurityRoleWord']);
+    expect(clean.rulesRun).toEqual([
+      'validateVisibilityPredicates',
+      'validatePredicatePathRefs',
+      'validateSecurityRoleWord',
+      'validateAppNavigationPresent',
+    ]);
   });
 
   it('[#19370] the two types already at the door gain the freeze too, with their controls', () => {
