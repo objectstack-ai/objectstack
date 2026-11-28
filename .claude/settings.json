@@ -94,10 +94,10 @@
     "ask": [
       "Bash(git commit -F * *)",
       "Bash(git push -u origin claude/issue-* *)",
-      "Bash(git push -u origin claude/issue-*:*)",
+      "Bash(git push -u origin claude/issue-*:**)",
       "Bash(git commit --allow-empty -F * *)",
       "Bash(git push -u origin claude/mailbox-* *)",
-      "Bash(git push -u origin claude/mailbox-*:*)"
+      "Bash(git push -u origin claude/mailbox-*:**)"
     ],
     "deny": [
       "mcp__github__issue_write",
