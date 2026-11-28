@@ -187,7 +187,11 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
       const advised = verdict.advisories.filter((f) => KS_RULE.test(f.rule));
       expect((severity === 'error' ? refused : advised).map((f) => f.rule)).toEqual([rule]);
       expect((severity === 'error' ? advised : refused)).toEqual([]);
-      expect([...refused, ...advised].map(face)).toEqual(atValidate(source).map(face));
+      // A write that names no package is worded for its author, who has no
+      // stack and no manifest; every other verdict prints the CLI's words.
+      const sameWords = rule !== KNOWLEDGE_SOURCE_OBJECT_UNKNOWN;
+      const at = (f: ReturnType<typeof face>) => (sameWords ? f : { rule: f.rule, severity: f.severity, where: f.where });
+      expect([...refused, ...advised].map(face).map(at)).toEqual(atValidate(source).map(face).map(at));
     });
   }
 
@@ -259,7 +263,7 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
       const verdict = runRuntimeAuthoringRules({ type: 'knowledge_source', item, context: { objects } });
       expect(verdict.errors.map((f) => [f.rule, f.severity, f.path]), object)
         .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error', 'knowledgeSources[0].source.object']]);
-      expect(verdict.errors[0]!.message, object).toContain(`'${object}', which this stack does not define`);
+      expect(verdict.errors[0]!.message, object).toContain(`'${object}', which is not an object of this organization`);
       expect(verdict.advisories.filter((f) => KS_RULE.test(f.rule)), object).toEqual([]);
     }
     // The CLI arms stay: a prefixed name no known package registers warns, a known platform name is not judged.
@@ -273,6 +277,70 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
       item: kbSource({ object: 'sys_kb_article', content: ['body'], metadataFields: [] }),
       context: { objects: served },
     }).errors).toEqual([]);
+  });
+
+  it('a write that names no package is refused in words that name neither a stack nor a manifest', () => {
+    const verdict = runRuntimeAuthoringRules({ type: 'knowledge_source', item: kbSource({ object: 'kb_artcle' }), context: { objects } });
+    expect(verdict.errors.map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
+    const [finding] = verdict.errors;
+    for (const word of [/\bstack\b/i, /manifest/i, /dependencies/]) {
+      expect(finding!.message).not.toMatch(word);
+      expect(finding!.hint).not.toMatch(word);
+    }
+    expect(finding!.message).toContain('organization');
+    expect(finding!.hint).toMatch(/install the package/);
+    // CONTROL: the CLI keeps its stack-and-manifest remedy, which its author can follow.
+    expect(atValidate(kbSource({ object: 'kb_artcle' }))[0]!.hint).toMatch(/manifest's `dependencies`/);
+  });
+
+  /**
+   * Limb 1 of the closure (`narrowObjectsToPackageClosure`) keeps every object
+   * `isSystemObject` accepts, and by name alone that is every `sys_` object:
+   * under a stated closure an absent `sys_` name is absent from the host.
+   */
+  describe('under a stated closure, an absent sys_ name', () => {
+    const scope = { packageId: 'app.kb', dependencies: [] as string[] };
+    const served = [
+      ...objects.map((o) => ({ ...o, _packageId: 'app.kb' })),
+      { name: 'sys_help_topic', _packageId: 'com.platform.help', enable: { aiReadable: true }, fields: { body: { type: 'text' } } },
+    ];
+    const atScoped = (object: string, context = served) => runRuntimeAuthoringRules({
+      type: 'knowledge_source',
+      item: kbSource({ object, content: ['body'], metadataFields: [] }),
+      context: { objects: context },
+      packageScope: scope,
+    });
+
+    it('is refused, known or not, with no dependency remedy', () => {
+      for (const object of ['sys_user', 'sys_kb_article']) {
+        const verdict = atScoped(object);
+        expect(verdict.errors.map((f) => [f.rule, f.severity, f.path]), object)
+          .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error', 'knowledgeSources[0].source.object']]);
+        expect(verdict.errors[0]!.message, object).toContain(`'${object}', a system object the host does not serve`);
+        expect(verdict.errors[0]!.hint, object).not.toMatch(/dependenc/);
+        expect(verdict.advisories.filter((f) => KS_RULE.test(f.rule)), object).toEqual([]);
+      }
+    });
+
+    it('CONTROL: a sys_ object the host serves, from a package outside the closure, passes', () => {
+      expect(atScoped('sys_help_topic').errors).toEqual([]);
+    });
+
+    it('cloud_ and ai_ names are not on that arm: limb 1 keeps them only on their definition\'s isSystem', () => {
+      const foreign = (extra: Record<string, unknown>) => [
+        ...served,
+        ...['cloud_usage_note', 'ai_memory_note'].map((name) => ({ name, _packageId: 'com.cloud', ...extra, fields: { body: { type: 'text' } } })),
+      ];
+      for (const object of ['cloud_usage_note', 'ai_memory_note']) {
+        // Not isSystem: the closure drops it, so the verdict is the closure's, with the dependency remedy.
+        const dropped = atScoped(object, foreign({}));
+        expect(dropped.errors.map((f) => f.rule), object).toEqual([KNOWLEDGE_SOURCE_OBJECT_UNKNOWN]);
+        expect(dropped.errors[0]!.message, object).toContain('outside the closure of package "app.kb"');
+        expect(dropped.errors[0]!.hint, object).toMatch(/^Declare a dependency on the package that defines/);
+        // isSystem: true: limb 1 keeps it, and the source is clean.
+        expect(atScoped(object, foreign({ isSystem: true })).errors, object).toEqual([]);
+      }
+    });
   });
 
   it('an empty whole collection at the door is no universe, and judges no object', () => {

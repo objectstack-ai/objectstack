@@ -249,13 +249,19 @@ export function validateAiContext(
             hint: `Name a long-text field of '${root}' (check the spelling)`,
           });
         } else if (!(AI_CONTEXT_BODY_FIELD_TYPES as readonly string[]).includes(str(def?.type))) {
+          // No definition means a column addressable without one: `id`, which
+          // the driver provisions on every object, is the only such name.
+          const type = str(def?.type);
+          const what = !def
+            ? bodyField === 'id' ? 'the record id every object carries' : 'a column with no declared type'
+            : type ? `${/^[aeiou]/i.test(type) ? 'an' : 'a'} ${type} field` : 'a field with no declared type';
           out.push({
             severity: 'warning',
             rule: AI_CONTEXT_BODY_NOT_LONG_TEXT,
             where: `${at} · body`,
             path: `aiContexts[${i}].body.field`,
             message:
-              `\`body.field\` names '${bodyField}', a ${str(def?.type) || 'untyped'} field; a body is a long-text ` +
+              `\`body.field\` names '${bodyField}', ${what}; a body is a long-text ` +
               `field (${AI_CONTEXT_BODY_FIELD_TYPES.join(', ')}), so the pack carries no body`,
             hint: `Name a long-text field of '${root}' as the body, or list '${bodyField}' in \`fields\` instead`,
           });

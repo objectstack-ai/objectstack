@@ -6321,7 +6321,8 @@ const AI_CONTEXT_SORT_FIELD_UNSORTABLE_EXPLANATION: RuleExplanation = {
 
 const KNOWLEDGE_SOURCE_DOORS =
   'Judged by `os validate`, `os build` and `os lint`, and at the runtime publish gate for a ' +
-  '`knowledge_source` write (Studio, the metadata API, MCP), with the same rule id and message. An error ' +
+  '`knowledge_source` write (Studio, the metadata API, MCP), with the same rule id and message, except that an ' +
+  'object verdict at the gate names the remedy its author has. An error ' +
   'refuses the publish (ADR-0161 K4): a source over a missing object has nothing to index, a missing field ' +
   'indexes no text for that member, and a gated object is never searched for a caller the service judges.';
 
@@ -6337,10 +6338,14 @@ const KNOWLEDGE_SOURCE_OBJECT_UNKNOWN_EXPLANATION: RuleExplanation = {
       'registers (`sys_user`) is not judged when the stack does not carry its definition, and a name with a ' +
       'platform prefix that no known package registers is a warning, because a third-party package may still ' +
       'provide it. At the publish gate with no package stated, the source is judged against every object the ' +
-      'host serves, so either one is an error there when the host does not serve it. When the publish ' +
-      'gate states the package\'s closure (the package, the packages its manifest declares in ' +
-      '`dependencies`, and platform objects), an object outside it is reported with the remedy to declare the ' +
-      'dependency.',
+      'host serves, so either one is an error there when the host does not serve it, worded for the ' +
+      'organization\'s author: name an object the organization has, or install the package that provides it. ' +
+      'When the publish gate states the package\'s closure (the package, the packages its manifest declares ' +
+      'in `dependencies`, and platform objects), the closure keeps every `sys_` object the host serves, so a ' +
+      '`sys_` name the host does not serve, known or not, is an error with no dependency to declare. A known ' +
+      'platform object of another prefix (`cloud_`, `ai_`) is not judged there, because the closure keeps such ' +
+      'an object only when its definition marks it a system object; any other object outside the closure is ' +
+      'reported with the remedy to declare the dependency.',
     'On the command line a package the manifest declares in `dependencies` but the artifact does not carry ' +
       'is out of sight: its objects cannot be read there. So while the manifest declares such a dependency, ' +
       'an object the stack does not define is a warning, which clears when that dependency defines it (the ' +

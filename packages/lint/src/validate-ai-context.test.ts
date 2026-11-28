@@ -211,6 +211,15 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     expect(rulesOf({ objects, aiContexts: [pack({ body: { field: 'id' } })] })).toEqual([
       [AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
     ]);
+    // The text names `id` as the record id, not as a typeless field.
+    const [finding] = validateAiContext({ objects, aiContexts: [pack({ body: { field: 'id' } })] });
+    expect(finding!.message).toBe(
+      "`body.field` names 'id', the record id every object carries; a body is a long-text field "
+      + '(textarea, markdown, html, richtext), so the pack carries no body',
+    );
+    // CONTROL: a declared field keeps its type in the text, with the article it takes.
+    const [typed] = validateAiContext({ objects, aiContexts: [pack({ body: { field: 'created_at' } })] });
+    expect(typed!.message).toMatch(/^`body\.field` names 'created_at', a datetime field; /);
   });
 
   it('a column the platform does not inject on the object is still unknown: owner_id under ownership org', () => {

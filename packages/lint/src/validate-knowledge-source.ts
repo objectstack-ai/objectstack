@@ -30,15 +30,25 @@
  *   A `warning` with the hedge on the CLI when the manifest declares such a
  *   dependency: the build cannot see that package's objects, and the publish
  *   door judges the source against its closure, which holds them (the
- *   `flow-trigger-unknown-object` split). The ladder
+ *   `flow-trigger-unknown-object` split). On the CLI the ladder
  *   `validateObjectReferences` resolves object names by also applies: a
  *   platform object a known package registers is not judged when the stack
  *   does not carry it (its declaration is not in hand), and a
- *   platform-prefixed name no known package registers is a `warning`; both
- *   on the CLI and under a closure. Against the whole collection at the door
- *   either one is absent from every package the host serves, so it is an
- *   `error` as an unprefixed name is. An empty whole collection at the door
- *   is no universe, and judges nothing.
+ *   platform-prefixed name no known package registers is a `warning`. Under
+ *   a closure only the first holds, and only for a name the closure may
+ *   drop. The closure keeps every system object the host serves
+ *   (`narrowObjectsToPackageClosure` in `runtime-gate.ts`, limb 1, which asks
+ *   `isSystemObject`), and by name alone that reading keeps every `sys_`
+ *   object, so an absent `sys_` name, known or not, exists nowhere the host
+ *   serves: an `error`, with no dependency remedy. A `cloud_` or `ai_` name
+ *   is not on that arm: limb 1 keeps such an object only when its definition
+ *   says `isSystem: true`, which the name does not tell, so its absence may
+ *   be the closure's own; a known one is not judged, and any other is
+ *   outside the closure. Against the whole collection at the door every
+ *   absent name, platform or not, is absent from every package the host
+ *   serves, so it is an `error`, worded for an author with no stack and no
+ *   manifest (the organization's objects, or a package to install). An
+ *   empty whole collection at the door is no universe, and judges nothing.
  * - `knowledge-source-field-unknown` (`error`): a `source.content` or
  *   `source.metadataFields` member names no field of the object: neither one
  *   it declares (its own stack's extensions folded in, `objectsAsServed`) nor
@@ -82,6 +92,7 @@ import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectst
 import { collectionEntries } from './collection-entries.js';
 import { closureDependencyRemedy, objectsAsServed, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
+import { isSystemObject } from './validate-security-posture.js';
 
 export type KnowledgeSourceSeverity = 'error' | 'warning';
 
@@ -213,11 +224,30 @@ export function validateKnowledgeSource(
 
     if (!def) {
       if (noUniverse) continue;
+      // Limb 1 of the closure keeps every system object the host serves, and
+      // asked by name alone (`isSystemObject`) it keeps every `sys_` one: an
+      // absent `sys_` name is as final under a closure as against the whole
+      // collection. A `cloud_` / `ai_` name is kept only on its definition's
+      // `isSystem: true`, which the name does not tell, so it is not here.
+      const absentSystemObject = !!closure && isSystemObject({ name: objectName });
       // A platform object a known package registers: its declaration is not
       // in this stack, so neither its fields nor its gates can be read here.
       // Against the whole collection it is in hand, and its absence is final.
-      if (!whole && isPlatformProvidedObjectName(objectName)) continue;
-      if (closure) {
+      if (!whole && !absentSystemObject && isPlatformProvidedObjectName(objectName)) continue;
+      if (absentSystemObject) {
+        out.push({
+          severity: 'error',
+          rule: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
+          where,
+          path: objectPath,
+          message:
+            `\`source.object\` names '${objectName}', a system object the host does not serve. The closure of ` +
+            `package "${closure.packageId}" holds every system object the host serves, so no dependency brings it ` +
+            'in, and the source indexes nothing.' +
+            suggestName(objectName, objects.keys()),
+          hint: 'Name a system object the host serves (check the spelling), or another object inside that closure',
+        });
+      } else if (closure) {
         out.push({
           severity: 'error',
           rule: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
@@ -256,6 +286,21 @@ export function validateKnowledgeSource(
           hint:
             'Ignore this if a declared dependency defines the object (the publish checks it against the package\'s ' +
             'closure); otherwise name an object the stack defines (check the spelling)',
+        });
+      } else if (whole) {
+        // A write that names no package: its author has no stack and no
+        // manifest, only the organization's objects and the packages it installs.
+        out.push({
+          severity: 'error',
+          rule: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
+          where,
+          path: objectPath,
+          message:
+            `\`source.object\` names '${objectName}', which is not an object of this organization (neither one it ` +
+            'authored nor one an installed package registers), so the source indexes nothing and no search ever ' +
+            'returns a hit from it.' +
+            suggestName(objectName, objects.keys()),
+          hint: `Name an object the organization has (check the spelling), or install the package that provides '${objectName}' first`,
         });
       } else {
         out.push({
