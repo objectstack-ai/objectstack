@@ -157,7 +157,7 @@ only). So the user-facing cases want `$icontains`:
 { where: { email: { $icontains: '@company.com' } } }
 ```
 
-Full table, `$like` portability and the `$ilike` boundary: **[filter rules](./rules/filters.md)**.
+All examples, `$like` portability and the `$ilike` boundary: **[filter rules](./rules/filters.md)**.
 
 ### Null & Existence Operators
 

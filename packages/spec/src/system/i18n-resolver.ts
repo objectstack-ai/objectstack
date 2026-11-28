@@ -4635,8 +4635,9 @@ export function normalizeSupportedLocales(
  * the runtime HTTP dispatcher now mounts the endpoint — and this is the only
  * path there is: `getFieldLabels` is optional on `II18nService` and NOTHING
  * implements it (neither `memory-i18n` nor `file-i18n-adapter`), so the
- * "dedicated method" branch both surfaces check first is dead and this
- * derivation always runs. Keeping one copy each is how the dispatcher was
+ * "dedicated method" branch the dispatcher checks first (as service-i18n's
+ * route did) is dead and this derivation always runs. Keeping one copy each
+ * was how the dispatcher was
  * left scanning the retired flat `o.<object>.fields.<field>` dialect after
  * #3778 converged the tree on nested `objects.<object>.fields.<field>.label`
  * and fixed only service-i18n's copy — a scan that cannot match a real bundle,

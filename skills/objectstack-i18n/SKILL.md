@@ -270,8 +270,8 @@ exact Zod shape is `TranslationItemSchema` in
 
 Both shipped adapters substitute
 **double-brace** `{{variable}}` placeholders only — single braces pass through
-unchanged. An activity-milestone summary (`_milestones.{field}.{value}`)
-keeps its authored `{field}` tokens.
+unchanged. A milestone summary (`_milestones.<field>.<value>.summary`) keeps its
+single-brace `{field}` tokens.
 
 ```json
 {

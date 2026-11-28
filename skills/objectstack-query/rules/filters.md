@@ -28,7 +28,7 @@ An example of each operator:
 
 Purpose, SQL equivalent, case sensitivity: SKILL.md, **Filter Operators**. `$like`/`$ilike` match the
 WHOLE value, so a pattern with no wildcard is an exact comparison, not
-a substring search. Their reach is narrower than the rest of the table: the SQL
+a substring search. Their reach is narrower than the other operators': the SQL
 family, `driver-memory` and `@objectstack/formula` answer them, while
 `driver-mongodb`, objectql `having` and service-analytics each keep an operator
 allowlist that omits them and refuse — `Unsupported filter operator`,

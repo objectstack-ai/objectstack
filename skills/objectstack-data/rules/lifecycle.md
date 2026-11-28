@@ -94,8 +94,8 @@ lifecycle: { class: 'telemetry', retention: { maxAge: '14d', onlyWhen: { status:
 ## Sealing (`seal`)
 
 `seal` makes an `audit` ledger tamper-evident (ADR-0154): `os audit verify`
-exits 1 on a row edited, inserted or deleted outside the platform and on a
-chain fault (a link, a signature, a row `listed_twice`).
+(read-only) exits with code 1 on a changed, missing or unsealed row or a chain fault (a
+link, a signature, a row `listed_twice`).
 
 Ten minutes after each `created_at` hour, `@objectstack/plugin-audit` signs
 its rows, per organization chain (plus one chain for rows about no
