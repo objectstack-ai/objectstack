@@ -171,6 +171,15 @@ export interface HttpDispatcherResult {
          * (#27506: the api-action forward relays a target's cookie rotation).
          */
         headers?: Record<string, string | string[]>;
+        /**
+         * [#37864] The sentence the operator's fault log prints for this
+         * answer when it is not the body's `error.message`. Never written to
+         * the wire. A `501` whose body is in the caller's language sets it to
+         * the English, so the one line a declared capability absence earns per
+         * route per process (`logServerFault`, `@objectstack/types`) does not
+         * take the language of whichever request reached the route first.
+         */
+        faultLogMessage?: string;
     };
     result?: any; // For flexible return types or direct response objects (Response/NextResponse)
 }

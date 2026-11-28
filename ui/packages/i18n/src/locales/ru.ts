@@ -2381,6 +2381,8 @@ const ru = {
         ctaUpgrade: "Повысьте тариф, чтобы продолжить",
         ctaTopUp: "Добавьте кредиты, чтобы продолжить",
         ariaLabel: "Использование ИИ: {{status}}",
+        tierPersonal: "Личная квота",
+        tierTeamPool: "Общий пул команды",
       },
       openChats: "Открыть чаты",
       chats: "Чаты",

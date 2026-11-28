@@ -116,14 +116,13 @@ the read scope.** When record sharing is composed (`@objectstack/plugin-sharing`
 a predicate (`multi: true`) `update` / `delete` on a `private` object writes only
 the rows the caller may **write**: their own records, their access depth and
 queue membership, plus **edit** shares for an `update` (a share never grants
-`delete`, ADR-0111 D3). A row the caller holds only through
-a **read** share is readable, and an app `update` widener admits it, but a
-predicate write does not reach it: the row is left as it was and the write
-answers no error. To write such a row, address it **by id alone**
-(`where: { id }`, or the payload `id`): a by-id write is judged by id, and the
-widener admits it as written. A `where` that carries a scalar `id` **beside
-other keys** under `multi: true`, and an `id` that is falsy (`''`, `0`), run as
-predicate writes and meet the same bound.
+`delete`, ADR-0111 D3), plus the rows an app-authored `using` policy for that
+verb admits, as a by-id write of each of those rows is admitted. An `update`
+widener widens the update and a `delete` widener the delete, never the other
+verb, and the read bound above still holds. A write on another user's behalf
+(ADR-0090 D10) is not widened by an app policy, by id or by predicate. A `where` that carries a
+scalar `id` **beside other keys** under `multi: true`, and an `id` that is
+falsy (`''`, `0`), run as predicate writes and meet the same bound.
 
 <Callout type="warn">
 **Known limitation — an app-authored write widener does nothing on a

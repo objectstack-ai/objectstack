@@ -296,11 +296,17 @@ describe('resolveSettingsStoreUrl', () => {
  * A settings service answering saved `knowledge` values as `SettingsService.get`
  * resolves them — and, as the real one does, only once its data engine is
  * bound: until `bound` is set a saved value reads as the manifest default.
+ * It serves a `knowledge` page the plugin's init() contributes the Turso group
+ * to, as the knowledge service's page is on a real boot.
  */
 function settingsOf(saved: Record<string, string | undefined>, failure?: Error) {
+  let page = { namespace: 'knowledge', specifiers: [] as Array<{ key?: string; id?: string }> };
   const settings = {
     bound: false,
     reads: 0,
+    getManifest: () => page,
+    registerManifest: (m: typeof page) => { page = m; },
+    registerAction: () => undefined,
     get: async (namespace: string, key: string) => {
       settings.reads += 1;
       if (failure) throw failure;

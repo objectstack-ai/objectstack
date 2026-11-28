@@ -34,8 +34,11 @@
  *   `validateObjectReferences` resolves object names by also applies: a
  *   platform object a known package registers is not judged when the stack
  *   does not carry it (its declaration is not in hand), and a
- *   platform-prefixed name no known package registers is a `warning`. An
- *   empty whole collection at the door is no universe, and judges nothing.
+ *   platform-prefixed name no known package registers is a `warning`; both
+ *   on the CLI and under a closure. Against the whole collection at the door
+ *   either one is absent from every package the host serves, so it is an
+ *   `error` as an unprefixed name is. An empty whole collection at the door
+ *   is no universe, and judges nothing.
  * - `knowledge-source-field-unknown` (`error`): a `source.content` or
  *   `source.metadataFields` member names no field of the object: neither one
  *   it declares (its own stack's extensions folded in, `objectsAsServed`) nor
@@ -193,6 +196,10 @@ export function validateKnowledgeSource(
   // registry read), as the list-view and form members read it: no object
   // verdict is drawn from it.
   const noUniverse = !closure && options.wholeCollection === true && objects.size === 0;
+  // The whole collection the host serves holds every platform object a
+  // package registers there, so an absent platform name, known or merely
+  // prefixed, exists nowhere: judged as an unprefixed name is (K4).
+  const whole = !closure && options.wholeCollection === true;
   const unseen = atDoor ? [] : unseenDeclaredDependencies(stack);
 
   for (const { rec, path } of sources) {
@@ -208,7 +215,8 @@ export function validateKnowledgeSource(
       if (noUniverse) continue;
       // A platform object a known package registers: its declaration is not
       // in this stack, so neither its fields nor its gates can be read here.
-      if (isPlatformProvidedObjectName(objectName)) continue;
+      // Against the whole collection it is in hand, and its absence is final.
+      if (!whole && isPlatformProvidedObjectName(objectName)) continue;
       if (closure) {
         out.push({
           severity: 'error',
@@ -222,7 +230,7 @@ export function validateKnowledgeSource(
             suggestName(objectName, objects.keys()),
           hint: closureDependencyRemedy(objectName, closure.packageId, 'name an object inside that closure'),
         });
-      } else if (hasPlatformObjectPrefix(objectName)) {
+      } else if (!whole && hasPlatformObjectPrefix(objectName)) {
         out.push({
           severity: 'warning',
           rule: KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,

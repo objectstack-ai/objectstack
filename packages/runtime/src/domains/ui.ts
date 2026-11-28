@@ -157,7 +157,7 @@ export async function handleUiRequest(
             // is temporary, but an uninstalled MetadataPlugin does not become
             // installed by retrying. The message now names that remedy, and is
             // the same sentence discovery reports for the slot (#4146).
-            return capabilityUnavailable(deps, 'ui');
+            return capabilityUnavailable(deps, _context, 'ui');
         }
     }
 

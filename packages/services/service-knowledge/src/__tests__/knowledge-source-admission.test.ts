@@ -891,6 +891,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
   });
   const sealed: ObjectDef = { ...TICKET, name: 'sealed', enable: { apiEnabled: false } };
   const getOnly: ObjectDef = { ...TICKET, name: 'get_only', enable: { apiMethods: ['get'] } };
+  const unsearchable: ObjectDef = { ...TICKET, name: 'unsearchable', enable: { apiMethods: ['list'], searchable: false } };
   const sysClosed: ObjectDef = { ...TICKET, name: 'sys_closed_note' };
   const sysOpen: ObjectDef = { ...TICKET, name: 'sys_open_note', enable: { aiReadable: true } };
 
@@ -971,7 +972,8 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
   it.each([
     ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
     ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
-    ['an object whose `apiMethods` do not grant `search`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object whose `apiMethods` do not grant `list`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object granting `list` beside `searchable: false`', { objects: [unsearchable] }, 'unsearchable', 'does not serve object'],
     ['a system object without `enable.aiReadable`', { objects: [sysClosed] }, 'sys_closed_note', 'does not opt into AI reads'],
   ])('%s is refused PERMISSION_DENIED / 403, naming the object', async (_label, opts, object, said) => {
     const { svc } = setup({ sources: [], ...opts });
@@ -981,6 +983,20 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect((verdict as { message: string }).message).toContain(said);
     // The engine's own write is admitted: a package install is judged at validate and publish.
     expect(await svc.admitAuthoredSource(item(object, ['body']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('the not-served refusal names `list` and `searchable` as cause and fix, never a `search` grant', async () => {
+    for (const object of ['sealed', 'get_only', 'unsearchable']) {
+      const { svc } = setup({ sources: [], objects: [sealed, getOnly, unsearchable] });
+      const verdict = await svc.admitAuthoredSource(item(object, ['body']), MANAGER);
+      expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('does not grant `list`');
+      expect(message).toContain('include `list` with `enable.searchable` not false');
+      // `search` is a retired `apiMethods` value the parse strips: never prescribed as a grant.
+      expect(message).not.toMatch(/(include|grant)s? `search`/);
+      expect(message).not.toContain('Serve the object for `search`');
+    }
   });
 
   it('CONTROL: a served object, and a system object that opts into AI reads, are admitted', async () => {
@@ -1000,6 +1016,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
 
     const noEngine = new KnowledgeService({});
+    noEngine.registerAdapter('memory', makeAdapter());
     expect(await noEngine.admitAuthoredSource(item('ticket', ['body']), MANAGER))
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
   });
@@ -1011,6 +1028,51 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     for (const shapeless of [null, {}, { name: 'x' }, { name: 'x', source: { kind: 'object' } }, { name: 'x', source: 'ticket' }]) {
       expect(await svc.admitAuthoredSource(shapeless, MANAGER), JSON.stringify(shapeless)).toEqual({ admitted: true });
     }
+  });
+
+  // [ADR-0161 K4] The store a source names must be one this deployment mounts:
+  // a retired adapter ('ragflow') or a typo is refused at the save, not left to
+  // the boot's error line and a search's 503.
+  it('a source naming an adapter the deployment does not mount is refused VALIDATION_ERROR / 400, naming the source, the adapter and the mounted ones', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    for (const adapter of ['ragflow', 'memroy', '']) {
+      const verdict = await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter }, MANAGER);
+      expect(verdict, adapter).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400, object: 'ticket' });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('knowledge source "authored" was not saved');
+      expect(message).toContain(`names adapter '${adapter}', which this deployment does not mount (mounted: memory)`);
+    }
+    // Refused before the gates are asked: an author the field gate would refuse hears the adapter first.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body', 'salary_note']), adapter: 'ragflow' }, MEMBER))
+      .toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+    // The engine's own write (a package install) is not judged at this door.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'ragflow' }, SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('with no adapter mounted, a named one is refused naming none mounted; with two, both are named', async () => {
+    const bare = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
+    expect(await bare.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("names adapter 'memory', which this deployment does not mount (mounted: none)"),
+    });
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'pgvector' }, MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("(mounted: memory, turso)"),
+    });
+  });
+
+  it('CONTROL: a source naming a mounted adapter, and one that leaves `adapter` out, are admitted', async () => {
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'turso' }, MANAGER)).toEqual({ admitted: true });
+    const placed = new KnowledgeService({ dataEngine: makeEngine([TICKET]), deploymentAdapter: 'turso' });
+    placed.registerAdapter('turso', makeAdapter());
+    placed.registerAdapter('memory', makeAdapter());
+    const { adapter: _omitted, ...omitted } = item('ticket', ['body']);
+    expect(await placed.admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
   });
 
   it('registers nothing and searches nothing: the verdict is a read', async () => {

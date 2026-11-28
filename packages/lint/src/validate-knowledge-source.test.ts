@@ -253,6 +253,28 @@ describe('validateKnowledgeSource on the runtime publish door', () => {
       .map((f) => [f.rule, f.severity])).toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error']]);
   });
 
+  it('against the whole collection, an absent platform name, prefixed or known, is refused as an unprefixed one is', () => {
+    for (const object of ['sys_kb_article', 'sys_user']) {
+      const item = kbSource({ object, content: ['body'], metadataFields: [] });
+      const verdict = runRuntimeAuthoringRules({ type: 'knowledge_source', item, context: { objects } });
+      expect(verdict.errors.map((f) => [f.rule, f.severity, f.path]), object)
+        .toEqual([[KNOWLEDGE_SOURCE_OBJECT_UNKNOWN, 'error', 'knowledgeSources[0].source.object']]);
+      expect(verdict.errors[0]!.message, object).toContain(`'${object}', which this stack does not define`);
+      expect(verdict.advisories.filter((f) => KS_RULE.test(f.rule)), object).toEqual([]);
+    }
+    // The CLI arms stay: a prefixed name no known package registers warns, a known platform name is not judged.
+    expect(atValidate(kbSource({ object: 'sys_kb_article', content: ['body'], metadataFields: [] })).map((f) => f.severity))
+      .toEqual(['warning']);
+    expect(atValidate(kbSource({ object: 'sys_user', content: ['name'], metadataFields: [] }))).toEqual([]);
+    // CONTROL: a served platform object is no unknown object at the door.
+    const served = [...objects, { name: 'sys_kb_article', enable: { aiReadable: true }, fields: { body: { type: 'text' } } }];
+    expect(runRuntimeAuthoringRules({
+      type: 'knowledge_source',
+      item: kbSource({ object: 'sys_kb_article', content: ['body'], metadataFields: [] }),
+      context: { objects: served },
+    }).errors).toEqual([]);
+  });
+
   it('an empty whole collection at the door is no universe, and judges no object', () => {
     const stack = { objects: [], knowledgeSources: [kbSource({ object: 'faq_entry' })] };
     expect(validateKnowledgeSource(stack, { wholeCollection: true })).toEqual([]);

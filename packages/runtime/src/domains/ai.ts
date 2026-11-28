@@ -114,7 +114,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // which is false for a Cloud/Enterprise deployment. The shared table
         // says the accurate thing now (REMEDY_DETAIL), so the override is gone
         // and this answer matches what discovery reports for the slot.
-        return capabilityUnavailable(deps, 'ai');
+        return capabilityUnavailable(deps, context, 'ai');
     };
 
     // [#4058] A slot filled by a self-declared non-handler (`handlerReady:
