@@ -64,7 +64,7 @@ const order = ObjectSchema.create({
   ],
 } as never);
 
-const LOCKED = 'hlo_order';
+const LOCKED = 'hlk_locked_order';
 const LOCKED_MESSAGE = 'An order moves draft, then confirmed, then done.';
 
 const lockedOrder = ObjectSchema.create({
@@ -84,7 +84,7 @@ const lockedOrder = ObjectSchema.create({
   validations: [
     {
       type: 'state_machine',
-      name: 'hlo_order_flow',
+      name: 'hlk_locked_order_flow',
       message: LOCKED_MESSAGE,
       field: 'status',
       initialStates: ['draft'],
@@ -92,7 +92,7 @@ const lockedOrder = ObjectSchema.create({
     },
   ],
   actions: [
-    { name: 'hlo_finish', label: 'Finish', objectName: LOCKED, operation: 'update', patch: { status: 'done', amount: 99 } },
+    { name: 'hlk_locked_finish', label: 'Finish', objectName: LOCKED, operation: 'update', patch: { status: 'done', amount: 99 } },
   ],
 } as never);
 
@@ -268,7 +268,7 @@ describe('[#37402] an object-level uiReadonlyWhen keeps every write path on a lo
 
   it('a declarative action on a confirmed record writes the fields it patches', async () => {
     const id = await confirmed('hlo action');
-    const res = await stack.apiAs(admin, 'POST', `/actions/${LOCKED}/hlo_finish`, { recordId: id });
+    const res = await stack.apiAs(admin, 'POST', `/actions/${LOCKED}/hlk_locked_finish`, { recordId: id });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await read(id)).toMatchObject({ status: 'done', amount: 99 });
   });
