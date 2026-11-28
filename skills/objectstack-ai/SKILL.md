@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.1"
+  version: "19.0.0-next.2"
   domain: ai
   tags: agent, tool, skill, knowledge, context-pack, llm, embedding, mcp
 ---
