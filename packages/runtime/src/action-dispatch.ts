@@ -624,7 +624,7 @@ async function admitResolvedAction(
     // [#25976] The body, and then its params bag, must be objects before the
     // param contract or any handler reads them; `undefined` / `null` stay the
     // legal bodyless call and an absent `params` key keeps its empty bag.
-    const invalidBody = (message: string, failure: { field: string; code: 'invalid_type'; message: string }) =>
+    const invalidBody = (message: string, failure: { field: string; code: 'invalid_type' | 'invalid_value'; message: string }) =>
         refuse({ message, status: VALIDATION_FAILED_STATUS, details: validationFailureDetails(validationFailure(message, [failure])) as ActionRefusal['details'] });
     const bodyFailure = objectValueFailure('(body)', call.body ?? {});
     if (bodyFailure) return invalidBody(`Invalid action body — ${bodyFailure.message}`, bodyFailure);
@@ -640,6 +640,11 @@ async function admitResolvedAction(
         return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
     }
     const params: Record<string, unknown> = reqBody.params ?? {};
+    // An action not bound to an object accepts no record, on any arm and for
+    // any caller: judged on the declaration the call resolved to, never on the
+    // object it was routed under, before any record is read or anything runs.
+    const recordKeyFailure = actionExec.objectLessActionRecordKeyFailure(actionDef, actionSchema, actionName, recordId, params, declaration?.ownerKey);
+    if (recordKeyFailure) return invalidBody(`Invalid action body — ${recordKeyFailure.message}`, recordKeyFailure);
     // A selection names records by id, as `recordId` names one: its shape is
     // judged here, beside the record key's, on every arm that reads it.
     let selectionIds: string[] | undefined;

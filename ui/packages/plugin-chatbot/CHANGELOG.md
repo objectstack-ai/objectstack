@@ -1,5 +1,82 @@
 # @object-ui/plugin-chatbot
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 57ab087: refactor(plugin-chatbot): move `ChatbotEnhanced`'s tool-card renderer into `src/chat/toolDetail.tsx`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A move-only split of `ChatbotEnhanced.tsx` with no behaviour change. The detailed tool card (`renderToolDetail`: the collapsible tool header and payload, the decision line, and the sample-data cleanup, package removal, record write and record hand-off cards) is now a module-level function in `src/chat/toolDetail.tsx` that the component calls with one context object. The rendered element tree is unchanged, and so are the package entry points (`index.tsx`, `core.ts`) and the published API.
+- 531e55b: feat(app-shell): the `ai:chat` menu entry is hidden from a member who cannot get an agent, and the app's home falls to the next entry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app's AI inquiry entry (`type: 'component'`, `componentRef: 'ai:chat'`) is now shown only to a member the access-filtered agent catalog (`GET /api/v1/ai/agents`) serves at least one agent. On a deployment with no AI, or for a member with no AI seat, the entry is left out of the sidebar, the phone's app menu, the command palette and the `nav:menu` block. If it was the app's home, the home is the next entry the member is shown.
+  
+  - **A declared `landing`** still comes first. A landing entry whose `item` is the `ai:chat` entry is passed over for such a member, like any entry the member is not shown: the next declared entry that holds lands, and with none the first entry shown lands.
+  - **While the catalog is loading** the entry is not drawn, and the app root waits on its loading skeleton instead of opening the page or the next entry. It lands once the catalog answers, so the home never opens one page and then jumps to another.
+  - **A direct link to the page** is not redirected. The page draws its "AI assistant unavailable" state.
+  - The catalog is read only while an app in the list carries an `ai:chat` entry. Apps without one read nothing new.
+  - `useAiSurfaceEnabled` takes an optional `{ enabled }` and no longer reports loading for ever when the catalog is empty and is answered from the session cache. Before, a member with no seat who opened the `ai:chat` page after the console had read the catalog saw a blank loading page and never the unavailable state.
+  - `@object-ui/plugin-chatbot`: `useAgents` returns `settled`, true once a catalog read for the current `apiBase` has answered or failed. The fields it already returned are unchanged.
+  
+  Nothing to migrate.
+- 3df181b: feat(app-shell): one empty-conversation layout for the AI home, the full-window drawer and the narrow drawer
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-chatbot` `ChatbotEnhancedProps` gains the optional `renderEmptyState`; `@object-ui/i18n` gains `console.ai.suggestionsLabel` and `console.ai.suggestions.page.*` (eight keys) in every locale
+  Metadata-protocol: none
+  
+  A conversation with no message now shows the same layout in all three places: a greeting, a line on what to ask, suggested questions and the recent conversations with their titles.
+  
+  - **The AI home page** (an app's `ai:chat` entry) keeps its large question box, its suggestions that send and its recent conversations that open on the page. Its heading is the entry's declared `title`; with none it now greets the user by the time of day and name, as Home does, where it read "Ask your data".
+  - **The console's assistant drawer** draws the layout before the first message: large when the drawer fills the window, compact in the side rail and the phone sheet. The composer stays where it is, under the conversation. The `ask` assistant's suggestions follow the page in view: on a record, "Summarize this record" and "What is related to this record?" put their text in the composer for the user to finish; on a list, a dashboard or a report, the page's two questions send at once. Elsewhere, and for other assistants, the starter questions are the ones they had. The recent conversations list the drawer assistant's last three (five in the full window), not the AI home's own, and open in the drawer.
+  - **`@object-ui/plugin-chatbot`.** `ChatbotEnhanced` takes `renderEmptyState`: a host's empty conversation drawn in place of the built-in one, given `send` (sends a text) and `fill` (puts it in the composer, focused, sending nothing).
+  
+  Nothing to migrate.
+- 8b47659: feat(plugin-chatbot): the question card takes the composer's place when the AI ends its turn on a question
+  
+  Clause-②: yes (widening) — widened: `ChatbotEnhancedProps` gains the optional `conversationId`; `@object-ui/plugin-chatbot` (and its `/core` entry) exports `QUESTION_SKIP_STORAGE_PREFIX`; `QuestionCardQuestion` and `QuestionCardOption` keep their names and shape and are now the envelope types of `@objectstack/spec/ai` (`AskQuestionParsed`, `AskQuestionOptionParsed`), with `options` still read-only.
+  Metadata-protocol: none
+  
+  `ChatbotEnhanced` now draws the question card itself. When a turn ends on a question tool's result that `parseAskQuestionEnvelope` reads, and the envelope's `reply` is the turn's last text, the card replaces the composer:
+  
+  - It shows only once the stream has ended, and never while a typed message is queued (that message is sent, and sending something else skips the question), while a write approval waits in the same turn, after a skip, or on a `readOnly` transcript. Both shapes of a tool-ended turn count: one streamed message, or the two messages a reloaded conversation holds.
+  - The composer stays mounted, hidden and `inert`, so a draft and its attachments come back after Skip or an answer, and focus that was in it returns to it.
+  - One click answers: the option label goes out through `onSendMessage` as the next user message. If the send fails and the message is rolled back, the card returns with its choice still made.
+  - Skip is remembered on this device, per conversation, under `objectstack:ai-chat-question-skip:` plus the conversation id. The console passes its conversation id, and signing out clears these keys with the rest of the chat cache.
+  - The conversation draws the question from its envelope instead of its plain-text reply: while pending, the question alone; once answered or skipped, a collapsed "AI asks: …" that expands to its options. Copy still copies the full reply, and a pending question shows no Regenerate.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes

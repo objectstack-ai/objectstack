@@ -1236,6 +1236,132 @@ export function lintFieldReferenceShapes(
   return issues;
 }
 
+// ─── Option colours the badge cannot paint ───────────────────────────
+
+/** The rule id an option `color` the option badge renders neutral reports under. */
+export const FIELD_OPTION_COLOR_RENDERS_NEUTRAL = 'field/option-color-renders-neutral';
+
+/**
+ * The palette families an option badge paints by name, exactly as the badge
+ * renderer spells them (`BADGE_COLOR_MAP` in `ui/packages/fields/src/index.tsx`;
+ * matched case-sensitively there). This package cannot import the renderer
+ * (`@objectstack/lint` depends on `@objectstack/spec` alone and runs at the
+ * kernel's save door), so the list is spelled here: a family added to that map
+ * is added here in the same change, or this rule warns on a colour that paints.
+ */
+export const OPTION_COLOR_FAMILIES: readonly string[] = Object.freeze([
+  'gray', 'red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'purple', 'pink',
+]);
+
+const OPTION_COLOR_FAMILY_SET: ReadonlySet<string> = new Set(OPTION_COLOR_FAMILIES);
+
+/** The hex the badge paints: `#` first, then 3 or 6 hex digits (trailing space tolerated, as the renderer trims). */
+const BADGE_HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** Does the option badge paint this declared colour (a family name, or a `#rgb` / `#rrggbb` hex)? */
+export function isBadgePaintableOptionColor(color: string): boolean {
+  return OPTION_COLOR_FAMILY_SET.has(color) || (color.charAt(0) === '#' && BADGE_HEX_RE.test(color.trim()));
+}
+
+/** The fix line for one unpainted colour: the nearest spelling the author meant, when the value says it. */
+function optionColorFix(color: string): string {
+  const trimmed = color.trim();
+  const lower = trimmed.toLowerCase();
+  const families = OPTION_COLOR_FAMILIES.join(', ');
+  if (OPTION_COLOR_FAMILY_SET.has(lower)) return `Write the family in lowercase: color: '${lower}'.`;
+  if (/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed)) {
+    return `Write the hex with a leading #: color: '#${trimmed.replace(/^#/, '')}'.`;
+  }
+  if (/^#[0-9a-f]{8}$/i.test(trimmed)) {
+    return `Drop the alpha digits: color: '${trimmed.slice(0, 7)}' (the badge paints #rgb and #rrggbb only).`;
+  }
+  return `Declare one of the families (${families}) or a #rgb / #rrggbb hex; remove color for a neutral badge.`;
+}
+
+/** One picklist (or picklist extension) as {@link lintOptionColors} reads it. */
+export interface OptionColorPicklist {
+  /** The picklist it declares or extends. */
+  readonly name: string;
+  /** Its config path, e.g. `picklists[0]` or `picklistExtensions[1]`. */
+  readonly path: string;
+  /** Human-readable location, e.g. `picklist "deal_stage"`. */
+  readonly where: string;
+  /** Its declared options. */
+  readonly options: unknown;
+}
+
+/**
+ * A select option `color` the option badge renders neutral
+ * ({@link FIELD_OPTION_COLOR_RENDERS_NEUTRAL}, `warning`).
+ *
+ * An option is coloured if and only if its author declared a colour, and no
+ * colour is derived from its value (the ruling on objectstack#36882, option
+ * A). The badge paints a declared colour only when it is one of
+ * {@link OPTION_COLOR_FAMILIES} or a `#rgb` / `#rrggbb` hex; anything else —
+ * `teal`, `amber`, `Red`, `rgb(…)`, `#rrggbbaa` — reaches the renderer and
+ * paints the same neutral grey as an option with no colour, with no signal.
+ * This rule is that signal, at save. It never refuses: `SelectOption.color`
+ * stays a free string, and other surfaces (charts, gantt) hand the string to
+ * the browser as a CSS colour. `os explain field/option-color-renders-neutral`
+ * gives the per-surface reading.
+ *
+ * Reads the inline options of the objects' fields, of the fields object
+ * extensions add, and of picklists and picklist extensions, each located where
+ * it is written. An empty or blank `color` declares nothing and is not judged.
+ */
+export function lintOptionColors(
+  objects: any[],
+  extensions: readonly FieldShapeExtension[] = [],
+  picklists: readonly OptionColorPicklist[] = [],
+): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
+  const judge = (options: unknown, owner: string, optionsPath: string, where: string) => {
+    if (!Array.isArray(options)) return;
+    options.forEach((opt: any, j: number) => {
+      if (!opt || typeof opt !== 'object') return;
+      const color = opt.color;
+      if (typeof color !== 'string' || color.trim() === '' || isBadgePaintableOptionColor(color)) return;
+      const value = typeof opt.value === 'string' || typeof opt.value === 'number' ? String(opt.value) : `#${j}`;
+      issues.push({
+        severity: 'warning',
+        rule: FIELD_OPTION_COLOR_RENDERS_NEUTRAL,
+        where: `${where} · option '${value}'`,
+        message:
+          `${owner} option '${value}' declares color: '${color}', which the option badge does not paint: ` +
+          'it renders neutral grey, the same as an option with no colour',
+        path: `${optionsPath}[${j}].color`,
+        fix: optionColorFix(color),
+      });
+    });
+  };
+
+  if (Array.isArray(objects)) {
+    objects.forEach((obj, i) => {
+      if (!obj?.name) return;
+      for (const { name, def } of fieldEntries(obj.fields)) {
+        if (!def || typeof def !== 'object') continue;
+        judge(def.options, `field "${obj.name}.${name}"`, `objects[${i}].fields.${name}.options`, fieldWhere(obj, name));
+      }
+    });
+  }
+  for (const ext of extensions) {
+    for (const def of ext.fields) {
+      const name = typeof def?.name === 'string' ? def.name : '';
+      if (!name) continue;
+      judge(
+        def.options,
+        `field "${ext.target}.${name}"`,
+        `${ext.path}.fields.${name}.options`,
+        `object extension of "${ext.target}" · field '${name}'`,
+      );
+    }
+  }
+  for (const list of picklists) {
+    judge(list.options, `picklist "${list.name}"`, `${list.path}.options`, list.where);
+  }
+  return issues;
+}
+
 // ─── Rule engine ────────────────────────────────────────────────────
 
 /**

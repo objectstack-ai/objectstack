@@ -244,6 +244,7 @@ const PIN_APP: any = {
     // [#25649] A package's action is stored as its `ActionSchema` parse, and a
     // `script` action names its handler (`target`) when it carries no `body`.
     { name: 'host_object_less_reads_record', label: 'Object-less host handler', type: 'script', target: 'host_object_less_reads_record' },
+    { name: 'host_family_bound_reads_record', label: 'Family-bound host handler', objectName: 'sys_metadata', type: 'script', target: 'host_family_bound_reads_record' },
   ],
   hooks: [
     // ① a sandboxed hook body: it would COPY what it read onto the row being inserted.
@@ -298,10 +299,17 @@ const PIN_HANDLER_PLUGIN: Plugin = {
       async (actionCtx: any) => ({ rows: await actionCtx.engine.find('sys_metadata', { where: { metadata: { $contains: 'z' } } }) }),
       'pin.reader21454.handler',
     );
-    // [#21594] the subject-record control: a host handler under the object-less key.
+    // [#21594] the subject-record control: a host handler under the object-less key,
+    // and one declared on a family table.
     ql.registerAction(
       'global',
       'host_object_less_reads_record',
+      async (actionCtx: any) => ({ record: actionCtx.record }),
+      'pin.reader21454.handler',
+    );
+    ql.registerAction(
+      'sys_metadata',
+      'host_family_bound_reads_record',
       async (actionCtx: any) => ({ record: actionCtx.record }),
       'pin.reader21454.handler',
     );
@@ -589,6 +597,17 @@ describe('[#21454] CONTROL — the same rows through the generic data door (unch
  * family content anywhere in the answer — neither the stored credential, nor a
  * stored hash, nor a family row in any form (a projection included).
  */
+/** An action not bound to an object accepts no record: refused `400` naming `recordId`, nothing read. */
+async function expectObjectLessRecordRefused(label: string, res: Response): Promise<void> {
+  const payload = await readJson(res);
+  const text = JSON.stringify(payload ?? null);
+  expect(res.status, `${label}: ${text}`).toBe(400);
+  expect(payload?.error?.code, `${label}: ${text}`).toBe('VALIDATION_FAILED');
+  expect(payload?.error?.details?.fields?.[0]?.field, `${label}: ${text}`).toBe('recordId');
+  expect(text.includes(SENTINEL), `${label}: the stored credential reached the answer`).toBe(false);
+  expect(familyRowsIn(payload), `${label}: a family row reached the answer`).toEqual([]);
+}
+
 async function expectBodyReadRefused(label: string, res: Response): Promise<void> {
   const payload = await readJson(res);
   const text = JSON.stringify(payload ?? null);
@@ -726,11 +745,13 @@ describe('[#21594] platform readers are outside the boundary (controls)', () => 
 /**
  * [#21594] The subject record. The `/actions` door loads an action's subject
  * row through the generic data door before it dispatches. A BODY is handed no
- * family row that way: an action declared on a family table, an object-less
- * action addressed under one, and an action declared there through the `/meta`
- * door are each refused with the body boundary's 403 before the body runs. A
- * caller who cannot read the row is stopped earlier by the door's own subject
- * load. A host handler's subject record and an ordinary one are unchanged.
+ * family row that way: an action declared on a family table, and an action
+ * declared there through the `/meta` door, are each refused with the body
+ * boundary's 403 before the body runs; an object-less action accepts no record
+ * at all, so one called with a record id under either table is refused `400`
+ * before any load. A caller who cannot read the row is stopped earlier by the
+ * door's own subject load. A host handler's subject record and an ordinary one
+ * are unchanged.
  */
 describe('[#21594] ① an action body is not handed a family row as its subject record', () => {
   async function historyRowId(): Promise<string> {
@@ -745,11 +766,11 @@ describe('[#21594] ① an action body is not handed a family row as its subject 
       'family-bound action',
       await as(adminToken, 'POST', `/actions/sys_metadata/family_bound_reads_record/${storedRow.id}`, { params: {} }),
     );
-    await expectBodyReadRefused(
+    await expectObjectLessRecordRefused(
       'object-less action under sys_metadata',
       await as(adminToken, 'POST', `/actions/sys_metadata/object_less_reads_record/${storedRow.id}`, { params: {} }),
     );
-    await expectBodyReadRefused(
+    await expectObjectLessRecordRefused(
       'object-less action under sys_metadata_history',
       await as(adminToken, 'POST', `/actions/sys_metadata_history/object_less_reads_record/${await historyRowId()}`, { params: {} }),
     );
@@ -775,19 +796,28 @@ describe('[#21594] ① an action body is not handed a family row as its subject 
   }, 30_000);
 
   it('member: the door\'s own subject load stops it first (the row is not readable), and the body never runs', async () => {
-    for (const action of ['family_bound_reads_record', 'object_less_reads_record']) {
-      const res = await as(memberToken, 'POST', `/actions/sys_metadata/${action}/${storedRow.id}`, { params: {} });
-      const payload = await readJson(res);
-      expect(res.status, action).toBe(404);
-      expect(payload?.error?.code ?? payload?.code, action).toBe('RECORD_NOT_FOUND');
-      expect(familyRowsIn(payload), `${action}: a family row reached the answer`).toEqual([]);
-    }
+    const action = 'family_bound_reads_record';
+    const res = await as(memberToken, 'POST', `/actions/sys_metadata/${action}/${storedRow.id}`, { params: {} });
+    const payload = await readJson(res);
+    expect(res.status, action).toBe(404);
+    expect(payload?.error?.code ?? payload?.code, action).toBe('RECORD_NOT_FOUND');
+    expect(familyRowsIn(payload), `${action}: a family row reached the answer`).toEqual([]);
+    // An object-less action accepts no record, before any load.
+    await expectObjectLessRecordRefused(
+      'member: object-less action under sys_metadata',
+      await as(memberToken, 'POST', `/actions/sys_metadata/object_less_reads_record/${storedRow.id}`, { params: {} }),
+    );
   });
 
-  it('control: a host handler addressed under a family table is still handed the row the data door serves', async () => {
-    const res = await as(adminToken, 'POST', `/actions/sys_metadata/host_object_less_reads_record/${storedRow.id}`, { params: {} });
+  it('control: a host handler declared on a family table is still handed the row the data door serves', async () => {
+    const res = await as(adminToken, 'POST', `/actions/sys_metadata/host_family_bound_reads_record/${storedRow.id}`, { params: {} });
     expect(res.status).toBe(200);
     expectServedLikeTheDoor('host handler subject record', await readJson(res));
+    // An object-less host handler accepts no record, under any object.
+    await expectObjectLessRecordRefused(
+      'object-less host handler under sys_metadata',
+      await as(adminToken, 'POST', `/actions/sys_metadata/host_object_less_reads_record/${storedRow.id}`, { params: {} }),
+    );
   });
 
   it('control: an ordinary subject record is handed to a body as before', async () => {
