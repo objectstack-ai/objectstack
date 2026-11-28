@@ -8197,11 +8197,14 @@ export class AutomationEngine implements IAutomationService {
      * ONLY the declared relation keys, and only when the re-read actually returned
      * an object/array, so bare lookup ids and #1872 multi-lookup arrays on other
      * relations — and the formula fields the trigger already hydrated — stay
-     * untouched. Mutates `record` in place: the run context's own copy of the
-     * record ({@link resolveRunContext} takes it first, and the run's variables
-     * are seeded from it after), never the object the caller handed. Best-effort: any failure leaves `record` unexpanded
-     * (the template then renders the scalar id) — expansion must never break the
-     * flow it feeds.
+     * untouched. Never writes into `record`: a graft sets a NEW top-level
+     * record as `runContext.record` — the own enumerable properties of the one
+     * it replaces, then the grafted relations — so neither the caller's object
+     * nor the run context's copy of it ({@link resolveRunContext} takes it
+     * first, and the run's variables are seeded after) is changed, a record
+     * that is not a plain object included. Best-effort: any failure leaves
+     * `record` unexpanded (the template then renders the scalar id) —
+     * expansion must never break the flow it feeds.
      */
     private expandDeclaredLookups(flow: FlowParsed, runContext: AutomationContext): Promise<void> {
         // The body lives in ./run-resume.ts (#25222).

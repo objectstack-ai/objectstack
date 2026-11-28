@@ -10,7 +10,9 @@
  *    the next run reading the original.
  *  - **The trigger record.** `record` and `$record` start as the same record;
  *    a `record.x` write is the run's own value, so `$record.x` and the
- *    trigger's object keep what they were handed.
+ *    trigger's object keep what they were handed. The lookups a start node
+ *    declares are read by every attempt of a retried run and by a dry run,
+ *    and the caller's record, a class instance included, stays as handed.
  *  - **A paused run.** With no durable store, the paused run is held in
  *    memory; its resume works on its own copy, as a stored run's does, so
  *    nothing it writes reaches a value the run was handed.
@@ -217,6 +219,73 @@ describe('the trigger record is the run\'s own copy', () => {
         expect(run.success, JSON.stringify(run)).toBe(true);
         expect((run.output as any).seen).toBe('Acme');
         expect(trigger).toEqual({ id: 'd1', account: 'a1' });
+    });
+
+    it('a start node that declares expand, under the retry strategy: every attempt reads the expanded relation, and the caller\'s record object is unchanged', async () => {
+        const engine = makeEngine();
+        engine.setRecordExpander(async (_object, id) => ({ id, account: { id: 'a1', name: 'Acme' } }));
+        // Fails on its first call and succeeds after; each call notes the
+        // relation name its attempt reads.
+        const seenByAttempt: unknown[] = [];
+        engine.registerNodeExecutor({
+            type: 'flaky',
+            descriptor: defineActionDescriptor({ type: 'flaky', version: '1.0.0', name: 'flaky' }),
+            async execute(_node: any, variables: Map<string, unknown>) {
+                const account = (variables.get('record') as Record<string, any> | undefined)?.account;
+                seenByAttempt.push(account && typeof account === 'object' ? account.name : account);
+                return seenByAttempt.length === 1 ? { success: false, error: 'first attempt fails' } : { success: true };
+            },
+        } as never);
+        const flow = chain('iso_expand_retry', [
+            { type: 'flaky' },
+            assign({ seen: cel('record.account.name') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]);
+        flow.runAs = 'system';
+        flow.nodes[0].config = { expand: ['account'] };
+        flow.errorHandling = { strategy: 'retry', maxRetries: 2, backoffMs: 0 };
+        engine.registerFlow('iso_expand_retry', flow);
+        const trigger = { id: 'd1', account: 'a1' };
+        const run = await engine.execute('iso_expand_retry', { object: 'deal', record: trigger } as any);
+        expect(run.success, JSON.stringify(run)).toBe(true);
+        expect(seenByAttempt).toEqual(['Acme', 'Acme']);
+        expect((run.output as any).seen).toBe('Acme');
+        expect(trigger).toEqual({ id: 'd1', account: 'a1' });
+    });
+
+    it('a start node that declares expand, in a dry run: the run reads the expanded relation, and the caller\'s record object is unchanged', async () => {
+        const engine = makeEngine();
+        engine.setRecordExpander(async (_object, id) => ({ id, account: { id: 'a1', name: 'Acme' } }));
+        const flow = chain('iso_expand_dry', [
+            assign({ seen: cel('record.account.name') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]);
+        flow.nodes[0].config = { expand: ['account'] };
+        const trigger = { id: 'd1', account: 'a1' };
+        const result = await engine.dryRun(flow, { userId: 'usr_maker', object: 'deal', record: trigger });
+        expect(result.status, JSON.stringify(result)).toBe('completed');
+        expect(result.steps.find((s) => s.nodeId === 'n1')).toMatchObject({ kind: 'assignment', values: { seen: 'Acme' } });
+        expect(trigger).toEqual({ id: 'd1', account: 'a1' });
+    });
+
+    it('a start node that declares expand, with a record that is not a plain object: the run reads the expanded relation, and the caller\'s instance is unchanged', async () => {
+        const engine = makeEngine();
+        engine.setRecordExpander(async (_object, id) => ({ id, account: { id: 'a1', name: 'Acme' } }));
+        const flow = chain('iso_expand_instance', [
+            assign({ seen: cel('record.account.name') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]);
+        flow.runAs = 'system';
+        flow.nodes[0].config = { expand: ['account'] };
+        engine.registerFlow('iso_expand_instance', flow);
+        class DealRow {
+            id = 'd1';
+            account: unknown = 'a1';
+        }
+        const trigger = new DealRow();
+        const run = await engine.execute('iso_expand_instance', { object: 'deal', record: trigger } as any);
+        expect(trigger).toBeInstanceOf(DealRow);
+        expect(trigger.account).toBe('a1');
+        expect({ ...trigger }).toEqual({ id: 'd1', account: 'a1' });
+        expect(run.success, JSON.stringify(run)).toBe(true);
+        expect((run.output as any).seen).toBe('Acme');
     });
 
     it('a node that changes previous in place leaves the caller\'s previous object as handed', async () => {

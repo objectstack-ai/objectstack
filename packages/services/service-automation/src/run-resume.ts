@@ -28,7 +28,7 @@ import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { dropEventsOf, foldDropEvents } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
-import { HeldValueCycleError, RESERVED_VARIABLE_KEY_REFUSAL, copyHeldValue } from './scope-key-segments.js';
+import { HeldValueCycleError, RESERVED_VARIABLE_KEY_REFUSAL, copyHeldValue, scopeContainer } from './scope-key-segments.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
@@ -141,9 +141,10 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
     };
     // The run's own copy of the record it was handed (`copyHeldValue`), taken
     // before anything below writes onto it: the lookups the start node
-    // declares (`expandDeclaredLookups`, at the end) are grafted onto this
-    // copy, and the run's variables are seeded from it, so nothing the run
-    // does reaches the caller's object. A record that contains itself throws
+    // declares (`expandDeclaredLookups`, at the end) are grafted into a new
+    // top-level record that replaces it, and the run's variables are seeded
+    // from that, so nothing the run does reaches the caller's object, a record
+    // that is not a plain object included. A record that contains itself throws
     // `HeldValueCycleError` here, which `execute()` answers as a failed run.
     if (context?.record) runContext.record = copyHeldValue(context.record) as Record<string, unknown>;
 
@@ -479,7 +480,21 @@ function decisionImpersonatorOf(signal: ResumeSignal): string | undefined {
     return trimmed ? trimmed : undefined;
 }
 
-/** The body of {@link AutomationEngine.expandDeclaredLookups}, moved unedited; that method's docblock is its contract. */
+/**
+ * A NEW top-level record: the own enumerable properties of `record`, then each
+ * grafted relation. `record` itself is never written, so a record that is not
+ * a plain object (one `copyHeldValue` hands back as it is) keeps what it was
+ * handed. A record with no prototype gets a result with none.
+ */
+function withGraftedRelations(record: Record<string, unknown>, grafts: ReadonlyArray<[string, unknown]>): Record<string, unknown> {
+    const out: Record<string, unknown> = Object.getPrototypeOf(record) === null ? scopeContainer() : {};
+    for (const [key, value] of [...Object.entries(record), ...grafts]) {
+        Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+}
+
+/** The body of {@link AutomationEngine.expandDeclaredLookups}; that method's docblock is its contract. */
 export async function expandDeclaredLookups(this: Pick<RunResumeHost, 'recordExpander' | 'logger'>, flow: FlowParsed, runContext: AutomationContext): Promise<void> {
     if (!this.recordExpander) return;
     const record = runContext.record as Record<string, unknown> | undefined;
@@ -502,15 +517,17 @@ export async function expandDeclaredLookups(this: Pick<RunResumeHost, 'recordExp
     try {
         const full = await this.recordExpander(object, id, expandFields, runContext);
         if (full && typeof full === 'object') {
+            const grafts: Array<[string, unknown]> = [];
             for (const field of expandFields) {
                 const expanded = (full as Record<string, unknown>)[field];
                 // Graft only a genuinely expanded relation (object/array); a
                 // scalar means the field is not a resolvable lookup — leave the
                 // raw id in place rather than overwrite it.
                 if (expanded !== null && typeof expanded === 'object') {
-                    record[field] = expanded;
+                    grafts.push([field, expanded]);
                 }
             }
+            if (grafts.length) runContext.record = withGraftedRelations(record, grafts);
         }
     } catch (err) {
         // #6499 — the expander's thrown text (transitively the
