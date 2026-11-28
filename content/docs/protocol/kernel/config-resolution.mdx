@@ -65,9 +65,20 @@ ObjectStack replaces the chain with one resolver and one declared order.
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ 5. DEFAULT    the specifier's `default` in the manifest      │
+│ 5. DEFAULT    what the deployment declares for the key, else │
+│               the specifier's `default` in the manifest      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+The bottom rung answers what the key takes in the running system while
+nothing is stored. A package whose runtime takes a key from its own
+configuration when nothing is stored (plugin options, a host declaration)
+states that value with `registerDeclaredDefault(namespace, key, provider)`;
+otherwise the manifest `default` answers. Either way the answer reports
+`source: 'default'`: nothing is stored, and a clear returns to it. The auth
+plugin states `email_password_enabled`, `signup_enabled` and
+`require_email_verification` this way, so Setup → Authentication shows what
+the deployment runs, not a console default it never applies.
 
 Two rules follow from the walk, and both are enforced in `SettingsService`:
 
@@ -251,8 +262,8 @@ OS_CRM_API_KEY=sk_live_...
 OS_AI_LOG_PROMPTS=true
 ```
 
-The raw string is coerced by the **type of the specifier's default**
-(`coerceEnvValue`):
+The raw string is coerced by the **type of the key's default** — the bottom
+rung above (`coerceEnvValue`):
 
 ```bash
 OS_HTTP_TIMEOUT=30000              # default is a number  → 30000
