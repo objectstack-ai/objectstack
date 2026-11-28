@@ -615,11 +615,59 @@ describe('flow-subflow-unknown', () => {
     ).toEqual([]);
   });
 
-  it('runs on the CLI commands and not on the runtime publish gate', () => {
+  it('stays a warning on the CLI commands', () => {
     const cli = runAuthoringRules('validate', { normalized: stack(calling('missing_child')) } as never);
-    expect(rulesOf(cli)).toContain(FLOW_SUBFLOW_UNKNOWN);
-    const verdict = runRuntimeAuthoringRules({ type: 'flow', item: calling('missing_child'), context: { objects: [DEAL] } });
-    expect(rulesOf([...verdict.errors, ...verdict.advisories])).not.toContain(FLOW_SUBFLOW_UNKNOWN);
+    expect(cli.filter((f) => f.rule === FLOW_SUBFLOW_UNKNOWN).map((f) => f.severity)).toEqual(['warning']);
+  });
+
+  const publish = (item: AnyRec, deploymentFlowNames?: readonly string[]) =>
+    runRuntimeAuthoringRules({
+      type: 'flow',
+      item,
+      context: { objects: [DEAL] },
+      ...(deploymentFlowNames !== undefined ? { deploymentFlowNames } : {}),
+    });
+
+  it('the runtime publish gate refuses a call to a flow the deployment does not hold', () => {
+    const verdict = publish(calling('missing_child'), ['child', 'other']);
+    const refused = verdict.errors.filter((f) => f.rule === FLOW_SUBFLOW_UNKNOWN);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ severity: 'error', path: 'flows[0].nodes[1].config.flowName' });
+    expect(refused[0].message).toContain("calls flow 'missing_child', but no flow of this deployment");
+    expect(verdict.rulesRun).toContain('validateFlowSubflowTargets');
+  });
+
+  it('refuses a map call nested in a loop body too', () => {
+    const nested = flow('parent', {}, [
+      {
+        id: 'each',
+        type: 'loop',
+        label: 'Each',
+        config: {
+          collection: { dialect: 'cel', source: '[1]' },
+          iteratorVariable: 'i',
+          body: {
+            nodes: [{ id: 'fan', type: 'map', label: 'Fan', config: { collection: '{{items}}', flowName: 'nope' } }],
+            edges: [],
+          },
+        },
+      },
+    ]);
+    const direct = validateFlowSubflowTargets(stack(nested), { deploymentFlowNames: new Set(['child']) });
+    expect(direct.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [FLOW_SUBFLOW_UNKNOWN, 'error', 'flows[0].nodes[1].config.body.nodes[0].config.flowName'],
+    ]);
+  });
+
+  it('the runtime publish gate lets a call through to a flow the deployment holds, or to the written flow itself', () => {
+    expect(rulesOf(publish(calling('child'), ['child']).errors)).not.toContain(FLOW_SUBFLOW_UNKNOWN);
+    expect(rulesOf(publish(calling('parent'), ['child']).errors)).not.toContain(FLOW_SUBFLOW_UNKNOWN);
+  });
+
+  it('the runtime publish gate judges nothing with no stated flow names, or an empty set', () => {
+    for (const verdict of [publish(calling('missing_child')), publish(calling('missing_child'), [])]) {
+      expect(rulesOf([...verdict.errors, ...verdict.advisories])).not.toContain(FLOW_SUBFLOW_UNKNOWN);
+    }
   });
 });
 

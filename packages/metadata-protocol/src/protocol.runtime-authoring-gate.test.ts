@@ -55,6 +55,7 @@ import {
     HIERARCHY_SCOPE_CAPABILITY_REQUIRED,
     HIERARCHY_SCOPE_RESOLVER_SERVICE,
     PUBLIC_FORM_INTAKE_UNAVAILABLE,
+    evaluateRuntimeAuthoringGate,
     stampHtmlPageRequires,
 } from './runtime-authoring-gate.js';
 
@@ -5753,5 +5754,85 @@ describe('ai_context author defects at save (ADR-0160 D1)', () => {
         // Non-vacuous: the same body saved active is told.
         const active = await savePack(protocol, item);
         expect((active.advisories ?? []).map((a: any) => a.rule)).toEqual(['ai-context-field-unknown']);
+    });
+});
+
+// [#35143] A `subflow` / `map` call to a flow the deployment does not hold is
+// refused at the publish door, judged against every flow the deployment holds:
+// the registry's, the stored rows in every state, the automation engine's, and
+// the batch's own drafts. No source readable, no judgement.
+describe('runtime authoring gate on a subflow call to an unknown flow (#35143)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    const calling = (name: string, flowName: string) => ({
+        name,
+        label: name,
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'call', type: 'subflow', label: 'Call', config: { flowName } },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'call' }],
+    });
+
+    /** A protocol whose automation engine holds `engineFlows`, and whose registry lists `registryFlows`. */
+    const protocolWith = (engineFlows: readonly string[] | undefined, registryFlows: readonly string[] = []) => {
+        const { engine, rows } = makeStubEngine();
+        const objectsOf = engine.registry.listItems;
+        engine.registry.listItems = (type: string) =>
+            type === 'flow' ? registryFlows.map((name) => ({ name })) : objectsOf(type);
+        const services = new Map<string, unknown>();
+        if (engineFlows !== undefined) services.set('automation', { listFlows: async () => [...engineFlows] });
+        const protocol = new ObjectStackProtocolImplementation(engine, () => services as Map<string, any>, 'env_test');
+        return { protocol: protocol as any, rows };
+    };
+    const publish = (protocol: any, item: { name: string }) =>
+        protocol.saveMetaItem({ type: 'flow', name: item.name, item });
+
+    it('refuses an active save calling a flow nothing in the deployment holds', async () => {
+        const { protocol, rows } = protocolWith(['child'], ['packaged_child']);
+        const err = await publish(protocol, calling('parent', 'missing_child')).catch((e: any) => e);
+        expect(err).toBeInstanceOf(Error);
+        expect(err.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        const issue = err.issues.find((i: any) => i.rule === 'flow-subflow-unknown');
+        expect(issue, `issues: ${JSON.stringify(err.issues)}`).toBeDefined();
+        expect(issue.path).toBe('flows[0].nodes[1].config.flowName');
+        expect(err.rulesRun).toContain('validateFlowSubflowTargets');
+        expect(flowRows(rows)).toEqual([]);
+    });
+
+    it("lets a call through to the engine's flow, an installed package's flow, or a stored draft", async () => {
+        const { protocol } = protocolWith(['engine_child'], ['packaged_child']);
+        expect((await publish(protocol, calling('a', 'engine_child'))).success).toBe(true);
+        expect((await publish(protocol, calling('b', 'packaged_child'))).success).toBe(true);
+        await protocol.saveMetaItem({ type: 'flow', name: 'draft_child', item: calling('draft_child', 'a'), mode: 'draft' });
+        expect((await publish(protocol, calling('c', 'draft_child'))).success).toBe(true);
+        // …and a flow published earlier is a stored active row.
+        expect((await publish(protocol, calling('d', 'a'))).success).toBe(true);
+    });
+
+    it('judges nothing when no automation service states its flows', async () => {
+        const { protocol } = protocolWith(undefined, ['packaged_child']);
+        expect((await publish(protocol, calling('parent', 'missing_child'))).success).toBe(true);
+    });
+
+    it('a flow the same batch publishes resolves; without it the call is refused', () => {
+        const body = calling('parent', 'batch_child');
+        const judge = (pending?: { flows: unknown[] }) => evaluateRuntimeAuthoringGate({
+            type: 'flow',
+            name: 'parent',
+            state: 'active',
+            body,
+            deploymentFlowNames: ['other'],
+            ...(pending !== undefined ? { pending: pending as never } : {}),
+        });
+        expect(((judge().error as any)?.issues ?? []).map((i: { rule: string }) => i.rule)).toContain('flow-subflow-unknown');
+        expect(judge({ flows: [{ name: 'batch_child' }] }).error).toBeNull();
     });
 });
