@@ -275,6 +275,7 @@ import {
   trackedPrefixes,
   triggerCovers,
   triggerListCovers,
+  triggerListMatches,
   typeCheckLaneLines,
   typeCheckLaneSteps,
   unnamedRootWalk,
@@ -6764,11 +6765,33 @@ export function selfTest({ tier = 'full' } = {}) {
     '...an == merge_group disjunct refuses — it would say the opposite WHEN',
     jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && github.event_name != 'pull_request' && (github.event_name == 'merge_group' || needs.f.outputs.b != 'false') }}") === null,
   );
+  // N3 (#38087): GitHub binds `&&` tighter than `||`, so a BARE `A || B` ahead of a
+  // stripped event clause puts the clause on `B` alone — refused, never read as both.
+  t(
+    '...a bare A || B ahead of the queue-and-full clause refuses; parenthesised it reads',
+    jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' || needs.f.outputs.b != 'false' && github.event_name != 'pull_request' }}") === null
+      && jobFilterOutputRefs("${{ (needs.f.outputs.a != 'false' || needs.f.outputs.b != 'false') && github.event_name != 'pull_request' }}")?.length === 2,
+  );
+  t(
+    '...a bare A || B ahead of the queue-path clause refuses too',
+    jobFilterOutputRefs(`\${{ needs.f.outputs.a != 'false' || needs.f.outputs.b != 'false' && ${QUEUE_PATH} }}`) === null,
+  );
   t(
     '...and the queue-path clause without the pull_request exclusion ahead of it refuses',
     jobFilterOutputRefs("${{ needs.f.outputs.a != 'false' && (github.event_name != 'merge_group' || needs.f.outputs.b != 'false') }}") === null,
   );
 
+  // N1 (#38087): a queue list narrowed by a dropped positive extglob, or carrying a
+  // plain negation, cannot back "none of your paths matched" — it is marked uncertain.
+  const queueJob = { if: `\${{ needs.filter.outputs.core != 'false' && ${QUEUE_PATH} }}` };
+  const queuePop = (globs) => jobFilterPopulation(queueJob, new Map([['filter.core', ['packages/**']], ['filter.temporal_live', globs]]));
+  t(
+    'jobFilterPopulation: a clean queue list is certain; a dropped positive extglob or a plain negation marks it queueUncertain',
+    queuePop(['packages/a/**'])?.queueUncertain === false
+      && queuePop(['packages/a/**', 'apps/!(docs)/**'])?.queueUncertain === true
+      && queuePop(['packages/a/**', '!packages/a/b.ts'])?.queueUncertain === true,
+  );
+  t('...and a negated extglob in it still refuses the job', queuePop(['packages/a/**', '!apps/!(docs)/**']) === null);
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
   t(
     'only the jobs whose if: RESOLVED and that invoke a check family contribute a population',
@@ -13638,6 +13661,32 @@ export function selfTest({ tier = 'full' } = {}) {
     '...ABLATED — queueOutput stripped from the row — the queue-path sentence disappears from BOTH lines',
     Boolean(driverStripped) && !jobFilteredNotMeasuredLine(driverStripped).includes(QUEUE_PATH_NOTE)
       && plainRowLine(driverStripped) !== '' && !plainRowLine(driverStripped).includes(QUEUE_PATH_NOTE),
+  );
+  // S1 (#38087): a DIRECTORY surface that a one-file temporal_live glob only reaches
+  // into is not a queue hit — the row hedges, and never says the queue build runs it first.
+  const QUEUE_HEDGE = 'the merge-queue build runs it only if a changed file is in `filter.temporal_live`';
+  t(
+    'triggerListMatches decides on the path ITSELF: a directory a one-file glob reaches into is covered, never matched',
+    triggerListCovers(['packages/runtime/src/**/x-real-driver*'], 'packages/runtime') !== null
+      && triggerListMatches(['packages/runtime/src/**/x-real-driver*'], 'packages/runtime') === null
+      && triggerListMatches(['packages/runtime/src/**/x-real-driver*'], 'packages/runtime/src/a/x-real-driver.test.ts') !== null,
+  );
+  const dirRow = jobFilteredSteps(liveWorkflows, ['packages/runtime']).rows.find((r) => r.job.startsWith('Temporal Conformance')) ?? null;
+  t(
+    "LIVE: the directory surface 'packages/runtime' gets the HEDGED sentence — not the queue-build-first one, not the full-battery one",
+    dirRow?.queueHedged === true && dirRow?.fullBatteryOnly === false && dirRow?.queueGlob === undefined
+      && jobFilteredNotMeasuredLine(dirRow).includes(QUEUE_HEDGE) && !jobFilteredNotMeasuredLine(dirRow).includes(QUEUE_FIRST)
+      && !jobFilteredNotMeasuredLine(dirRow).includes(NOT_ON_PR) && plainRowLine(dirRow).includes(QUEUE_HEDGE),
+  );
+  const dirStripped = dirRow ? Object.fromEntries(Object.entries(dirRow).filter(([k]) => k !== 'queueHedged')) : null;
+  t(
+    '...ABLATED — queueHedged stripped from the row — the hedge disappears and the defect sentence (queue build first) is what remains',
+    Boolean(dirStripped) && !jobFilteredNotMeasuredLine(dirStripped).includes(QUEUE_HEDGE)
+      && jobFilteredNotMeasuredLine(dirStripped).includes(QUEUE_FIRST),
+  );
+  t(
+    '...and the driver-sql file row names the glob that matched it, so the claim can be checked',
+    driverRow?.queueGlob === 'packages/drivers/driver-sql/**' && driverRow?.queuePath === 'packages/drivers/driver-sql/src/sql-driver.ts',
   );
   const prJobRow = ledgerRow('Build Core');
   t(
