@@ -75,12 +75,13 @@ async function plan(): Promise<{ payload: any; exitCode: number; said: string }>
       if (!trapped) thrownExit = (error as { oclif?: { exit?: number } }).oclif?.exit;
     }
     const out = stdout.mock.calls.map((c) => String(c[0])).join('').trim();
-    // The document is the last whole line that parses as a JSON object.
+    // The document is the last top-level JSON object on stdout, pretty-printed:
+    // try each line-initial `{` from the end until the rest parses.
     let payload: any = { unparsed: out.slice(-400) };
-    for (const line of out.split('\n').reverse()) {
-      if (!line.startsWith('{')) continue;
+    const starts = [...out.matchAll(/(^|\n)\{/g)].map((m) => m.index + m[1].length).reverse();
+    for (const start of starts) {
       try {
-        payload = JSON.parse(line);
+        payload = JSON.parse(out.slice(start));
         break;
       } catch { /* a log fragment */ }
     }
