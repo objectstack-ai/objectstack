@@ -32,8 +32,8 @@ import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
  * great for tests and reference implementations. **Don't use in prod.**
  *
  * The reference implementation of `listDocuments` (ADR-0161 K8, item 1): it
- * stores each document's `docHash` as given and lists it back as stored, in
- * document-id order, the cursor being the last id of the page before. It runs
+ * stores each document's `docHash` and `sourceRecordIdType` as given and lists
+ * them back as stored, in document-id order, the cursor being the last id of the page before. It runs
  * the contract suite of `@objectstack/service-knowledge/testing`.
  *
  * The first reader of the record scope (ADR-0161 K8, item 17): when a search
@@ -99,7 +99,13 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
 
   async upsert(docs: KnowledgeDocument[], ctx: AdapterContext): Promise<void> {
     const byDoc = this.writeTarget(ctx, true)!.docs;
-    for (const doc of docs) byDoc.set(doc.id, { docHash: doc.docHash, chunks: embedPassages(doc) });
+    for (const doc of docs) {
+      byDoc.set(doc.id, {
+        docHash: doc.docHash,
+        ...(doc.sourceRecordIdType === undefined ? {} : { sourceRecordIdType: doc.sourceRecordIdType }),
+        chunks: embedPassages(doc),
+      });
+    }
   }
 
   async delete(documentIds: string[], ctx: AdapterContext): Promise<void> {
@@ -199,8 +205,12 @@ export class KnowledgeMemoryAdapter implements IKnowledgeAdapter {
     const page = ids.slice(0, opts.limit);
     return {
       documents: page.map((documentId) => {
-        const docHash = byDoc.get(documentId)?.docHash;
-        return docHash === undefined ? { documentId } : { documentId, docHash };
+        const stored = byDoc.get(documentId);
+        return {
+          documentId,
+          ...(stored?.docHash === undefined ? {} : { docHash: stored.docHash }),
+          ...(stored?.sourceRecordIdType === undefined ? {} : { sourceRecordIdType: stored.sourceRecordIdType }),
+        };
       }),
       ...(ids.length > page.length ? { nextCursor: page[page.length - 1] } : {}),
     };
@@ -298,6 +308,8 @@ function requireIndex(ctx: AdapterContext, member: string): NonNullable<AdapterC
 interface StoredDocument {
   /** The document's `docHash`, stored as given (ADR-0161 K8, item 2). */
   docHash?: string;
+  /** The document's `sourceRecordIdType`, stored as given and listed back for the purge's re-read. */
+  sourceRecordIdType?: 'number';
   chunks: ChunkRecord[];
 }
 

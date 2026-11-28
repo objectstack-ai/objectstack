@@ -1083,6 +1083,7 @@ export class KnowledgeService implements IKnowledgeService {
         adapter,
         engine,
         candidates,
+        numericRecordIds: listing.ok ? listing.numericRecordIds : undefined,
         // Each settled deletion (or confirmed keep) is progress: a large,
         // healthy purge restarts the fence's bound as it goes. A build that
         // lost its lease, or was cancelled, re-reads and deletes no further
@@ -3859,9 +3860,13 @@ export const SEARCH_REFILL_FACTOR = 20;
  */
 export const SEARCH_FRESHNESS_ROUNDS = 3;
 
-/** What {@link listAdapterDocuments} learned: every listed id → its stored hash, or why there is no listing. */
+/**
+ * What {@link listAdapterDocuments} learned: every listed id → its stored
+ * hash, and the ids listed with `sourceRecordIdType: 'number'`; or why there
+ * is no listing.
+ */
 type AdapterListing =
-  | { ok: true; documents: Map<string, string | undefined> }
+  | { ok: true; documents: Map<string, string | undefined>; numericRecordIds: Set<string> }
   /** `reason` is absent when the adapter has no `listDocuments`; present when the listing failed. */
   | { ok: false; reason?: string };
 
@@ -3878,6 +3883,7 @@ async function listAdapterDocuments(
 ): Promise<AdapterListing> {
   if (typeof adapter.listDocuments !== 'function') return { ok: false };
   const documents = new Map<string, string | undefined>();
+  const numericRecordIds = new Set<string>();
   const cursors = new Set<string>();
   let cursor: string | undefined;
   try {
@@ -3890,8 +3896,9 @@ async function listAdapterDocuments(
       for (const entry of page.documents) {
         if (typeof entry?.documentId !== 'string') return { ok: false, reason: 'an entry carried no documentId' };
         documents.set(entry.documentId, typeof entry.docHash === 'string' ? entry.docHash : undefined);
+        if (entry.sourceRecordIdType === 'number') numericRecordIds.add(entry.documentId);
       }
-      if (page.nextCursor === undefined) return { ok: true, documents };
+      if (page.nextCursor === undefined) return { ok: true, documents, numericRecordIds };
       if (cursors.has(page.nextCursor)) {
         return { ok: false, reason: `the cursor '${page.nextCursor}' came back twice, so the listing would never end` };
       }
@@ -3911,6 +3918,12 @@ export interface PurgeDocumentsInput {
   engine: IDataEngine;
   /** Document ids believed stale: listed by the adapter, not produced from a current row. */
   candidates: Iterable<string>;
+  /**
+   * The candidates the adapter listed with `sourceRecordIdType: 'number'`: their
+   * record is re-read by the number. Every other candidate is re-read by the
+   * id's text.
+   */
+  numericRecordIds?: ReadonlySet<string>;
   /**
    * Runs one candidate's confirm-and-delete after every earlier sync of that
    * document has finished, answering the task's own outcome — the service
@@ -3945,18 +3958,18 @@ export interface PurgeDocumentsOutcome {
  * the first re-read or delete that throws (a re-read that answers no list
  * included), counting what it did before.
  *
- * KNOWN LIMIT — numeric record ids. The record id is recovered from the
- * document id as text, and the re-read asks for that text. A driver that does
- * not equate `'5'` with `5` (driver-mongodb, driver-memory) does not find a
- * row stored under a caller-supplied NUMERIC id, so if such a row's document
- * is a candidate while the row exists (it was restored, or came back into
- * `where`, after the walk read past it), the document is deleted. The row is
- * untouched; its document returns at the row's next event or the next complete
- * reindex. Asking again by the number is not done: on driver-sql the number
- * is bound against the text `id` column, which MySQL compares numerically
- * (`'05'` matches `5`) and SQL Server and Oracle reject outright, and the
- * object schema does not say which ids are numeric. Platform-minted ids are
- * text on every driver, so the limit needs a caller-supplied numeric id.
+ * The record id is recovered from the document id, typed as it was at index
+ * time: by the number when the adapter listed the candidate with
+ * `sourceRecordIdType: 'number'` (`numericRecordIds` — a caller-supplied
+ * numeric id, which driver-memory and driver-mongodb keep as given and do not
+ * equate with its text), and by the id's text otherwise. So a row stored under
+ * a number that was restored, or came back into `where`, after the walk read
+ * past it is found and keeps its document. A text id is re-read by its text,
+ * as before: driver-sql answers every id as text, so its re-read never binds a
+ * number against its text `id` column, which MySQL would compare numerically
+ * (`'05'` matches `5`) and SQL Server and Oracle would refuse. A document
+ * listed without the type — stored before it existed, or by an adapter that
+ * does not store it — is re-read by text.
  *
  * The caller decides when a purge may run at all (a complete reindex walk,
  * which is also what the reconcile runs) and computes the candidates.
@@ -3966,11 +3979,12 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
   const prefix = `${source.name}:`;
   const outcome: PurgeDocumentsOutcome = { purged: 0, kept: 0, foreign: 0 };
   for (const documentId of input.candidates) {
-    const recordId = documentId.startsWith(prefix) ? documentId.slice(prefix.length) : '';
-    if (recordId === '') {
+    const idText = documentId.startsWith(prefix) ? documentId.slice(prefix.length) : '';
+    if (idText === '') {
       outcome.foreign++;
       continue;
     }
+    const recordId = input.numericRecordIds?.has(documentId) ? numericRecordId(idText) ?? idText : idText;
     try {
       const deleted = await input.serialize(documentId, async () => {
         if (await rereadRow(engine, objSource, recordId)) return false;
@@ -3989,6 +4003,16 @@ export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeD
     }
   }
   return outcome;
+}
+
+/**
+ * The number a numeric record id's text names — the id whose `String()` is
+ * that text — or `undefined` when the text is not one (a listing that says
+ * `'number'` for a document whose id is not a number's text).
+ */
+function numericRecordId(text: string): number | undefined {
+  const value = Number(text);
+  return Number.isFinite(value) && String(value) === text ? value : undefined;
 }
 
 /**
@@ -4175,7 +4199,8 @@ export function recordToDocument(
     ...collectCredentialWriteResponseFields(schema),
     ...collectInternalWriteResponseFields(schema),
   ]);
-  const recordId = String(record.id ?? (record as any)._id ?? '');
+  const rawId = record.id ?? (record as any)._id;
+  const recordId = String(rawId ?? '');
   const contentParts: string[] = [];
   for (const field of objSource.content) {
     if (withheld.has(field)) continue;
@@ -4191,6 +4216,9 @@ export function recordToDocument(
     id: documentIdFor(source.name, recordId || `unknown-${Date.now()}`),
     sourceId: source.name,
     sourceRecordId: recordId || undefined,
+    // The id's JS type (ADR-0161 K8, item 1): the purge re-reads a numeric id
+    // by the number. Not hashed, so every document keeps its `docHash`.
+    ...(typeof rawId === 'number' && Number.isFinite(rawId) ? { sourceRecordIdType: 'number' as const } : {}),
     content: contentParts.join('\n\n'),
     title: documentTitle(record, schema, withheld),
     metadata,

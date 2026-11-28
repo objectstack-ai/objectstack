@@ -217,6 +217,15 @@ export interface AdapterListedDocument {
    * without one reads as changed: the next complete reindex writes it again.
    */
   docHash?: string;
+  /**
+   * The `sourceRecordIdType` the document was stored with, returned as stored
+   * (`KnowledgeDocument.sourceRecordIdType`). The purge of a complete reindex
+   * re-reads a candidate's record by the number when the entry says
+   * `'number'`, and by the id's text otherwise — an entry without one (a
+   * document stored before the field, or by an adapter that does not store
+   * it) is re-read by text.
+   */
+  sourceRecordIdType?: 'number';
 }
 
 /** One page of `IKnowledgeAdapter.listDocuments`. */
@@ -335,7 +344,8 @@ export interface IKnowledgeAdapter {
   /**
    * List the documents the adapter holds for `ctx.source`, one page at a
    * time (ADR-0161 K8, item 1): each entry is a document id and the
-   * `docHash` it was stored with. It lists the generation that writes go to.
+   * `docHash` (and `sourceRecordIdType`) it was stored with. It lists the
+   * generation that writes go to.
    * A document written while a listing runs may be missing from it — the
    * safe direction, because a missing entry is never a purge candidate.
    *

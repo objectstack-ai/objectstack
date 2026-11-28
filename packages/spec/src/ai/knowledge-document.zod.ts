@@ -86,6 +86,20 @@ export const KnowledgeDocumentSchema = lazySchema(() => z.object({
    * re-checked against the caller's `ExecutionContext`.
    */
   sourceRecordId: z.string().optional(),
+  /**
+   * `'number'` when the record's id is a JavaScript number — a caller-supplied
+   * numeric id, which driver-memory and driver-mongodb keep as given. Set by
+   * the knowledge service when it assembles a document from a record; absent
+   * for a text id, which is every id driver-sql answers and every id the
+   * platform mints. Stored by the adapter and returned as stored by
+   * `listDocuments` (`AdapterListedDocument.sourceRecordIdType`): a complete
+   * reindex re-reads a purge candidate's record by the number, so a row
+   * restored while the walk ran keeps its document on a driver that does not
+   * equate `'5'` with `5`. Not part of `docHash`, and not `metadata`: the
+   * document id and `sourceRecordId` stay the id's text.
+   */
+  sourceRecordIdType: z.literal('number').optional()
+    .describe("'number' when the record id is a JavaScript number; set by the knowledge service, stored and listed back by the adapter, not part of docHash"),
   /** Document content. UTF-8 text. */
   content: z.string(),
   /** Optional human-readable title (defaults to id when absent). */
