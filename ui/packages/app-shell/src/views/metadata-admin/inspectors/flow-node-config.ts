@@ -33,6 +33,7 @@ import type { FlowTriggerKind } from '@objectstack/spec/automation';
 import { SIBLING_GATES, type DeclaredConfigKey } from './json-schema-to-fields.js';
 import type { RegistryAndDataValueSource, RegistryValueSource } from '../../../utils/approverValueSources.js';
 import { flowFieldZh, isZhLocale } from '../i18n.js';
+import { isUnsetFieldValue } from '../storedValue.js';
 
 export type FlowConfigFieldKind =
   | 'text'
@@ -1924,24 +1925,6 @@ export function isFieldVisible(
   // this line is what stops config an author entered from vanishing unseen.
   if (hasStoredValue(field, node)) return true;
   return controllerAdmits(field, node, fields, flowKind);
-}
-
-/**
- * Whether a read value counts as UNSET — the one definition of "the author has
- * stored nothing here", shared by every site that has to answer it.
- *
- * There were three copies of this predicate before objectui#8451: the re-show
- * rule's {@link hasStoredValue}, {@link controllerAdmits}'s fallback to the
- * declared default, and (as of that card) the boolean control's own fallback in
- * `FlowNodeConfigField`. The third is the reason it is exported and named: a
- * control that seeds from `defaultValue` must call a key unset in exactly the
- * words the visibility resolver does, or the same node can render a field whose
- * gate says "unset, so use the default" beside a control that says "stored, so
- * ignore it". `''` is included because a cleared text control commits the empty
- * string rather than deleting the key.
- */
-export function isUnsetFieldValue(raw: unknown): boolean {
-  return raw === undefined || raw === null || raw === '';
 }
 
 /**

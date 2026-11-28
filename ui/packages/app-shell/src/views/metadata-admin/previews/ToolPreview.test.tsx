@@ -28,6 +28,12 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { ToolPreview } from './ToolPreview';
 import { componentRefToUrlSegments } from '../../../services/componentRegistry';
+import { PLATFORM_PROVIDED_TOOL_NAMES } from '@objectstack/spec/system';
+import { t } from '../i18n';
+import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+
+// The zh studio catalogue is fetched on demand; the note's zh row is read below.
+await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
 
@@ -196,5 +202,66 @@ describe('ToolPreview "Open in API Console" link (objectui#10591)', () => {
     renderPreview(STALE_DRAFT);
     expect(screen.getByText('Delete All Orders')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /open in api console/i })).toBeNull();
+  });
+});
+
+/**
+ * The note beside the link (objectstack#34193). The console runs the tool
+ * directly, outside a chat turn, and the hosted cloud refuses such a run a
+ * call that needs the server-side model. Tool metadata carries no field that
+ * says which calls those are, and for some tools it turns on the arguments,
+ * so the link stays for every tool and the note goes wherever the link does.
+ */
+describe('ToolPreview "Open in API Console" note on calls that need the server model (objectstack#34193)', () => {
+  const NOTE_KEY = 'engine.toolPreview.openApiConsoleNote';
+
+  function renderAt(url: string, draft: Record<string, unknown> = STALE_DRAFT) {
+    const preview = <ToolPreview type="tool" name={String(draft.name)} draft={draft} />;
+    return render(
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path="/apps/:appName/*" element={preview} />
+          <Route path="*" element={preview} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const link = () => screen.getByRole('link', { name: /open in api console/i });
+
+  it('keeps the link and shows the note next to it, as the link\'s description', () => {
+    renderAt('/apps/studio/metadata/tool/delete_all_orders');
+    const note = screen.getByText(t(NOTE_KEY, 'en-US'));
+    const describedBy = link().getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(note.id).toBe(describedBy);
+  });
+
+  it('keeps the link and the note alike for a tool with no parameters', () => {
+    renderAt('/apps/studio/metadata/tool/ping', { name: 'ping', description: 'Pings.' });
+    expect(link()).toBeTruthy();
+    expect(screen.getByText(t(NOTE_KEY, 'en-US'))).toBeTruthy();
+  });
+
+  it('shows no note where no link is drawn', () => {
+    renderAt('/somewhere/else');
+    expect(screen.queryByRole('link', { name: /open in api console/i })).toBeNull();
+    expect(screen.queryByText(t(NOTE_KEY, 'en-US'))).toBeNull();
+  });
+
+  it('shows no note with no router above it (the designer gallery)', () => {
+    renderPreview(STALE_DRAFT);
+    expect(screen.queryByText(t(NOTE_KEY, 'en-US'))).toBeNull();
+  });
+
+  it('names no tool in either language, since whether a call needs the model turns on its arguments', () => {
+    for (const locale of ['en-US', 'zh-CN']) {
+      const note = t(NOTE_KEY, locale);
+      expect(note, `${locale}: the note row is missing`).not.toBe(NOTE_KEY);
+      if (locale === 'zh-CN') expect(note, 'the zh row must not be the English one').not.toBe(t(NOTE_KEY, 'en-US'));
+      for (const tool of PLATFORM_PROVIDED_TOOL_NAMES) {
+        expect(note, `${locale}: the note names ${tool}`).not.toContain(tool);
+      }
+    }
   });
 });

@@ -374,12 +374,12 @@ touched, unrepaired by a plain rebuild because that rebuild is a cache **HIT** �
 that package. Ablating a build tool is a sanctioned producer; `--force` writes the whole closure.
 
 **Doing reverse verification ("revert the fix, watch the diagnostics")? Commit the fix
-FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a commit
-that really exists ([why](docs/agents/multi-agent-discipline.md#reverse-verification-against-an-uncommitted-edit)).
+FIRST.** Committed, restoring is `git checkout <your-branch> -- <path>`, out of a real
+commit ([why](docs/agents/multi-agent-discipline.md#reverse-verification-against-an-uncommitted-edit)).
 Prove any retyped change identical
 with `git diff` against a saved patch or `git hash-object <path>` (a matching `--stat`
 insertion count is **not** byte-identity), then re-run from the committed state so your
-red/green numbers are trustworthy.
+red/green numbers hold.
 
 **⛔ And `git checkout <ref> -- <path>` STAGES what it retrieves — putting the file back
 with `cp` undoes only half of it**
@@ -387,12 +387,12 @@ with `cp` undoes only half of it**
 Restore with `git checkout HEAD -- <path>` or
 `git restore --source=HEAD --staged --worktree <path>` — both reset index *and* tree —
 read `git status --porcelain` before you commit, and ⛔ never trust `git diff HEAD` alone
-after a checkout-from-ref. Better still, don't stage it at all:
+after a checkout-from-ref. Better, stage nothing:
 `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree only, a lone
 unstaged `M`.
 
-**A windowed history question ("how many commits on `<ref>` in `<window>`") goes through
-`scripts/pm/git-history.mjs` — answer, or REFUSE**
+**A windowed history question ("how many commits on `<ref>` in `<window>`"), or a containment
+one (`git-history.mjs ancestor`), goes through `scripts/pm/git-history.mjs` — answer, or REFUSE**
 ([why](docs/agents/multi-agent-discipline.md#windowed-history-on-a-shallow-clone)). `historyHorizon()` is the
 read-only predicate for tools that answer their own question.
 
@@ -806,7 +806,7 @@ skipping a check it could not run) is worse than no verifier, because it reports
 success. Prefer failing to falling back.
 
 **4. Machine-readable surfaces must not lie.** `/discovery` and friends are read by
-SDKs, codegen and AI clients. Advertise only what is actually mounted, and mount
+SDKs, codegen and AI clients. Advertise only what is mounted, and mount
 everything advertised (ADR-0076 D12) — a wrong answer here propagates into everything
 built on top of it.
 
@@ -946,7 +946,7 @@ no baseline and no verdict.
 ## Startup registry reads — never record a verdict the boot can still contradict
 
 A boot fills its registries incrementally. Asking a registry "is X there?" while it is
-still filling is fine — the answer is simply not final yet. Turning that not-yet into a
+still filling is fine — the answer is not final yet. Turning that not-yet into a
 **verdict and recording the verdict** is the defect, because the provider registers a
 moment later and nothing goes back to undo the record.
 
