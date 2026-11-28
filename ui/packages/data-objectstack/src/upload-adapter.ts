@@ -121,8 +121,10 @@ export function createObjectStackUploadAdapter(
       });
       if (!presignRes.ok) {
         const text = await presignRes.text().catch(() => '');
-        throw new Error(
+        throw refusalOf(
           `Presigned upload request failed (${presignRes.status}): ${text || presignRes.statusText}`,
+          presignRes.status,
+          text,
         );
       }
       const presignBody = await presignRes.json();
@@ -156,16 +158,10 @@ export function createObjectStackUploadAdapter(
         // The server's refusal code and status ride on the error, so a caller
         // maps a refused attach (`ATTACHMENT_PARENT_ACCESS`, `FILES_DISABLED`,
         // `PERMISSION_DENIED`…) without parsing the message.
-        let code: string | undefined;
-        try {
-          const parsed = JSON.parse(text);
-          if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
-        } catch {
-          // Not the declared envelope — the message keeps the raw text.
-        }
-        throw Object.assign(
-          new Error(`Upload completion failed (${completeRes.status}): ${text || completeRes.statusText}`),
-          { status: completeRes.status, ...(code ? { code } : {}) },
+        throw refusalOf(
+          `Upload completion failed (${completeRes.status}): ${text || completeRes.statusText}`,
+          completeRes.status,
+          text,
         );
       }
       const completeBody = opts.attachTo ? await completeRes.json().catch(() => null) : null;
@@ -186,6 +182,22 @@ export function createObjectStackUploadAdapter(
       };
     },
   };
+}
+
+/**
+ * The error a refused storage request throws: the message as given, the HTTP
+ * `status`, and the server's error `code` when the answer was the declared
+ * envelope.
+ */
+function refusalOf(message: string, status: number, text: string): Error & { status: number; code?: string } {
+  let code: string | undefined;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed?.error?.code === 'string') code = parsed.error.code;
+  } catch {
+    // Not the declared envelope — the message keeps the raw text.
+  }
+  return Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 }
 
 interface UploadFetchOptions extends UploadOptions {
@@ -221,7 +233,7 @@ async function uploadWithProgress(
           headers: options.headers,
           signal: options.signal,
         });
-        if (!res.ok) throw new Error(`Upload failed with status ${res.status}`);
+        if (!res.ok) throw Object.assign(new Error(`Upload failed with status ${res.status}`), { status: res.status });
         options.onProgress?.(1);
       }
       return;
@@ -250,7 +262,7 @@ function xhrUpload(url: string, body: Blob, options: UploadFetchOptions): Promis
         options.onProgress?.(1);
         resolve();
       } else {
-        reject(new Error(`Upload failed with status ${xhr.status}`));
+        reject(Object.assign(new Error(`Upload failed with status ${xhr.status}`), { status: xhr.status }));
       }
     };
     xhr.onerror = () => reject(new Error('Network error during upload'));
