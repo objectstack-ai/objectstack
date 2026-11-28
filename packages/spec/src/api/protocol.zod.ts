@@ -4787,7 +4787,9 @@ export const AiAgentChatRequestSchema = lazySchema(() => z.object({
 // ── HITL pending actions ──────────────────────────────────────────────────
 //
 // The approval queue an embedding app has to render. `objectui` ships a whole
-// approval UI on these four routes over hand-built URLs.
+// approval UI on these four routes over hand-built URLs. They front the
+// pending-confirmation service (`IActionConfirmationService`, contracts), the
+// one store every AI door hands a gated call to.
 
 /**
  * Lifecycle of a proposed action. Mirrors `PendingActionStatus` in contracts.
@@ -4824,9 +4826,9 @@ export const AiPendingActionSchema = lazySchema(() => z.object({
 /**
  * `GET /api/v1/ai/pending-actions` query.
  *
- * Only the three the ROUTE reads. `AIService.listPendingActions` also accepts
- * `objectName`, but the route never forwards it, so declaring it here would
- * type a filter that silently does nothing.
+ * Only the three the ROUTE reads. `IActionConfirmationService.list` also
+ * accepts `objectName`, but the route never forwards it, so declaring it here
+ * would type a filter that silently does nothing.
  */
 export const ListAiPendingActionsRequestSchema = lazySchema(() => z.object({
   status: AiPendingActionStatusSchema.optional().describe('Filter by status'),
