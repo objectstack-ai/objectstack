@@ -136,6 +136,8 @@ import {
   PackageExportManifest,
   PackageExportBundle,
   ReassignOrphanedMetadataResponse,
+  MoveIntoPackageRequest,
+  MoveIntoPackageResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
   CloneFlowRequest,
@@ -3625,6 +3627,23 @@ export class ObjectStackClient {
             body: JSON.stringify(opts ?? {}),
         });
         return this.unwrapResponse<ReassignOrphanedMetadataResponse>(res);
+    },
+
+    /**
+     * Move a selection of loose (package-less) items into this package — one
+     * item, several, or every loose item of a type, across types. Whole or
+     * nothing: the answer's `outcome` is `moved`, or `refused` with every
+     * refused item's own code and nothing moved; `dryRun: true` answers
+     * `would_move` and writes nothing, so a confirm step can show what each
+     * item's addresses become.
+     */
+    moveIn: async (id: string, request: MoveIntoPackageRequest): Promise<MoveIntoPackageResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/move-in`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+        });
+        return this.unwrapResponse<MoveIntoPackageResponse>(res);
     },
 
     /**

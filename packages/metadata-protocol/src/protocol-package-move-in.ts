@@ -90,7 +90,7 @@ type MoveHost = Pick<ProtocolHost,
 >;
 
 /** A stored `sys_metadata` row, as the system-context read answers it. */
-interface StoredRow {
+interface StoredRow extends Record<string, unknown> {
     readonly id?: string;
     readonly type: string;
     readonly name: string;
