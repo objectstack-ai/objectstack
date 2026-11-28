@@ -241,8 +241,9 @@ the same schema. A source is identified by its package and `name`; the ☁️
 `search_knowledge` tool lists a package's source to agents as `NAMESPACE-NAME`
 (bare for one no package holds), and a code registration and an environment
 item of one name are one slot, the second refused. A shipped item mounts the
-knowledge service and its store; an app that ships none and authors sources at
-run time needs `requires: ['knowledge']`, or its items are never indexed.
+knowledge service and its store; where an app ships none, a run-time save is
+refused (`503 SERVICE_UNAVAILABLE`, nothing written) until you add
+`requires: ['knowledge']` to the stack and restart the server.
 
 **A source is an egress and cost decision.** Its first build sends every listed
 field of every matching record to the embedding provider and keeps the text (and

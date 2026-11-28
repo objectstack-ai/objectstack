@@ -483,7 +483,20 @@ export const CEILINGS = new Map([
   // 26779 -> ceil(26779 / 4) = 6695; the row moves +56, the measured remainder
   // only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26779 / 4)
-  ['skills/objectstack-ai/SKILL.md', 6695], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6695 -> 6709 (2026-11-28, the no-knowledge-service save refusal): the
+  // section's run-time clause said an app that ships no source "needs
+  // `requires: ['knowledge']`, or its items are never indexed"; the save is now
+  // refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack
+  // declares the token and the server restarts, and the clause says so. Raise
+  // path the standing ruling 「A:先削重复,余额按实测提高」 (ruling record
+  // 6513306068, letter B). PAID DOWN FIRST: the replaced clause itself, and the
+  // refusal's "then save the source again" (the "until" says it). Arithmetic in
+  // priced bytes (stamp line excluded), against the row's 26779: the file is
+  // 26806 -> 26860 bytes, so the LANDED priced text is 26833 ->
+  // ceil(26833 / 4) = 6709; the row moves +14, the measured remainder only.
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(26833 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6709], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
