@@ -1,0 +1,32 @@
+{
+  "number": 38138,
+  "kind": "issue",
+  "title": "flake: Live E2E master-detail.spec.ts「Create with a task line」在 beforeEach 等页面标题超时，把 #38090 踢出合并队列",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T03:52:41Z",
+  "updated_at": "2026-11-28T05:09:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38138",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) first queue eviction from this test (seat rule: file a flake card at the first eviction). Source: fleet.\nGrading: area:build · Bug · p2 · reach: every merge-queue group runs Live E2E UI, so a red here evicts a PR whose diff cannot reach the page · evidence: one eviction, read by the #37894 card thread.\nDedupe: \"master-detail.spec\", \"flake Live E2E\" → 0 open. Closed sibling: #28471 (the same spec, a batch-request wait timeout; this one has a different shape).\n\n## 维护者速读\n\n- 问题：界面端到端测试里，「主从表单：新建项目并带一行任务」这一条偶尔在打开页面后 5 秒内等不到标题就超时，结果把一个跟界面无关的 PR（#38090）踢出了合并队列。\n- 修法：查清这一条为什么偶尔等不到页面，修掉不稳的根因，不靠加长等待时间。\n- 要你做的：无。\n\n## Measured\n\n- Queue commit 4696e22734 (main 0e361201 + PR #38090, a group of one). The only red is Live E2E UI, job 140849556074: `ui/e2e/live/master-detail.spec.ts:103` \"Create with a task line stores the child referencing the parent\". It failed in `beforeEach` (l.65): no \"New Project + Tasks\" heading within 5 s of `page.goto`.\n- The other four tests that share that `beforeEach` (l.68, l.78, l.199, l.215) passed. One of 23 tests was red.\n- PR #38090 touches no `ui/` or showcase path. Live E2E is green on the PR head c68c625b, and on the previous queue group at the same base 0e361201 (run 46102923263).\n- The failure screenshot and error context are in artifact 15246781857. They were not read here, because the proxy refuses the blob download.\n\n## Ask\n\n1. Read the artifact and find why the heading is missing in this one test: the page state left by the earlier tests, the data the test seeds, or a load race. Check whether #37929 (action locations, new on main) is involved.\n2. Fix the cause and keep the 5 s wait. A repeat-run proof (e.g. 20 runs green) goes in the PR.\n\n## Acceptance\n\n- The test is stable under repeated runs, and no queue group is evicted by it."
+}

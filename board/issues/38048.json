@@ -2,8 +2,8 @@
   "number": 38048,
   "kind": "issue",
   "title": "chat: draft review card for the ask admin skill — spec part `data-draft-review` and a plugin-chatbot DraftReviewCard (links to Studio review; no publish in chat)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "enhancement",
-    "pm:dispatched",
     "pm:epic",
     "priority:p1",
     "size/m"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T20:55:44Z",
-  "updated_at": "2026-11-28T00:53:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T04:54:46Z",
+  "closed_at": "2026-11-28T04:21:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38048",
   "body": "epic:#5027#1 · hotlong · session_01Q4EjjMUfmNYTem26rXLFUf\n\nFiling gate: ④ topic child (cross-repo half of a cloud card). Source: epic objectstack-ai/cloud#5027 M2 row 3 = cloud#5085 (plan v2 approved by the maintainer 2026-11-27 01:02Z 「同意，开工」): \"a build turn that saved N drafts ends with a card listing N rows; publish from the card goes through the existing human publish path\". cloud#5085's premise check (2026-11-27 20:54Z) found the chat renders no drafts; cloud's half is PR cloud#5172 (sends the data part). Business reason: an admin who builds in chat sees what was saved and where to review it, instead of hunting in Studio.\nOwner: **repo:objectstack#3** (maintainer 2026-11-27 07:51Z: non-cloud tasks go to the objectstack seat). Filed by seat epic:#5027#1, which keeps cloud#5085 and the pin round.\nGrading: area:ai · Task · p1 · size M · reach: admins with the cloud admin skill switched on (default off) · evidence: read (objectstack `origin/main` 8d34c440; cloud PR #5172).\nDedupe: searched `data-draft-review`, `DraftReviewCard`, `pending drafts` chat; no open card. Precedent: the question card (objectstack#37872 spec envelope, #37874 `QuestionCard`).\n\n## 维护者速读\n- 是什么：管理员在 ask 对话里搭建时，回合结束后在回答下面出一张卡，列出这一轮存的草稿和每个的判定（能发布 / 有几个问题），每行和每个包都带去工作室审阅的链接。\n- 卡片上不发布、不丢弃，都去工作室现有的人工流程（席位裁定 Q1=A）。第一版只在实时对话里显示，刷新后不重建（Q2=A，之后另开 cloud 卡把部件存进消息）。\n- 要你做什么：无。\n\n## Where it renders (objectstack origin/main 8d34c440)\n- The ask chat is `ui/packages/app-shell/src/console/ai/ChatPane.tsx` over `ui/packages/plugin-chatbot` (`ChatbotEnhanced`, `mapMessages.ts`, `toolResultParsers.ts`).\n- Only `data-chart` and `data-record-citations` are read today (`STORED_ANSWER_DATA_PARTS`, `toolResultParsers.ts:325`). Nothing renders a `save_metadata_draft` / `list_drafts` result.\n\n## What cloud sends (PR cloud#5172)\nAt the end of a streamed ask turn whose admin skill saved drafts, before `finish`, one UI-message-stream part:\n```\n{ type: 'data-draft-review', id: 'draft-review', data: {\n    drafts: [{ type, name, package, label?, verdict: { publishable, refusals, advisories } | null,\n               verdictWithheld?, verdictError?, verdictRead: 'turn-end' | 'save',\n               review: { changes, item } }],   // save order, at most 50\n    omitted?: number } }\n```\n`verdict` is the light door's own `list_drafts` verdict read at the turn's end as the person; `review` is the door's own review routes (`studioChangesReviewLink`, `studioItemReviewLink`).\n\n## What to do\n1. **Spec:** `packages/spec/src/ai/draft-review.zod.ts` with `DRAFT_REVIEW_PART_TYPE = 'data-draft-review'` and `DraftReviewListSchema` (closed objects, as above; field names may be refined, say so on this card before merge so cloud follows). Follow the spec change rules (changeset, generated baselines, api-surface, docs).\n2. **plugin-chatbot:** a `DraftReviewCard` under the assistant message that carries the part. One row per draft: label or name, type, a verdict badge (will publish / N problems / verdict withheld), a \"Review\" link to `review.item`; per package a \"Review and publish\" link to `review.changes`; `omitted` shown as \"+N more\". No publish and no discard button (seat ruling Q1 = A). Strings in every ui locale pack.\n3. **Live only in v1** (seat ruling Q2 = A): do not rebuild the card from stored `save_metadata_draft` results (save-time verdicts can be wrong). Do not add the part to `STORED_ANSWER_DATA_PARTS` until a cloud card stores it on the assistant message.\n\n## Acceptance\n- A stream fixture with the part renders N rows with the right badges and links; a malformed part renders nothing (no crash); a turn without the part is unchanged.\n- Accessible names on the links; no overflow in the eleven locales.\n- Hand-off: when merged, Notify seat epic:#5027#1 (mailbox objectstack#37634) with the sha; cloud then switches to the spec constant (closes cloud#5085) after a pin round.\n\nClause-②: yes\nSuggested-grade: p1"

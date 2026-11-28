@@ -14,18 +14,20 @@
     "area:ai",
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T16:59:50Z",
-  "updated_at": "2026-11-26T17:20:18Z",
+  "updated_at": "2026-11-28T06:58:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37642",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review records 7197638051 and 7198330476 on PR #37619, nits N2, N4, N5, adopted at ACCEPT)\n\n## What happens\n\nPR #37619 (Fixes #37407) teaches the multi-reason refusal throw on `skills/objectstack-data/references/data-hooks.md` and `skills/objectstack-ui/rules/actions.md`. Its reviews left these items open:\n\n- [ ] **The `/data` message bound is untaught** (N2). On `/data`, `userMessage` is cut at 500 characters (`CLIENT_MESSAGE_MAX`), so a long reasons list loses its closing line there. The page also says nothing about that bound for a single sentence. Expected: one clause on the hook page naming the bound.\n- [ ] **\"(rules there)\" names no place** (N4). In `actions.md` \"Refusing by code\", the nearest place named earlier is `objectstack-i18n`, while the rules are in the hook section. Expected: name the hook section.\n- [ ] **\"door\" has two senses on the hook page** (N5). \"The HTTP doors answer `details.refusals`\" sits beside the `ctx.title` row, where \"door\" means a hook registration path. The MCP tools are also reached over HTTP, but they relay the lines as text. Expected: name the routes (`/data`, `/actions`, the dispatcher).\n\nCategory ①: skill text (a shipped surface) that is incomplete or ambiguous on a refusal contract.\nPriority: p3, wording on a shipped skill page.\nBusiness reason: an agent that builds a long refusal list from the skill cannot see that the `/data` answer may lose its closing line.\nReader: the skills-lane dev who next edits either page (skills/** is governed, Tier H).\nDedupe: searched open issues for `\"PR #37619\"`: 0 hits.\nRelated: #37407, PR #37619, #36877.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (`main` code against the two pages) · evidence: read → p3"

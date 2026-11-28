@@ -1,0 +1,37 @@
+{
+  "number": 38165,
+  "kind": "pull_request",
+  "title": "fix(scenarios): skill-eval turns are spawned without the host's memory variables",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T04:59:47Z",
+  "updated_at": "2026-11-28T07:35:37Z",
+  "closed_at": "2026-11-28T07:35:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T07:35:35Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38165",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu1VhSQmxMmBJAWNw5MuyuHN)_\n\nFixes #37842\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：用户无感。技能评测和场景卡评测在项目容器里跑时，起的每个回合都不再读到本项目的记忆。\n- 为什么：属于「评测可信」工作。之前两组（带技能、不带技能）都能读到项目记忆，不带技能的一组照着记忆答对，看起来和带技能一样好，技能的价值被藏住了。\n- 出错会怎样：只影响内部评测怎么起提问进程；最坏是某个记忆变量没去干净，结果和以前一样，可直接撤回。\n- 要你做的：无。\n\n## What changes\n\n- `packages/qa/scenarios/src/runner/driver.ts`: new `CLAUDE_MEMORY_ENV = ['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES']`, declared beside `API_BILLING_ENV` and `CLAUDE_EFFORT_ENV`, so the three lists of what a turn is spawned without live in one place.\n- `packages/qa/scenarios/src/runner/driver.ts`: `ClaudeCodeDriver.turnEnv`, the scenario runner's live driver, also deletes every name in `CLAUDE_MEMORY_ENV`, so its build (author) and ask turns are spawned without the host's memory variables too. Folded in at the seat's word after the first hand-off.\n- `packages/qa/scenarios/src/skill-evals/run.ts`: `turnEnv` deletes every name in `CLAUDE_MEMORY_ENV`, after the billing and effort variables. `executeRound` already spawns every turn with `turnEnv()`, so both arms of every case get the scrubbed environment. The file header says so.\n- `packages/qa/scenarios/README.md` (skill-evals section): a new **Isolated from project memory** bullet says a round run inside a project container is isolated from that project's memory, which variables are removed and why, and that the scenario runner's build and ask turns are isolated too.\n- `.changeset/37842-skill-evals-memory-isolated.md`: `patch` for `@objectstack/scenarios` (the README ships in its `files[]`).\n\nMeasured before the change, in this container: both variables are set here (presence read only, values never printed). The card's evidence is the two rounds of PR #37841: with the variables inherited, all three no-skill answers to case 2 quoted a project memory note; with them removed, case 2 scored 3/3 with the skill and 0/3 without. No eval round was run for this PR.\n\n## Tests\n\n`packages/qa/scenarios/test/skill-evals/skill-evals.test.ts`:\n\n- new block \"a turn's environment\": a host env carrying `PATH`, `HOME`, both billing variables, the effort variable and both memory variables yields exactly `{ PATH, HOME }`; every name of the three lists is absent; the memory list names both variables; the caller's env object is left as it was.\n- the existing round test (\"a round hands each turn its arm's directory…\") now also stubs both memory variables in `process.env` and asserts that none of the four turns (two cases × two arms) receives either one. This pins the wiring through `executeRound`, not only the pure function.\n\n`packages/qa/scenarios/test/runner/units.test.ts` (the live driver against a stand-in `claude`): the stand-in's `ENV` turn now also answers which memory variables it was started with; a new test stubs both in `process.env`, runs one build turn and one ask turn through `makeDriver`, and asserts neither turn was started with either.\n\nAblation, one line at a time: with `for (const k of CLAUDE_MEMORY_ENV) delete out[k];` removed from the skill-evals `turnEnv`, 3 tests fail (the two new ones and the round test) and 37 pass; restored, 40/40. With the same line removed from `ClaudeCodeDriver.turnEnv`, the new `units.test.ts` test fails and 95 pass; restored, 96/96.\n\n<details><summary>runs</summary>\n\nHead ac1dd475.\n\n- `pnpm --filter '@objectstack/scenarios^...' build` then `pnpm --filter @objectstack/scenarios build`: exit 0.\n- `pnpm --filter @objectstack/scenarios test`: 45 files, 1411 tests passed.\n- `pnpm --filter @objectstack/scenarios typecheck`: exit 0.\n- `pnpm --filter @objectstack/scenarios skill-evals --self-test`: 44 rows pass.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 65 derived (the same 65 as on the first head); 64 exit 0; 1 exit 3 (PREREQUISITE NOT MET), so NOT MEASURED locally and left to CI: `node scripts/check-plugin-teardown-shape.mjs --self-test` (its positive control is pinned to a commit this shallow clone cannot reach).\n\n</details>\n\n## Acceptance notes\n\n- Other memory-named variables the CLI reads (Claude Code 2.1.332's binary names `CLAUDE_CODE_REMOTE_MEMORY_DIR`, `CLAUDE_COWORK_MEMORY_INDEX_CONTENT`, `CLAUDE_COWORK_MEMORY_GUIDELINES`, `CLAUDE_COWORK_MEMORY_EXTRA_GUIDELINES`, `CLAUDE_CODE_MEMORY_API_BASE_URL`, `CLAUDE_CODE_MEMORY_API_TOKEN`): not set in this container, not measured, not handled by this PR.\n- The card's Expected section also asks that the round's record say the turn environment was scrubbed. The three Done-when items do not, and the dispatch scoped this PR to them, so `round.json` is unchanged; the README now states it for every round.\n\n## Verification\n\nRead first: `packages/qa/scenarios/src/skill-evals/run.ts` (`turnEnv`), then `ClaudeCodeDriver.turnEnv` in `src/runner/driver.ts`, then the two new test spots.\n\nTwo-minute check: `pnpm --filter @objectstack/scenarios exec vitest run --maxWorkers=2 test/skill-evals/skill-evals.test.ts test/runner/units.test.ts` prints 136 passed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXWFXqMUE85PmLT9AE)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgXWFXqMUE85PmLT9AE -->\n"
+}

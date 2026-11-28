@@ -2,8 +2,8 @@
   "number": 38072,
   "kind": "issue",
   "title": "ci(test-ui): check-pending-changeset-literals \"the tree as it stands satisfies the rule › exits 0 through the CLI\" timed out (15 s) and turned the 4-hourly full run red on main",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:fleet",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-28T01:12:38Z",
-  "updated_at": "2026-11-28T02:00:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T02:48:55Z",
+  "closed_at": "2026-11-28T02:46:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38072",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ① a flake that turned `main` red (the 4-hourly full run, card #38065). Source: triage probe, R1447.\n\n## 维护者速读\n\n- 每 4 小时一次的全量测试在主干上红了一次。原因是一条测试要扫描整个代码树、调用一次命令行，在较慢的机器上超过了 15 秒上限。它不是代码错误。\n- 按规矩，让主干变红的不稳定测试算 p1。修法是给这条整树测试留足时间，或者让它只扫描改动范围，不能删掉也不能跳过这条测试。\n\n## Reading\n\n- Run 46086203867 (`CI`, schedule, `main` at `27ee98438e`, 2026-11-28T00:07Z), job \"Test UI (1/16)\" (140796965590): `ui/scripts/__tests__/check-pending-changeset-literals.test.ts:172`, \"3. the tree as it stands satisfies the rule › exits 0 through the CLI\", `Error: Test timed out in 15000ms`. This is the only failure in the run.\n- The case runs `ui/scripts/check-pending-changeset-literals.mjs` over the whole tree through the CLI, so its cost grows with the tree. On a slow full-run runner it crossed the 15 s case timeout. The last green 4-hourly run was 46060926437 (20:03Z).\n- No existing card names this test (`is:issue check-pending-changeset-literals`).\n\n## Fix\n\nGive the whole-tree CLI case a timeout matched to its measured cost on the slowest shard, or make the check incremental (affected files only) with a separate bounded whole-tree pin. ⛔ Do not skip, narrow or delete the case: the remedy for the 4-hourly card is never to weaken the check.\n\n## Done when\n\nThe case passes on the 4-hourly full run, and #38065 is closed by triage after a verified green run."

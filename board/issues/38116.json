@@ -1,0 +1,36 @@
+{
+  "number": 38116,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the metadata form field picker reads the object document the server serves",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:46:51Z",
+  "updated_at": "2026-11-28T04:21:49Z",
+  "closed_at": "2026-11-28T04:21:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T04:21:45Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38116",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoHA4cvc77SGmCXasFnbgKTX)_\n\nFixes #37508\nrepo:objectstack#3 · os-tesla · session_01L9qibwBcaYpnhtGgnknxmq\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 后台元数据表单里的「字段选择」控件以前去读一个服务端根本没有的地址，所以每次都显示加载失败；现在改读服务端已有的对象元数据接口，能正常列出字段。\n- 属于「声明的能力要真的能用」这条线：控件留着，读取点改对，不新增任何服务端路由。\n- 只改控件读哪条路由，spec、控件配置和服务端都不动；有问题直接撤回即可。\n- 无\n\n## What changes\n- `ui/packages/app-shell/src/views/metadata-admin/widgets.tsx`: `fetchFieldSelectorOptions` no longer requests `/api/v1/objects/:name/fields`, which no ObjectStack server mounts (no route ledger carries a `fields` row). It reads the object document at `GET /api/v1/meta/object/:name` (`?preview=draft`) through the console's `MetadataClient` (`useMetadataClient`) and normalizes `object.fields` with `readFields` — the read `useObjectFields` already makes for the other field pickers in this directory.\n  - The four `LoadState` arms are kept. A refused or failed read throws (the client's own error, carrying the server's message) and lands in the failure arm; a 404 (the client's `null`) is shown as a failure reading \"Object not found\" in the designer's language, never as an empty catalog; a served object answers its fields, possibly none.\n  - The load keys on the object name alone; the client is read through a ref set in a layout effect, so nothing rests on the identity of the memoized client (ui/AGENTS.md #10).\n  - The raw `createAuthenticatedFetch` import goes; the bearer is carried by the client's transport (`metadataClientFactory.ts`), so the property objectstack#37225 fixed still holds.\n- `loadState.ts`: one docblock sentence no longer says the widget bypasses `MetadataClient`.\n- No server route is added (one route, one owner), and the widget and its configuration (`dependsOn`, `reference`, `multiple`) are unchanged.\n- `patch` changeset for `@object-ui/app-shell`.\n\n## Tests\n- `FieldSelectorWidget.loadFailure.test.tsx`: the existing fault-vs-measurement pins are re-pointed at the served read (responses are the `{ type, name, item }` envelope; a non-JSON 500 still fails with its status). The objectstack#37225 describe now pins the `Authorization` header on the served read. New top-level describe \"the catalog is read from the served object document\": the request is exactly `GET /api/v1/meta/object/:name?preview=draft` and never a `/fields` path; the bound name is encoded into the path; record-shaped `fields` become the options (label and type on the stored chip); a 404 is the \"Object not found\" failure, with no picker.\n- `FormFieldSpec.dependsOn.test.tsx` and `__tests__/SchemaForm.controlWidgetFailureArmNaming-9931.test.tsx`: their fetch doubles answer the served envelope, and the asserted URL is the served one.\n\n<details><summary>Readings at de4ff26c (base origin/main 815e882b)</summary>\n\n- Premise at 815e882b, static census: 0 rows whose path contains `fields` in all 18 route ledgers (each conformance-tested against the mounted routes); 0 declarers of `widget: 'field-selector'` in `packages/spec` metadata forms, `ui/` production code or hotcrm. Not measured by booting a server.\n- Seven files (the three above plus `selector-placeholder.i18n`, `SchemaForm.widgetLabelling`, `SchemaForm.controlWidgetGridNaming-9889`, `viewListDrop-13057`): `Test Files 7 passed (7)`, `Tests 203 passed (203)`. `metadata-client-auth.ratchet` and two siblings: `Tests 25 passed (25)`; `sameServerFetch.bearer.ratchet`: `Tests 4 passed (4)`.\n- Ablation: `widgets.tsx` restored to 815e882b with the new tests (fix committed first; restore `blob == HEAD` after): `Tests 8 failed | 54 passed (62)` across the three changed test files — every test of the new describe red, plus the populated, rejected and bearer pins and the `dependsOn` URL pin.\n- The whole `metadata-admin/` directory at aa74c7c3 (the previous head, whose read built its client through the factory): `Test Files 1 failed | 804 passed (805)`; the one failure was `viewListDrop-13057`'s \"every console MetadataClient is built by useMetadataClient\", which de4ff26c fixes (it passes in the seven-file run above).\n- `@object-ui/app-shell` `type-check` (both `tsc` programs) exit 0 after a real `.d.ts` build of its dependency closure. `eslint` on the five changed `.ts`/`.tsx` files exit 0, no new warnings in `widgets.tsx` (one fewer `no-explicit-any`).\n- `dispatch-gates --ran`: 38 derived, 38 run, 0 NOT-MEASURED; 37 exit 0. `pnpm --dir ui exec vitest run scripts/` was killed by the local 20-minute timeout (SIGKILL), so it is left to CI. `check:new-line-citations` alone: 0 citations added.\n</details>\n\n## Acceptance notes\n- The full `@object-ui/app-shell` suite did not finish inside a 28-minute local timeout; CI's `Test UI` is the reading for it.\n- No boot reading: the old path's 404 and the new path's 200 against a running showcase server are not measured here.\n\n## Verification\nRead first (by risk):\n1. `widgets.tsx`: `fetchFieldSelectorOptions` and the `loadFields` / `objectMissing` lines in `FieldSelectorWidget`.\n2. `FieldSelectorWidget.loadFailure.test.tsx`: the new last describe.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/FieldSelectorWidget.loadFailure.test.tsx` passes; put `widgets.tsx` back to 815e882b and the same file reds in the new describe.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwBcaYpnhtGgnknxmq)_\n"
+}

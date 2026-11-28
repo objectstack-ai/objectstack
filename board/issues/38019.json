@@ -2,8 +2,8 @@
   "number": 38019,
   "kind": "issue",
   "title": "Review follow-ups of PR #37971: admitAuthoredSource names the right cause for a search refusal; ai_context accepts `id`; prefixed names at the door; relevantWhen on the knowledge-source upgrade entries",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T16:32:07Z",
-  "updated_at": "2026-11-27T19:22:07Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T04:56:56Z",
+  "closed_at": "2026-11-28T04:53:38Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38019",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-ups of PR #37971 (#37307): contract review 7221784031 nits N3, N4 and N6, L1-a 7221796788 (\"file the `admitAuthoredSource` wording as a card, and use the same wording as the S2 fix\"), plus one gap the dev found beside M1 (dev report 7223340311); one card per PR, review-follow-ups exception · Source: topic #37000\nGrading: area:ai · Task · p3 (suggested: wording, one sibling field-existence gap, and an upgrade-guide filter; no data path changes) · reach: authors of `knowledge_source` and `ai_context` items, and readers of the 19 upgrade guide · evidence: read (the review records and the dev report named above).\nDedupe: `is:issue \"PR #37971\"` → #37307 only; `is:issue admitAuthoredSource wording` → none open; `is:issue validate-ai-context injectedColumnDefsFor id` → none open.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：几处收尾小问题：知识源保存被拒时，提示的原因写错（让作者去开放一个已退役的 `search` 方法）；AI 上下文的字段检查把 `id` 当成不存在；发布时对带平台前缀但不存在的对象名没有判错；升级指南里知识源相关的条目没有「只在用到知识源时显示」的条件。\n- 做什么：按 PR #37971 已定的措辞改提示；`id` 等注入列按存在处理；补上发布时的判断和升级条目的显示条件。\n- 谁受益：写知识源和 AI 上下文的作者，看升级指南的人。\n- 需要你做的：无。\n\n## What\n1. **N4, the save-door wording.** `admitAuthoredSource` (`packages/services/service-knowledge`, the object-api-not-served refusal) says the object's `enable.apiMethods` list \"does not include search\". `search` is a retired list value: it is stripped at parse, and search derives from `list` unless `enable.searchable` is false. Use the wording PR #37971 settled for its S2 fix: cause, \"the API does not serve object 'X' for `search` (`enable.apiEnabled` is false, its `enable.apiMethods` list does not grant `list`, from which search derives, or it grants `list` beside `enable.searchable: false`)\"; fix, \"Serve 'X' for search: keep `enable.apiEnabled` true and, where it declares `enable.apiMethods`, include `list` with `enable.searchable` not false; or index another object\".\n2. **`ai_context` and `id`.** `packages/lint/src/validate-ai-context.ts` resolves field existence through `injectedColumnDefsFor`, which leaves `id` out by contract, the same gap PR #37971's M1 closed for knowledge sources. Resolve existence through `injectedColumnsFor`, as `system-fields.ts` prescribes; pin `id`.\n3. **N3, a prefixed name at the door.** The knowledge-source rule does not judge an absent platform-prefixed object name against the whole served collection at publish. Judge it there as an error, as unprefixed names now are; the CLI's warning arm stays.\n4. **N6, `relevantWhen`.** The knowledge-source upgrade entries under `packages/spec/src/migrations/entries/semantic/19.knowledge-source-*` carry no `relevantWhen` (stack declares `knowledgeSources`), so every reader of the 19 guide sees them. Add it across the family.\n\n## Acceptance\n- A save refused for an object the API does not serve for search names `list` and `searchable`, never `search`, as the cause and the fix.\n- `ai_context` naming `id` passes `os validate`; pinned.\n- A `knowledge_source` naming an absent platform-prefixed object is refused at publish; pinned.\n- The knowledge-source upgrade entries are listed only for a stack that declares knowledge sources.\n\nBlocked-by: #37307"

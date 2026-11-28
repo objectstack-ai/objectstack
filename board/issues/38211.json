@@ -1,0 +1,31 @@
+{
+  "number": 38211,
+  "kind": "issue",
+  "title": "rest: PUT /meta/knowledge_source answers a scoped knowledge-factory miss as \"this deployment runs no knowledge service\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T07:03:14Z",
+  "updated_at": "2026-11-28T07:18:43Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38211",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38208 (#38058; contract record 7235658537 §③ note 2, which asks for it to be filed and measured first) · Source: topic #37000\nGrading: area:ai · Bug · p3 (suggested: refusal wording on one transport; status is right, and the platform's own plain-instance service cannot reach it) · reach: a host that registers a scoped `knowledge` factory that serves no instance for an environment, saving a `knowledge_source` through REST · evidence: read, NOT MEASURED. `RestServer.resolveKnowledgeService` (`packages/rest/src/rest-server.ts` ~6227) returns whatever `kernelServiceProvider` answers and maps only the branded miss to `undefined`, so a scoped miss most likely takes the no-service sentence, while after PR #38208 the dispatcher transport answers it with its own scope sentence.\nDedupe: `is:issue rest knowledge scoped factory miss no knowledge service` → checked at filing; open: #38058 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：同一个\"保存知识源\"操作走两条入口(REST 和内部调度)。PR #38208 之后，按范围注册的知识服务落空时，调度入口会如实说\"该环境没有实例\"，REST 入口很可能仍说\"这个部署没装知识服务\"。两边说法不一致，而且 REST 的说法不对。\n- 做什么：先实测 REST 入口的回答；如果确实不一致，让 REST 用同样的判别和说法，或者写明为什么不用。\n- 谁受益：使用按范围注册知识服务的宿主(少见)。\n- 需要你做的：无。\n\n## What\n1. Measure first: on a real kernel with a `SCOPED` `knowledge` factory that serves no instance for the request's environment, `PUT /meta/knowledge_source/:name` through `RestServer`. Record the status and sentence.\n2. If it reads \"runs no knowledge service\", give the REST transport the same classification as the dispatcher's `classifyServiceOrLoud` (PR #38208) and answer `knowledgeServiceNotInScope(scopeId)`. Otherwise, state and pin why the shared sentence is right.\n\n## Acceptance\n- The measured reading is in the PR.\n- A REST pin on a real kernel with a scoped factory asserts the scope sentence (or the stated reason). The controls are a plain instance (admitted) and a factory that serves the scope (admitted).\n- The two transports answer the same miss with the same sentence.\n\nBlocked-by: #38208"
+}

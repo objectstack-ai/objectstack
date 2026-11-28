@@ -1,0 +1,32 @@
+{
+  "number": 38154,
+  "kind": "issue",
+  "title": "文档和注释仍把 trackHistory 说成「字段历史开关」：改成 #38064 合入后的字段历史模型（接 #36776）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "domain:docs",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T04:37:42Z",
+  "updated_at": "2026-11-28T05:19:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38154",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) follow-ups named by the contract review on PR #38064 (#36776), record 7231559159 §③ and N3, left out of that card's `packages/spec` scope. Rechecked on origin/main after #38064 merged (1f1cd212). Source: fleet.\nGrading: area:build · Docs · p2 · reach: every author or AI reading the data-modeling docs, the ObjectQL protocol pages, the generated security-context reference or the project skill's eval about field history · evidence: grep on main, sentence by sentence against #38064's model.\nDedupe: \"trackHistory docs field history\", \"trackHistory oversell\" → 0 open.\n\n## 维护者速读\n\n- 问题：#38064 已经把拒绝提示改成正确的字段历史说法：字段改动的新旧值默认就会显示在记录时间线上，对象上的 trackHistory 只管审计台账视图。但文档、协议页、两处源码注释和项目技能的一道评测题，还把 trackHistory 讲成「字段历史开关」。照着写的人或 AI 会以为不开它就没有字段历史，或者以为把它设为 false 能关掉。\n- 修法：逐句改成和 #38064 一样的说法，指向 fieldHistory。只改文字，不改行为。\n- 要你做的：无。\n\n## Lines (origin/main after 1f1cd212)\n\n- `content/docs/data-modeling/field-types.mdx:1063`: field `trackHistory` is described as the timeline switch.\n- `content/docs/data-modeling/objects.mdx:81`, `:94`; `content/docs/data-modeling/schema-design.mdx:68`; `content/docs/protocol/objectql/schema.mdx:239`; `content/docs/protocol/objectql/index.mdx:89`; `content/docs/concepts/metadata-driven.mdx:487`: object `trackHistory` is glossed as \"field history tracking\".\n- `packages/spec/src/system/index.ts:45–46` and `packages/spec/src/system/security-context.zod.ts:17`: the comment \"object/field `trackHistory`\". The second is rendered into `content/docs/references/system/security-context.mdx:16`, so regenerate it.\n- `skills/objectstack-project/evals/project-process.json:145`: the expected output says it \"sets `trackHistory` where field-level history is wanted\". This is governed `skills/**`.\n- N3: the folded spellings of `trackChanges` / `feedTracked` in the alias table. Check that each refusal reads the `fieldHistory` model, as `tracked` does.\n\n## Ask\n\n1. Each line above says what #38064's refusals say: a changed field's values show by default (except the default-off types, which need `fieldHistory: true`). Field `trackHistory: false` turns nothing off. Object `trackHistory` gates the ledger view and the `history` verb, not the values.\n2. Regenerate the security-context reference. The spec comment edit ships a patch changeset (comment-only zod.ts edits ship bytes).\n3. The eval line changes in the same PR. That makes it Tier H by path (`skills/**`), or split it into a skills-only PR if the seat prefers.\n\n## Acceptance\n\n- `git grep -n \"trackHistory\"` over `content/docs`, `packages/spec/src/system` and the project skill's evals has no sentence that calls it the field-history switch.\n- Related: #36776, PR #38064."
+}

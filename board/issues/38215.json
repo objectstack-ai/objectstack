@@ -1,0 +1,31 @@
+{
+  "number": 38215,
+  "kind": "issue",
+  "title": "knowledge-turso: a narrow record-only scope goes straight to the exact scan instead of paying for the one-bit pass first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-28T07:35:19Z",
+  "updated_at": "2026-11-28T08:17:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38215",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of #38066 (the seat's ruling B, comment 7236023531; named out of the os-dev report 7235999186) · Source: topic #37000\nGrading: area:ai · Feature · p3 (suggested: a speed-up; recall is unaffected) · reach: every Turso store with the one-bit index on, for a search whose scope is record ids only and keeps a small share of passages · evidence: measured in the #38066 report 7235999186 at 200k x 1536 (clustered synthetic, topK 10, 50 queries per share) on origin/main e3bdc74884. Under a record-only scope the floor-8 path costs p95 303 / 381 / 419 ms at 10 / 15 / 20% in scope. The exact scan alone, which F3's record index (PR #38160) now limits to the rows in scope, costs 128 / 207 / 265 ms.\nDedupe: `is:issue knowledge-turso record scope exact index one-bit pass` → checked at filing; open: #38066 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：F3 加了按记录的索引后，\"只看少量指定记录\"的检索直接逐条比对已经很快(约 0.13 到 0.27 秒)。但现在仍先跑一遍近似检索，不够再逐条比对，总共约 0.3 到 0.42 秒，反而更慢。\n- 做什么：范围只按记录、而且很窄时，直接逐条比对；范围宽时仍用近似检索。分界点要实测。\n- 谁受益：权限范围窄的用户在大知识库里的检索速度。\n- 需要你做的：无。\n\n## What\nIn `packages/plugins/knowledge-turso/src/turso-adapter.ts`, when the scope is record ids only (no parent term) and the in-scope share is narrow, skip the approximate leg and run the exact scan, which the record index already limits to the rows in scope. Choose the cut-over by measurement. It can be a share estimate, or a threshold on the scope's id count relative to the source's passage count. Wider shares keep the approximate leg: at 50% the exact scan reads 100k rows and the one-bit pass wins.\n\n## Acceptance\n- Real-store bench (200k x 1536, topK 10, 50 record-only scoped queries per share) at 5, 10, 20, 35 and 50% in scope: at every share, p95 is no worse than the better of today's path and the exact scan alone, and recall@10 is at least today's.\n- The cut-over's position is stated with the measurement that placed it.\n- With the direct-exact branch ablated, the bench's narrow-share p95 goes back to today's (the pin).\n- Parent-scoped searches keep #38066's path.\n\nBlocked-by: #38066"
+}

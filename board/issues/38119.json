@@ -1,0 +1,37 @@
+{
+  "number": 38119,
+  "kind": "pull_request",
+  "title": "ci(release): the post-version validation also runs the registry template's region pin",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "ci/cd",
+    "pm:awaiting-merge",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:58:13Z",
+  "updated_at": "2026-11-28T04:21:48Z",
+  "closed_at": "2026-11-28T04:21:45Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-28T04:21:45Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38119",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoQcXadSnPCNF2ff1apTGQy2)_\n\nFixes #37587\nrepo:objectstack#3 · os-tesla · session_01L9qibxRSo4RBpRknKqBLmy\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感：发版流程里\"版本 PR 打开前的校验\"多跑一个只要 2 秒的测试。它检查迁移登记模板有没有给当前大版本开好区段；下一次跨大版本时，如果漏开了区段，同一次运行里就会直接报出来，不会等到版本 PR 上再红。\n- 为什么做：卡 #37587 的最后一项。19 预发布那次，版本 PR 就是被这类缺口挡住的（#37549）。卡上另外两项：ui 测试已由 #38089 合入，mcp-authoring 文案已由 #37821 修好。\n- 出错会怎样：只在 release.yml 的校验步骤里加了一行检查和一段注释，不碰发布、打 tag 或部署那几步；这个 job 只在定时和手动触发时跑。如果这条检查误报，版本 PR 只是暂时不刷新，撤回这一行就恢复。\n- 要你做什么：这个文件按路径属于 Tier H，需要你（GOVERNED_APPROVERS）批准后，由 3 号座位落地。\n\n## What changes\n- `.github/workflows/release.yml`, job \"Version PR maintenance\", step \"Validate the post-version tree\":\n  - One new content gate after the `protocol-version.test.ts` line: `run_gate pnpm --filter @objectstack/spec --fail-if-no-match exec vitest run --project local scripts/build-migration-registry-entry.test.ts`. That file holds the registry template's region pin (from #37557). It checks that every migration kind has an `os-generated` region for the spec package's major and for `PROTOCOL_MAJOR`, the majors a new entry registers under.\n  - The header's \"WHAT IS CHECKED\" list gains the entry. It says why the gate runs here: the version pass moves the spec major, so on a boundary train this is the first tree where the new major is the package's own. It also says what the gate adds next to the existing refusal of a moved `protocol-version.ts`: the same run names a missing region, rather than the run after the refusal is resolved. And it says why the other three files that reddened the 19 Version PR are not added (readings below).\n- No other step, job, permission or trigger changes. Nothing publishes; no changeset.\n\n## Tests\n<details><summary>Readings at dc29936f (5746ba60 measured on origin/main 6e06729a, then cherry-picked onto 447757d0, the merge of #38089)</summary>\n\n- Premise at 815e882b and 6e06729a: the step ran one spec test file, `src/kernel/protocol-version.test.ts` (l.825).\n- The new gate's command on this tree (spec `19.0.0-next.1`, `PROTOCOL_VERSION` 19), after install and with no build, which is this job's state: `Tests  7 passed (7)`, 2.2 s.\n- Ablation: with the `retired-key:19` region deleted from `registry.ts.template`, the same command exits 1: `× opens and closes 'retired-key:19'`, \"src/migrations/registry.ts.template has no `<os-generated retired-key:19>` region, but major 19 is current (spec package 19.0.0-next.1, PROTOCOL_VERSION major 19)…\", `Tests  1 failed | 6 passed (7)`. Restored with `git checkout HEAD -- <file>`; `git status --porcelain` empty.\n- Measured and left out:\n  - `scripts/build-schemas-check-mode.retired-keys.test.ts` (repo project): `13 passed`, 132 s. Its failure on #35129 is the missing region itself, which the pin judges structurally.\n  - `packages/runtime/src/domains/mcp-authoring.test.ts`: does not start without a build (`Failed to resolve entry for package \"@objectstack/objectql\"`).\n  - `ui/scripts/__tests__/doc-version-claims.test.ts`: 2.0 s. Its version-step input is the objectui skill's `compatibility:` pin, which `check:skill-compatibility` already judges in this step.\n- The workflow still parses as YAML (`yaml.safe_load`).\n- At dc29936f the new gate's command reads `Tests  7 passed (7)` again.\n</details>\n\n<details><summary>Gates</summary>\n\n- `dispatch-gates --ran` on `.github/workflows/release.yml`: 40 derived, 40 run, every one `exit 0`, 0 NOT-MEASURED (a derived zero), 0 unrun.\n</details>\n\n<details><summary>Affected step, before and after (advisory)</summary>\n\n- Before: \"Validate the post-version tree\" on the last four scheduled runs and one dispatch took 33 s, 27 s, 33 s, 27 s and 33 s (median 33 s).\n- After: one more file at 2.2 s measured locally, so about +2 to 3 s. Nothing else in the job moves.\n</details>\n\n## Acceptance notes\n- Tier H by path (`check-governed-merges.mjs`, the `release.yml` row of the workflows split). It lands only after an authorized approval, then by the owning seat.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxRSo4RBpRknKqBLmy)_\n"
+}

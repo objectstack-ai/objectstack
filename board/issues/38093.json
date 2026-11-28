@@ -2,9 +2,9 @@
   "number": 38093,
   "kind": "pull_request",
   "title": "fix(scripts): read a function-typed property's return type in the ADR-0087 registration gate",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-28T02:09:58Z",
-  "updated_at": "2026-11-28T02:10:42Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-28T02:53:10Z",
+  "closed_at": "2026-11-28T02:53:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T02:53:08Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/38093",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\nFixes #37446\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；变的是公开类型收窄的登记检查，它现在能读懂「属性: (参数) => 返回类型」这种写法的返回类型。\n- 为什么做：替靠这道检查拦截公开类型收窄的审查者补上漏洞，之前它会把写了具体返回类型的箭头属性当成没写类型，从而放行一次真实的收窄。\n- 出错会怎样：最坏是这道检查对某些写法比以前更严，作者会看到一条拒绝信息；改动只在检查脚本里，直接撤回即可。\n- 要你做什么：无。\n\n## What changes\n\n- `scripts/check-adr-0087-registration.mjs` `memberDefinitionsIn`: a `name: (...) => T` member is now read as a **function type** whose return annotation is the text after the arrow, whenever its `:` sits in a type position: an `interface` or `class` body, a `type` alias object type, an object type nested under one of those through `:` / a union / an intersection / a type argument, or the top level and a parameter list (a `let` / parameter annotation). An object-literal property holding an unannotated arrow (`queryDataset: async (payload) => {`, the founding `type-surface-only` shape), a `name = (...) =>` class field, and anything `async` keep the unannotated reading, so the category's own population is unchanged.\n- New helpers beside it: `enclosingOpener`, `sitsInTypePosition`, `braceOpensTypeBody`, `functionTypeReturn`. A container the classifier cannot read falls back to the old value reading.\n- Consequence for predicate 4: a concrete arrow-property base (`updateUser: (data: Partial of AuthUser) => Promise of AuthUser`) is now CONCRETE at the merge base, so narrowing it to a method signature or to another arrow property is refused as `narrowed-from-erased is FALSE` instead of admitted.\n\n## Tests\n\n- New self-test pins (battery floors raised to match: `type-surface-only` 26 -> 29, `TSO-U` 30 -> 37):\n  - TSO-R8: arrow-property base `Promise` of `AuthUser` -> method-signature head `Promise` of `void` is refused by predicate 4 (the live `ui/packages/auth/src/types.ts#updateUser` shape, moved into a published fixture package).\n  - TSO-R9: arrow-property -> arrow-property, concrete at both revs, refused.\n  - TSO-G2: a truly erased arrow-property base (`=>` `Promise` of `any`) -> method signature is still admitted.\n  - TSO-U31..U37: interface / type-literal / class-field function types read their return; a newline-terminated member stops at its line; nested `() => () => T` and a union continued on the next line are read whole; object-literal and `=`-initialised arrows, and `async` arrows, stay unannotated.\n- Reproduction before the fix (reader level, on `origin/main` f72f3353): `readDeclaredTypeSurface` on the arrow-property base answered `{\"shape\":\"`updateUser`, which carries NO return annotation\",\"type\":null,\"erased\":true}` and on the method head `{\"type\":\"Promise of void\",\"erased\":false}` -- the pair predicate 4 admits.\n\n<details><summary>Self-test and ablation readings</summary>\n\n- `node scripts/check-adr-0087-registration.mjs --self-test` at 4f10d40a: `✓ check-adr-0087-registration --self-test: 834 assertions over real temp git repos (real scan()/assertInputs() path)`, lock `VERDICT command-exit 0`.\n- Ablation (committed fix first; `scripts/ablation-replace.mjs`, anchor x1 -> x0, restored blob == HEAD 7b0a4361, `git diff HEAD` empty): disabling the new function-type branch turns red exactly TSO-R8 (`expected RED, got green` -- the permissive admission reproduced end to end through `scan()`), TSO-R9, TSO-U31, U32, U34, U36, U37; TSO-G2, U33, U35 stay green, as they pin the unchanged readings. Lock `VERDICT command-exit 1`.\n\n</details>\n\n## Acceptance notes\n\n- Not fixed here, noted: the member head regex does not match an OPTIONAL member (`name?: (...) => T`, `name?(...): T`), so such a symbol reads as \"declares no readable symbol\" -- a refusal, the strict direction, not this card's permissive one.\n- Not fixed here, noted: `braceOpensTypeBody` reads a brace after `:` at the top level as a type, so a top-level ternary `c ? a : { f: (x) => y }` would read `y` as a return type -- the strict direction (a concrete reading refuses predicate 4), and no such shape is a known producer.\n- #37445 and #37447 edit the same file and are queued behind this card; neither is touched here.\n\n## Verification\n\n- Read first: `memberDefinitionsIn`'s new `if (!colon)` branch, then `braceOpensTypeBody` (the classifier deciding type vs value), then the TSO-R8 / TSO-G2 pins.\n- Two-minute check: `node scripts/check-adr-0087-registration.mjs --self-test` -- expect the `✓ ... 834 assertions` line and exit 0.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n"

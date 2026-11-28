@@ -1,0 +1,32 @@
+{
+  "number": 38103,
+  "kind": "issue",
+  "title": "Declarative update actions drop the data write's notice and droppedFields, so a hook's note to the operator and the fields the engine stripped never reach the user",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T02:24:28Z",
+  "updated_at": "2026-11-28T03:21:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38103",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) out-of-scope finding from the #37867 card thread (pre-claim report, PR #38076), read on objectstack origin/main 815e882b. Source: fleet.\nGrading: area:ux · Bug · p2 · reach: every declarative `operation: 'update'` action whose write hits a hook that sets a notice or a field the engine strips · evidence: code read (no probe yet).\nDedupe: \"declarative update notice / droppedFields\", \"action answer notice\" → 0.\n\n## 维护者速读\n\n- 问题：用户点一个声明式「更新」动作时，数据写入那一层会带回两样东西：钩子给操作者的提示（notice，#28000），和被引擎剥掉没写进去的字段（droppedFields）。动作执行器把这两样都丢了，用户只看到「成功」，不知道有提示，也不知道有字段没写进去。\n- 修法：照 #37867（PR #38076）给 warnings 开的路，把这两项也带回动作应答，并在控制台的提示里显示出来。\n- 要你做的：无。\n\n## Measured (code read, origin/main 815e882b)\n\n- `packages/runtime/src/protocol-data-writes.ts` l.253–256: the data write answer carries `notice` and `droppedFields`.\n- `executeDeclarativeUpdateAction` → `callData` passes neither through to the action answer. #37867's probe covered `warnings` only; these two are read from the code.\n\n## Ask\n\n1. The declarative update action answer carries `notice` and `droppedFields` when the write returned them, the same way PR #38076 carries `warnings`.\n2. The console action runtime shows them: the notice as the hook's text, and the dropped fields named, on the same one toast.\n3. Pins through the real dispatcher, as #37867's, with ablations.\n\n## Acceptance\n\n- A hook notice on a declarative update reaches the user's toast. A stripped field is named to the user instead of a plain success.\n- Blocked-by: #37867 (same files; build on its answer shape)."
+}

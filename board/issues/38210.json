@@ -1,0 +1,31 @@
+{
+  "number": 38210,
+  "kind": "issue",
+  "title": "service-knowledge: a package duplicate that the knowledge service itself refuses is told to \"save the source\" and that \"Nothing was written\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T07:02:43Z",
+  "updated_at": "2026-11-28T07:18:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38210",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38208 (#38058; contract record 7235658537 §③ note 1, which asks for it to be filed) · Source: topic #37000\nGrading: area:ai · Bug · p3 (suggested: wording at the duplicate door; status and code are right) · reach: an administrator duplicating a package that holds a `knowledge_source` on a deployment that runs the platform's knowledge service (the common path) · evidence: read of PR #38208 at b85886609d by the contract review; `packages/services/service-knowledge/src/knowledge-service.ts` composes `was not saved` (~3149), `Nothing was written; try again.` (~3157) and `have someone who may query it save the source` (~3215, 3226, 3228), and `refuseDuplicatedKnowledgeSources` appends a service verdict verbatim.\nDedupe: `is:issue knowledge duplicate door service verdict wording` → checked at filing; open: #38058 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：复制一个含知识源的应用包时，如果知识服务本身拒绝(比如权限不够)，报错里照搬了\"保存\"时的说法：叫人\"再保存一次知识源\"、说\"什么都没写入\"，对复制操作的人来说不对。\n- 做什么：知识服务给出拒绝理由时也区分是\"保存\"还是\"复制\"，复制时说\"没有复制\"并让人重新复制。\n- 谁受益：复制应用包的管理员(报错能照着做)。\n- 需要你做的：无。\n\n## What\nPR #38208 gave the predicate-composed refusals a `door: 'save' | 'duplicate'` wording. The knowledge service's own `admitAuthoredSource` verdicts still pass verbatim through the package-duplicate door. Let the door reach the service's verdict wording (for example a `door` input on `admitAuthoredSource`, or a duplicate-door rewrite of the service's remedy tail), so that a duplicate is told \"cannot be copied … duplicate the package again\", with no \"save the source\" and no second \"nothing was written\". The save door's bytes stay unchanged.\n\n## Acceptance\n- On a real kernel running `KnowledgeServicePlugin`, each service verdict reached through the duplicate door (the 503 transient and the 403 query-permission arms) says nothing was copied exactly once and tells the caller to duplicate again, with no \"save the source\" and no \"Nothing was written\".\n- Control: the same verdicts at the `/meta` save door are byte-identical to before.\n- The pins go red when the door's wording is reverted.\n\nBlocked-by: #38208"
+}

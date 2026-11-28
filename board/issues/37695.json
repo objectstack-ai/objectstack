@@ -14,18 +14,20 @@
     "area:ai",
     "bug",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T21:00:21Z",
-  "updated_at": "2026-11-26T21:16:03Z",
+  "updated_at": "2026-11-28T07:30:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37695",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7203257460 on PR #37675, nits N1–N3 and its out-of-diff note, adopted at ACCEPT)\n\n## What happens\n\nPR #37675 (card #37625) corrects the `objectstack-i18n` skill and two spec comments: the three locale routes are mounted by the runtime HTTP dispatcher and served from whichever i18n provider fills the slot. Its review left these items open; none could be fixed on that head without moving it (the skill sits at its token ceiling).\n\n- [ ] **The retired route-owner fact is still stated outside that diff** (N1). `packages/spec/src/system/i18n-resolver.ts` still says it in the `ResolvedFieldLabel` docblock (\"service-i18n's autonomous route\") and the `normalizeSupportedLocales` docblock (\"either one can be the thing mounting `GET /i18n/locales`\"); the same wording sits in `packages/client/src/index.ts` and `i18n-resolver.test.ts`. Expected: name the dispatcher as the mounter, as #37675 did.\n- [ ] **\"Don't wire this plugin\" reads as a prohibition** (N2). Explicit `new I18nServicePlugin({ localesDir })` wiring is supported (`os serve` skips auto-registration when it is present). Expected: restore the statement form (\"You do not need to wire…\") when tokens allow.\n- [ ] **`getSourceLocale()` is listed bare** (N3). It returns only the declared value (`undefined` otherwise), while the same skill's config table says `sourceLocale` defaults to `defaultLocale`. Expected: one clause saying what the getter returns when nothing is declared.\n- [ ] **Registration sentence omits two facts** (out-of-diff note). The three routes answer signed-in callers only, and the locales answer also carries `fallbackChain` (`packages/runtime/src/domains/i18n.ts`). Expected: say both, if the budget can pay for them.\n\nCategory ①: docs and skill text that teach a stale or incomplete fact.\nPriority: p3 (comments and skill wording; no shipped behaviour changes).\nBusiness reason: an app author or agent following the skill or the spec comments would look for the routes in the wrong plugin, or read `getSourceLocale()` as always returning a locale.\nReader: the dev who next edits the i18n skill or `i18n-resolver.ts`.\nDedupe: searched open issues for `\"PR #37675\"`: 0 hits.\nRelated: #37625, PR #37675.\n\n## Grade\n\narea:ux · Bug · minor · reach: read (the head against `main`) · evidence: read → p3"

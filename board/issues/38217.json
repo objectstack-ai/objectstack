@@ -1,0 +1,31 @@
+{
+  "number": 38217,
+  "kind": "issue",
+  "title": "spec: the knowledge-source-id-to-name conversion says \"no index is rebuilt\" without the leading-underscore exception",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T07:43:06Z",
+  "updated_at": "2026-11-28T08:17:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38217",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38050 (#38022; L1 ACCEPT 7236095767, which names it worth a card) · Source: topic #37000\nGrading: area:ai · Bug · p3 (suggested: an upgrade notice that is true for every source but one class; the tombstone and upgrade entry already teach the exception) · reach: an author upgrading from 18 whose `knowledgeSources[].id` starts with an underscore, reading `os migrate meta --from 18` · evidence: read on origin/main e3bdc74884: `packages/spec/src/conversions/entries/19/knowledge-source-id-to-name.ts` `summary` reads \"the value is unchanged, so no index is rebuilt\", and its jsdoc says \"the rename starts no rebuild (K6 item 4)\". PR #38050 teaches, on the `id` tombstone and in entry `19.knowledge-source-registration-governed`'s `reason`, that `name` refuses a leading underscore, so such a source takes a new name, is built again under it, and must drop its old index with `dropSource`.\nDedupe: `is:issue knowledge-source-id-to-name underscore rebuilt` → checked at filing; open: #38022 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：从 18 升级时，迁移工具对\"知识源 id 改名为 name\"的说明写着\"值不变，所以不重建索引\"。但 id 以下划线开头的知识源不能直接沿用(name 不允许下划线开头)，要换新名字并重建索引。这一类没被说到。\n- 做什么：在迁移工具的那句说明里补上这个例外，与 PR #38050 已改的说明保持一致。\n- 谁受益：从 18 升级、知识源 id 以下划线开头的作者(照提示做不会漏掉重建和清理旧索引)。\n- 需要你做的：无。\n\n## What\nIn `knowledge-source-id-to-name.ts`, qualify `summary` and the jsdoc's \"the rename starts no rebuild\" with the exception PR #38050 states. A source whose id starts with an underscore cannot keep it as `name`. It takes a new name and is built again under it, and its old index is dropped with `dropSource`, which the author runs: it is not automatic. Check what `renameKey` does with such a value today (rewrite it to a `name` the parse then refuses, or refuse it), and make the summary match.\n\n## Acceptance\n- `os migrate meta --from 18` on a fixture with an underscore-led id prints a notice that names the exception and the remedy. A fixture with a plain id still reads \"no index is rebuilt\".\n- The conversion's fixture or a test pins the underscore case.\n- The wording agrees with the `id` tombstone and entry `19.knowledge-source-registration-governed` as landed by PR #38050.\n\nBlocked-by: #38050"
+}

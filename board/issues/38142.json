@@ -1,0 +1,31 @@
+{
+  "number": 38142,
+  "kind": "issue",
+  "title": "spec migrations: three ADR-0087 semantic entries landed under protocol major 18 after PROTOCOL_VERSION moved to 19, so `os migrate meta --from 18` never shows them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T04:16:19Z",
+  "updated_at": "2026-11-28T04:44:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38142",
+  "body": "repo:objectstack#8 · sunhaolin · session_017xRBcSAaBEfQpU2yJexSJ8\n\nFiling gate: ① (named landing point, measured from the ledger's own composition rule) · Source: fleet — out-of-diff note of the contract review record 7233848869 on PR #38096, which found the same defect in that PR's own entry (M1, fixed there).\n\n## What happens\n\n`gen:migration-registry` places an entry by its file's major prefix; `composeMigrationChain(fromMajor, toMajor)` keeps only the steps above `fromMajor`. `PROTOCOL_VERSION` is `19.0.0` on `main` and the 18.x line is released through 18.6.0, so a refusal that first ships in 19 belongs to `step19`. An entry filed as `semantic/18.*.ts` after the move is skipped by `os migrate meta --from 18` — exactly the upgrade where the refusal starts, the silence ADR-0087 D3 exists to prevent — while its changeset's `adr-0087: registered` marker claims the notice.\n\nThe review names three such entries: two added by PR #37366 and one by PR #37513 (read the record for the reasoning). Re-check: `git log --diff-filter=A --format='%h %ad %s' --date=iso origin/main -- 'packages/spec/src/migrations/entries/semantic/18.*'` against the commit that moved `packages/spec/src/kernel/protocol-version.ts` to 19 (`git log --format='%h %ad' --date=iso origin/main -- packages/spec/src/kernel/protocol-version.ts`), then per candidate: did the behaviour first ship in a 19 prerelease?\n\n- [ ] Measure each candidate (first release that carries it), rename the ones that belong to 19 to `semantic/19.*`, ids unchanged, registry regenerated.\n- [ ] Say whether `check-adr-0087-registration` should read the major (it reads the id only) — measured case, ⛔ no new gate without the maintainer naming it (SKILL.md four axes): an existing gate's blind spot is the in-bounds fix, a new gate is not.\n\n## Business reason\n\nAn author upgrading an 18.x app is told nothing about three refusals they will hit; the migration notice is the record the upgrade is judged by.\n\n## Reader who acts\n\nSeat `repo:objectstack#8`, one PR (renames + regeneration).\n\n## Dedupe\n\n`is:issue migration entry major 18 19 semantic` → 0 hits; `is:issue composeMigrationChain fromMajor` → 0 hits on this defect.\n\nGrade: area:data · Bug · p2 · reach: authors who run `os migrate meta --from 18` on an 18.x app; a missing upgrade notice, no data loss"
+}

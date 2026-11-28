@@ -1,0 +1,32 @@
+{
+  "number": 38207,
+  "kind": "issue",
+  "title": "check-adr-0087-registration: a `type X = {` alias that follows a semicolon-less statement reads its body as a value, so its annotated members read as erased",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T06:47:59Z",
+  "updated_at": "2026-11-28T06:49:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38207",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① (b) out-of-scope finding of the #38144 dev (os-dev report, #38144 comment 7235496909). Source: seat repo:objectstack#1 area `o1-F`. ⛔ Not a claim.\nGrading (suggested, triage's call): area:fleet · Bug · reach: ADR-0087 predicate 4 readings of a member of a type-literal alias in any file whose preceding statement ends without a semicolon · evidence: measured at origin/main `9dca1097bd` and at PR #38179 head `9e13d6d24a`.\nDedupe: `braceOpensTypeBody`, `semicolon-less alias`, `sitsInTypePosition` → only #38144 open, a different mechanism (a type literal inside a header, not where the header starts).\n\n## 维护者速读\n\n- 问题：发版检查里读类型的工具，遇到 `type X = { ... }` 这种写法时，如果它前一行语句没写分号，就会把这个类型的成员当成「没有标注」。和 #38144 同一个方向：本该拦下的改动可能被放行。\n- 修法：让它在没有分号的语句之后也能认出类型别名的开头，并补上能证明修好的测试。\n- 要你做的：无。\n\n## Measured\n\n- `readTypeSurfaceRef` answers \"`SidebarContextProps.setOpen`, which carries NO return annotation\" (erased) for `ui/packages/components/src/ui/sidebar.tsx#SidebarContextProps.setOpen`; `setOpenMobile` and `toggleSidebar` read the same. Same reading at origin/main `9dca1097bd` and at `9e13d6d24a`.\n- Cause: `braceOpensTypeBody` recognises a type alias only at the start of the header it collects. After a semicolon-less statement the header starts at that earlier statement (here `from \"./tooltip\" const SIDEBAR_... =`), so the alias body reads as a value.\n- Minimal repro: `import { a } from \"b\"\\n\\ntype T = {\\n  f: () => void\\n}\\n` gives `memberReturnAnnotation` f = null; the same text with `export interface T {` gives `void`.\n- Direction: permissive for predicate 4 (an annotated member reads as erased).\n\n## Acceptance\n\n- A member of a `type X = {` alias reads its annotation when the alias follows a semicolon-less statement; the sidebar instance above resolves to its annotation.\n- Pins: the minimal repro, the real sidebar shape, and a lit control (the same alias after a `;`); an ablation reds them. The #38093, #38137 and #38144 pins stay green.\n\nSurface: `scripts/check-adr-0087-registration.mjs` (`braceOpensTypeBody`). Serial after PR #38179 (#38144, same function).\nBlocked-by: #38144"
+}

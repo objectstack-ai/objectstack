@@ -2,8 +2,8 @@
   "number": 37435,
   "kind": "issue",
   "title": "选项颜色：声明了九个色系以外的颜色名（如 teal、amber）时界面静默显示为中性灰，应在保存时提示或给出映射（接 #36882）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T04:51:36Z",
-  "updated_at": "2026-11-28T00:53:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T02:48:32Z",
+  "closed_at": "2026-11-28T02:46:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37435",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding S3 of the seat's contract-tier L2 on PR #37427 (#36882), record 7182916794, verdict 7182932149; the seat asked the owning zone to card it. Source: reviewer.\nGrading: area:ux · Bug · p2 (with the parent) · reach: any author who declares a select option `color` that is neither one of the nine semantic families nor a hex, once #36882 ships · evidence: L2 S3; os-dev report 7182745430 (out-of-scope note: no platform or example producer declares one today).\n\n## 维护者速读\n\n- 做什么：#36882 之后，选项颜色只认九个色系名或十六进制色。写了 teal、amber 这类名字的，界面会悄悄显示成灰色，作者不知道写错了。改成保存时提示，或者把常见颜色名映射到最近的色系。\n- 谁受益：给选项配颜色的搭建者。\n- 不做会怎样：写了颜色却显示灰色，没有任何提示。\n- 需要你做的：无。\n\n## What\n\n- After #36882 an option `color` outside the nine families and not a hex renders neutral with no signal (before, the value hash coloured it).\n- Pick one and state why in the PR: (a) refuse or warn at save on an out-of-family colour name, naming the nine families; or (b) map the common CSS names (teal, amber, …) to the nearest family. Option (a) is a narrowing and carries its own declaration.\n\n## Acceptance\n\n- An out-of-family colour name no longer renders neutral silently; a pin for it and for a declared family name.\n\n## Order\n\nAfter PR #37427 merges.\n\nBlocked-by: #36882\n\nReader: zone o5-U (seat repo:objectstack#5).\nDedupe: open issues for \"teal amber option color\" and \"out-of-family colour\" return none."

@@ -1,0 +1,32 @@
+{
+  "number": 38219,
+  "kind": "pull_request",
+  "title": "docs(releases): drop the retired knowledge-ragflow from implementation-status",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T07:51:22Z",
+  "updated_at": "2026-11-28T08:12:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38219",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuKQhn8159SBVy85xb31ZjCh)_\n\nFixes #37481\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 是什么：文档改三处。实现状态页不再把已退役的 RAGFlow 适配器（`knowledge-ragflow`）列为随仓发布的插件。\n- 为什么：这个包已由 PR #37477 删除，页面还写着它在，读者会以为能用。\n- 出错会怎样：只改文档文字，没有代码和发布面；可直接撤回。\n- 要你做的：无。\n\n## What changes\n\n`content/docs/releases/implementation-status.mdx`, three lines, only the retired name is removed:\n\n- line 311 (AI protocol table, **RAG Pipeline** row): `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins → `knowledge-memory` / `embedder-openai` plugins.\n- line 329 (Notes under that table): the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins → the `knowledge-memory` and `embedder-openai` plugins.\n- line 446 (Phase 10 checklist, RAG Pipeline item): the same edit.\n\nThis is a docs-only PR, as AGENTS.md's Documentation Guardrails ask for a factual error on a releases page (`content/docs/releases/` is never edited in a code PR). No published package changes, so it carries `skip-changeset`.\n\nPremise, read on `main` 9609c137 before the edit: PR #37477 has merged (the card's `Blocked-by: #37004` is cleared) and no `knowledge-ragflow` package is left under `packages/plugins`.\n\n## Why\n\nThe page told readers a retired adapter ships in this repo.\n\n## Verification\n\n- `git grep -n -i ragflow content/docs/releases/implementation-status.mdx` returns nothing (exit 1), the card's Done-when.\n\n<details><summary>runs</summary>\n\nHead 2d895db9.\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 52 commands. The docs and release-page families were run locally, all exit 0: `check-adr-links`, `check-closing-keyword-parity`, `check-doc-route-spelling --advisory`, `check-docs-section-name`, `check-issue-citations`, `check-release-section-coverage` (plain and `--strict`), `check-section-landing-index`, `check-comment-mask-corpus`, and `pnpm check:` `doc-anchors`, `doc-authoring`, `doc-frontmatter`, `docs-redirects`, `docs-single-h1`, `release-notes`, `release-page-status`, `issue-citations`, `docs-audit-scope`, `corpus-claim-drift`, `nul-bytes`, `role-word`, `closed-ceremony-text`, `docs-spec-enumerations`, `skill-identifier-liveness`, `vendor-version-stamps`, `published-readme-links`, `adr-anchors`.\n\nNOT MEASURED locally, left to CI: `pnpm check:docs-transcript-drift` answered exit 3 (prerequisite: `@objectstack/lint` is not built in this container), and the remaining derived commands (spec, lint-package and `--self-test` checker-health families) were not run, since this diff touches none of their inputs.\n\n</details>\n\n## Acceptance notes\n\n- The adapters that replaced RAGFlow, `knowledge-pgvector` and `knowledge-turso`, both live under `packages/plugins` but are not named on this page. Adding them is outside this card (its Done-when only removes the retired name), so the three lists now name `knowledge-memory` and `embedder-openai` only. A follow-up can add them if the page should list every store.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran. `pnpm lint` was not run locally: the diff touches no lintable source.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes; `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [ ] 7. No hand edits to `content/docs/releases/`. Deliberately not ticked: this is the dedicated docs-only PR that AGENTS.md prescribes for a factual error on a releases page.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 summary is the seat's Chinese summary for the maintainer)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\nThe branch is `claude/project-thread-yhu54n`, assigned by the platform rather than the repo's `claude/issue-<n>-…` convention.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTYj1Jzqd85E3eG9Ta\n"
+}

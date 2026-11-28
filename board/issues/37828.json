@@ -2,8 +2,8 @@
   "number": 37828,
   "kind": "issue",
   "title": "A localized 404 RECORD_NOT_FOUND is cacheable by default but carries no Vary: Accept-Language",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T05:40:27Z",
-  "updated_at": "2026-11-28T01:39:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T05:54:39Z",
+  "closed_at": "2026-11-28T05:31:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37828",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a contract review finding outside its PR's diff) · Source: fleet (PR #37813 contract review 7210823764, S1; card #37737 item 6)\n\n## What happens\n\n`404 RECORD_NOT_FOUND`, raised by `GET /data/:object/:id` (`packages/metadata-protocol/src/protocol-data-crud.ts:1016`), carries a `userMessage` in the caller's `Accept-Language` (`packages/core/src/utils/record-not-found.ts:75`). It sends no `Vary: Accept-Language`. A `404` is cacheable by default (RFC 9110 §15.1), so a shared cache can serve one caller's language to another.\n\nPR #37813 adds `Vary: Accept-Language` to the ten localized `501`s in runtime, which answers #37737 item 6 for those only. This card carries the rest of item 6.\n\n## Expected\n\nEvery localized refusal that is cacheable by default carries `Vary: Accept-Language`. Today that is the `404` above; the card checks whether any other cacheable status (`410`, `405`, `414`, `421`, `451`) carries a localized message.\n\n## Done when\n\n- [ ] `404 RECORD_NOT_FOUND` sends `Vary: Accept-Language`, through both senders (the Hono adapter and the dispatcher plugin), appended to any existing `Vary`.\n- [ ] A test pins the header on the `404`.\n- [ ] Any other default-cacheable localized refusal found is covered the same way, or listed on this card.\n\nGrade: area:ux · bug · reach: a shared cache in front of a multi-language deployment · evidence: read (the two lines above), not run\nSuggested-grade: p3\nSize: S\nRelated: #37737, PR #37813, #37811."

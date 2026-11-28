@@ -1,0 +1,32 @@
+{
+  "number": 38129,
+  "kind": "pull_request",
+  "title": "docs(changelog): the 35827 note names GridCellSelectionProvider as the host to mount",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T03:21:53Z",
+  "updated_at": "2026-11-28T03:25:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38129",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoPm5yqPvuwrjEV9JhFTrVJj)_\n\nFixes #37521\nrepo:objectstack#3 · os-tesla · session_01L9qibxEbSk19qJRPHrm3v9\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 是什么：纯文档。#35827 已发布的发版说明里，迁移表有两行叫宿主去挂 `GridCellSelection`，这是类型名，挂不上；改成要挂的组件 `GridCellSelectionProvider`。\n- 为什么：PR #38097 已把运行时警告改对，发版说明还写着旧名字，照着做会编译不过。\n- 影响谁：只影响读 CHANGELOG 的宿主开发者；没有行为变化，可整体撤回。\n- 需要你：无。\n\n## What changes\nThe migration table of the #35827 note (\"the staged editing model is retired\"), two rows, in six copies: the five published `CHANGELOG.md` entries (`@objectstack/spec`, `@object-ui/app-shell`, `@object-ui/components`, `@object-ui/plugin-grid`, `@object-ui/types`, each in its `19.0.0-next` section) and the consumed prerelease changeset `.changeset/pre/35827-data-table-staged-edit-retired.md`.\n\n- Row `data-table` schema `onBatchSave: (changes) => …`, TO column. Before: \"`onRowSave` inside a `GridCellSelection` host, or render `object-grid`\". After: \"`onRowSave` inside a `GridCellSelectionProvider` host, or render `object-grid`\".\n- Row \"an editable `data-table` with no … host or no `onRowSave`\". Before: \"an editable `data-table` with no `GridCellSelection` host or no `onRowSave` | mount `GridCellSelection` and pass `onRowSave`, or render `object-grid`; until then it renders read-only and warns\". After: \"an editable `data-table` with no `GridCellSelectionProvider` host or no `onRowSave` | mount `GridCellSelectionProvider` and pass `onRowSave`, or render `object-grid`; until then it renders read-only and warns\".\n\nNothing else in the note moves. The note's opening sentence, \"edits only inside a select-first host (`GridCellSelection`)\", names the model and is left as written; the other `GridCellSelection` mentions in these CHANGELOGs name the type's members (`GridCellSelection.confirmCommit`, `.describeCell`, `referenceCells`) and are correct.\n\n## DELIBERATE CORRECTION\n\nThis PR rewrites a released note, the #35827 note, in its consumed changeset `.changeset/pre/35827-data-table-staged-edit-retired.md` and in the five CHANGELOG entries compiled from it.\n\n- AGENTS.md *Documentation Guardrails*, `packages/*/CHANGELOG.md` row: a factual error in a released entry is amended in that entry, in a dedicated docs-only PR.\n- The consumed prerelease copy is changed byte-equal with the CHANGELOG rows (bar the CHANGELOG's two-space indent), so the stable cut, which re-applies consumed changesets, prints the corrected rows.\n- The corrected sentences are quoted under *What changes* above.\n\nBecause the PR changes an existing changeset and adds none, `Check Changeset` is red by design; it carries no `skip-changeset` label.\n\n## Why\n`GridCellSelection` is the context's value type; the component a host mounts is `GridCellSelectionProvider`, exported from `@object-ui/components` beside it. PR #38097 (part 1 of #37521) corrected the runtime warning that said the same thing; this is the release-text half the card's contract record 7189751333 named.\n\n## Verification\n- `git diff origin/main --stat`: 6 files, 12 insertions, 12 deletions, two lines per file.\n- The six copies of each corrected row are identical apart from the indent (`git diff`).\n- `GridCellSelectionProvider` is the exported component name in `ui/packages/components/src/index.ts` and `ui/packages/components/src/context/gridCellSelection.tsx`.\n\n## Human Minimum\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind. (no names added)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no code)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (publishes nothing of its own; corrects a consumed note, see above)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (only its CHANGELOG)\n- [ ] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`. — one deliberate hand edit of a released CHANGELOG entry, the docs-only route AGENTS.md prescribes for a factual error.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the fleet's maintainer summary)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L9qibxEbSk19qJRPHrm3v9\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxEbSk19qJRPHrm3v9)_\n"
+}

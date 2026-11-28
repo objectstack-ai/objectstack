@@ -1,0 +1,33 @@
+{
+  "number": 38218,
+  "kind": "pull_request",
+  "title": "fix(analytics): an empty or blank where key answers 400 INVALID_FIELD on all three analytics doors",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T07:44:44Z",
+  "updated_at": "2026-11-28T07:48:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38218",
+  "body": "Fixes #35543\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:通过接口或 AI 助手做统计查询时,筛选条件里写了空的或只有空格的字段名,现在会直接得到「字段名无效」的明确提示,不再报服务器内部错误或无权限。\n- 为什么做:让统计查询对这种写错的请求和普通数据查询给出同一种答复,调用方能看懂错在哪里。\n- 出错会怎样:最坏情况是某个本来能用的统计筛选被误拒,调用方会看到明确的拒绝提示;改动只有一处检查,可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nAn empty filter key (`{\"\": \"z\"}`) on `POST /api/v1/analytics/query`, as the dataset `runtimeFilter` on `POST /api/v1/analytics/dataset/query`, and through MCP `query_dataset` reached SQLite as `WHERE  = ?` and answered `500 DATABASE_ERROR`. A blank key (`\" \"`) answered `403 PERMISSION_DENIED` from the field-read gate. Both now answer `400 INVALID_FIELD` (`field`, `param: 'where'`), as `/data` answers the same body. The engine is never reached.\n\nThe mechanism: every analytics gate passes the empty key by. `namedQueryFields` skips `member === ''` outright, and `resolveMemberSource` answers `source: null` (a stand-down) for any spelling that is not a bare identifier. So nothing judged it before the strategy compiled it. The fix is one check, `assertWhereMemberIsFieldName`, at the top of the `where` source-field gate (`assertWhereFields`, #5669). That gate runs on every path out of `ensureCube` and on the dataset draft-preview path, so all three doors share it. The check needs no field probe. It runs before the gate's three probe stand-downs, because no object has a field with an empty name.\n\n`/data`'s validator (`assertFilterFieldsExist`, `@objectstack/metadata-protocol`) is not reused. It answers \"is this a field of the object\". The analytics question is \"does this member resolve to a column\", and the existing `where` gate already asks it in the analytics vocabulary (cube members, the cube qualifier, relationship paths). Taking a dependency on the protocol package for an emptiness check would add a second reader of the filter tree.\n\nDeliberately narrow: only whitespace-only keys. A key that is text but no column reference (`amount + 1`, `foo bar`) keeps the #21156 member-shape gate's `PERMISSION_DENIED` / 403. That verdict is pinned \"in every tier\" by `caller-member-column-reference-gate.test.ts`, which this PR's first, wider draft turned red (8 cases). Changing that verdict is a contract question and is out of scope here.\n\n## Tests\n\n`src/__tests__/where-member-field-name-35543.test.ts` uses the plugin-wired service (`AnalyticsServicePlugin` over an engine double), with all three doors called as their callers call them: `service.query`, `service.queryDataset` and `datasetTools().queryDataset`.\n- An empty key, a blank key and a tab-only key on each door: `code: 'INVALID_FIELD'`, `status: 400`, `field`, `param: 'where'`. The engine saw no statement.\n- An empty key nested under `$or`: refused the same way.\n- `amount + 1` keeps `PERMISSION_DENIED` / 403. This is the #21156 boundary.\n- CONTROL: `{status: 'paid'}` answers on all three doors.\n\nAblation through `scripts/ablation-replace.mjs`, which deleted the gate's call line (anchor 1 to 0, restored blob == HEAD, `git diff HEAD` empty). 10 failed, 1 passed (the control). The red set was every refusal case on all three doors.\n\nLive re-measure on the stock showcase (`--fresh`, admin), before at `7605e0c9c` and after at `c79abcb26`:\n\n| body | before | after |\n|:--|:--|:--|\n| `/analytics/query` `where {\"\": \"z\"}` | 500 DATABASE_ERROR | 400 INVALID_FIELD |\n| `/analytics/dataset/query` `runtimeFilter {\"\": \"z\"}` | 500 DATABASE_ERROR | 400 INVALID_FIELD |\n| MCP `query_dataset` `runtimeFilter {\"\": \"z\"}` | isError DATABASE_ERROR / 500 | isError INVALID_FIELD / 400 |\n| the same three with `{\" \": \"z\"}` | 403 PERMISSION_DENIED | 400 INVALID_FIELD |\n| CONTROL `{\"status\": \"paid\"}` on all three | 200 | 200 |\n| `/data/showcase_invoice/query` `where {\"\": \"z\"}` | 400 INVALID_FIELD | 400 INVALID_FIELD |\n\n<details><summary>Package run at c79abcb26</summary>\n\n`pnpm --filter @objectstack/service-analytics typecheck && … build && … test` under the verify lock: `VERDICT command-exit 0`, `Test Files 228 passed (228)`, `Tests 5914 passed | 345 skipped (6259)`. `tsc --listFiles` includes the new test file.\n</details>\n\n## Acceptance notes\n\n- The card's second \"also seen\" row is a separate mechanism and is not fixed here. `where {\"account.a.b.c.d\": \"z\"}` still answers `403 PERMISSION_DENIED` naming the synthesized alias `account__a`. The two-hop `account.nope` answers `400 INVALID_FIELD` naming `showcase_account`. It is a relationship-path resolution question, not an empty key, and is reported for the seat to file.\n- A key with a space in it (`foo bar`) still answers 403 under #21156, where `/data` answers 400. See the narrowing above.\n- `/data`'s empty-key envelope omits `field`, where its blank-key envelope carries `field: \" \"`. This is an observation only.\n\n## Verification\n\nRead first: `assertWhereMemberIsFieldName` and its call at the top of `assertWhereFields` (`packages/services/service-analytics/src/analytics-service.ts`). The risk hunk is the move of the three probe stand-downs below the member collection. The second file is the new test.\n\nTwo-minute check: `pnpm --filter @objectstack/service-analytics exec vitest run --maxWorkers=2 src/__tests__/where-member-field-name-35543.test.ts`. Expect 12 passed.\n\nGates at `c79abcb26`: `dispatch-gates --ran` accounts for 71 derived families. 69 ran with exit 0. 2 are NOT MEASURED (exit 3, prerequisite not met): `check:dual-build-cjs-loads` needs a full workspace build, and `check:type-check-debt` could not get a turn on the verify lock. CI runs both.\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSAaBEfQpU2yJexSJ8)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 38170,
+  "kind": "issue",
+  "title": "perf(app-shell): a cold Console load waits on five serial request hops before the app bundle is even requested, so a page heading lands up to ~3.6 s after goto on a busy runner",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "finding",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T05:08:12Z",
+  "updated_at": "2026-11-28T06:56:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38170",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① (b) root cause measured by the #38138 dev (os-dev report, #38138 comment 7234459441); filed on seat 1's routing. Source: fleet. ⛔ Not a claim; app-shell work, not area:fleet — triage grades and routes it.\nGrading (suggested, triage's call): Bug/perf · reach: every cold Console page load, and the Live E2E UI lane whose 5 s heading waits time this boot (#38138 evicted PR #38090 from the queue once).\nDedupe: `console boot serial bundle`, `meta/app bundle parallel` → none open on this shape.\n\n## 维护者速读\n\n- 问题：控制台冷启动时，要先串行走完五轮请求（运行配置 → 会话/发现 → 元数据/权限/偏好 → 我的应用和对象列表），之后才开始请求应用包，再渲染页面。机器忙时页面标题要 3 秒多才出现，端到端测试的 5 秒等待因此偶尔超时。\n- 修法：路由一旦能确定是哪个应用，就和启动读取并行地去请求应用包，缩短每个页面的首屏等待。\n- 要你做的：无。\n\n## Measured (on `581ae76a`, CI lane rebuilt locally: backend `--fresh`, Console `vite build` with `VITE_BASE_PATH=/`, `vite preview`)\n\n- Boot chain before the heading: `runtime/config` → `get-session` + discovery → `meta/app` + permissions + preferences → `me/apps` + `meta/object?package` → `meta/app/<APP>/bundle` → render. Each hop starts after the previous one ends.\n- Heading after `goto`: 1.0–1.7 s idle; 1.3–3.6 s with four busy-loop CPU burners (15 runs). The slow runs start the bundle request at 2.6–2.8 s and it takes up to 0.9 s.\n- No state leaks between tests (fresh browser context each); a project create just before `goto` did not slow the next load (12 runs, 1.6–2.3 s).\n- Not reproduced red locally: `master-detail.spec.ts --repeat-each=20` 100/100; the CI spec list `--repeat-each=4` 92/92; `--repeat-each=8` under CPU burn 40/40.\n- ⚠️ The CI failure artifact 15246781857 (job 140849556074) could NOT be read from the seat container: the agent proxy refuses its blob host. Whoever picks this up should read it from a runner or a machine that can reach it.\n\n## Suggested direction (the owner's call)\n\nStart the app bundle read (`meta/app/<APP>/bundle`) as soon as the route names the app, in parallel with the boot reads, instead of after `me/apps` and `meta/object?package`. It touches the MetadataProvider bundle-first read path (#28645, #29552 semantics), so it needs unit pins and a before/after timing reading.\n\n## Acceptance\n\n- The cold-load critical path to the app bundle request is shorter, with a before/after timing reading on the same lane.\n- #38138's beforeEach heading wait passes under the existing 5 s budget on a busy runner without any added wait.\n\nUnblocks: #38138.\nBlocked-by: none"
+}

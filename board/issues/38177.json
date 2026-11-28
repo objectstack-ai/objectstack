@@ -1,0 +1,33 @@
+{
+  "number": 38177,
+  "kind": "issue",
+  "title": "技能：翻译技能里「规范说明写 {variable}、与运行时不一致」的旁注已过时（#38090 后两边一致），删改它",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T05:32:41Z",
+  "updated_at": "2026-11-28T07:30:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38177",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) review nit N1 on PR #38090 (#37894), left by its author and both review rounds to a seat follow-up card (records 7232513584 and 7233057981). Source: fleet.\nGrading: area:ai · Docs · p3 · reach: agents reading the i18n skill's interpolation section · evidence: `skills/objectstack-i18n/SKILL.md` at origin/main 7605e0c9.\nDedupe: \"schema docstring mentions {variable}\", \"objectstack-i18n interpolation aside\" → only #37894 (the fix that made the aside stale).\n\n## 维护者速读\n\n- 问题：翻译技能里有一句旁注，说规范的说明文字写的是 `{variable}`、跟运行时不一致。#38090 合入后两边已经一致（都是双花括号），这句旁注说的分歧不存在了。\n- 修法：删掉或改写这句旁注；技能本身「用双花括号」的建议不变。\n- 要你做的：无。\n\n## Ask\n\n`skills/objectstack-i18n/SKILL.md` l.272–274 (Message Interpolation → Simple Format) ends with: \"(The schema docstring mentions `{variable}` notation, but that is not what the runtime implements.)\". Since PR #38090 (merge 86ce7a33), the schema's own sentence (`packages/spec/src/system/translation.zod.ts`, the `messageFormat` retired-key guidance) says interpolation in a message read through `t()` is double-brace `{{variable}}` substitution, a single brace is left as written, and activity-milestone summaries keep their own `{field}` tokens.\n\nReplace the aside with a sentence true at HEAD, for example that the schema states the same rule and that activity-milestone summaries (`objects.OBJECT._milestones.FIELD.VALUE.summary`) are the one slot that fills single-brace `{field}` tokens. Keep the double-brace advice.\n\n## Done when\n\n- The aside no longer claims a docstring/runtime disagreement.\n- If the milestone exception is named, it matches `translation.zod.ts` and `content/docs/ui/translations.mdx`.\n- Whatever skills generator or check covers `skills/**` stays green."
+}

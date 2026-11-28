@@ -1,0 +1,37 @@
+{
+  "number": 38115,
+  "kind": "pull_request",
+  "title": "fix(spec): dropped-refinements census walks every reachable node instead of stopping at depth 14",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:40:12Z",
+  "updated_at": "2026-11-28T03:50:08Z",
+  "closed_at": "2026-11-28T03:50:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T03:50:05Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38115",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\n\nFixes #34442\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:构建时的\"被丢弃规则\"清点改为走遍每一层,发布的三个已安装包结构文件多列出了它们原先漏报的校验规则。\n- 属于规格工具链的完整性收口,替所有依赖已发布结构文件的作者与 AI 解决\"清单说齐了其实没齐\"的问题。\n- 出错时构建会直接报错并点名哪个结构、哪条路径,不再悄悄截断;可整个撤回此 PR,不影响任何运行时行为。\n- 无。\n\n## What changes\n\nThe dropped-refinements census (`packages/spec/scripts/lib/dropped-refinements.ts`) stopped descending at `MAX_DEPTH = 14` and still printed \"all declared\". It now follows the card's Expected ruling verbatim: \"The census either walks every reachable schema node, with cycles guarded by identity rather than by a depth cap, or fails loudly when it hits the cap, so that \\\"all declared\\\" is never a false complete.\" It does both:\n\n- The walk has no depth cap. The identity-keyed `visited` set it already carried is what terminates it; every node is queued at most once per export.\n- `RUNAWAY_WALK_DEPTH = 256` is not a cap but a refusal: a path that long means the identity guard failed (e.g. a `lazy` getter building a fresh node per call), and the census throws naming the export and path instead of returning a short list.\n- The proxy-unwrap loop in `identityOf` reused `MAX_DEPTH`; it now has its own `MAX_PROXY_HOPS` (same value, a prototype-chain bound, not a graph bound).\n\n### Measured site counts (acceptance item 1), every published schema, `gen:schema`, base f72f3353 vs this branch\n\n| Walk | dropped sites | schemas with drops | projected sites | undecidable |\n|:--|--:|--:|--:|--:|\n| depth 14 (base) | 1225 | 281 | 812 | 0 |\n| unbounded, identity-guarded | 1239 | 281 | 830 | 0 |\n\n+14 dropped (all in three installed-package envelopes, no new schema), +18 projected. Ledger rows added (acceptance item 2):\n\n- `api/InstalledPackageAtEitherStage` (+1): `options[1].manifest.translations.element.valueType.flows.valueType.records.valueType.fields.valueType` (the card's `flows.records.fields.valueType`).\n- `api/GetInstalledPackageResponse` (+5): `translations…flows.valueType.{notices.valueType.message, records.valueType.fields.valueType, refusals.valueType.message, screens.valueType.description, screens.valueType.title}` under `data.options[1].manifest`.\n- `api/ListInstalledPackagesResponse` (+8): the same five under `data.packages.element.options[1].manifest`, plus `aiContexts.element.related.element.where.lazy.lazy`, `views.element.list.emptyState.link.url`, `views.element.list.grouping.fields.element.field`.\n\n`measured.droppedRefinementSites` 1225 to 1239. A `patch` changeset covers the published `json-schema/api/*` annotation growth (`x-` keywords; no accepted document changes).\n\n## Tests\n\n`scripts/dropped-refinements.test.ts`, new `describe('the walk is bounded by identity, never by depth')`:\n- a refinement 40 objects deep is reported at its full path;\n- lit control: the same leaf one level deep is one site;\n- a `lazy` getter returning a fresh node per call makes the census throw naming the export.\n\nAblation: the base version of `dropped-refinements.ts` restored on disk turns the deep and runaway pins red (2 failed / 28 passed), control stays green; restored byte-identical (`git hash-object` a6f5f824 = HEAD blob).\n\n## Acceptance notes\n\n- `refinementSitesThatDidProject` in the ledger header reads 728 while the build measures 812 at base and 830 now; no test reads that field. Left untouched (outside this card's file-surface rows).\n\n## Verification\n\nRead first: `packages/spec/scripts/lib/dropped-refinements.ts` (the walk loop and `RUNAWAY_WALK_DEPTH`), then the ledger diff.\n\nTwo-minute check: `pnpm --filter @objectstack/spec gen:schema` prints `1239 refinement site(s) across 281 published schema(s) ... all declared`, and `json-schema/api/InstalledPackageAtEitherStage.json` names `...records.valueType.fields.valueType` in `x-dropped-refinements`.\n\n<details><summary>Local readings (head e096f215)</summary>\n\n- `pnpm gen:schema`: exit 0, census line above.\n- `vitest run scripts/dropped-refinements.test.ts scripts/refinement-projection.test.ts scripts/published-projection-choke-point.test.ts`: 3 files, 124 tests passed.\n- `pnpm --filter @objectstack/spec test`: 909 files passed / 1 skipped, 28814 tests passed.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- Derived gate families (`dispatch-gates --commands`): 69 run at e096f215, `--ran` reconciliation green; 64 exit 0; 5 exit 3 PREREQUISITE NOT MET, read as NOT MEASURED (`check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`: no workspace `dist/`; `check-plugin-teardown-shape.mjs --self-test`: shallow clone). CI runs them on this PR.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n"
+}

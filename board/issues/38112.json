@@ -1,0 +1,37 @@
+{
+  "number": 38112,
+  "kind": "pull_request",
+  "title": "fix(kanban): a list view board laned by a lookup draws its Uncategorized lane when every empty-lookup record sits past the first page",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:34:16Z",
+  "updated_at": "2026-11-28T04:51:01Z",
+  "closed_at": "2026-11-28T04:50:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T04:50:59Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38112",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibwxBy3QieJMqJbJtTk\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoEynsd5XL1JYxPkwhkywADp)_\n\nFixes #37516\n\nClause-②: yes (widening) — `@object-ui/plugin-kanban` `bucketCardsIntoColumns` (exported from the package entry) gains the optional sixth parameter `keepUncolumned`, default `false`\nMetadata-protocol: none\n\n## 维护者速读\n- 列表视图里按查找字段分道的看板，如果查找字段为空的记录全都排在第一页之后，以前看板上根本没有「未分类」这一道；现在这一道画在最后，带整道计数和「未加载的卡片」提示。\n- 接在「看板按查找字段分道时计数整道、补画第一页之后的分道」那一轮之后，替用查找字段分组看板的用户找回这部分记录的入口。\n- 只多画一道，不改任何数据和配置；数据源不支持分组读、或分组读被拒绝或截断时，照旧不画，可以直接撤回。\n- 无\n\n## What changes\n- `ui/packages/plugin-kanban/src/index.tsx`: `bucketCardsIntoColumns` takes an optional `keepUncolumned` (default `false`). When it is true the trailing `KANBAN_UNCOLUMNED_ID` lane is drawn even when no card of the page lands in it; the page's uncategorized cards, if any, still go into that one lane. Every other caller passes nothing and keeps today's behaviour.\n- `ui/packages/plugin-kanban/src/KanbanBoardCore.tsx`: a `keepUncolumned` prop, passed through to `bucketCardsIntoColumns` (a prop, not a schema key, for the reason `laneCounts` is one).\n- `ui/packages/plugin-kanban/src/ObjectKanban.tsx`: `keepUncolumned` is true under the gate the lanes past the page already take (`hostLaneRead && flatLanes && lanesFromData && laneTargetObject`) when the lane read counts records under `KANBAN_UNCOLUMNED_ID` (`hostLaneCounts[KANBAN_UNCOLUMNED_ID] > 0`). A partial (`hasMore`) or refused read answers no counts, so no lane is drawn from it. The `extraLaneIds` docblock now says how the empty group is drawn.\n- `patch` changeset for `@object-ui/plugin-kanban`.\n\n## Tests\n- `ui/packages/app-shell/src/__tests__/listKanbanEveryRecord-12619.test.tsx`, inside the #37327 describe (the #36871 rig), deals 60–69 with a null account, all past the first page of 25:\n  - the board draws `Uncategorized` last (after `acc-a`, `acc-b`), badge `10`, zero cards, and `Cards not loaded: 10`;\n  - CONTROL: with deals 0–1 also null (two on the page), `Uncategorized` is drawn once as before, badge `12`, its 2 cards;\n  - CONTROL, three cases: a source with no grouped door, a refused read and a cut read draw no `Uncategorized` lane (the page counts read `13+`).\n- `ui/packages/plugin-kanban/src/index.bucket.test.ts`, new describe: kept with no uncategorized card ⇒ an empty trailing lane titled as passed; kept with one ⇒ one lane holding it; not kept ⇒ no lane.\n\n<details><summary>Readings (fix head 3700f53d, base origin/main f72f3353; 916e7a83 changes only the changeset declaration)</summary>\n\n- Premise at 815e882b, before the fix (probe on the same rig, kept at `/mnt/project-files/card-37516/` in the project, not in this PR): the grouped read answered `[{account:'acc-a',count:30},{account:'acc-b',count:30},{account:null,count:10}]` and the board's lane groups were `acc-a`, `acc-b` only. Control (two null deals on the page): `Uncategorized` drawn, badge 12, 2 cards.\n- Ablation on the committed fix through `scripts/ablation-replace.mjs`: `keepUncolumned={keepUncolumned}` → `keepUncolumned={false}` in `ObjectKanban.tsx`; `vitest run …listKanbanEveryRecord-12619.test.tsx -t Uncategorized`: `Tests 1 failed | 4 passed | 22 skipped (27)`, the failure being the new past-page pin, every control green. Restore: blob == HEAD, `git diff HEAD` empty.\n- At 3700f53d (after merging origin/main): `pnpm --filter @object-ui/plugin-kanban type-check` exit 0; `pnpm --filter @object-ui/plugin-kanban test`: `Test Files 91 passed (91)`, `Tests 614 passed (614)`; the rig file: `Tests 27 passed (27)`.\n- Derived local gates: see Acceptance notes.\n</details>\n\n## Acceptance notes\n- Scope is the card's: lookup-laned boards only, the gate #37327 drew past-page lanes under. A board laned by a text field or by declared options has the same defect (records with an empty or unmatched lane value, all past the page, get no `Uncategorized` lane); per the claim, the seat files it.\n- The new `Uncategorized` lane past the page shows its whole count and \"Cards not loaded\", with no way to load its cards yet. That is #37517 (a past-page lane offers no way to see its cards); its fix covers this lane too, whose read condition is \"lane field is empty\".\n- Local narrowing: `@object-ui/app-shell`'s full suite is left to `Test UI`; only the rig file this PR edits was run locally.\n- Derived local gate set at 3700f53d: `dispatch-gates --ran` reconciles 38 derived, 38 run, every one exit 0, 0 NOT MEASURED, 0 unrun. One earlier full run of `pnpm --dir ui exec vitest run scripts/` timed out a single test (`check-i18n-call-site-keys`, 20 s on the shared box while a build ran beside it); that file passed alone (152/152) and the whole family passed on the final head.\n\n## Verification\nRead first (by risk):\n1. `ui/packages/plugin-kanban/src/ObjectKanban.tsx`: the `keepUncolumned` gate beside `extraLaneIds`.\n2. `ui/packages/plugin-kanban/src/index.tsx`: the `keepUncolumned` arm at the end of `bucketCardsIntoColumns`.\n3. The new pins in `listKanbanEveryRecord-12619.test.tsx`.\n\nTwo-minute check: from `ui/`, `pnpm exec vitest run packages/app-shell/src/__tests__/listKanbanEveryRecord-12619.test.tsx -t Uncategorized` shows 5 passing; set `keepUncolumned={false}` in `ObjectKanban.tsx` and the past-page pin fails.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwxBy3QieJMqJbJtTk)_\n"
+}

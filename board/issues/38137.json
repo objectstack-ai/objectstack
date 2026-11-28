@@ -1,0 +1,35 @@
+{
+  "number": 38137,
+  "kind": "pull_request",
+  "title": "fix(adr-0087): a dotted member path walks interface and type-literal alias bodies",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T03:51:14Z",
+  "updated_at": "2026-11-28T05:16:35Z",
+  "closed_at": "2026-11-28T05:16:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T05:16:33Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38137",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\nFixes #37445\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:内部的 ADR 登记检查现在能沿“接口”和“对象类型别名”找到成员,只有写变更说明的开发者会看到区别。\n- 为什么做:补全登记检查的成员路径能力,替修改公开接口成员的开发者解决“接口成员的收窄无法按名字登记”的问题。\n- 出错会怎样:检查若读错,只会错误拒绝或错误放行一条登记,不影响任何运行中的产品,可直接撤回。\n- 要你做的:无。\n\n## What changes\n\n`scripts/check-adr-0087-registration.mjs`, the structural member-path walk behind `type-surface-only path#A.B.member` references:\n\n- `containerBodiesFor` now unions four container kinds: object literals and classes (as before), plus **interface declarations** (`interfaceBodiesFor`: `export` / `export default` / `declare` prefixes, type parameters, `extends`; body located by `declarationBodyStart`) and **type-literal aliases** (`typeAliasBodiesFor`: `type X = {` with or without type parameters, the `=` found by `aliasEqualsIndex`; the RHS must begin with an object type literal, and that literal is the body walked).\n- `objectLiteralBodiesFor` no longer claims the braces of `type X = {` (`followsTypeKeyword`), so a plain alias is counted once, under its own kind, instead of twice.\n- **Same zero-or-several refusal** for the new kinds. **Declaration merging is pinned as AMBIGUOUS, not merged**: two `interface X` blocks are two bodies (\"opens 2 interfaces\"), even when the member sits in only one block; a class and an interface of one name are ambiguous across kinds (\"opens 2 class bodies and interface bodies\").\n- Refusal text names the new shapes: \"no `X` object literal or class, nor interface or type-literal alias (... `interface X {` or `type X = {`), is declared ...\". Predicate 4's HEAD-side refusal prose names them too.\n\nThe #38093 position reader (`sitsInTypePosition` / `braceOpensTypeBody` / `functionTypeReturn`) is untouched; its pins R8, R9, G2, U31 to U37 run green in the same self-test.\n\n## Tests\n\nNew battery `TSO-I (#37445)` (floor 20), in the gate's own `--self-test`:\n\n- I1: the card's shape (`AuthClient.updateUser`, a function-typed property signature) resolves to its return type; I2: a method signature on the same interface.\n- I3: negative control, the bare `updateUser` still reads the first definition in the file; I4: top-depth rule inside an interface, three spellings land on three different definitions.\n- I5: an interface whose name prefixes the segment (`AuthClientSession`) is not entered; I6: refusal names every shape looked for; I7: `export declare interface` with a type-parameter default and a brace-bearing `extends`.\n- I8, I9: declaration merging is AMBIGUOUS (also when the member is in only one block); I10: class plus interface of one name is ambiguous across kinds.\n- I11, I12: generic and plain type-literal aliases resolve, the plain one once; I13: an alias of a non-literal type is refused as absent.\n- I14 to I16, end to end through `scan()`: the dotted interface marker is green; the bare spelling of the same diff is red (`narrowed-from-erased`); a merged interface at HEAD is red as AMBIGUOUS.\n\n<details><summary>Self-test at adfdb84b</summary>\n\n```text\nos-verify-lock: VERDICT command-exit 0\ncheck-adr-0087-registration --self-test: 854 assertions over real temp git repos (real scan()/assertInputs() path)\n```\n\nReal instance, at this head vs at the base (447757d0):\n\n```text\nHEAD  ui/packages/auth/src/types.ts#AuthClient.updateUser -> surface \"the return annotation of AuthClient.updateUser\", type Promise of AuthUser, erased false\nBASE  -> refusal \"no `AuthClient` object literal or class (...) is declared at the top of the file.\"\n```\n</details>\n\n## Acceptance notes\n\n- Finding (not fixed here, outside this card's walk): `braceOpensTypeBody` reads its header only back to the previous brace, so an interface whose heritage carries a type literal (`interface P` with type parameter `T extends { id: string }`) is not classified as a type body, and a function-typed property inside it reads as UNANNOTATED (erased). Measured on `ui/packages/app-shell/src/layout/SortableFavoriteRows.tsx#SortableFavoriteRowsProps.renderRow` at adfdb84b: \"carries NO return annotation\", though it is annotated. The bare spelling reads the same today. Reported to the seat for filing; the TSO-I fixture keeps its brace-bearing heritage case on a method signature, which does not depend on that reader.\n- Merging is refused rather than merged by design (card ruling: the same zero-or-several refusal). Naming a member of a merged interface stays impossible until one block is renamed; that is the honest state.\n\n## Verification\n\nRead first: `interfaceBodiesFor` / `typeAliasBodiesFor` (the new regexes), `followsTypeKeyword` (the double-count guard), `describeBodies` (the refusal wording TSO-C9 pins).\n\nTwo-minute check: `node scripts/check-adr-0087-registration.mjs --self-test` prints the success line with 854 assertions.\n\n<details><summary>Derived gate families, local, at adfdb84b</summary>\n\n`dispatch-gates --ran`: 34 derived families accounted for, 34 run, 0 NOT-MEASURED (a derived zero, every one recorded exit 0), including `check:adr-0087-registration --base origin/main`, `check:scripts-symbol-anchors`, `check:entry-guard`, `check:nul-bytes`, `check:comment-mask-corpus`, `check:pm-dispatch-gates`. Every other family is CI's.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n"
+}

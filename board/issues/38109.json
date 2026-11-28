@@ -1,0 +1,34 @@
+{
+  "number": 38109,
+  "kind": "issue",
+  "title": "An app's isDefault permission set installed into a running environment is not bound as the baseline until restart, so users with no explicit grant read nothing",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T02:29:44Z",
+  "updated_at": "2026-11-28T07:11:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38109",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ② cross-repo finding, asked for by seat repo:cloud#5 (mailbox #37784 comment 7232381344). The brightrule#69 smoke on a local objectos-ee found it (that seat's project file `pm-orders/brightrule/69/pr-b-report.json`, `out_of_scope_findings[0]`). Source: fleet.\nGrading: area:package · Bug · p2 (suggested; triage grades) · reach: every environment that installs an app with an `isDefault` permission set while running (install-local, enterprise edition); every user without an explicit grant is locked out until a restart · evidence: smoke run; the cause is a code read, not proven.\nDedupe: `isDefault permission set restart` and `default permission set install runtime` → nothing related open.\n\n## 维护者速读\n\n- 问题：在一个已经在跑的环境里装一个应用，如果它带了「默认权限集」（isDefault），这个权限集要等环境重启后才生效。重启前，没有单独授权的用户什么都读不到（403）。\n- 后果：真实员工装完应用后打开就是一片空，直到有人重启环境。\n- 修法：装、升级、卸载应用时，重新解析应用声明的默认权限集；托管内核的工厂路径也查一遍。加一条测试：往运行中的内核装一个带默认权限集的应用，没有授权的用户不用重启就能读。\n- 要你做的：无。\n\n## What happens\n\nbrightrule's inquirer permission set is `isDefault`. Installed with install-local into an already running environment, it is not bound as the baseline until the environment restarts. Personas with no explicit grant got 403 on every policy read. Workaround today: grant the set by name (the eval driver does).\n\n## Likely cause (code read on origin/main, not proven)\n\n`packages/cli/src/commands/serve.ts` ~l.4893–4908 builds `SecurityPlugin(appSecurityPluginOptions(config))` once, from the boot config (ADR-0056 D7). A package installed later never updates that default set name.\n\n## Ask\n\n1. Re-resolve the app-declared default permission set when a package is installed, upgraded or uninstalled at runtime.\n2. Check that hosted kernels' factory path does the same.\n3. A test: install an app with an `isDefault` set into a running kernel; a user with no grants reads its objects without a restart. Uninstalling it removes the baseline.\n\n## Acceptance\n\n- Installing, upgrading or uninstalling an app with an `isDefault` set takes effect on the running environment with no restart, on both the serve and hosted paths."
+}

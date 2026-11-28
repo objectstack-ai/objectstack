@@ -1,0 +1,32 @@
+{
+  "number": 38122,
+  "kind": "issue",
+  "title": "dispatch-gates：改了 *.metadata-form.ts 时没有派生出对应的 lint 测试",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T03:00:40Z",
+  "updated_at": "2026-11-28T03:21:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38122",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) follow-up named by L1-a on PR #38078 (#36799): contract record 7232601911, L1 7232611473. Source: fleet.\nGrading: area:build · Bug · p3 · reach: every card that edits a `*.metadata-form.ts` file and runs the derived gates locally · evidence: reviewer read; #36799's claim needed a hand amendment (7232140022) to add the lint test.\nDedupe: \"dispatch-gates metadata-form lint\", \"derived gates metadata-form.ts\" → 0.\n\n## 维护者速读\n\n- 问题：开发者本地跑派生门禁（dispatch-gates）时，改了 `*.metadata-form.ts` 文件却不会派生出检查这些表单的 lint 测试。这次 #36799 是靠认领时手工补了一条才跑到的，下次容易漏掉，要到 CI 才发现。\n- 修法：在 dispatch-gates 的派生规则里，把 `*.metadata-form.ts` 映射到对应的 lint 测试。\n- 要你做的：无。\n\n## Ask\n\n1. `dispatch-gates` derives the metadata-form lint test(s) from any `*.metadata-form.ts` path in the diff.\n2. A self-test case for the new mapping, with an ablation.\n\n## Acceptance\n\n- A diff that touches only a `*.metadata-form.ts` file lists the lint test in `dispatch-gates --ran`."
+}

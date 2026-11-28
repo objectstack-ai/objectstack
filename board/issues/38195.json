@@ -1,0 +1,31 @@
+{
+  "number": 38195,
+  "kind": "issue",
+  "title": "follow-ups of #38085: os i18n check counts a related-list title placed only by a .custom arrangement; N2 test title; N3 one pair read on the by-name path",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T06:17:29Z",
+  "updated_at": "2026-11-28T07:18:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38195",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) review follow-ups of PR #38085 (#37622, merged 2026-11-28 06:04Z at d830f5af): the contract record's ③ boundary flag (a coverage gap that predates the PR) and nits N2, N3, all left to the seat. Source: fleet.\nGrading: area:ux · Task · p3 · reach: translators running `os i18n check` on a customer package that places a related list the owner does not name, and readers of the pair-read tests · evidence: contract record on PR #38085 (③ and nits).\nDedupe: \"placement-only label i18n check\", \"relatedLists placement translation coverage\" → only #37622 and #38128 (skills text, separate).\n\n## 维护者速读\n\n- 问题：定制包把一个父对象原本没列出的相关列表摆上标签页时，页面会显示它的标题，但翻译覆盖率检查不把这个标题算进去，所以漏翻也不会报。另有两处小问题：一个测试名字描述错了，一种少见的读取会多查一次翻译。\n- 修法：让覆盖率检查也数这种标题；改测试名；把那次重复查询并成一次。\n- 要你做的：无。\n\n## Ask\n\n1. **Coverage gap (contract record ③).** Where the owner declares `relatedLists` and does not name the list a `.custom` arrangement places, the registry applies the placement and the tab title is served, but `collectExpectedEntries` (`os i18n extract` / `check`) does not expect a key for it. Make the expected set include it, with the same accepting direction `os validate` uses, and pin it. If `--strict` can newly go red on such a package, declare it as the narrowing it is.\n2. **N2.** `meta-object-related-list-pair-i18n.test.ts`, the control \"…and the pair first where it ships one\": since 7ddcc646 it asks the pair zero times (`人员` comes from the harness's deployment catalog). Rename the case to what it asserts.\n3. **N3.** `translateMetaDocument` passes no memo, so the by-name read of an object that renames its `label` with no plural and diverges a tab title asks `getPairTranslationBundle` twice (once there, once in `withoutStaleObjectPlural`). Share one read. Keep the ADR-0090 D10 statement budget pin (`mcp-list-objects-statements.pin.test.ts`) green.\n\n## Done when\n\n- `os i18n check` counts a placement-only related-list title, with a pin that is red on main.\n- The renamed control and the single pair read pass, and the statement-budget pin is unchanged."
+}

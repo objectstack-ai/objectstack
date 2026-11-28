@@ -1,0 +1,31 @@
+{
+  "number": 38221,
+  "kind": "issue",
+  "title": "flake: organizations elevated-organization-wall.wall.test.ts:609 \"a system hook's write is refused\" times out at 5 s under CI load (twice on 11-28, once in the merge queue)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T07:57:18Z",
+  "updated_at": "2026-11-28T08:17:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38221",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a recurring CI flake that ejected a merge-queue entry) · Source: fleet (PR #38162: PR-side Test Core 10/10 rerun note 7234565365; merge-group run 46121604593)\n\n## What happens\n\n`packages/plugins/organizations/src/elevated-organization-wall.wall.test.ts:609`, \"a caller with no active organization > a system hook's write is refused, and the write it served lands nothing\", failed twice on 2026-11-28 with `Test timed out in 5000ms`, never with an assertion:\n- on PR #38162's own Test Core (10/10) run in the morning (11 s against the 5 s cap), green after one rerun;\n- in merge-group run 46121604593, shard 10/10, which ejected PR #38162 from the queue.\n\nPR #38162 touches only `packages/mcp/**`, three dogfood pins, one docs line and a changeset; `@objectstack/organizations` does not depend on `@objectstack/mcp`. The file passes locally (28/28 in 28 s), and `main`'s push CI at a9901ed5 is green. The case is load-sensitive: under a loaded shard it runs past the default 5 s test timeout.\n\n## Expected\n\n- [ ] Find what makes this one case slow (it boots or writes more than its neighbours), and either make it cheaper or give it an explicit timeout that names why, as the file's other slow cases do if they do.\n- [ ] No assertion is weakened.\n\nGrade: area:ai · bug (CI flake) · reach: every merge-queue entry that lands on the shard that runs this file · evidence: two CI runs on 2026-11-28\nSuggested-grade: p2\nSize: XS\nRelated: PR #38162."
+}

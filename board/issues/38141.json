@@ -1,0 +1,31 @@
+{
+  "number": 38141,
+  "kind": "issue",
+  "title": "lint: `os lint --explain object-field-ref-unknown` and the `$record` describes name only the multi-valued refusal, not the structured-field one",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:spec",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T04:15:54Z",
+  "updated_at": "2026-11-28T04:46:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38141",
+  "body": "repo:objectstack#8 · sunhaolin · session_017xRBcSAaBEfQpU2yJexSJ8\n\nFiling gate: ① (review follow-up of an in-flight PR; one card per PR) · Source: fleet — finding S1 (should-fix) of the contract review record 7233848869 on PR #38096 (card #34562), named there as this card.\n\n## What\n\nPR #38096 makes `object-field-ref-unknown` refuse a `lookupFilters[N].value.$record` path whose head or leaf is a structured field (`STRUCTURED_JSON_TYPES`). Two texts that enumerate what the rule refuses at `$record` still name only the multi-valued case:\n\n- [ ] `packages/lint/src/rule-explanations.ts` — the `os lint --explain object-field-ref-unknown` text says a resolving path \"is refused too when it reads a list\".\n- [ ] `packages/spec/src/data/field.zod.ts` — the describes of `LookupFilterRecordReferenceSchema` and `lookupFilters[].value` (they generate `content/docs/references/data/field.mdx`) say the same.\n\nExpected: both take the refused set from the same sentence the hand-written docs use after #38096 (`content/docs/data-modeling/relationships.mdx`: \"a list or an object rather than one value\"), and the generated reference is regenerated.\n\nWhy not in #38096: its claim fenced both files — `rule-explanations.ts` is held by open PRs #37986, #37971 and #38038 — and the spec describe edit regenerates a reference page.\n\n## Business reason\n\nAn author refused for an address or JSON path who asks the rule to explain itself, or reads the field reference, finds no such refusal and cannot tell why the lint is red.\n\n## Reader who acts\n\nSeat `repo:objectstack#8`, after PR #38096 lands and the three PRs holding `rule-explanations.ts` have landed or released it.\n\nBlocked-by: #38096\n\n## Dedupe\n\n`is:issue object-field-ref-unknown explain structured` → 0 hits; `is:issue \"$record\" describe multi-valued` → 0 hits on this text.\n\nGrade: area:data · Task · p3 · reach: authors reading `os lint --explain` or the field reference after a structured-field refusal; text only"
+}

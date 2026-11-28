@@ -1,0 +1,35 @@
+{
+  "number": 38130,
+  "kind": "pull_request",
+  "title": "fix(pm): a Blocked-by value opening with none names no target",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T03:28:04Z",
+  "updated_at": "2026-11-28T04:51:01Z",
+  "closed_at": "2026-11-28T04:50:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T04:50:59Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38130",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\nFixes #38086\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用户无感;各席位取卡时,写了「无阻塞」又顺带提到别的卡的卡片重新出现在可取清单里。\n- 为什么做:车队取卡工具的读数缺陷,一张优先级最高的卡曾因此被藏起来。\n- 出错会怎样:最坏是某张真被挡住的卡被当成可取,席位开工后会读到阻塞并停手;改动可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`blockedByTargets` in `scripts/pm/check-half-states.mjs` now skips a `Blocked-by:` directive value whose first token is `none` (any case, before any ref; a leading code or emphasis marker is read through). Every `#N` after it is context, not a target. The check is per directive, so a sibling `Blocked-by: #6` on the same line still counts, and `none` appearing after a ref is still prose. Only this reader changes: `directiveValues` serves other keys and stays as it is, and H4's presence test (`hasBlockedByLine`) still counts a `none` line as a line, because H4 asks whether the author left anything, not which card blocks.\n\nWhat else reads the same value: `directiveValues(..., 'Blocked-by')` has exactly one consumer, `blockedByTargets`. Everything else goes through it: `commentBlockedByTargets`, `blockerTargetsFor` (card-pick, `scripts/ci/scheduled-full-run.mjs`, `fleet-roster.mjs`), `buildBlockingIndex`, and the H19/H26/H28 reads. So one guard covers every reader, and no consumer-side change is needed. The `blockerTargetsFor` docblock rules (both channels unioned) are unchanged.\n\nBoard measurement (REST search `is:issue is:open \"Blocked-by: none\"`, 26 hits, 2026-11-28 ~02:50Z; bodies plus all 3320 comments read through the base parser): **3 open cards** carry a `Blocked-by: none` value that names a `#N`. All three are in the body channel: #37445, #37446 (named on #36987) and #37405 (named on #36806). 0 are in the comment channel.\n\n## Tests\n\nNew pins in the self-test battery after the URL-fragment pin: the card's measured line verbatim reads as zero targets; any case and decoration (`None —`, bulleted backticked `NONE`, bolded key, backticked `none`) read as zero; a sibling directive on the same line still counts; `none` after a ref is prose; `nonesuch#9` / `none-of-them #10` are not the token; the `#A, #B` run, bulleted and bolded lines read as before; `hasBlockedByLine` stays true on a `none` line.\n\nReadings on head `39633858` (merge of origin/main into the fix commit `a43c62b4`):\n\n<details><summary>Self-test, ablation, local gates, card-pick before/after</summary>\n\n- `pnpm check:pm-half-states`: exit 0, `check-half-states self-test: 5427 cases pass.`\n- Ablation (the `BLOCKED_BY_NONE` skip line removed on disk, one line changed, then restored; porcelain empty after): exit 1, `3 of 5427 case(s) failed`. The three that fail are the `none. … #N` pin (got `36987`), the case/decoration pin (got `36806|1|2|3`) and the sibling pin (got `5,6`).\n- Local derived gates (`dispatch-gates --commands`, 69 families, all run under `os-verify-lock.sh`, VERDICT command-exit 0): 68 exit 0. `pnpm check:i18n-coverage` exits 3 (PREREQUISITE NOT MET: no package `dist/`; this diff touches no package), so it is NOT MEASURED locally and left to CI. `--ran` reconciliation: `69 derived famil(ies) accounted for — 68 run, 1 NOT-MEASURED`.\n- `node scripts/pm/card-pick.mjs --order area:fleet --why`. On base 93fa9118 it prints `· #37445 · p2 · area:fleet · domain:devx — Blocked-by: #36987 (open)`. On this branch it prints `3 · #37445 · p2 · area:fleet … order 1`, as a pick. #37446 appears in neither listing. It was claimed by hand on 7231942694.\n\n</details>\n\n## Acceptance notes\n\n- H4 (pm:blocked with no `Blocked-by:` line) still treats `Blocked-by: none` as discharging its duty. A card labelled `pm:blocked` whose only line says `none` is now an empty-target block. That is H19's existing \"names no open target\" row, not a new state. No change here.\n\n## Verification\n\nRead first: `blockedByTargets` and `BLOCKED_BY_NONE` (the one behaviour change), then the new pins after `a URL fragment inside a value is not a target`.\n\nTwo-minute check: `node scripts/pm/card-pick.mjs --order area:fleet --why`. #37445 is in the picks, and the line `#37445 … — Blocked-by: #36987 (open)` is gone (base prints it).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n"
+}

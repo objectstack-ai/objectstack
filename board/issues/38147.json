@@ -1,0 +1,36 @@
+{
+  "number": 38147,
+  "kind": "pull_request",
+  "title": "test(service-automation): stub the host lookup in the http-nodes failed-call suite",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T04:24:42Z",
+  "updated_at": "2026-11-28T07:32:04Z",
+  "closed_at": "2026-11-28T07:32:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T07:32:02Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38147",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\n\nFixes #38126\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只改了自动化服务里一个测试文件,产品代码与线上行为都不变。\n- 为什么做:消除一个偶发失败的测试,它依赖真实域名解析,CI 上解析慢时会超时变红。\n- 出错会怎样:最坏是这个测试本身再变红,不影响任何用户,可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`packages/services/service-automation/src/builtin/http-nodes.test.ts` only (+25 / -3). In the describe `http (canonical node) — a failed call names its host and cause`, `run()` no longer falls back to `defaultEgressGuard()` (whose resolver is the real `dns.promises.lookup`). It hands the node the **real** egress guard, `createEgressGuard({ policy: createEnvEgressPolicy({ allowedTargets: '127.0.0.1' }), resolve })`, through the existing `registerHttpNodes(..., { egress })` seam and the guard's own `resolve` option (documented \"DNS override (tests)\"; same pattern as `http-node-egress-guard.test.ts`). The stub resolver answers an ENOTFOUND-shaped error for `no-such-host.invalid` and throws on any other name; it records every name asked.\n\n- The refusal text assertion and the \"nothing of the lookup\" assertion (`not.toContain('ENOTFOUND')`) are unchanged.\n- The two cases that name `no-such-host.invalid` (unknown host; path/query/userinfo secrets) now also assert the stub answered the lookup (`lookups` equals `['no-such-host.invalid']`).\n- ECONNREFUSED and timeout cases stay real undici against a real loopback socket: an IP literal never reaches the resolver.\n- No product change: `http-nodes.ts` and the egress guard are untouched.\n\nEvery other case in the file was checked for a host lookup: `example.test` / `api.test` cases use `stubbedFetchEgress()` or the durable outbox (no fetch); `example.invalid` in the missing-url case never sends. The DNS-off run below records zero lookups for the whole file.\n\n## Tests\n\n- `http-nodes.test.ts`: 19/19 passed, normally and with DNS disabled.\n- Control on `origin/main`'s version with every name lookup made to hang (the CI shape): the two cases time out at 5000 ms, two lookups of `no-such-host.invalid` recorded.\n- Ablation: stub resolving `no-such-host.invalid` to a public address (93.184.215.14) turns both cases red; restored byte-identical.\n- Package: `@objectstack/service-automation` typecheck (incl. `check:test-typecheck`) green; full vitest 297/297 files, 4342/4342 tests.\n\n<details><summary>DNS-off evidence (a preload hook records and then hangs or fails every non-IP lookup)</summary>\n\n```\n# origin/main version, DNS_HOOK=hang\n× an unknown host reads the refusal ... 5003ms   Error: Test timed out in 5000ms.\n× never names the path, query secret or userinfo of the url 5002ms\nTests  2 failed | 17 passed (19)\nlookups: dns.promises.lookup no-such-host.invalid (x2)\n\n# this branch, DNS_HOOK=hang and DNS_HOOK=fail\nTest Files  1 passed (1)   Tests  19 passed (19)\nlookups recorded: 0\n```\n</details>\n\n<details><summary>Ablation (scripts/ablation-replace.mjs, anchor x1 -> x0, restored blob == HEAD blob)</summary>\n\n```\n× an unknown host reads the refusal ... 23ms\n  AssertionError: expected 'Node \\'http\\' failed: HTTP 403' to match /http: EGRESS_REFUSED: /\n× never names the path, query secret or userinfo of the url 14ms\n  AssertionError: expected 'Node \\'http\\' failed: HTTP 403' to contain 'no-such-host.invalid'\nTests  2 failed | 17 passed (19)\nrestore: blob a5bbfa63edd6 == HEAD\n```\n</details>\n\n## Acceptance notes\n\n- `skip-changeset`: test-only diff. `files[]` is `dist`, `README.md`, `CHANGELOG.md`; after a build, the new test symbols have zero hits in `dist/`, and the positive control (`defaultEgressGuard`) has hits.\n\n## Verification\n\nRead first: `http-nodes.test.ts` around the `stubbedLookupEgress()` helper (the only risky hunk: the default egress for `run()` changed).\n\nTwo-minute check: `pnpm --filter @objectstack/service-automation exec vitest run --maxWorkers=2 src/builtin/http-nodes.test.ts` with networking off; expect 19 passed.\n\n<details><summary>Local gates at fc05d4e861 (derived list, dispatch-gates --ran: 53 derived, 52 run, 1 NOT MEASURED)</summary>\n\n- 52 derived families exit 0 (incl. `check:nul-bytes`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:type-check-coverage`, `check:type-check-debt`, `check:issue-citations`).\n- NOT MEASURED: `check:dual-build-cjs-loads`, exit 3 PREREQUISITE NOT MET (needs a whole-workspace `dist/`; this diff changes no built output). CI runs it.\n- `overlap-check.mjs`: VERDICT clean exit 0 (origin/main merges cleanly, 0 overlapping PR heads).\n- Everything else (repo-wide `check:*`, Test Core, Build Core, type-check lanes): CI's.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW\n"
+}

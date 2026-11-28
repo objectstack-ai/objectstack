@@ -1,0 +1,34 @@
+{
+  "number": 38128,
+  "kind": "issue",
+  "title": "技能：定制包里的相关列表标签页标题现在会按翻译对显示，更新「重写一遍 owner 的 label」这条唯一解法（接 #37622）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T03:14:07Z",
+  "updated_at": "2026-11-28T08:14:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38128",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) `Skills-docs: follow-up owed` on PR #38085 (#37622). Source: fleet.\nGrading: area:ux · Docs · p3 · reach: agents and developers translating a customer package that re-arranges a parent object's related-list tabs · evidence: PR #38085 body, Risk section.\nDedupe: \"_relatedLists skills label\", \"relatedLists arrangement translation skill\" → only #37622 (the code fix this follows).\n\n## 维护者速读\n\n- 问题：技能里讲，定制包改了相关列表标签页的标题后，要想让它显示译文，唯一办法是把 owner 原来的标题照抄回去。#37622 合入后，记录页会按定制包自己的翻译显示任何标题，所以这条说法不再是唯一办法。\n- 修法：在两处技能文字里补上新的做法。照抄 owner 标题的办法仍然有效，保留。\n- 要你做的：无。\n\n## Ask\n\n1. `skills/objectstack-i18n/SKILL.md`, the `_relatedLists.{list}` row, and `skills/objectstack-data/rules/relationships.md` (the remedy that says to re-state the entry \"with the owner's own `label`\", l.359 on the PR #38085 head) also teach that the object read translates an arrangement-set tab title through the package's own translations, as PR #38085 does.\n2. The token ratchet rows move only by the measured delta.\n\n## Acceptance\n\n- Both files describe both routes, and match PR #38085's behaviour as merged.\n- Blocked-by: #37622 (PR #38085 must merge first, so the text matches the shipped behaviour)."
+}

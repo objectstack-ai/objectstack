@@ -1,0 +1,33 @@
+{
+  "number": 38175,
+  "kind": "pull_request",
+  "title": "fix(cli): os migrate plan / apply compose the knowledge service an artifact-only stack's shipped source mounts, as os serve does",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T05:21:30Z",
+  "updated_at": "2026-11-28T06:18:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38175",
+  "body": "Fixes #38062\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：只用构建产物、没有配置文件的应用，如果自带知识源，运行迁移预览和迁移时会像正式启动一样挂上知识服务，不再提示知识源无人服务。\n- 为什么做：属于知识库检索专题，替用构建产物部署的团队解决迁移命令与正式启动拼出的平台不一致的问题。\n- 出错会怎样：最坏是这类应用的迁移预览多列出知识服务的表；不带知识源的应用不受影响，改动可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\nOn an artifact-only stack (`dist/objectstack.json`, no `objectstack.config.ts`), `os serve` builds its config as the standalone stack's result laid over the empty authored config (`mergeBootConfig`), then reads the tokens the stack's items mount off that config (`stackItemCapabilities`). Since the standalone result started carrying `knowledgeSources`, a shipped `knowledge_source` mounts KnowledgeServicePlugin there.\n\n`os migrate plan` / `apply` handed the served-platform composition only `stack.requires`, and `composeServedPlatform` read item tokens off the loaded config, which is empty on that stack. Now:\n\n- `packages/cli/src/utils/schema-migrate.ts`: `servedPlatform` also carries `artifactStack: stack`, the standalone result.\n- `packages/cli/src/utils/schema-migration-plugins.ts`: `composeServedPlatform` reads `stackItemCapabilities` off `mergeBootConfig(config, artifactStack)` whenever the config is not a host config. That is serve's own merge, gated by the same rule `requires` already follows a few lines above. A host config, or a call with no `artifactStack` (`os migrate security-catalog-overlays`), reads the config as before.\n\nThe auth gate's `authGatedSecurity` hand-off is unchanged. The only item token is `knowledge`, and it maps to no tier (`CAPABILITY_TO_TIER`), so the tier reading is the same with or without it.\n\n## Tests\n\n- New `packages/cli/src/commands/migrate/plan.artifact-item-capabilities.test.ts` (unit tier) runs `os migrate plan --json` on an artifact-only project:\n  - one `knowledgeSources` entry and no `requires`: exit 0, `composition.hostConfig` is null (precondition), the \"Composed what `os serve` mounts\" note names `KnowledgeServicePlugin`, and no output channel carries the unserved-knowledge_source warning;\n  - control, the same artifact with no source: the note is present and does not name `KnowledgeServicePlugin`.\n\n## Acceptance notes\n\n- Ablation (both source files restored to the base `0e361201b2`, test unchanged): the main case goes red on the note assertion (the note lists the REST API plugin through PackageServicePlugin, with no KnowledgeServicePlugin), and the control stays green. A second ablation moved the warning assertion first. It went red with the ObjectQLPlugin unserved line in captured output, which shows the \"no warning\" assertion can fail. The tree was restored and `git status` read clean after each run.\n\n## Verification\n\nRead first: `composeServedPlatform`'s `servedConfig` line in `schema-migration-plugins.ts` (the gate on `isHostConfig`), then the `servedPlatform` hand-off in `schema-migrate.ts`.\n\nTwo-minute check: `pnpm --filter @objectstack/cli exec vitest run --project unit src/commands/migrate/plan.artifact-item-capabilities.test.ts` should give 2 passed.\n\n<details><summary>Local readings</summary>\n\n- Closure build `pnpm turbo run build --filter='@objectstack/cli^...'`: 69/69 tasks, lock VERDICT command-exit 0.\n- New pin: Test Files 1 passed, Tests 2 passed.\n- `@objectstack/cli` unit tier: 445 files passed. The 2 `published-subpath-*` pins failed on a missing `packages/cli/dist` prerequisite, not on this change. After `pnpm --filter @objectstack/cli build` they read Test Files 2 passed, Tests 29 passed.\n- `pnpm --filter @objectstack/cli typecheck`: exit 0.\n- `src/utils/schema-migration-plugins.test.ts` (integration tier, the touched module): Tests 54 passed.\n- `overlap-check --pr=38056,38060,38013,37982,38038`: VERDICT clean, exit 0.\n- Derived gate families (`dispatch-gates --commands`, 70 commands, `--ran` 70/70 accounted): 68 exit 0. Two read NOT MEASURED: `check:dual-build-cjs-loads` (PREREQUISITE NOT MET, needs a whole-tree build) and `check:i18n-coverage` (exit 3, a partial round with unbuilt configs); CI runs both.\n- After the last commit (21be65c7a7, which drops one test-file import), these were rerun on that head, all exit 0: `test-source-alias`, `cross-package-test-inputs`, `issue-citations`, `nul-bytes`, `undeclared-dep-imports`, `doc-authoring`, `type-check-debt`, `type-check-coverage`, `refd-timer-probe`, `empty-changeset`, `changeset-no-major`, `adr-0087-registration`. The new pin and `boot-preparation-parity` also passed again: Test Files 2 passed, Tests 41 passed.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP)_\n"
+}

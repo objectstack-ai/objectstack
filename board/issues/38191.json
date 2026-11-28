@@ -1,0 +1,31 @@
+{
+  "number": 38191,
+  "kind": "issue",
+  "title": "follow-up of #36544: after FormView modalSize retires, update the QA checklist view.form row and the @object-ui/types taxonomy comment",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T06:14:41Z",
+  "updated_at": "2026-11-28T07:18:25Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38191",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) review nit N2 on PR #38168 (#36544), contract review 7235062576: the two edits the PR defers by ruling have no card. Source: fleet.\nGrading: area:build · Task · p3 · reach: QA runs of the Studio authoring checklist and readers of the `@object-ui/types` form-view taxonomy after 19.0 · evidence: PR #38168 body, Acceptance notes (head fa4a7b40).\nDedupe: \"modalSize checklist\", \"objectql.ts modalSize\" → only #36544 and PR #38168.\nBlocked-by: #38168\n\n## 维护者速读\n\n- 问题：表单视图的 `modalSize`（弹窗大小）在 19 退役（#38168）。那个 PR 按裁定没有动两处旁边的文字：QA 测试清单里还把它记成「今天失败的一行」，ui 类型包的一段注释还把它列为表单视图的键。\n- 修法：#38168 合入后，改这两处文字，与退役一致。\n- 要你做的：无。\n\n## Ask (after #38168 merges)\n\n1. `docs/qa/platform-checklist/areas/studio-authoring.json`, the `view.form` row: it still records `modalSize` as a row that fails today. Update the row to the retired key (the item now expects the parse refusal that #38168 ships, or the row drops `modalSize`, as the checklist's own conventions say), and keep `check-platform-checklist` green.\n2. `ui/packages/types/src/objectql.ts`: the taxonomy comment lists `modalSize` among form view keys. Remove it, with an `@object-ui/types` patch changeset if the comment ships in the package's sources.\n\n## Done when\n\n- Neither file names `modalSize` as a live form-view key.\n- `check-platform-checklist --changed-from origin/main` and the `@object-ui/types` gates exit 0."
+}

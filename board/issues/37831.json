@@ -2,8 +2,8 @@
   "number": 37831,
   "kind": "issue",
   "title": "AI drawer: the model picked in the composer falls back to the default after every answer",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T06:02:21Z",
-  "updated_at": "2026-11-28T01:54:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T03:10:36Z",
+  "closed_at": "2026-11-28T03:09:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37831",
   "body": "## What happens\n\nIn the console's AI drawer (the side panel opened from the header's assistant icon), pick a non-default model in the composer's model picker (e.g. `Fast - Minmax 3.1 Flash` instead of `Fast · Claude Haiku 5.5`), then ask a question. When the answer finishes, the picker shows the default model again. It happens after **every** answer, not only the first send of a new conversation.\n\nSeen on a deployed console: ObjectStack 19.0.0-next.0, console build `1dbf19a1`, app `ai.objectstack.brightrule`, both on an app `page` (`brightrule_home`) and on a record page. Six models offered (Haiku 5.5 ×1, Deepseek 4.1 Flash ×1, Minmax 3.1 Flash ×1, Qianwen 3.8 Omni Flash ×1, Sonnet 5.5 ×20, Opus 5.5 ×40).\n\n## Why it matters\n\n`ChatPane` sends the value the picker shows (`effectiveModelId = selectedModelId ?? defaultModelId`, `console/ai/AiChatPage.tsx`), so after the reset the next question silently runs on the default model. A user who picked a stronger model for a hard question gets the default one on the follow-up without noticing, and one who picked a cheaper one is charged at the default's multiplier.\n\n## What the code intends\n\nADR-0028: the pick is held by the host, `ChatDockConversation` (`layout/ChatDockConversation.tsx:216`, \"held here so it outlives the keyed pane's remount when the first send mints the conversation\"), and handed to the pane as `selectedModelId` / `onSelectedModelChange`. The pane's own key (`${chatApi}:${paneConversationId}`) changing should therefore not lose it. That the pick is still lost after each answer suggests `ChatDockConversation` itself is remounted (or its state reset) around the end of a turn — `handleSent` bumps `refreshKey`, and the drawer mounts the body lazily under `React.Suspense` in `ChatDock.tsx` — but I have not reproduced it locally (no AI service there), so the cause is a guess.\n\n## Expected\n\nThe picked model stays picked for the rest of the drawer conversation (and the next request uses it), as on the full-page chat."

@@ -1,0 +1,29 @@
+{
+  "number": 38171,
+  "kind": "pull_request",
+  "title": "test(app-shell): await the flow label in the canvas-chip header test",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T05:09:37Z",
+  "updated_at": "2026-11-28T06:23:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38171",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoAoNwrZVJoUEFfvMURpRPKJ)_\n\nFixes #37822\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户无感:只改一条自动化测试,产品界面不变。\n- 让流程画布标题测试不再偶发失败(测试在标题加载完成前就去读文字)。\n- 出错只会让这条测试误报,可直接撤回。\n- 要你做什么:无。\n\n## What changes\n`StudioDesignSurface.flowCanvasChip-11665.test.tsx` only. The canvas chip prints the API name until the flow loads (`flowTitle = current ? ... : flowName`), so the synchronous label and header-text reads after `caption()` raced the load. They now sit in `waitFor`. The fixture gains a `server.gate` that holds `list`/`layered`; a new case proves the chip is the API-name placeholder while held and the label after release; the API-name fallback case releases the gate and waits for `auto-flow-meta` so it no longer passes on the placeholder.\n\n## Tests\n- File: 5/5 pass; 20 consecutive runs: 20 ok.\n- Ablation (header prints API name, `flowTitle = flowName`, reverted): zh, en and the new late-load case go red; the API-name case stays green by design (it is the fallback).\n- Old synchronous read vs late load: the new case asserts the placeholder while held, which is what the old sync assertion would have read.\n\n## Acceptance notes\nNo changeset: test file ships in no package. Header text reads (zh hint, en 'Visual orchestration') also sat synchronously; now awaited.\n"
+}

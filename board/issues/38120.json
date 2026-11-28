@@ -1,0 +1,32 @@
+{
+  "number": 38120,
+  "kind": "issue",
+  "title": "看板按文本字段或声明选项分道：空值记录全在第一页之后时，「未分类」道不显示（接 #37516）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T02:59:39Z",
+  "updated_at": "2026-11-28T06:57:57Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38120",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) out-of-scope finding from the #37516 card thread (PR #38112, os-dev-report 7232465642). Source: fleet.\nGrading: area:ux · Bug · p2 · reach: a list-view kanban laned by a text field or by declared options, whose records with an empty or unmatched lane value all sit past page one · evidence: code read.\nDedupe: \"kanban uncategorized lane past page text field\", \"declared options uncategorized windowed\" → only #37516 (lookup lanes, the fix this follows).\nBlocked-by: #38178\n\n## 维护者速读\n\n- 问题：看板按文本字段或按声明的选项分道时，如果空值或对不上任何道的记录都在第一页之后，「未分类」道就不画出来。用户看到的总数和各道加起来对不上，那些记录在看板上找不到。\n- 修法：#37516（PR #38112）已经给查找字段分道修好了同一个问题，把同一条路放宽到文本字段和声明选项分道。\n- 要你做的：无。\n\n## Measured (code read)\n\n- `bucketCardsIntoColumns` draws the Uncategorized lane only from the cards on the loaded page.\n- PR #38112's gate in `ObjectKanban` (`keepUncolumned` / `extraLaneIds`) requires `laneTargetObject`, so it covers lookup lanes only. The claim on #37516 scoped text and option lanes out.\n\n## Ask\n\n1. A kanban laned by a text field or declared options keeps the Uncategorized lane when the empty-value count is known, even if no such card is on the loaded page. Use the same rule as #38112: counts are null on a partial or refused read.\n2. Pins with ablations, as #38112's.\n\n## Acceptance\n\n- With empty-lane records only past page one, a text-field kanban and an option kanban both show Uncategorized with its count.\n- Blocked-by: #37516 (same files; build on PR #38112).\n"
+}

@@ -2,8 +2,8 @@
   "number": 37505,
   "kind": "issue",
   "title": "同服务器令牌棘轮：别名、拼接 URL、spread 参数等写法数漏，react 宿主回退仍走裸 fetch（接 #37225）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T09:25:48Z",
-  "updated_at": "2026-11-27T06:33:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T07:57:54Z",
+  "closed_at": "2026-11-28T07:56:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37505",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding S1 + S2 + S3b of the seat's L2 on PR #37489 (#37225), record 7187820695; the seat asked the owning zone to card it under #37225. Source: reviewer.\nGrading: area:ux · Bug · p2 (triage grades) · reach: every same-server call the bearer ratchet should hold but cannot see, so a cookie-only call can come back unnoticed · evidence: L2 record 7187820695; os-dev report 7187574466.\n\n## 维护者速读\n\n- 做什么：#37225 加宽了「同服务器请求必须带令牌」的棘轮测试，但它数漏了几种写法（别名、拼接 URL、spread 参数等），有一行计数也不对；react 包里两处宿主回退也走裸 fetch。补全棘轮，并把这两处一起改掉。\n- 谁受益：用纯令牌登录（嵌入、云租户）的用户，以后新增的漏网请求会被测试拦下。\n- 不做会怎样：棘轮看起来是绿的，其实有盲区。\n- 需要你做的：无。\n\n## What\n\n- `ui/packages/app-shell/src/sameServerFetch.bearer.ratchet.test.ts`: an aliased `const doFetch = apiFetch ?? fetch` counts 0; URL constants, `+` concatenation, `credentials: 'same-origin'` and spread inits are missed; the `MePermissionsProvider` row says 1 for 2 sites (S1, S2).\n- S3b: the react host fallbacks `ui/packages/react/src/useElementApiDataSource.ts` (1) and `useDatasetDimensionLabels.ts` (1) fall back to bare `fetch` when no host apiFetch exists; convert or record them once the ratchet sees them.\n\n## Acceptance\n\n- The ratchet counts each listed spelling (a pin per spelling), the row counts match the census, and stays shrink-only.\n- The two react fallbacks are converted or recorded with their reason.\n\nBlocked-by: #37225"

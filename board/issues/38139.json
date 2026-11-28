@@ -1,0 +1,32 @@
+{
+  "number": 38139,
+  "kind": "issue",
+  "title": "其余本地化的 501（#37845）写故障日志时仍用第一个调用方的语言；把英文原句放进 catalogNotImplemented 一并覆盖（接 #37864）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T03:56:30Z",
+  "updated_at": "2026-11-28T04:14:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38139",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) follow-up named by the contract review delta on PR #38113 (#37864): record 7233494597, L1 7233509846. Source: fleet.\nGrading: area:ux · Bug · p3 · reach: operators who read the server fault log on a deployment whose callers use more than one language · evidence: reviewer read; PR #38113 fixed the same defect for `capabilityUnavailable` only.\nDedupe: \"fault log language 501\", \"catalogNotImplemented English log\" → 0.\n\n## 维护者速读\n\n- 问题：服务端「功能未实现」这类 501 应答已经会按请求语言给出提示，但写进运维日志的那一行每个进程只写一次，用的是第一个调用方的语言。运维可能看到一行日文或中文日志。#38113 只修了其中一种 501。\n- 修法：照 #38113 的做法，在共用的 catalogNotImplemented 里放进英文原句，供日志使用，其余 501 就一并覆盖了。顺手改掉说明里「任何 501」的不准确说法。\n- 要你做的：无。\n\n## Ask\n\n1. Every localized 501 from #37845 that goes through `catalogNotImplemented` carries the English sentence in `faultLogMessage`, as PR #38113 does for `capabilityUnavailable`. The fault log line is English whatever the first caller's language, and the response still follows the request.\n2. N4: the jsdoc that says \"any 501\" names the answers it actually covers.\n3. Pins: a non-English request first, then the warn line is English, and the field is not in the response body. Include an ablation.\n\n## Acceptance\n\n- No localized 501 writes a non-English fault log line.\n- Blocked-by: #37864 (PR #38113 adds `faultLogMessage`)."
+}

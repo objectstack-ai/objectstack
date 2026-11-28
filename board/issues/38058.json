@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:docs",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T23:04:25Z",
-  "updated_at": "2026-11-27T23:15:15Z",
+  "updated_at": "2026-11-28T07:18:01Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38058",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38013 (#37983; contract review 7228262724 nits N1, N3, N4 and N5, folded into one card as L1 7228292666 lists them; N2 accepted as a deviation, not carried) · Source: topic #37000\nGrading: area:ai · Feature · p3 (suggested: docs-face over-inclusion and wording; no wrong accept or refusal on the platform's own service) · reach: an author reading semantic migration entry 19 on a stack that ships a `knowledgeSources` entry; a host registering a scoped `knowledge` factory; a caller duplicating a package that holds a source · evidence: read of PR #38013 at 33acf12ec4 by the contract review (no live run).\nDedupe: `is:issue knowledge-source-save-refused-without-knowledge-service` → checked at filing; open: #37983 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：#38013 让\"没装知识服务的部署上保存知识源\"当场失败。复审留下四处小毛病：升级说明把\"已自带知识源的应用\"也算进受影响范围（照做无害但多余）；少见的按范围注册的知识服务落空时会被误说成\"没装知识服务\"；一段代码注释读不通；复制应用包时报错里叫人\"再保存一次知识源\"。\n- 做什么：收窄升级说明的适用范围，给按范围落空单独一句说明，修两处文字。\n- 谁受益：照升级说明操作的作者、复制应用包的管理员（说明更准，报错能照着做）。\n- 需要你做的：无。\n\n## What\n1. N1: semantic migration entry `19.knowledge-source-save-refused-without-knowledge-service.ts` (`surface`, `acceptanceCriteria`) and the changeset's FROM line describe the affected deployment as one whose stack \"does not declare `requires: ['knowledge']`\". Since #37306 a stack that ships a `knowledgeSources` entry also mounts the service (`mountedBy: { collection: 'knowledgeSources' }`), and saves there are accepted. Narrow the text to a deployment that neither declares the token nor ships a source.\n2. N3: on the dispatcher transport and the package-duplicate door, `resolveServiceOrLoud` also answers `undefined` for the `no-instance-in-scope` classification, which is then told \"this deployment runs no knowledge service\". The platform plugin registers a plain instance, so the platform's own service cannot reach this; a host with a scoped `knowledge` factory that answers nothing for a scope can. Give that classification its own sentence (or state why the shared one is right), pinned.\n3. N4: the reworded jsdoc on `OpenAuthoringWriter.itemSaveRefusal` (\"..., or on a deployment with no knowledge service, or `undefined` ...\") no longer parses as a sentence. Reword it.\n4. N5: through the package-duplicate door the predicate's sentence is appended verbatim, so a caller duplicating a package is told to \"save the source again\" and that \"Nothing was written\" after \"nothing was copied\". Word the duplicate door's remedy for its caller (duplicate the package again).\n\n## Acceptance\n- Entry 19's `surface` / `acceptanceCriteria` and the changeset FROM line no longer include a stack that ships a `knowledgeSources` entry.\n- A scoped-factory miss is answered with its own sentence (or the PR states and pins why not); the platform-instance path is unchanged (control).\n- The `itemSaveRefusal` jsdoc reads as a sentence.\n- The duplicate door's refusal tells the caller to duplicate again, and says nothing was copied once.\n\nBlocked-by: #38013"

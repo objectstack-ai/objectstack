@@ -1,0 +1,34 @@
+{
+  "number": 38144,
+  "kind": "issue",
+  "title": "check-adr-0087-registration: a type literal in an interface or class header (type parameter constraint or heritage) makes the type-position reader read an annotated member as erased",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T04:19:02Z",
+  "updated_at": "2026-11-28T06:49:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38144",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① (b) out-of-scope finding of the #37445 dev (os-dev report, #37445 comment 7233468940), confirmed real by L1-a on PR #38137 (7233892416). Source: seat repo:objectstack#1 area `o1-F`.\nGrading: area:fleet · Bug · p2 · reach: ADR-0087 predicate 4 readings of a member inside an interface or class whose header carries a type literal · evidence: measured at `adfdb84b`.\nDedupe: `braceOpensTypeBody`, `sitsInTypePosition heritage` → 0 open hits.\n\n## 维护者速读\n\n- 问题：发版检查里有个读类型的工具，遇到接口或类的声明头里带 `{ ... }`（例如 `T extends { id: string }`）时，会把里面有类型标注的成员当成「没有标注」。这个方向偏宽：本该拦下的改动可能被放行。\n- 修法：让它正确识别声明头里的类型字面量，并补上能证明修好的测试。\n- 要你做的：无。\n\n## Measured (at `adfdb84b`)\n\n- `readTypeSurfaceRef` answers \"carries NO return annotation\" (erased) for `ui/packages/app-shell/src/layout/SortableFavoriteRows.tsx#SortableFavoriteRowsProps.renderRow`, an annotated function-typed property.\n- Cause: `braceOpensTypeBody` reads its header back only to the previous brace, so an interface or class header that carries a type literal (`T extends { id: string }`, or `extends Base<{ a: 1 }>`) is not classified as a type body, and `sitsInTypePosition` falls back to the value reading. The bare spelling gives the same reading.\n- Direction: permissive for predicate 4 (a concrete base reads as erased).\n\n## Acceptance\n\n- A member of an interface or class whose header carries a type literal reads its annotation; the real instance above resolves to its annotation.\n- Pins: header type literal in a constraint and in heritage, with a lit control; an ablation reds them.\n- Carry L1's optional nits from PR #38137 in the same PR: N1 (`containerBodiesFor` docstring names the interface and type-literal kinds), N2 (predicate 4 refusal prose line break), N3 (a pin for the companion-object case, `interface X` plus an object literal `X = {`, which reads AMBIGUOUS).\n\nSurface: `scripts/check-adr-0087-registration.mjs` (the #38093 reader). Serial with #37447 if that card's PR also edits this file.\nBlocked-by: none"
+}

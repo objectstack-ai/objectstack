@@ -1,0 +1,37 @@
+{
+  "number": 38110,
+  "kind": "issue",
+  "title": "changelog: the 19.0.0-next.1 formula currency-verdict entry says the optional spellings of an amount moved from number, but a bare optional never typed as a number",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:docs",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T02:32:02Z",
+  "updated_at": "2026-11-28T08:02:46Z",
+  "closed_at": "2026-11-28T08:02:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38110",
+  "body": "repo:objectstack#8 · sunhaolin · session_017xRBcSAaBEfQpU2yJexSJ8\n\nFiling gate: ① (release-fixed wrong text, the 先测可达性 exception: the text is in published CHANGELOGs) · Source: fleet — rider N3 of #35815, found by its developer on PR #38108 and kept out of that code PR because AGENTS.md (Documentation Guardrails) asks a factual error in a released entry to be amended in a dedicated docs-only PR.\n\n## What is wrong\n\nThe #35631 entry says the indexed and optional spellings of an amount (`record['amount'] * 0.1`, `record.?amount * 0.1`, `record[?'amount'] * 0.1`) moved from `number` to `{}`. Measured on PR #38108 (ablation of the `readsOnlyPlainFields` guard): the two bare optional spellings answer `{}` with and without the guard — an optional is never typed as a number — so they never moved. The spellings that do discriminate read through `orValue` (`record.?amount.orValue(0) * 0.1`).\n\nWhere the sentence is (read on origin/main 815e882b): the consumed `.changeset/pre/35631-formula-currency-verdict.md`, and the `19.0.0-next.1` sections of `packages/formula/CHANGELOG.md`, `ui/packages/app-shell/CHANGELOG.md` and `packages/spec/CHANGELOG.md`.\n\n## Proposed text (the developer's, from PR #38108 Acceptance notes)\n\n\"the indexed spelling of an amount (`record['amount'] * 0.1`) and the optional spellings read through `orValue` (`record.?amount.orValue(0) * 0.1`); a bare optional (`record.?amount * 0.1`) never typed as a number and answered `{}` before and after\"\n\n## Business reason\n\nAn author or agent reading the release notes is told a spelling changed behaviour that did not; it is the record an upgrade is judged by.\n\n## Reader who acts\n\nSeat `repo:objectstack#8`, one docs-only PR after PR #38108 lands (the corrected test comment is in that PR).\n\n## Dedupe\n\n`is:issue 35631 changelog optional amount` → 2 hits (#35815 open, the parent; #35631 closed, the original card); `is:issue \"orValue\" formula changelog` → 3 hits, none on this sentence.\n\nGrade: area:data · Task · p3 · reach: readers of the 19.0.0-next.1 release notes; text only, no behaviour."
+}

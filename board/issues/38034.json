@@ -2,8 +2,8 @@
   "number": 38034,
   "kind": "issue",
   "title": "ui: the ChatDock AI usage ring reads the optional `tiers` of /api/v1/ai/usage — personal share and team pool remaining, plus `tiers.notice` (cloud#5159)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T18:27:09Z",
-  "updated_at": "2026-11-27T19:15:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T06:29:47Z",
+  "closed_at": "2026-11-28T06:05:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38034",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjNNAszFFRkpjA3zLbb\n\nFiling gate: ④ framework half of a cross-repo topic: objectstack-ai/cloud#5159 (child of epic cloud#5151, on the maintainer's word: Jack 2026-11-27 17:23Z named 「S2-01 实现 AI 两层额度：个人额度加团队共享池」 a first-batch item; cloud#5159 scope item 5: 「用量读数（额度环、用量接口、按用户明细）显示个人剩余和共享池剩余」). Source: topic objectstack-ai/cloud#5159.\n\nGrading: area:ai · Feature · p2 (set by the cloud#5 seat on the coordinator's request; the cloud half is p1) · reach: n/a until cloud PR #5163 ships the field · evidence: read (cloud PR #5163 head 3a6eec7, framework main).\n\nDedupe: searched `is:issue` for `usage ring personal team pool` (1, a seat post), `tiers ChatDock allowance` (1, a seat post), `AiUsageIndicator tiers` (0), `team shared allowance ring` (0): no card covers it.\n\nReader: the objectstack seat holding area:ai dispatches it; the dev changes `ui/packages/app-shell` only.\n\n## 维护者速读\n\n- 做什么：聊天框右上角的 AI 额度环，在付费版上分别显示「个人额度」和「团队共享额度」还剩多少；个人额度用完、开始用共享额度时，显示服务端给的提示（如「你本周的个人 AI 额度已用完，正在使用团队共享额度。」）。\n- 免费版和私有部署读数里没有这一项，额度环保持现在的样子。\n- 需要你做的：无。\n\n## Why\n\ncloud#5159 (PR objectstack-ai/cloud#5163) splits a paid organization's weekly AI allowance into a personal share per person plus one team pool; a person overflows into the pool when their share is used up. The cloud reading already answers both tiers, but the console ring only reads `pool`, so a person who silently moved onto the team pool sees nothing change, and the team cannot tell whose allowance is running out.\n\n## The wire shape (cloud PR #5163, `packages/objectos-runtime/src/ai-usage-endpoint-plugin.ts`)\n\n`GET /api/v1/ai/usage` keeps `{ pool, breakdown }` unchanged and adds, on paid plans with a known caller only, an optional:\n\n```ts\ntiers?: {\n  personal: { fraction: number; resetsAt: string | null } | null; // null for a pool-only caller (an AI service account)\n  teamPool: { fraction: number; resetsAt: string | null };       // credit packs included\n  usingTeamPool: boolean;                                         // personal share used up, turns draw on the pool\n  notice: { en: string; zh: string; ja: string; es: string } | null; // non-null exactly when usingTeamPool\n}\n```\n\n`pool` stays the binding reading (personal share while it lasts, then the team pool, or the 5-hour pace when closer). Fractions only, never tokens (D5).\n\n## What\n\n1. `ui/packages/app-shell/src/hooks/useAiUsage.ts`: `parseUsage` accepts an optional `tiers` of exactly that shape; a malformed `tiers` drops to the `{ pool, breakdown }` reading (the ring still renders) rather than nulling the whole answer.\n2. `ui/packages/app-shell/src/layout/AiUsageIndicator.tsx`: when `tiers` is present, the popover shows the personal share's and the team pool's remaining (as the existing qualitative status plus the used share, D5-safe, no token counts) and each tier's reset; when `tiers.notice` is non-null it shows the notice in the console's locale (fall back to `en`). The ring itself keeps drawing `pool` (the binding reading). A `personal: null` caller shows the team pool only.\n3. No `tiers` (Free, self-hosted, older backend): behaviour and copy unchanged. Note the popover is deliberately one figure today (objectui#11658); this card widens it to two only when `tiers` is present.\n4. New console strings in all four locales (`console.ai.usage.*`).\n\n## Acceptance\n\n- Unit tests: `parseUsage` with no `tiers`, a valid `tiers`, `personal: null`, a malformed `tiers`; the indicator renders both tiers and the notice when present, and the current output unchanged when absent.\n- `pnpm` affected typecheck/test for `@object-ui/app-shell` green; i18n key check clean.\n\nRelated: objectstack-ai/cloud#5159, objectstack-ai/cloud#5163, objectstack-ai/cloud#5151."

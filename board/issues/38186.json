@@ -1,0 +1,32 @@
+{
+  "number": 38186,
+  "kind": "pull_request",
+  "title": "fix(app-shell): note beside the tool preview's API console link that a call needing the server model runs in a chat",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T06:04:22Z",
+  "updated_at": "2026-11-28T06:39:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38186",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuFp7psAjwMAd6im45pssh1w)_\n\nFixes #34193\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 搭建者在后台的工具预览里点「在 API 控制台中打开」时，链接旁边现在多一行说明：这里直接运行工具、不经过对话，托管云上需要服务端模型的调用会被拒，请在对话里试；以前什么都不说，点进去只看到一句拒绝。\n- 替云端搭建者解决：直接运行工具不带服务端模型，这是云端已有的规则，预览页之前没有交代。\n- 只是加一行提示文字，链接照旧对所有工具保留，出问题删掉这行即可，用户数据不受影响。\n- 无。\n\n## What changes\n\n- `ui/packages/app-shell/src/views/metadata-admin/previews/ToolPreview.tsx`: wherever the \"Open in API Console\" link is drawn, a short note now sits beside it, and the link names that note as its `aria-describedby`. Where no link is drawn (no router, or a route with no `:appName`) no note is drawn either. The link itself, its target and its preset are unchanged. The docblock records why the preview cannot hide the link per tool.\n- New studio string `engine.toolPreview.openApiConsoleNote` in `ui/packages/i18n/src/namespaces/studio/en.ts` and `zh.ts`:\n  - en: \"Runs the tool directly, outside a chat. On the hosted cloud a call that needs the server-side model is refused here: try it in a chat.\"\n  - zh: \"这里直接运行工具，不经过对话。托管云上需要服务端模型的调用会被拒绝，请在对话里试。\"\n  - The studio namespace ships `en` and `zh` only by ruling (its header, objectstack#25922); every other language falls back to `en`. The claim's file surface said \"every `ui/packages/i18n/src/locales/*.ts`\"; the `engine.toolPreview.*` rows live in the studio namespace, not in the `locales/` packs, so the key went there.\n- Changeset: `@object-ui/app-shell` and `@object-ui/i18n` patch.\n\nWhy a note for every tool and not a per-tool hide (the card's premise, corrected on the card in comment 7234934521): tool metadata has no field that says a tool needs the server model (`ToolSchema` is strict: `name`, `label`, `description`, `parameters`, `outputSchema`, `objectName`), the platform tool registry groups tools by package only, and for some tools whether a call reaches the model turns on the call's arguments. So the note names no tool.\n\n## Tests\n\n- `ToolPreview.test.tsx`, new describe (5 tests): the note shows next to the link and is the link's `aria-describedby`; a tool with no parameters keeps the link and the note; no note where no link is drawn (route with no app) and none with no router; the note's `en` and `zh` rows are real rows (zh not the English one) and contain none of the names in `PLATFORM_PROVIDED_TOOL_NAMES`.\n- `automationPreviews.i18n-10862.test.tsx`: the tool-preview site list now includes `engine.toolPreview.openApiConsoleNote`, so the row is rendered in both languages and the zh row is held to being a real zh row.\n- At c6e1fa7a, from `ui/`: `vitest run` of `ToolPreview.test.tsx` + `automationPreviews.i18n-10862.test.tsx`: Test Files 2/2, Tests 81/81. `packages/i18n/src/__tests__/studio-namespace.test.ts` + `studio-zh-label-word-36749.test.ts` (the namespace's own en/zh parity and placeholder checks): Test Files 2/2, Tests 46/46. `pnpm --filter @object-ui/app-shell run type-check` (both tsconfigs, test files included): exit 0, 0 errors, after building the `@object-ui/app-shell^...` closure.\n- Ablation (`scripts/ablation-replace.mjs`, delete the note's `tr(...)` call in `ToolPreview.tsx`): 4 of 81 red, the two note-beside-link tests and both locale rows of the i18n site test; the no-note and names-no-tool tests stay green as they should. Restored: blob == HEAD, `git diff HEAD` empty. Tests import `src/`, so no rebuild was needed.\n- Local derived gates (`dispatch-gates.mjs --commands` at c6e1fa7a, 38 commands): 38 exit 0. `dispatch-gates.mjs --ran` on the `command :: exit N` record: \"38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero)\".\n- CI at c6e1fa7a: 45 check runs success, 13 skipped (opt-in or path-filtered), none failed; `mergeable_state` clean.\n\n## Acceptance notes\n\n- A tool that calls no model also sees the note. That is the corrected premise's accepted cost: there is no fact on the preview that tells such a tool apart.\n- An exact per-tool hide would first need a cloud-owned fact (a spec field or list of model-calling tools with a cloud-side consistency test). That is a contract change and is not this card.\n\n## Verification\n\n- First reads, by risk: `RoutedApiConsoleLink` in `ToolPreview.tsx`, then the two string rows.\n- Two minutes: from `ui/`, `pnpm exec vitest run packages/app-shell/src/views/metadata-admin/previews/ToolPreview.test.tsx` — expect every test green, including the five in \"note on calls that need the server model\".\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXrYRu1Ttn1FxcgKbf)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgXrYRu1Ttn1FxcgKbf -->\n"
+}

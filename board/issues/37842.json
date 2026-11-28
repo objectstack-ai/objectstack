@@ -2,8 +2,8 @@
   "number": 37842,
   "kind": "issue",
   "title": "skill-evals: a turn inherits the host's memory variables, so project memory reaches both arms of a round",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ai",
     "bug",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T06:37:01Z",
-  "updated_at": "2026-11-27T20:17:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T07:41:09Z",
+  "closed_at": "2026-11-28T07:35:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37842",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a defect a card thread measured while running the eval for #37796) · Source: fleet (PR #37841)\n\n## What happens\n\n`turnEnv` in `packages/qa/scenarios/src/skill-evals/run.ts` passes the host's whole environment to every eval turn, minus the API-billing and effort variables. When the runner is started inside a project container, the memory variables (`CLAUDE_COWORK_MEMORY_PATH_OVERRIDE`, `CLAUDE_MEMORY_STORES`) go through too. Each turn then reads the project's memory in both arms. In the first round for PR #37841, all three without-skill answers to case 2 quoted a project memory note about the very change the case tests, so the without-skill arm scored as if it had the skill. With those two variables removed, the second round was clean: case 2 scored 3/3 with the skill and 0/3 without.\n\n## Expected\n\nAn eval turn sees only what its arm gives it: the skill or no skill, never the host's memory. `turnEnv` drops every memory variable the CLI reads, and the round's record says the turn environment was scrubbed.\n\n## Done when\n\n- [ ] `turnEnv` removes the memory variables, listed in one place next to the billing and effort ones.\n- [ ] A test pins it: a host env carrying the memory variables yields a turn env without them.\n- [ ] The README of the runner says a round run inside a project container is isolated from project memory.\n\nGrade: area:ai · bug · reach: any skill-eval round run from a project container; it inflates the without-skill arm and hides a skill's value · evidence: measured (two rounds of PR #37841, before and after removing the variables)\nSuggested-grade: p2\nSize: S\nRelated: PR #37841, #37796."

@@ -2,8 +2,8 @@
   "number": 37983,
   "kind": "issue",
   "title": "knowledge: what a knowledge_source saved at run time does on a deployment that mounted no knowledge service (split from #37306 item 4)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "area:ai",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T14:04:37Z",
-  "updated_at": "2026-11-28T00:34:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T04:53:48Z",
+  "closed_at": "2026-11-28T04:51:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37983",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000), split from card #37306 by seat repo:objectstack#1 so #37306 ships items 1, 2, 3 and 5 on the critical path · Source: topic #37000; card #37306 item 4 · Spec: dev report on #37306, comment 7220234733 (open question 1).\nGrading: area:ai · Feature · p2 (topic) · needs-user-decision: the built behaviour departs from both of the card's options, so it is a behaviour ruling (routed to a Fable decision pass by the seat) · reach: an author who saves the first `knowledge_source` at run time (Studio, `PUT /meta/knowledge_source`, the MCP draft save) on a deployment that booted with no knowledge service · evidence: measured (dev report 7220234733).\nDedupe: split by name from #37306; `is:issue knowledge first item saved runtime` → #37306 and #37000 only.\nReader: area o1-C of seat repo:objectstack#1 claims it once the ruling is on this card.\n\n## 维护者速读\n- 问题：部署启动时没有挂知识检索服务，作者在运行中保存了第一份知识源，这份知识源会怎样？原卡给了两种做法（不重启就挂上，或下次启动后生效并在保存时提示），但现在的内核两种都做不到：启动后不能再挂服务，而启动时又是先组服务、后读元数据。\n- 开发做了第三种（A）：知识源保留但不生效；保存时提示一次「需要在应用里加 `requires: ['knowledge']` 并重启」，每次启动也打印同样的提示。\n- 另两种：B 在启动前先读一遍元数据库，下次重启自动挂上（工作量 L）；C 内核支持启动后热挂服务（要改内核生命周期，需 ADR，工作量 XL）。\n- 需要你做的：选 A / B / C。\n\n## Card #37306 item 4, verbatim\n> 4. **The first item saved at runtime.** State, and pin, what happens when the first `knowledge_source` is saved at runtime on a deployment that mounted no knowledge service at boot: mounted without a restart, or served after the next boot with a stated message at save. Row 3a's boot line (\"an item but no knowledge service\") changes to match.\n\nAcceptance line carried from #37306: \"The first item saved at runtime on a deployment with no service behaves as item 4 states, pinned.\"\n\n## Dev's open question 1 (report 7220234733), verbatim\n> Item 4: what does a knowledge_source saved at run time, on a deployment that mounted no knowledge service, do? The card lists 'mount the service' or 'refuse the save'. Neither can be built today: the kernel refuses use() after bootstrap, and serve/verify compose services before the metadata store is readable, and refusing the save would block authoring ahead of a restart.\n\nSeat correction: the card's second option is not \"refuse the save\". It is \"served after the next boot with a stated message at save\". Option A is narrower than that, because the item mount reads the stack and not the metadata store. A runtime-saved item is therefore not served after a plain restart; the author must also add `requires: ['knowledge']`. So A departs from both of the card's options.\n\n## Options\n- **A (built on #37306's branch, held back from its PR):** keep the item, do not serve it, warn once at save naming `requires: ['knowledge']` plus a restart, and repeat the remedy in every boot line. Further cost: none. Effort: done; the code is kept for this card.\n- **B:** a pre-boot read of the platform metadata store in `os serve` / `bootStack`, so a saved item mounts the service at the next restart without `requires`. Cost: a second metadata read path before kernel boot, with tenancy and driver resolution duplicated outside the kernel. Effort: L.\n- **C:** a kernel hot mount of a capability after bootstrap. Cost: a kernel lifecycle contract change (ADR level), and start-after-ready semantics for every service. Effort: XL.\n\nDev and area recommendation: A. It is honest about the restart, costs nothing more, and forecloses neither B nor C.\n\nUntil ruled, row 3a's boot line and behaviour for \"an item but no knowledge service\" stay as they are on main."

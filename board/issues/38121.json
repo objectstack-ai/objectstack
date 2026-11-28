@@ -1,0 +1,34 @@
+{
+  "number": 38121,
+  "kind": "issue",
+  "title": "钩子表单：从 js 改成 expression 后，隐藏行仍保留已填的拒绝项，保存时被拒在一个表单已不显示的键上（接 #36799）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T03:00:08Z",
+  "updated_at": "2026-11-28T06:21:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38121",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) follow-up named by the contract review on PR #38078 (#36799): record 7232601911, L1 ACCEPT 7232611473. Source: fleet.\nGrading: area:build · Bug · p2 · reach: anyone authoring a hook in the console form who fills a js-only row and then switches the hook to expression · evidence: reviewer read.\nDedupe: \"hook form hidden row keeps value\", \"visibleWhen hidden field value saved refused\" → 0.\n\n## 维护者速读\n\n- 问题：PR #38078 让钩子表单只在对应类型下显示拒绝项和提示文字。但用户先在 js 类型下填了这些行，再把类型改成 expression，这些行虽然隐藏了，值还留着。保存时校验拒绝，报错指向一个表单上已经看不见的键，用户不知道怎么改。\n- 修法：类型切换让某行隐藏时，清掉这一行的值，或者保存时不提交隐藏行的值。具体选哪种由开发者照表单的现有惯例定。\n- 要你做的：无。\n\n## Ask\n\n1. After a hook switches from js to expression, the rows that are now hidden do not reach the save payload, or they are cleared when they hide.\n2. A pin through the real form: fill the refusals, switch the type, save, and the save is accepted. Include an ablation.\n\n## Acceptance\n\n- The fill, switch and save sequence saves without a refusal at a hidden key.\n- Blocked-by: #36799 (PR #38078, same form)."
+}

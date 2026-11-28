@@ -2,8 +2,8 @@
   "number": 37254,
   "kind": "issue",
   "title": "dispatch-gates: a new ui/packages/*/scripts/*.mjs does not derive the ui/scripts suite gate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T07:45:07Z",
-  "updated_at": "2026-11-26T08:42:58Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T03:35:14Z",
+  "closed_at": "2026-11-28T03:33:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37254",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFound by zone a4-S while building #37223 (PR #37230). It was reported to seat repo:objectstack#4 as out of scope, and the seat files it here.\n\n## What\n\nThe dev added a new script under `ui/packages/*/scripts/`. `node scripts/pm/dispatch-gates.mjs --commands` printed no `ui/scripts` suite gate for that file. CI `Test UI` then went red on exactly `ui/scripts/__tests__/check-ui-root-lookups.test.ts`.\n\n## Why, read at main\n\n- The `ui-scripts-suite-input` row in `scripts/pm/dispatch-gates.data.mjs` matches through `UI_SCRIPTS_SUITE_ROOTS`.\n- Those roots are `ui/packages/**/src`, `ui/packages/**/src/**`, `ui/apps/**`, `skills/objectui/**` and `ui/scripts/**`.\n- `ui/packages/*/scripts/**` is not among them.\n- Yet `ui/scripts/check-ui-root-lookups.mjs` scans the whole ui tree, and its test runs in that suite. Today `ui/packages/components/scripts/` and `ui/packages/fields/scripts/` exist.\n\nRe-check: `grep -n -A7 'UI_SCRIPTS_SUITE_ROOTS *=' scripts/pm/dispatch-gates.data.mjs`\n\n## Done when\n\nA path under `ui/packages/*/scripts/` makes `dispatch-gates --commands` print the `pnpm --dir ui exec vitest run scripts/` gate. Either widen the roots to every ui file the suite reads, or derive them from what the suite reads. A self-test case pins it.\n\n## Notes\n\n- `scripts/pm/dispatch-gates.mjs` and its data module are guard instruments: Tier H.\n- Size XS."

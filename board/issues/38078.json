@@ -2,9 +2,9 @@
   "number": 38078,
   "kind": "pull_request",
   "title": "fix(spec): the hook form offers refusals and texts only where HookSchema accepts them",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -24,11 +24,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-28T01:40:46Z",
-  "updated_at": "2026-11-28T02:08:57Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 3,
+  "updated_at": "2026-11-28T03:29:00Z",
+  "closed_at": "2026-11-28T03:28:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T03:28:58Z",
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/38078",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao25upKJEGo6EpwNBNHeRSB5)_\n\nFixes #36799\nrepo:objectstack#3 · os-tesla · session_01L9qibwvndECT67oMnono1P\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 搭建者在工作室里编辑一个表达式写成的钩子时，不会再看到拒绝码和文案这两栏；JavaScript 钩子和旧式处理函数钩子照常显示。\n- 属于「作者界面只提供保存时会被接受的东西」这条线，替用工作室写钩子的搭建者解决填了就保存失败的问题。\n- 只改表单什么时候显示这两栏，钩子能写什么完全不变；万一条件写错，最多是该显示的栏没显示，可以直接撤回。\n- 无\n\n## What changes\n- `packages/spec/src/data/hook.metadata-form.ts`: the `refusals` and `texts` rows both carry one `visibleWhen`, `SANDBOXED_CODE_VISIBLE`, which is the test `HookSchema` refuses both keys by (`hook.zod.ts`, the refusals and texts refinements): shown for a `js` body, or for no body and a non-empty `handler`; hidden on an `expression` body. The form serves it as `{ dialect: 'cel', source: \"data.body.language == 'js' || data.body == null && data.handler != null && data.handler != ''\" }` (`defineMetadataForm` lifts the string, as for every other row).\n  - Written without parentheses on purpose: the Studio form evaluator (`ui/packages/app-shell/src/views/metadata-admin/predicate.ts`) splits `||` before `&&` and has no grouping, so a parenthesised group fails open. The const's docblock says so.\n- No schema, no other form, no evaluator, no locale pack changes (label and help text are unchanged).\n- `patch` changeset for `@objectstack/spec`.\n\n## Tests\n- `packages/spec/src/system/metadata-form-declared-rows.pin.test.ts`, new top-level `describe` \"hook.refusals and hook.texts are shown exactly where HookSchema accepts them\" (the shared harness that already pins the action form's gated `refusals` / `texts` rows):\n  - each row is offered once and its served `visibleWhen` equals `{ dialect: 'cel', source: <the predicate> }`;\n  - for each row × five drafts (expression body, js body, handler and no body, neither, empty handler and no body), the predicate read against `{ data: draft }` equals \"`HookSchema.safeParse` raises no issue at that key\";\n  - the predicate is read by a test-local reader of exactly the subset it is written in (`||` over `&&` over `data.path ==|!= 'literal'|null`, loose `null == undefined`, no grouping); any other shape throws, so a rewrite fails the pin. CONTROLS: the reader refuses a grouped and an `in` rewrite, and the schema refuses the key on some drafts and accepts it on others.\n\n<details><summary>Readings at 8c37099a (base origin/main 815e882b)</summary>\n\n- Premise at 815e882b: `git show origin/main:packages/spec/src/data/hook.metadata-form.ts | grep -c visibleWhen` = 0 (the card's `hook.form.ts` has since been renamed).\n- The predicate through the real Studio evaluator (`evaluatePredicate` + `buildPredicateCtx` from `predicate.ts` at 815e882b, run under `node --experimental-transform-types`): expression body `false`, js body `true`, handler `'fn'` and no body `true`, neither `false`, handler `''` `false`; all five equal `HookSchema`'s verdict.\n- Ablation on the committed fix, file restored with `git checkout HEAD --` after each (`git status --porcelain` empty): `visibleWhen` removed from `refusals` → `Tests  6 failed | 23 passed (29)` (that row's six pins); removed from `texts` → `6 failed | 23 passed (29)` (that row's six).\n- Build: `env -u OS_SKIP_DTS bash scripts/pm/os-verify-lock.sh -c \"pnpm exec turbo run build --filter='./packages/**' --filter='@objectstack/dogfood^...' --concurrency=2\"` exit 0 (83 tasks).\n- `pnpm --filter @objectstack/spec check:generated` exit 0 (\"All 14 generated artifacts are up to date\"); spec `typecheck` exit 0; `eslint` on the two changed `.ts` exit 0.\n- `vitest run src/data src/system src/ui` in `packages/spec`: `Test Files  470 passed (470)`, `Tests  16505 passed | 1 todo (16506)`.\n- `dispatch-gates --ran`: 86 derived, 86 run, every one exit 0, 0 NOT-MEASURED (a derived zero), 0 unrun.\n</details>\n\n## Acceptance notes\n- A hidden row keeps a value already written: an author who fills `refusals` on a `js` body and then switches the body to `expression` no longer sees the row, and the save is refused at a key the form does not show. This holds for every `visibleWhen` row (the metadata form does not clear hidden values); not widened here.\n- Out of scope, for the seat to file (seat said it will): the Studio form evaluator fails open on a parenthesised group, so `field.metadata-form.ts`'s `percentDisplay` row and the currency row after it read TRUE on every field type (measured at 815e882b: `{ type: 'text' }` → `true`; the same predicate without parentheses → `false`).\n\n## Verification\nRead first (by risk):\n1. `packages/spec/src/data/hook.metadata-form.ts`: `SANDBOXED_CODE_VISIBLE` and its two uses.\n2. `packages/spec/src/system/metadata-form-declared-rows.pin.test.ts`: the new describe, `evalFormPredicate` and `refusedAt`.\n\nTwo-minute check: `pnpm --filter @objectstack/spec exec vitest run src/system/metadata-form-declared-rows.pin.test.ts` shows 29 passing; delete `visibleWhen: SANDBOXED_CODE_VISIBLE,` from the `texts` row and the same command shows 6 failing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwvndECT67oMnono1P)_\n"

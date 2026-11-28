@@ -2,8 +2,8 @@
   "number": 37935,
   "kind": "issue",
   "title": "review follow-ups of PR #37927: ci.yml ui filter misses docs/adr/0084, which studioMenuPlacement.test.ts reads",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:fleet",
     "ci/cd",
     "domain:devx",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T12:05:43Z",
-  "updated_at": "2026-11-27T12:18:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T05:33:31Z",
+  "closed_at": "2026-11-28T05:31:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37935",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① L1/L2 follow-ups of one PR (`review follow-ups of PR #N`, one card per PR, later rounds append here). Source: fleet (contract review of PR #37927, comment 7217478459, observation outside the diff; L1 7217675946).\nGrading: area:devpath · Task · p2 · domain:devx. Same class as #27673 and #27717 (a diff confined to a file a ui job reads starts no ui job).\nReader: whichever seat holds area:devpath; not repo:objectstack#3 (no devpath intake).\nDedupe: `\"PR #37927\"` 2 hits (#37685, #37920, neither about CI); `studioMenuPlacement` 17 hits, none about the CI filter.\n\nBusiness reason: ADR-0084's type → group table is pinned to the Studio menu code by `studioMenuPlacement.test.ts`, so a wrong table row is caught before Studio's menu and its design record drift apart. A PR that edits only that ADR runs no ui job, so the pin test does not run on it: the PR shows green, merges, and the next ui PR goes red on a change it did not make. The person who pays is the next author, who has to find someone else's ADR edit.\n\n## Items\n- [ ] F1: `.github/workflows/ci.yml`'s `ui` paths filter (origin/main, the `ui:` list near line 735) holds `ui/**` and the build roots but no `docs/adr/**`. `ui/packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts:104` reads `docs/adr/0084-application-builder-information-architecture.md`. Other ui tests also read under `docs/adr/` (`product-neutral-renderer.ratchet.test.ts`, `ui/scripts/__tests__/check-doc-*.test.ts`, `check-governed-queue-guard.test.ts`, `select-type-check-scope.test.ts`); measure which of them a docs/adr-only diff can turn red. Expected: a diff confined to a docs/adr file one of these tests reads starts the ui job that runs it (on the PR and in the merge group). Pin it the way #27673 did (the filter-parity gate). Not measured yet: whether the merge group runs the ui jobs for such a diff."

@@ -1,0 +1,33 @@
+{
+  "number": 38161,
+  "kind": "issue",
+  "title": "skills(objectstack-data): the registerHook example says \"in your plugin's onEnable()\", but a kernel plugin has init/start, and onEnable is the app's config export",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T04:48:54Z",
+  "updated_at": "2026-11-28T06:58:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38161",
+  "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (an out-of-scope finding of a dev report, escalated by the contract review) · Source: fleet (PR #38155, the card thread's report on #35324 and contract review 7234212662, section ③)\n\n## What happens\n\n`skills/objectstack-data/references/data-hooks.md` (Hook registration, method 2, `ctx.ql.registerHook()`) opens its example with the comment `// in your plugin's onEnable()`. No such method exists:\n\n- A kernel plugin (`packages/core/src/types.ts`, the `Plugin` interface) has `init(ctx)`, `start?(ctx)` and `destroy?()`. It has no `onEnable`.\n- `onEnable` is the app's export from `objectstack.config.ts`, which `AppPlugin` calls at boot (`skills/objectstack-platform/SKILL.md`, the `onEnable` section; `STACK_RUNTIME_MEMBERS` in `packages/spec/src/kernel/metadata-authoring-lint.ts`).\n\nAn author who follows the comment and writes a plugin method named `onEnable` gets a method nothing calls, so the hook is never registered and nothing reports it.\n\n## Expected\n\n- [ ] The comment names a real seam: a plugin's `start(ctx)`, or the app's `onEnable` export. Check that the handle the example uses (`ctx.ql.registerHook`) exists on the one it names.\n- [ ] The file stays at or under its token ceiling. The file sits at its ceiling, so the fix must not add bytes.\n\n`skills/**` is Tier H.\n\nGrade: area:ai · documentation · reach: one example comment in a published skill · evidence: read (the `Plugin` interface on `main`)\nSuggested-grade: p3\nSize: XS\nRelated: #35324, PR #38155."
+}

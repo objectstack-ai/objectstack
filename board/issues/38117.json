@@ -1,0 +1,32 @@
+{
+  "number": 38117,
+  "kind": "issue",
+  "title": "review follow-ups of PR #37986",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T02:47:53Z",
+  "updated_at": "2026-11-28T03:21:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38117",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibx7DSQZnugnuX8CpCM\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (L1 ACCEPT 7231247834 on PR #37986, Fixes #37435)\n\n## What happens\n\nPR #37986 (merged 9548be27) added the advisory lint rule `field/option-color-renders-neutral`, which warns when a select option's `color` is a value the badge renders as neutral grey. Its L1 review left these open:\n\n- [ ] **A (L1 decision): define the nine option colour families once, in `@objectstack/spec`.** Today the list is written twice. The renderer has `BADGE_COLOR_MAP` at `ui/packages/fields/src/index.tsx:1577`. The lint rule has `OPTION_COLOR_FAMILIES` at `packages/lint/src/data-model-rules.ts:1252`, and its docblock (`:1250`) asks that a new family be \"added here in the same change\". Export the family names from spec, and have both the badge renderer and the rule import them. `ui/packages/plugin-grid/src/useRowColor.ts` keeps a third family-keyed map (`COLOR_TO_CLASS`, `:44`): read whether it should take the same list.\n- [ ] **N1: the fix line for a family with stray whitespace names the wrong problem.** For `' red'`, `optionColorFix` (`data-model-rules.ts:1271`) says \"Write the family in lowercase\", but the trouble is the whitespace. The proposed fix, `color: 'red'`, is still right. Say \"Remove the spaces\" when `trimmed !== color`.\n\n## Who meets it, and what it costs if not fixed\n\n- An author who adds a tenth family to the badge palette must also find and edit the lint copy. If they miss it, every app author who uses the new family gets a false warning on `os validate` and save. The warning is advisory and never refuses, so nothing breaks, but authors learn to ignore the warning, and that warning is the only signal that a colour will render grey.\n- N1 sends an author looking at letter case when the value is already lowercase.\n\n## Done when\n\nEach box above is fixed, or closed with a reason.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue BADGE_COLOR_MAP` → 3 hits (#37435 open, the source card; #36882 and #37406 closed), none on this mechanism. `is:issue \"PR #37986\"` → 3 hits (#37435 and two unrelated); no follow-ups card yet.\nReader: zone o3-ux of seat repo:objectstack#3 (or whichever lane triage routes a spec export to). The family export touches `packages/spec/src/**`, so triage should read whether it needs a contract review.\nGrade: area:ux · bug · reach: `os validate` / save warning text and a duplicated renderer list · evidence: the review record above\nSuggested-grade: p3\nSize: S\nRelated: PR #37986, #37435, #36882."
+}

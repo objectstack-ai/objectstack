@@ -1,0 +1,36 @@
+{
+  "number": 38157,
+  "kind": "pull_request",
+  "title": "docs(changelog): correct which optional spellings of an amount the formula currency-verdict entry says moved",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T04:39:43Z",
+  "updated_at": "2026-11-28T08:02:48Z",
+  "closed_at": "2026-11-28T08:02:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T08:02:44Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38157",
+  "body": "Fixes #38110\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:读 19.0.0-next.1 发版说明的作者与智能体,看到的「哪些写法从数字变成未定」那一句改对了;产品行为不变,用户无感。\n- 为什么做:公式货币判定那条已发布说明多说了一种写法变了,实测它前后都没变;这是公式币种判定工作的收尾,替读发版说明做升级判断的人纠错。\n- 出错会怎样:只动说明文字,不动代码;若措辞有误,直接撤回本次合并即可恢复原句。\n- 要你做什么:无。\n\n## What changes\n\nOne sentence of the released `19.0.0-next.1` entry for the formula currency verdict, amended in place in all four places it lives (byte-identical in each, the CHANGELOG copies keep their two-space list indent):\n\n- `packages/formula/CHANGELOG.md`\n- `packages/spec/CHANGELOG.md`\n- `ui/packages/app-shell/CHANGELOG.md`\n- `.changeset/pre/35631-formula-currency-verdict.md` (the consumed pre-mode source the three are compiled from)\n\nThe phrase is replaced by the card's proposed text verbatim. To keep the sentence grammatical, the replacement is moved to the end of the list (after \"a name the field map does not declare\"), because it ends in a semicolon clause; nothing else in the sentence changes.\n\nBefore:\n\n> The same holds for `100 / record.amount`, `record.amount % 3`, `record.amount * 1.0 + record.fee_eur * 1.0` (two currencies), `double(record.amount) * double(record.tax)`, an amount whose `currencyConfig` does not parse, a hop through a reference (`record.account.balance * 0.9`), a formula operand that declares no `returnType` (`record.subtotal * 0.2`), the indexed and optional spellings of an amount (`record['amount'] * 0.1`), and a name the field map does not declare (`record.unknown_field * 2`).\n\nAfter:\n\n> The same holds for `100 / record.amount`, `record.amount % 3`, `record.amount * 1.0 + record.fee_eur * 1.0` (two currencies), `double(record.amount) * double(record.tax)`, an amount whose `currencyConfig` does not parse, a hop through a reference (`record.account.balance * 0.9`), a formula operand that declares no `returnType` (`record.subtotal * 0.2`), a name the field map does not declare (`record.unknown_field * 2`), the indexed spelling of an amount (`record['amount'] * 0.1`) and the optional spellings read through `orValue` (`record.?amount.orValue(0) * 0.1`); a bare optional (`record.?amount * 0.1`) never typed as a number and answered `{}` before and after.\n\n### Which correction path, and why\n\nAGENTS.md, Documentation Guardrails, row `packages/*/CHANGELOG.md`: a factual error in a released entry is amended **in that entry, in a dedicated docs-only PR** — never an erratum in a later entry (so this PR adds no changeset) and never a rider on code (this PR changes only these four lines). `content/docs/releases/` is not touched.\n\n**DELIBERATE CORRECTION** (`check-empty-changeset`, ruling D on #17712): this PR modifies one changeset it did not add, `.changeset/pre/35631-formula-currency-verdict.md`, line 21 — the sentence quoted above, corrected to the After text. It is not a collision; restoring it from the base would put the false sentence back. The foreign-changeset refusal and `Require a changeset` are therefore red by design, and per the rule the PR carries **no** `skip-changeset` label (that label would skip the very job whose refusal puts this correction in front of the dispatching seat's record). Confirmation is the seat's own record (pm-dispatch landing-operations), not a maintainer wait.\n\n## Tests\n\nNo code changes. The claim was measured on `origin/main` 0e361201b before writing it:\n\n- `packages/formula/src/formula-return.test.ts` lines 195-200 (PR #38108) pin the `orValue` spellings in `UNPROVEN_OVER_MONEY` (each answers `{}`, line 209), and lines 222-223 pin their quantity controls answering `number`. Lines 195-198 record that a bare `record.?amount` is an optional cel-js does not type as a number.\n- A throwaway vitest (deleted, not committed) ran the current `inferFormulaReturn` and the pre-#35631 one (`formula-return.ts` at `401eb4468^`) over the same field map:\n\n```text\nMEASURE \"record.?amount * 0.1\" old= {} new= {}\nMEASURE \"record[?'amount'] * 0.1\" old= {} new= {}\nMEASURE \"record.?amount.orValue(0) * 0.1\" old= {\"returnType\":\"number\"} new= {}\nMEASURE \"record[?'amount'].orValue(0) * 0.1\" old= {\"returnType\":\"number\"} new= {}\nMEASURE \"record['amount'] * 0.1\" old= {\"returnType\":\"number\"} new= {}\nos-verify-lock: VERDICT command-exit 0\n```\n\nSo the bare optionals never moved; the indexed and `orValue` spellings did.\n\n## Acceptance notes\n\n- The four copies are byte-identical: the added line of each file's diff, indent stripped, hashes to the same sha256 (`06a32456…`).\n- `skip-changeset` is deliberately absent; the changeset job's red is the designed DELIBERATE CORRECTION red, not a missing changeset.\n\n## Verification\n\nRead first: the one-line hunk in `.changeset/pre/35631-formula-currency-verdict.md` (the source the release tooling compiles from); the other three are the same line.\n\nTwo-minute check: `git grep -nF \"a bare optional (\\`record.?amount * 0.1\\`) never typed\" origin/claude/issue-38110-changelog-optional-spellings` — expect exactly four hits, one per file above, and zero hits for \"the indexed and optional spellings of an amount\".\n\nLocal gates, at head 7f9570d61, derived by `dispatch-gates.mjs --commands` (68 families): 64 exit 0; `check-empty-changeset --base origin/main` exit 1 (the DELIBERATE CORRECTION refusal above, by design); `check:dual-build-cjs-loads` and `check:lean-entry-closure` exit 3 NOT MEASURED (need `dist/` of unrelated packages); `pnpm --dir ui exec vitest run scripts/` NOT MEASURED (local 500 s timeout; CI-owned). `--ran` reconciliation: 68 derived, 68 run, 0 UNRUN. `check-nul-bytes` OK; `overlap-check` VERDICT clean.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSAaBEfQpU2yJexSJ8)_\n"
+}

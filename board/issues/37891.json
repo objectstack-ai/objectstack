@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T09:03:02Z",
-  "updated_at": "2026-11-27T09:13:35Z",
+  "updated_at": "2026-11-28T07:53:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37891",
   "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAk8tegvAi1ECkgCFfc\n\nFiling gate ③ (maintainer-directed) · Source: maintainer — Irene chose to file this platform card on the hotcrm project thread's decision card (2026-11-27T09:00Z), approving the order-line card design in hotcrm#2828. · Type: Feature · Grade: left to objectstack triage.\n\n## Need\n\nHotCRM wants an order line's phone card to read:\n- title: **\"1. Implementation Services\"**, with the line number as a small prefix;\n- subtitle: **\"Qty 1 × Unit Price ¥2,000.00 · Discount 10%\"**, where the discount part appears only when there is one;\n- amount: the line total, bottom right (see the companion defect card).\n\n## What 18.6.0 allows (measured on HotCRM 08a7451e, 390 px)\n\n- The card subtitle is the first two non-title, non-amount cells of the related list's table column order, joined with \" · \", unlabelled (`ObjectGrid.tsx` `subtitleColumns = bodyColumns.filter(…).slice(0, 2)`). Today an order line reads \"2 · 2\", meaning line number · quantity.\n- There is no card-layout setting for a related list: no card fields, amount field, subtitle format or title prefix. So the card cannot change without reordering the wide table, which the maintainer requires to stay unchanged.\n- An app-side text formula \"summary\" field is not a fix. It adds a table column, carries one language while apps ship several locale packs, and cannot follow the tenant currency.\n\n## Ask\n\nA declarative card layout for a related list or object, for example in the object's `relatedListColumns` sibling or the list view, naming:\n- the subtitle fields, rendered with their field labels or by a small format template that uses localized labels and currency formatting, with empty parts dropped;\n- an optional title prefix field.\nThe wide table keeps its own columns. The spec contract and a generic renderer change belong to the platform; HotCRM would only declare the layout.\n\nWho benefits: every app with line items or child lists on phones; the reader can check quantity × price = amount at a glance.\n\nDedupe: searched `card subtitle related list`, `related list card labels`, `phone card layout` (open and closed), 0 open hits. #28484 (closed) defined the one-line subtitle. #37008 (closed) added labels in the gallery path only."

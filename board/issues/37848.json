@@ -2,8 +2,8 @@
   "number": 37848,
   "kind": "issue",
   "title": "review follow-ups of PR #37840",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:build",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T06:50:23Z",
-  "updated_at": "2026-11-27T08:36:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T03:42:18Z",
+  "closed_at": "2026-11-28T03:42:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37848",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① candidate (measure first) · Source: fleet (contract-review-tier L2 record 7211713497 on PR #37840, nit N4; L1-a asked the seat to file or drop)\n\n## Items\n\n- [ ] **N4 — `today()` date arithmetic beside a bare ordering, measure first.** By code read only, the condition `due_date > \"2026-01-01\" && today() + 30 > record.due_date` is still accepted after PR #37840 (Fixes #36377). If it reproduces, it is the same class as #36377 (a mixed spelling that no validator pass refuses but that fails at run time), on the `today()` arithmetic arm rather than the `record.` arm. Step one: run it through `os validate` and the publish door on main after #37840 merges, and through the flow runtime, and write down each answer. Not reproduced ⇒ tick with the reading and close.\n\n## Business reason\n\nA flow author (or an AI) who writes a date condition gets the refusal at save, not a run-time failure of the automation. PR #37840 closes one spelling; this item checks the sibling spelling the reviewer read.\n\nPriority: p2 — same grade and class as #36377 if it reproduces. Suggested-grade: p2 · measure-first sibling of #36377.\nReader: seat repo:objectstack#3, zone `o3-build` (area:build), after PR #37840 merges (same files).\nBlocked-by: #37840 (merge)\nDedupe: searched `review follow-ups of PR 37840` (0) and `date arithmetic today record due_date` (22 hits, all closed siblings of the #34946/#34363 family or the open #36377 itself), open and closed.\nRelated: #36377, PR #37840, #36333."

@@ -1,0 +1,34 @@
+{
+  "number": 38193,
+  "kind": "pull_request",
+  "title": "feat(spec): list list_flow_runs among the service-ai-studio platform tools",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T06:16:34Z",
+  "updated_at": "2026-11-28T07:27:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38193",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuEKqL1r3otpmPGByaZzap4u)_\n\nFixes #34372\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 搭建助手新增的「查看自动化运行记录」工具，现在登记进平台工具名表；技能里写上这个工具名，校验不再把它当成不存在的工具拒掉。\n- 替云端搭建助手解决：它要回答「我的自动化跑成功了吗」，靠的就是这个工具。\n- 只是多认一个工具名，不改任何已有工具；出问题直接撤回这个改动即可。\n- 无。\n\n## What changes\n\n- `packages/spec/src/system/constants/platform-tool-names.ts`: `'list_flow_runs'` joins `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` in its alphabetical place (after `get_record_history`, before `list_metadata`), and the group's doc comment names it. `PLATFORM_PROVIDED_TOOL_NAMES` therefore carries it and `isPlatformProvidedToolName('list_flow_runs')` answers `true`, so a skill whose `tools[]` names it resolves under ADR-0109 reference integrity instead of being reported as `ai-skill-tool-unresolved`.\n- `ui/packages/plugin-chatbot/src/__tests__/toolLabels-locale-parity-7481.test.ts`: `list_flow_runs` moves from `AHEAD_OF_PIN` (now empty) to `GRADUATED`, per the file's own note. The ui half (#34368, PR #34379) already put its label in every locale pack. This move must ride with the registry entry: with the entry and without the move, the `AHEAD_OF_PIN carries only names the pinned registry still lacks` case turns red (plugin-chatbot reads `@objectstack/spec` as `workspace:^`).\n- Changeset: `@objectstack/spec` patch (`.changeset/34372-list-flow-runs-registry.md`). Contract review M1 (7235393865, seat revision 7235409030): `SkillSchema.tools` is a free string array, so what an author can write parses the same; the only behaviour change is that one advisory lint warning no longer fires. Same as the registry's earlier additions #32668 and #37989.\n- Resumed from `claude/project-thread-a7rk9c@f754db19` (release comment 6929523318): its two commits were cherry-picked onto current `main`; the old main merge was not reused. Two conflicts resolved by keeping both sides: the `service-ai-studio` doc comment (main had added `ask_which`, cloud#4773) and the spec test (main had added the `get_record_context` case).\n\n## Tests\n\n- `platform-tool-names.test.ts`: new case, the group contains `list_flow_runs`, `isPlatformProvidedToolName('list_flow_runs')` is `true`, control `list_flow_run` is `false`. 13/13 pass.\n- `packages/lint/src/validate-ai-tool-references.test.ts`: new case, a skill naming `list_flow_runs` yields no finding; control, a fictional neighbour `retry_flow_run` in the same list is still reported at `skills[0].tools[1]`. 46/46 pass.\n- ui `toolLabels-locale-parity-7481.test.ts` + `toolLabels-sentences-12724.test.ts`: 30/30 pass at c5e44f02. Review N2, at 2c464d444b: the zh case that looped over `AHEAD_OF_PIN` (now empty, so it asserted nothing) loops over `GRADUATED` with a non-empty guard; 7481 file 17/17.\n\n<details><summary>Ablation</summary>\n\n- Deleted the `'list_flow_runs',` registry line, rebuilt `@objectstack/spec`, re-ran: the spec case `lists the build agent's read-only flow-run reader` red (1 failed / 12 passed); the ui 7481 file red on `reads a non-empty coverage set` and `AHEAD_OF_PIN carries only names the pinned registry still lacks` (the GRADUATED guard). Restored from the index, rebuilt, green again.\n\n</details>\n\n## Acceptance notes\n\n- No other enumerating reader of the registry: `git grep get_record_history` outside the registry hits only locale packs, changelogs and a release page.\n- Review N1 (nit, not taken): the jsdoc carries no cloud reference for `list_flow_runs`; no cloud issue number is named on #34368 or this card, and the cloud repo is outside this session's reach.\n- The cloud side deletes its AHEAD entry for this name on the pin bump that carries this (card item 4, cloud repo, not in this PR).\n\n## Verification\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec exec vitest run src/system/constants/platform-tool-names.test.ts` — expect 13 passed.\n\n- Local derived gates (`dispatch-gates.mjs --commands`, 89 commands at c5e44f02): 86 exit 0 (two of them, `lint check:doc-formula-expressions` and `check:docs-transcript-drift`, after building the `@objectstack/lint` closure; first run was PREREQUISITE NOT MET). Not measured locally, CI runs them: `check:dual-build-cjs-loads` and `check:lean-entry-closure` (PREREQUISITE NOT MET: they load built output of packages this worktree did not build), and `pnpm --dir ui exec vitest run scripts/` (1 of 5146 red: `unit-registry-absence-collision` cannot resolve the unbuilt `@objectstack/client` entry; the closure-budget half wants a built console). No `!` in the title and no narrowing arm, so no dogfood battery is owed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgXM39VND2qb8HbebbK)_\n\n<!-- signed: repo:objectstack#2 · os-sales · session_01L6bhgXM39VND2qb8HbebbK -->\n"
+}

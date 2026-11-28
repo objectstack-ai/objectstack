@@ -1,0 +1,32 @@
+{
+  "number": 38132,
+  "kind": "issue",
+  "title": "ci filter parity: pin the whole input of the ui paths-filter step and the shape of every ui job condition, not only the filter rows",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T03:37:30Z",
+  "updated_at": "2026-11-28T03:42:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38132",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① (b) follow-up of the L1/contract review of PR #38124 (#37935), filed on seat 1's routing. Source: seat repo:objectstack#1 area `o1-F`.\nGrading: area:fleet · Task · p2 · reach: every PR whose ui battery is scheduled by the `filter` job in `.github/workflows/ci.yml` · evidence: code read of PR #38124's gate.\nDedupe: `is:issue is:open ci filter parity paths-filter if` → 0 relevant (1 hit, a seat post).\n\n## 维护者速读\n\n- 问题：PR #38124 新增的检查只核对 ui 过滤规则的「路径行」。决定 ui 测试跑不跑的，还有这一步的其他配置和各个 ui 任务自己的触发条件；这些以后被改动时，检查不会发现。\n- 修法：让同一个检查把这一整步的输入和每个 ui 任务的触发条件形状一并钉住，任何会让 ui 测试少跑的改动都变红。\n- 要你做的：无。\n\n## Goal\n\n`scripts/check-ci-filter-parity.mjs` (from PR #38124) pins the `ui:` rows of the paths-filter step. A later workflow edit can still narrow what runs while that gate stays green, through the parts it does not read.\n\nThe gate should pin, against the real `ci.yml`:\n1. the paths-filter step's whole `with:` input, and\n2. the shape of the `if:` of every job that reads `needs.filter.outputs.ui`,\n\nso that any edit which could make a ui job skip on a diff where it ran before turns the gate red, with a positive control and an ablation for each pinned part.\n\n⛔ Pin the goal, not a list of known bypasses. The PR body and the failure text name what is pinned, not which edits would have slipped through.\n\nOrder: after PR #38124 merges (same file). Blocked-by: #37935"
+}

@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-28T00:32:46Z",
-  "updated_at": "2026-11-28T02:20:30Z",
+  "updated_at": "2026-11-28T05:52:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38062",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38059 (#38039; out-of-scope finding of the dev report 7230969358, class b, measured at a public door; one card per finding) · Source: topic #37000\nGrading: area:ai · Bug · p2 (suggested: the migrate run and the serve run of one artifact compose different platforms, against a contract sentence) · reach: every artifact-only stack (`dist/objectstack.json`, no config) that ships a `knowledgeSources` entry and no `requires: ['knowledge']` · evidence: measured by the dev of #38039 (an artifact with one `knowledgeSources` entry: `os serve` mounts KnowledgeServicePlugin; `os migrate plan` on the same artifact composes none, its \"Composed what os serve mounts\" note lists none, and ObjectQLPlugin warns the source is unserved).\nDedupe: `is:issue migrate plan artifact knowledgeSources` → checked at filing; open: #38039 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：只有构建产物、没有配置文件的应用，`os serve` 启动时会因为自带知识源而挂上知识服务，但 `os migrate plan` / `apply` 读同一份产物时不会，于是两次启动拼出的平台不一致，迁移计划还会提示知识源\"无人服务\"。\n- 做什么：让迁移命令和 `os serve` 一样，从产物里的知识源推导出要挂的知识服务。\n- 谁受益：用构建产物部署、带知识源的应用（迁移计划和真实运行一致）。\n- 需要你做的：无。\n\n## What\n`composeServedPlatform` reads `stackItemCapabilities(loadedConfig ?? {})`, and `packages/cli/src/utils/schema-migrate.ts` (around lines 1429-1435) hands only `stack.requires` (`servedPlatform.artifactRequires`) from the standalone result. On an artifact-only stack the loaded config is empty, so the item token (`mountedBy: { collection: 'knowledgeSources' }`) is never derived. Since #38059 the standalone result carries `knowledgeSources`; hand the item-derived tokens (or the collection itself) to the served-platform composition the same way `os serve` reads them, so both boots compose one set, as the #37306 changeset (\"`os migrate plan` / `apply` read them too\") and the serve/migrate comment (\"so both boots compose one set\") state.\n\n## Acceptance\n- `os migrate plan` on an artifact-only stack with one `knowledgeSources` entry and no `requires` composes the knowledge service; its \"Composed what os serve mounts\" note names it; no unserved warning.\n- Control: the same artifact with no source composes none.\n- Pinned, with an ablation.\n\nBlocked-by: #38039"

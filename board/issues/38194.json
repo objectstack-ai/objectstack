@@ -1,0 +1,33 @@
+{
+  "number": 38194,
+  "kind": "pull_request",
+  "title": "test(scenarios): order_to_cash asks for a field no object records",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T06:17:25Z",
+  "updated_at": "2026-11-28T06:45:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38194",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4UuFQEA2rjhCqPBgt21XnCB31)_\n\nFixes #37473\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：问数评测的「订单到收款」卡多了一道题，问一个系统里根本没记录的字段（订单运费），看 AI 会不会如实说「没有记录」而不是编一个数。\n- 为什么做：补齐问数评测专题里欠下的一道「问到没有记录的字段」题，原来只有一道问「没有的对象」（提成）。\n- 出错会怎样：只影响评测卡与它的测试，不碰产品；这张卡此后每轮多一道题，新旧轮次的问数总分不能直接对比，可整体撤回。\n- 要你做什么：无。\n\n## What changes\n\n- `docs/qa/scenarios/order_to_cash.json`: one question appended to `run.questions` (now 11), `cedar_shipping_charges`: zh 「Cedar Logistics 的销售订单上运费一共是多少?」, en \"How much shipping is charged on Cedar Logistics' sales orders?\", `askKind: \"unanswerable\"`, `object: \"sales_order\"`, no personas, truth `unanswerable` with a `reason` naming what an order and a line do record. Appended last, so every existing `run.questions[i]` path the tests name stays where it was.\n- `docs/qa/scenarios/README.md`: the default band is 8–11 questions (Counts, and the mid-tier floor list), and the per-kind table reads `unanswerable` 2 / 1 / 3.\n- `packages/qa/scenarios/test/order-to-cash.test.ts`: the new question's computed truth pinned (`UNANSWERABLE`), and the card's count pin is `toBeLessThanOrEqual(11)`.\n- `packages/qa/scenarios/test/dataset-cards.test.ts`: `STATED.unanswerable` is `[2, 1]`, the README table's row.\n- `docs/qa/scenarios/builds/order_to_cash.provenance.json`: `cardSha256` re-pinned (`fb53e5cf…` → `59d02578…`) with an `amended` entry (`cardFrom` = the old hash). The build file is untouched.\n- `.changeset/37473-order-to-cash-not-recorded-field.md`: `@objectstack/scenarios` patch (the card ships in the package's packed library).\n\n## Why\n\n#35138's owed item, carried by #35429 and split here: \"One ask-card question for an object or field that is not recorded, in #35113's open ask cards.\" The card's existing unanswerable question (`september_commission`) asks for an object the app lacks; this one names a field the order itself lacks, the case where a data tool's refusal carries `notRecorded` (the reply should say so and never report 0 or empty). Route A from the handoff (7183583455 on #35429), as the claim names: widen the band by one rather than replace or reword a question.\n\nSmall calls made in this thread (listed per the small-things rule):\n\n- **Which field.** The handoff's example, a discount, is recorded: every `order_line` row carries `discount_pct` in the seed, and the verified build's `sales_order` declares `max_discount_pct`. A discount question would be answerable, so the question names a shipping charge instead; no seed object and no build object has a shipping, freight or tax field (read from the seed rows' keys and the build's `objects[].fields`).\n- **No personas**, like `september_commission`: the question adds no persona read, so it adds no `persona-grant` Build check.\n- **The band moves for every card in the README**, as route A says; the other mid-tier cards keep their own `≤ 10` pins, which still hold.\n\n## Verification\n\n- The verified build against the card before and after the edit (scratch test, `scoreCardArtifact` on the namespaced card, at `bbe3ceda`): both read Build 174/174 over the same 174 checks with identical verdicts (sha256 of the check list `b4284350…` both times). So the card edit does not invalidate the build, and the README's re-pin path applies (`cardSha256` + `amended`), not a new build.\n- `pnpm --filter @objectstack/scenarios test` at `3f7041b5`: 43/45 files, 1394 passed, 14 skipped; the two failing files were `test/build/built-consumer.test.ts` and `test/build/packed-tarball.test.ts`, which need the package's own `dist`. After `pnpm --filter @objectstack/scenarios build` both pass (14/14).\n- `order-to-cash.test.ts`, `dataset-cards.test.ts`, `verified-builds.test.ts`: before the provenance re-pin, only `its provenance's cardSha256 is the card file in the tree` failed (68/69); after it, all pass.\n- `pnpm --filter @objectstack/scenarios typecheck`: exit 0.\n- Local derived gates (`dispatch-gates.mjs --commands`, 62 commands at `3f7041b5`): running when this PR opened; the reading goes in the `os-dev-report` comment on #37473. CI runs every family.\n- No eval round run (rounds are paused).\n\n## Acceptance notes\n\n- From this card hash on, an `order_to_cash` ask round asks one more turn per repetition, so its 问数 total is out of a larger denominator; rounds before and after this PR are not directly comparable (records already split at card hashes).\n- Not touched: the citation grader's `来源：` / `Source:` reading (`SOURCE_LINE`); no zh-Hant or ja question is added, as the card says.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (untouched)\n- [x] 2. Every name I added uses the casing for its kind. (`cedar_shipping_charges`, snake_case data value)\n- [x] 3. No formatter ran; `pnpm lint` passes. (no lint-scoped source changed beyond two test literals; full `pnpm lint` left to CI)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L6bhgTZoF91csJPJdff2jn)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgTZoF91csJPJdff2jn\n"
+}

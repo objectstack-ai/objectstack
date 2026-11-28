@@ -1,0 +1,31 @@
+{
+  "number": 38189,
+  "kind": "issue",
+  "title": "docs(releases/v19): recount the breaking list against 19.0.0-next.0..next.2 (about 27 entries landed after the page's measurement) and refresh the stale header",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:package",
+    "documentation",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T06:05:32Z",
+  "updated_at": "2026-11-28T06:30:53Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38189",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) out-of-scope finding of the #37922 card thread's pre-claim report (`/mnt/project-files/card-37922/pre-claim-report-7605e0c9.md`, origin/main 7605e0c9). Source: fleet.\nGrading: area:package · Docs · p2 · reach: everyone upgrading an app or host to 19.0.0, who reads this page's breaking list as complete · evidence: a rough grep of `.changeset/pre/` (below), not yet a `classifyReleaseBullet` run.\nDedupe: `\"releases/v19\" in:title`, `v19 release page breaking`, `\"19.0.0-next\" release notes recount` → #37922 (one missing bullet, open, claimed), #37461 and #37522 (closed; the page's creation and one step-19 fix). None recounts the list.\n\n## 维护者速读\n\n- 问题：v19 发布页的 breaking 清单是 11 月 26 日按当时的 changeset 数出来的（102 条，71 条要手动处理，31 条自动迁移）。之后 19.0.0-next.0、next.1、next.2 又合进约 27 个 breaking 或已登记迁移的改动，页上大多没有。页头还写着「还没有发布 19.x」，而 npm 的 next 标签已经是 19.0.0-next.2。\n- 不改会怎样：升级到 19 的人照着清单改，会漏掉这些改动，升级后才发现报错。\n- 做法：用分类脚本按 next.0 到 next.2 重算清单，补条目、改计数和页头。#37922 只补其中一条，已在做。\n- 要你做的：无。\n\n## Readings (origin/main 7605e0c9)\n\n- The page's counts are taken from the 950 changesets at `a46efa8c` (2026-11-26 05:42Z), as its \"How this list was built\" section says.\n- Rough measurement: changesets in `.changeset/pre/` whose adding commit is not an ancestor of `a46efa8c` and whose body carries `**BREAKING**` or `adr-0087: registered`: about 27, across the 19.0.0-next.0, next.1 and next.2 cuts. In next.0 alone (cut commit 33a31dc7) these include #37491 (flow option label filters), #37477 (retire knowledge ragflow) and #37513 (data-model publish checks). A grep, so false positives are possible; `classifyReleaseBullet` was not run.\n- The page header says no 19.x version is published and that it was written on 2026-11-26; `npm view @objectstack/spec dist-tags` answers `{ latest: '18.6.0', next: '19.0.0-next.2' }`.\n\n## Ask\n\n1. Re-derive the page's breaking list with the same method the page states (`classifyReleaseBullet` over the changesets), from `a46efa8c` up to the current main, and add each new entry to 需手动处理 or 自动迁移 as the page sorts them.\n2. Update the counts and the \"How this list was built\" paragraph to the new measurement point (sha and date).\n3. Update the header's publication sentence to what npm answers at the time of the PR.\n4. Coordinate with #37922 (one bullet, #37437): whichever lands second rebases onto the other; do not add #37437 twice.\n\n## Done when\n\n- Every changeset that `classifyReleaseBullet` marks breaking or registered between `a46efa8c` and the measurement sha has a bullet, and the counts match the bullets.\n- The header and the method paragraph name the measurement sha.\n- Docs-only PR; no release PR is touched."
+}

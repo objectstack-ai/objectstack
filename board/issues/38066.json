@@ -13,18 +13,20 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-28T00:44:13Z",
-  "updated_at": "2026-11-28T01:20:46Z",
+  "updated_at": "2026-11-28T07:34:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38066",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38056 (#37975; the seat's ruling after the maintainer's A, named out of that PR) · Source: topic #37000\nGrading: area:ai · Feature · p3 (suggested: a speed-up for narrow scoped searches; recall is already guarded by the floor) · reach: every Turso store with the one-bit index on, for a search whose record scope keeps about 20% of passages or fewer · evidence: measured in PR #38056 at 200k x 1536 (clustered synthetic): at 10% and 15% in scope every query goes exact (p95 about 1.0 s); at 20%, 48% do. Simulated (`/mnt/project-files/decision-37975/scoped-recall-floor8-retry-sim.py`): floor 8 then a retry with a pool of about 4,000 gives recall 1.000 at 10-15% with 0% exact.\nDedupe: `is:issue knowledge-turso scoped approximate retry` → checked at filing; open: #37975 (the parent), #37957 (F3, the small-visible-set end) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：新索引对\"只能看到一小部分记录\"的检索没有提速：可见范围在两成以下时，为保证召回率会退回逐条比对，约 1 秒。\n- 做什么：在退回逐条比对前，先用更大的候选池再做一次近似检索；只有仍不够时才逐条比对。\n- 谁受益：权限范围较窄的用户在大知识库里的检索速度。\n- 需要你做的：无。\n\n## What\nIn `turso-adapter.ts`, when the approximate leg leaves fewer than 8 x topK candidates in scope, run one more approximate pass with a pool of about 10x the over-fetch (for example 4,000 rows) and the same scope `WHERE`, and keep its answer only if it now clears the floor; otherwise run exact as today. The decisive unknown is the real-store cost of re-ranking about 4,000 rows plus the scope `WHERE`: measure it first, and keep the change only if it beats the exact scan at 10%, 15% and 20% in scope.\n\n## Acceptance\n- Real-store bench (200k x 1536, topK 10, 50 scoped queries per share) at 10%, 15% and 20% in scope: recall@10 at least as high as the floor-8 rule alone, and p95 lower than the exact scan's.\n- With the second pass ablated, the bench's exact share goes back up (the pin).\n- Small visible sets stay F3 #37957's.\n\nBlocked-by: #38056"

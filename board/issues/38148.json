@@ -1,0 +1,36 @@
+{
+  "number": 38148,
+  "kind": "pull_request",
+  "title": "test(app-shell): skip fetch-free files before parsing in the bearer ratchet scan",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T04:29:12Z",
+  "updated_at": "2026-11-28T05:31:14Z",
+  "closed_at": "2026-11-28T05:31:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T05:31:12Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38148",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\n\nFixes #38101\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:只改了一条界面代码的自检测试,让它跑得更快,产品行为不变。\n- 为什么做:这条自检在持续集成上跑到 15 秒超时,挡住了必过的界面测试分片。\n- 出错会怎样:最坏是这条自检漏看某个文件;已用全量对照证明前后结果一字不差,可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`ui/packages/app-shell/src/sameServerFetch.bearer.ratchet.test.ts` only. The scan was already computed once per run and shared by the two cases that read it; the time went to the TypeScript parse of every scanned file.\n\nMeasured on this container (2464 scanned files, about 41 MB of source): walk 22 ms, read 146 ms, parse of every file about 3.5 s, AST visits about 0.2 s. So the parse is the cost, and two changes cut it:\n\n1. **Skip a file before parsing it when it holds neither `fetch` as a whole word nor `sharedGetJson`** (`MAY_HOLD_A_COUNTED_CALL`). Every transport the detector counts is matched on its written text (`fetch`, `window.fetch`, `globalThis.fetch`, `self.fetch`, an alias whose initializer is one of those, or `sharedGetJson`), so a file without either token cannot produce a row. 397 of 2464 files are kept.\n2. **Parse without JSDoc and without parent links** (`jsDocParsingMode: ParseNone`, `setParentNodes: false`). The detector reads neither; every `getText` / `getStart` call is handed the source file.\n\nThe scanned set is unchanged, and so are the counted rows (proof below). A new assertion in the detector case pins the pre-filter: every positive detector spelling must pass `MAY_HOLD_A_COUNTED_CALL`, so narrowing the filter reds the file.\n\n## Tests\n\nTimings are from a shared 4-core box under `os-verify-lock` (load average about 4), so ratios are the reading to trust. The base file (a copy of `origin/main`'s test) and the new file ran in the same process, one after the other, twice (`--maxWorkers=1 --no-file-parallelism`):\n\n| run | base `every bare cookie-only call…` | this PR |\n|---|---|---|\n| 1 | 5394 ms | 2060 ms |\n| 2 | 5420 ms | 1422 ms |\n\nThat is 0.26 to 0.38 of the base time. Applied to the 15202 ms CI reading on job 140828751977, that is about 4 to 5.8 s on a CI shard, well under the 15 s timeout. The CI figure on this PR's own `Test UI` shard is NOT MEASURED here: read it off the check-run.\n\n<details><summary>Same counted rows before and after</summary>\n\nA temporary case (not committed) ran the full unfiltered scan next to the filtered `scan()` and compared the two maps: `FILES 2464 ROWFILES 15 CALLS 21 EQUAL true`. It ran once against each commit's parse options. Both before and after, the allow-list case `every allow-list row is still exact` is green: all 15 rows (21 calls) match exactly.\n</details>\n\n<details><summary>Ablations (on disk, restored, tree clean afterwards)</summary>\n\n- Bare cookie-only call added to a scanned file that held no `fetch` token before the edit (`ui/packages/fields/src/FieldEditWidget.tsx`: `await fetch('/api/v1/x', { credentials: 'include' })`). The case `every bare cookie-only call is a counted row…` goes red with `packages/fields/src/FieldEditWidget.tsx:495 :: fetch('/api/v1/x', …)`. The ratchet keeps its teeth.\n- `MAY_HOLD_A_COUNTED_CALL` narrowed to `/sharedGetJson/`. The detector case goes red (`\"kept\": false`), and so does `every allow-list row is still exact`.\n</details>\n\n## Acceptance notes\n\n- No timeout raised, no vitest config touched, no product source touched.\n- `skip-changeset`: `@object-ui/app-shell` is `private: true`, and its `files[]` (`dist`, `src/styles.css`, …) does not ship this test file.\n\n## Verification\n\nFiles to read first:\n1. `MAY_HOLD_A_COUNTED_CALL` and its use in `scan()`. This is the risk hunk: a filter that is too narrow drops files without saying so. Check the claim that every counted transport is matched on written text containing `fetch` or `sharedGetJson`.\n2. The `createSourceFile` options in `bareCookieOnlyCalls`.\n\nTwo-minute check: `pnpm --filter @object-ui/app-shell exec vitest run --root ../.. packages/app-shell/src/sameServerFetch.bearer.ratchet.test.ts`. Expect 4 passed, with the counted-row case at about a third of its time on `main`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW\n"
+}

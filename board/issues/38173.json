@@ -1,0 +1,37 @@
+{
+  "number": 38173,
+  "kind": "pull_request",
+  "title": "fix(data-objectstack): uploads send through the injected fetch, and the bearer ratchet reads four more spellings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T05:12:31Z",
+  "updated_at": "2026-11-28T07:56:17Z",
+  "closed_at": "2026-11-28T07:56:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T07:56:15Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38173",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoDanEGNW6fHMedo6Br7tobU)_\n\nFixes #37505\nFixes #37506\nFixes #37507\nrepo:objectstack#3 · os-tesla · session_01L9qic11DcdSCqDBNNUAXcb\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 嵌入或云租户里只靠令牌登录的用户：数据适配器的两个上传方法以前只带 cookie，现在和其他请求一样带上令牌；控制台界面没有变化。\n- 属于「纯令牌登录和分源部署下请求都带上身份」专题：补全检查「同服务器请求必须带令牌」的那条测试，它以前漏数四种写法。\n- 只换了上传用哪个请求通道，地址、内容和连接状态都不变；有问题可以直接撤回。顺带发现标准服务端上这两个上传地址本身不存在，已另立卡，本次没有修。\n- 无\n\n## What changes\n- `@object-ui/data-objectstack` (#37506): `uploadFile` and `uploadFiles` call the host's injected `fetch` as given (`uploadTransport`, kept aside in the constructor), not the global `fetch`. The console hands `createAuthenticatedFetch()`, so an upload under a bearer-only session now carries the stored bearer like every other request of the adapter. Both stay outside the connection-state observer (`observeServerAnswer`), so an upload's outcome still does not move the connection state, as the README says; only the README's \"call the global `fetch`\" wording changes. URL, body and headers are unchanged. `metadata-client` has no bare call left on main, so nothing changes there.\n- The same-server bearer ratchet (`sameServerFetch.bearer.ratchet.test.ts`, #37505) now reads four spellings that used to pass uncounted:\n  - a URL held in a `const` of the file (`const url = ` + template naming `/api/`), and a `+` concatenation with an `/api/` part;\n  - `credentials: 'same-origin'` spelled out (the default: the cookie alone);\n  - an init that spreads a `const` of the file (`{ ...COOKIE_INIT, method: 'POST' }`), with later keys overriding, as at run time. A spread of anything else (`{ ...init }`) stays unknown and uncounted; a credentials value written before such a spread is kept.\n  - Each spelling has pins in the detector case table (counted and not-counted). The `ALLOWED` list is unchanged: on the widened detector the whole tree matches it row for row.\n- The ratchet gains `REGISTERED_CHANNELS` (#37505, #37507): three calls that read like a bare fetch and are not one, each with its reason, and a case that fails once a file no longer holds the registered spelling or the scan starts counting a call in it:\n  - `react` `useDatasetDimensionLabels` and `useElementApiDataSource`: `apiFetch ?? fetch`, the host's channel off `SchemaRendererContext`.\n  - `auth` `createAuthClient`: the stale-bearer self-heal retry of `get-session`, token-less on purpose. Every other request of that client already goes through `bearerFetch`, so #37507 needs no production change.\n- `patch` changeset for `@object-ui/data-objectstack`.\n\nNot here: #38101 (the same test file's scan time) is claimed by another seat; whichever lands second merges main.\n\n## Tests\n- New `uploadTransport-37506.test.ts`: the injected fetch adds a bearer and records what reached the network; the global `fetch` is stubbed to record and refuse (the control, the pre-fix transport). `uploadFile` and `uploadFiles` each send exactly one `POST` to the upload URL carrying the bearer, and never touch the global fetch; a refused upload leaves the connection state at `connected` with no event.\n- The ratchet: the detector case table gains 15 rows for the four spellings and one row flips from 0 to 1 (`credentials: 'same-origin'` on an `/api/` path); one new case for `REGISTERED_CHANNELS`.\n\n<details><summary>Readings (base origin/main 581ae76a)</summary>\n\n- Premise, before any change: a port of the detector run over the whole `ui` tree (2466 files) matched `ALLOWED` exactly (15 rows, 21 calls); with the four spellings on, the only new hits were the two uploads in `data-objectstack` (`uploadFile` and `uploadFiles`, `fetch(url, …)`).\n- `uploadTransport-37506.test.ts`: `Tests 3 passed (3)`. Ablation (both uploads put back to the global `fetch`, fix committed first, restored with `git checkout HEAD`): `Tests 3 failed (3)`.\n- `sameServerFetch.bearer.ratchet.test.ts`: `Tests 5 passed (5)`. Ablations, one at a time against the committed file: uploads back to the global `fetch` reds \"every bare cookie-only call is a counted row\" with exactly the two upload lines; dropping the `+` branch, the URL-const lookup, the `same-origin` reading or the spread reading each reds the detector case for that spelling.\n- `eslint` on the three changed `.ts` files: 0 errors; the warnings are the existing `no-explicit-any` ones in `index.ts`, none on a changed line.\n- `@object-ui/data-objectstack` `type-check` (`tsc --noEmit`) exit 0, after a build of its dependency closure.\n- `dispatch-gates --commands` at 96332e47: 40 families derived, 40 run, every one exit 0 (`--ran`: 0 NOT-MEASURED, a derived zero), `pnpm --dir ui exec vitest run scripts/` included (`Tests 5144 passed | 2 skipped`).\n- `overlap-check`: clean against origin/main 33a0d4fa and against #38148 (the scan-time change in the same test file). The ratchet with both changes merged (`git merge-file`, not committed here): `Tests 5 passed (5)`.\n</details>\n\n## Acceptance notes\n- Out of scope: the upload route itself, see #38163. On a stock stack both upload methods' path answers 404 whatever the credentials; this PR changes only which fetch carries them.\n- No boot reading of an upload through the console; the pins drive the adapter through an injected fetch double.\n\n## Verification\nRead first (by risk):\n1. `data-objectstack/src/index.ts`: the `uploadTransport` field, its assignment in the constructor, and the two `this.uploadTransport(url, …)` calls.\n2. The ratchet's `credentialsOf` and `namesApiPath`, and the new rows of the detector case table.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/data-objectstack/src/uploadTransport-37506.test.ts packages/app-shell/src/sameServerFetch.bearer.ratchet.test.ts` passes; put either upload call back to `fetch(url, {` and both files red.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qic11DcdSCqDBNNUAXcb)_\n"
+}

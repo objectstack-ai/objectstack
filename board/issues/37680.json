@@ -2,8 +2,8 @@
   "number": 37680,
   "kind": "issue",
   "title": "Knowledge settings: verify or correct the Turso group's cloud per-organization fallback sentence",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T20:01:44Z",
-  "updated_at": "2026-11-28T00:34:54Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T06:17:30Z",
+  "closed_at": "2026-11-28T06:04:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37680",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Cb4BAjgQ43tqy1DvVJ\n\nFiling gate: ② follow-up out of #37104 (PR #37668, os-dev report 7201999210 out-of-scope finding, seat handoff 7202179921), filed by the owning zone ai-37000 under #37104 at the seat's direction, per the maintainer's standing permission for areas to file their own follow-up cards.\nGrading: area:ai · domain:server · Task · p3 (seat-directed, low) · reach: knowledge settings page text · evidence: read, not run (cloud not measurable here).\n\n## 维护者速读\n\n- 做什么：设置页 Turso 说明里有一句“云部署每个组织留空即复用本组织数据库”，开源版里留空实际是打开本地 knowledge.db；需要在云版核实，不对就改。\n- 谁受益：看说明配置的管理员。\n- 不做会怎样：说明可能与实际行为不符；功能不受影响。\n- 需要你做的：无。\n\n## What\n\nThe Turso group's English fallback text says: \"In a cloud deployment with a database per organization, leave blank to reuse that organization's own database connection\". In this repository an empty `turso_url` opens the store's own `knowledge.db` (Test connection says so). The cloud behaviour could not be measured from this repo.\n\n## Acceptance\n\n- The sentence is checked against the cloud deployment; it is kept, corrected, or moved to the cloud repo's own contribution, with all 11 locale bundles in step."

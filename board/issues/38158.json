@@ -1,0 +1,33 @@
+{
+  "number": 38158,
+  "kind": "issue",
+  "title": "skills + migration entry: teach the save refusal of a knowledge_source whose adapter is not mounted (review follow-ups of PR #38060)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T04:39:51Z",
+  "updated_at": "2026-11-28T08:19:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38158",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38060 (#37961; contract review 7232224061 nits N2 and N3, plus the delta read's skills-docs finding at its merged head) · Source: topic #37000\nGrading: area:ai · Bug · p3 (suggested: teaching and pin gaps around a shipped refusal; the refusal itself is correct and pinned) · reach: authors and agents that pick a `knowledge_source` `adapter` from the skill, and readers of the migration entry · evidence: read on main 0e361201b2 — `skills/objectstack-ai/SKILL.md:257` (the `adapter` row) names the omitted-adapter refusal but not the save refusal of a named adapter that is not mounted, which PR #38060 adds; the review record names N2 and N3.\nDedupe: `is:issue knowledge_source adapter not mounted skill` → checked at filing; open: #37961 (the parent) only.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：知识源指定了没挂载的存储（adapter）时，保存现在会被当场拒绝（PR #38060），但给 AI 编程助手看的技能文档里 `adapter` 那一行还没写这条；拒绝提示的几种修法分支、包复制入口的回答也没有测试钉住；升级说明里「不写 adapter」那句少了一个限定条件。\n- 做什么：技能文档 `adapter` 行补一句拒绝和修法；补齐测试；升级说明那句加上限定。\n- 谁受益：写知识源的作者和 AI 助手（照文档写不会踩到拒绝）。\n- 需要你做的：无。\n\n## What\n1. `skills/objectstack-ai/SKILL.md` § Knowledge Sources, the `adapter` row: add that a save naming an adapter the deployment does not mount is refused (`400 VALIDATION_ERROR`, nothing written), naming the source, the adapter and the mounted ones, and the remedy (mount the store, or name a mounted one). Word it from `unmountedAdapterSaveText` in `packages/services/service-knowledge/src/knowledge-service.ts`. Move the token-ratchet row by the measured amount if the text grows, under the standing ruling.\n2. Pin the remedy branches of `unmountedAdapterSaveText`: the \"leave `adapter` out\" clause is present with one adapter or a mounted deployment adapter, and absent with two and no mark. Pin the package-duplicate door's answer for this refusal.\n3. Migration entry `19.knowledge-source-unmounted-adapter-refused-at-save`: qualify its `replacement` \"no `adapter` at all\" the way the changeset does (on a host that mounts several adapters and marks none the deployment's, an omitted adapter is itself refused).\n\n## Acceptance\n- The skill's `adapter` row names the refusal and its remedy; `check:skill-docs` and the ratchet are green.\n- The remedy-branch and duplicate-door pins go red when the branch or the door's mapping is reverted.\n- The entry's `replacement` carries the qualifier.\n\nBlocked-by: #37961"
+}

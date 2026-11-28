@@ -1,0 +1,36 @@
+{
+  "number": 38106,
+  "kind": "pull_request",
+  "title": "fix(plugin-chatbot): a send clears only the composer's message box, so the picked model survives it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:26:49Z",
+  "updated_at": "2026-11-28T03:09:24Z",
+  "closed_at": "2026-11-28T03:09:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T03:09:22Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38106",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao2F5jFXXMeaD95BAtSDpyiW)_\n\nFixes #37831\nrepo:objectstack#3 · os-tesla · session_01L9qibxaAB2c4Epy2EEZxDf\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 在 AI 侧栏里换了模型再提问，以后的问题会一直用这个模型，直到你自己再换。以前每次发送都会把选择悄悄改回默认模型，下一个问题就用默认模型回答、按默认倍率计费。\n- 属于问 AI 对话体验这条线：用户选定的设置不能被悄悄丢掉。全页聊天用的是同一个输入框，同一处修复覆盖它，但没有单独测。\n- 只改输入框发送时清空文字的方式：以前重置整张表单，现在只清空输入框本身，其他表单控件不再被一起重置。改错的话，最坏是发送后输入框里的文字没清掉，可以直接撤回。\n- 无\n\n## What changes\n- `ui/packages/plugin-chatbot/src/elements/prompt-input.tsx`: `handleSubmit` no longer calls `form.reset()` to clear the composer. It sets the `message` field back to its `defaultValue`, which is what the reset gave that field, and leaves every other control in the form alone.\n- `patch` changeset for `@object-ui/plugin-chatbot`.\n\n## Why\nThe composer's model picker (`chat/ModelPicker.tsx`) is the shared Radix `Select`, and it sits inside the composer's `<form>`. Radix Select 2.3.7 listens for the `reset` event of the form it belongs to and answers it with `setValue(initialValueRef.current)`, the value it had on its FIRST render (`@radix-ui/react-select` `dist/index.mjs`, the effect that adds the `reset` listener). For the picker that is the default model's index. Because the picker is controlled, `setValue` calls `onValueChange`, so `ModelPicker` calls `onPick(defaultId)` and the host that holds the pick (`ChatDockConversation`, ADR-0028) records the default model. Every send therefore put the pick back to the default: the send itself still carried the picked model (read before the reset landed), and the next one carried the default.\n\nThe earlier attempt on this card (report 7213606537) mocked `ChatbotEnhanced` and called `onSendMessage` directly, so the form submit, and with it the reset, never ran. Its other finding still holds: `ChatDockConversation` is not remounted around a turn.\n\n## Tests\n`ui/packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.modelPicker-11865.test.tsx`, new top-level `describe` \"a picked model survives the composer's send (objectstack#37831)\". The host holds the pick, as every chat host does, and each send goes through the real form submit (Enter in the box):\n- picked: after each of two sends the picker still shows the picked model; `onModelChange` received only the user's pick; both sends carried the picked model; the box is empty after the send;\n- CONTROL, no pick: the first model is in force before and after a send, nothing is written, the box is empty.\n\n<details><summary>Readings at eb2e26d3 (base origin/main f72f3353)</summary>\n\n- Premise at f72f3353 through a throwaway probe (deleted; copy kept in the project folder): the real `ChatbotEnhanced`, a pick made in the UI, then a form submit. `onModelChange` received `[\"m_picked\",\"m_default\"]` and the picker showed Default after the send; CONTROL (no pick) wrote nothing; with the `reset` event swallowed in the window's capture phase and nothing else changed, the pick survived (`writes: [\"m_picked\"]`).\n- Ablation on the committed fix: `form.reset()` put back in `handleSubmit`, then `vitest run packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.modelPicker-11865.test.tsx`: `Tests 1 failed | 21 passed (22)`, the failure being the picked row (`expected 'GPT-4o mini' to be 'Claude 3.5'`), the CONTROL row green. Restored with `git restore --source=HEAD --staged --worktree`, `git status --porcelain` empty, `Tests 22 passed (22)`.\n- `pnpm --filter @object-ui/plugin-chatbot test`: `Test Files  76 passed (76)`, `Tests  731 passed (731)`. `type-check` exit 0. `eslint` on the two changed files: 0 errors, and the same 11 warnings as the file on `main` (all pre-existing, none on a changed line).\n- `vitest run packages/app-shell/src/console/ai packages/app-shell/src/layout` (the hosts that render this composer): `Test Files  210 passed (210)`, `Tests  1796 passed (1796)`.\n- `dispatch-gates --commands` at eb2e26d3: 39 derived, 39 run, all exit 0 (`pnpm --dir ui exec vitest run scripts/` was killed once by the container's memory limit while another run was going, then re-run alone: `Test Files  172 passed | 2 skipped (174)`, exit 0). `origin/main` is 2 commits ahead, neither touching `ui/packages/plugin-chatbot`.\n</details>\n\n## Acceptance notes\n- Not changed, file surface fenced by the claim: two comments in `ChatbotEnhanced.tsx` (in `sendTyped` and above the send-failure restore effect) still say \"the composer's own form.reset clears the box optimistically\". The box is still cleared optimistically at the same moment, now by the field reset, so both comments stay true in effect; the word `form.reset` in them is stale. A follow-up can reword them when that file is next touched.\n- The full-page chat (`AiChatPage`) and the app Ask page render the same composer, so they take the same fix. Neither was measured separately.\n\n## Verification\nRead first (by risk):\n1. `ui/packages/plugin-chatbot/src/elements/prompt-input.tsx`: `handleSubmit`, the clear before the blob conversion.\n2. The new `describe` at the end of `ChatbotEnhanced.modelPicker-11865.test.tsx`.\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/plugin-chatbot/src/__tests__/ChatbotEnhanced.modelPicker-11865.test.tsx` shows 22 passing; put `form.reset();` back in place of the field clear in `handleSubmit` and the same command shows the picked row failing.\n\n## Human Minimum\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibxaAB2c4Epy2EEZxDf)_\n"
+}

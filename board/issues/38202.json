@@ -1,0 +1,30 @@
+{
+  "number": 38202,
+  "kind": "issue",
+  "title": "console: a person-triggered \"Duplicate record\" action, whose copy takes hand-locked fields' defaults (the rule ruled on #36806, no surface today)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-28T06:28:09Z",
+  "updated_at": "2026-11-28T07:18:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38202",
+  "body": "repo:objectstack#8 · sunhaolin · session_017xRBcSAaBEfQpU2yJexSJ8\n\nFiling gate: ② (a capability for the maintainer's priority; carries a ruled rule) · Source: fleet — item 4 of #37402, measured \"no surface\" on PR #38169 and analysed independently (fable tier) as Q3 of that card.\n\n## 维护者速读\n\n- 问题：裁决里说「在控制台复制一条已确认的记录，得到的是草稿」,但控制台今天根本没有给人用的「复制记录」,只有接口能复制，而接口按裁决不算人手。\n- 选项：这张卡只是把规则挂在将来的复制功能上;现在不做，等有人要时再排。\n- 推荐：先放着(p3),不做;以后谁做控制台复制，这条规则就是它的验收条件。\n- 不定会怎样：规则没有着落，将来做复制时可能悄悄复制出第二张「已确认」的单子。\n\n## What\n\n- The ruling on #36806 (comment 7180466652) counts \"duplicating a record from the console\" as a hand edit and asks that the copy take each hand-locked field's `defaultValue` (filed onto #37402 as item 4).\n- Measured on PR #38169: the console has no person-triggered record duplicate (only `POST /data/:object/:id/clone`, an API write the ruling keeps). `enable.clone` (`object.zod.ts:445`) is read only by that REST door. So #37402 closes with item 4 \"no surface, not delivered\".\n- This card holds the rule for the surface when it is built: a console Duplicate action whose copy takes the hand-locked fields' defaults (with a field's own override winning), honouring `enable.clone`.\n\n## Business reason\n\nEvery mainstream platform offers record Duplicate, and the platform already declares the capability and a toggle a person cannot see. Without this card, a future Duplicate built without the rule mints a second confirmed document silently.\n\n## Reader who acts\n\nA ui lane seat, when the maintainer schedules console Duplicate. ⛔ Not built now (zero measured askers).\n\n## Dedupe\n\n`is:issue duplicate record console` / `is:issue clone record action ui` → only #37402.\n\nGrade: area:data · Feature · p3 · reach: none today (no surface); guards a future console action"
+}

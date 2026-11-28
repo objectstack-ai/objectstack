@@ -1,0 +1,32 @@
+{
+  "number": 38159,
+  "kind": "issue",
+  "title": "docs：19.0 正式发布后删掉入门页两处「18.6.0 today」提示（从 #37615 拆出）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "domain:docs",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T04:44:34Z",
+  "updated_at": "2026-11-28T05:19:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38159",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) split from #37615 item 2 by the seat, so that #37615's PR can close it. Source: fleet (review follow-up of PR #37595).\nGrading: area:build · Docs · p3 · reach: every newcomer reading the two getting-started pages after 19.0 ships · evidence: grep and npm dist-tags on main 581ae76a.\nDedupe: \"18.6.0 today\" → only #37615.\nRestart-when: `npm view create-objectstack dist-tags.latest` answers 19.x. (At filing it answers 18.6.0; next is 19.0.0-next.2.)\n\n## 维护者速读\n\n- 问题：入门的两页文档各有一句提示，说现在用 npm create 装到的脚手架是 18.6.0，新写法要等 19.0。等 19.0 正式发布，这句话就不对了。\n- 修法：等 19.0 正式发布后，把这两个提示删掉。现在删反而会让文档说错，所以这张卡先挂起。\n- 要你做的：无。\n\n## Ask\n\n1. Once the restart condition holds, delete the callout in `content/docs/getting-started/your-first-project.mdx` (l.54 at filing) and in `content/docs/getting-started/build-with-claude-code.mdx` (l.56 at filing).\n2. Re-check: `git grep -n \"18.6.0 today\" -- content/docs` finds nothing.\n\n## Acceptance\n\n- After 19.0 GA, neither page tells a reader that `npm create objectstack@latest` installs 18.6.0."
+}

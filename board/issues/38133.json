@@ -1,0 +1,32 @@
+{
+  "number": 38133,
+  "kind": "issue",
+  "title": "ui test scheduling: ui tests that read files outside ui/ that no ui filter row covers, beyond docs/adr",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "finding",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T03:38:00Z",
+  "updated_at": "2026-11-28T03:42:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38133",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① (b) out-of-scope finding of the #37935 dev, measured with the shared walker on head `3402071c` (os-dev report, #37935 comment 7232776944); filed on seat 1's routing. Source: seat repo:objectstack#1 area `o1-F`.\nGrading: area:fleet · Bug · p2 · reach: ui scheduling on PRs that edit only a file outside `ui/` that a ui test reads · evidence: walker measurement over all ui tests.\nDedupe: `ui tests reading outside ui` → 44 hits, none on this class beyond #37935 itself (which covers `docs/adr` only).\n\n## 维护者速读\n\n- 问题：有几条 ui 测试会读取 ui 目录以外的文件。只改这些文件的 PR 不会触发 ui 测试，所以它们弄坏的东西要等合进主干后才暴露。#37935 只修了其中一类（ADR 文档）。\n- 修法：把 #38124 的检查从 ADR 推广到「ui 测试读到的所有 ui 外文件」，再把缺的路径补进 ui 过滤规则，或改成测试不读这些文件。\n- 要你做的：无。\n\n## Rule\n\nEvery file a ui test reads outside `ui/` either has a ui filter row in `ci.yml`, or is a declared, commented trade-off there. The parity gate from PR #38124 checks this for the whole class, not only for `docs/adr`.\n\n## Measured\n\nThe #37935 dev's walker run (comment 7232776944, `out_of_scope_findings`, first item) lists the reads found today and one that is already a declared trade-off. Re-measure on the then-current head before fixing.\n\n## Acceptance\n\n- The parity gate's subject covers every out-of-`ui/` read the walker sees, with a positive control.\n- Each found read is covered by a filter row or declared as a trade-off with its reason.\n\nOrder: after PR #38124 merges (same gate). Blocked-by: #37935"
+}

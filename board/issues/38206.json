@@ -1,0 +1,33 @@
+{
+  "number": 38206,
+  "kind": "issue",
+  "title": "设置里新建岗位或权限集打开空白页：访问目录页只认 /apps/setup 地址，控制台用软件包全名时不转去 Studio",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T06:43:13Z",
+  "updated_at": "2026-11-28T07:18:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38206",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibzywxH36FPH6ayWMUe\n\nFiling gate: ② (a defect on a public door, found while building #38149) · Source: #38149's dev report (comment 7235442918, out-of-scope finding 1), measured live on a showcase boot at PR #38204's head 1e5b3fad94; the base made the same navigation. Sub-issue of #37424 (the Setup access directory came from #37565).\nGrade: area:ux · Bug · p2 · evidence: the blank page is measured; the cause below is a code reading on origin/main 33a0d4fa.\nReader: build at the default judgment tier, one `os-dev` in zone `o3-studio`. Review: the seat's L1 at the default tier. No new key, no surface change: `Clause-②: no`, `Metadata-protocol: none`.\nDedupe: searched `access-directory new`, `AccessDirectoryPage`, `positions new blank`, `com.objectstack.setup access-directory` (issues, open and closed). Hits: #37565 (closed, built the page), #38149 (open, the ask that leads here). None reports the blank page.\n\n## 维护者速读\n\n- 用户看到的问题：设置 → 访问控制 → 岗位（或权限集）→ 点「新建」，打开的是一个空白页，什么都没有。\n- 原因：控制台把地址里的 `setup` 换成软件包全名 `com.objectstack.setup`，而这个页面只认短的写法，于是没把「新建」转去 Studio，内层路由也匹配不上。\n- 影响：在设置里新建岗位和权限集，目前只能绕到 Studio 去建。#38149 把「新建」改成先问软件包，问完以后仍然落到这个空白页，所以这张卡要在 #38149 合并前后尽快修好。\n- 需要你做的：不需要你裁。\n\n## Measured\n\n- Setup → Positions and permissions → New navigates to `/apps/com.objectstack.setup/component/security/access-directory/position/new?scope=environment`, which renders an empty page (dev report 7235442918; live boot at 1e5b3fad94; same on the base).\n\n## Code reading (origin/main 33a0d4fa)\n\n- `ui/packages/app-shell/src/views/setup/AccessDirectoryPage.tsx:68–71` computes `rest` only when `pathname.startsWith(ACCESS_DIRECTORY_PATH)`, else `''`.\n- `ACCESS_DIRECTORY_PATH` is `/apps/setup/component/…` (`accessDirectoryRef.ts:27`). The shell serves Setup at its package id, `com.objectstack.setup` (`console/setupApp.ts:25`), so on that address `rest` is `''`.\n- `accessDirectoryLocation('', search)` (`accessDirectory.ts:126–138`) answers `null` for zero segments, so no redirect to Studio happens.\n- The inner `<Routes>` (78–81) hold only `index` and `:type`. `position/new` matches neither, so nothing renders.\n- The same miss drops the list's own repair on that address: a directory type's list without `?scope=environment` is not given it (`accessDirectory.ts:135–137`).\n\n## What\n\n1. Derive `rest` from the route itself (the splat below the page's route, `useParams()['*']`, or both the alias and the canonical prefix), so the page reads its own sub-path on every address the shell serves it at.\n2. Keep `accessDirectoryLocation` as is; with a true `rest`, an item, a create or a history opens in Studio on the `~all` leg (its docblock, ADR-0146 D1).\n3. A changeset on `@object-ui/app-shell` (patch).\n\n## Acceptance\n\n- A test renders the page at the `com.objectstack.setup` address and at the `setup` address. For `…/position/new?scope=environment` both redirect to `/studio/~all/metadata/position/new?scope=environment`; for `…/position` without the scope both add it. The test has an ablation (restore the `startsWith` read and the alias case goes red).\n- A live check on a boot: Setup → Positions → New opens the editor (after #38149, after the ask). Screenshot on the PR."
+}

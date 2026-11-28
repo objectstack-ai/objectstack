@@ -1,0 +1,35 @@
+{
+  "number": 38118,
+  "kind": "pull_request",
+  "title": "fix(pm): dispatch-gates ui/scripts suite roots cover the whole ui tree",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:50:00Z",
+  "updated_at": "2026-11-28T03:33:54Z",
+  "closed_at": "2026-11-28T03:33:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T03:33:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38118",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-elon-musk\"} -->\n_Requested by **Elon** · [project thread](https://claude.ai/code/project/chan_01WedDzV26nniwxv7jC88B9D?thread=cmsg_01WedDzV26nniwxv7jC88B9DDypKu7B9nwbu5WuV7AEio8)_\nFixes #37254\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感:开发代理改动界面包里任何文件(包括各包自带的脚本目录)时,派发门禁清单现在会提示它先跑界面脚本测试套件。\n- 属于车队开发效率治理,替那些因清单漏报、等 CI 才发现界面测试变红的开发代理解决问题。\n- 若出错,最坏是界面改动多跑一次约五分钟的测试套件,或继续漏报;只改一张数据表,可直接撤回。\n- 无。\n\n## What changes\n\n- `UI_SCRIPTS_SUITE_ROOTS` in `scripts/pm/dispatch-gates.data.mjs` is widened from five sub-tree roots (`ui/packages/**/src`, `ui/packages/**/src/**`, `ui/apps/**`, `skills/objectui/**`, `ui/scripts/**`) to `ui`, `ui/**` and `skills/objectui/**`. The row's `kind` and `why` prose follow.\n- **Widen, not derive** — the reading on origin/main 93fa9118:\n  - `ui/scripts/check-ui-root-lookups.mjs` walks `SCAN_ROOTS = ['scripts', 'packages', 'apps']` under the ui root, with no exclusion for a package's own `scripts/` directory, and `check-ui-root-lookups.test.ts` runs that scan (`scan(repoRoot)`, `scanned > 100`). Six such directories exist today (`components`, `fields`, `i18n`, `plugin-gantt`, `plugin-grid`, `plugin-kanban`).\n  - Files under `ui/scripts/` and `ui/scripts/__tests__/` that name each top-level ui directory: `packages` 210, `scripts` 239, `apps` 121, `docs` 58, `examples` 53, `e2e` 26, `eslint-rules` 13, `patches` 8. Ui root files: `package.json` 144, `.changeset` 36, `tsconfig.json` 35, `vitest.config.mts` 32, `eslint.config.js` 15, `playwright.config.ts` 4.\n  - So the suite reads every top-level part of the ui tree. Building the list from what the suite reads would mean parsing about 180 tests' read sites, and it would still end up at roughly `ui/**`. CI's own `ui` path filter in `ci.yml` is `ui/**` too. Including the few unread root files (`cliff.toml`, `.gitattributes`) costs one extra suite run. Leaving a reader out costs a red CI round trip.\n- The old control `ui/packages/core/package.json` (\"outside the roots\") was wrong: `package-files-exist.test.ts` reads every ui package manifest. It is now a specimen.\n\n## Tests\n\n- `scripts/pm/dispatch-gates.self-test.mjs`: specimens are now keyed by the reader that makes them suite inputs. New ones are `ui/packages/components/scripts/new-script.mjs` (the card's miss), `ui/packages/core/package.json` and `ui/vitest.config.mts`. Each one is checked through the predicate, the whole table and the runnable union. The directory case now covers `ui/packages/fields/scripts` and bare `ui`. A `uikit/...` control checks that the `ui` root does not over-match on a shared prefix.\n- Reverse check: run against the old five roots, `readByUiScriptsSuite` returns `false` for all three new specimens, so the new cases fail on the pre-fix list.\n\n<details><summary>Self-test and Done-when readings at 20a777d0</summary>\n\n```\n✓ dispatch-gates self-test (fast tier): 2369 cases pass; 9 slow section(s) deferred.\nos-verify-lock: VERDICT command-exit 0\n  ✓ a path under a ui package's own scripts/ directory is read by the ui/scripts suite (ui/packages/components/scripts/new-script.mjs)\n  ✓ through the whole table, a diff under a ui package's own scripts/ directory derives the suite, anchored on the delimiter\n  ✓ CONTROL: uikit/packages/core/scripts/x.mjs is outside the roots\n\nnode scripts/pm/dispatch-gates.mjs --commands ui/packages/components/scripts/build-css.mjs   -> exit 0, prints: pnpm --dir ui exec vitest run scripts/\nold roots: ui/packages/components/scripts/new-script.mjs false · ui/packages/core/package.json false · ui/vitest.config.mts false\n```\n</details>\n\n## Acceptance notes\n\n- The slow tier of the self-test (`pnpm check:pm-dispatch-gates`) is not measured locally. It runs longer than the foreground limit, so CI runs the full battery.\n- Ran locally, all exit 0: `check:nul-bytes`, `check:issue-citations` and its census, `check-declaration-mirrors`, `check-self-test-wired`, `check:pm-governed-prose`, `check:scripts-symbol-anchors`, `check:ratchet-remedy-authority`, `check-published-list-mirrors`, `check-comment-mask-corpus`, plus the fast self-test. This is a declared narrowing: `--ran` reports 54 of 63 derived families unrun, and those are left to CI.\n- Read first: (1) `UI_SCRIPTS_SUITE_ROOTS` and its docblock in `dispatch-gates.data.mjs`, the riskiest hunk because a wider root changes every ui card's gate list; (2) the specimen and control tables in the self-test.\n\n## Verification\n\nTwo-minute check: `node scripts/pm/dispatch-gates.mjs --commands ui/packages/components/scripts/build-css.mjs | grep 'vitest run scripts/'` should print `pnpm --dir ui exec vitest run scripts/`. On main it prints nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_016WV4cxRDKprCtjpEdtiPFW)_\n"
+}

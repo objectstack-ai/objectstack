@@ -2,8 +2,8 @@
   "number": 37280,
   "kind": "issue",
   "title": "fleet-write rerun_failed: hotcrm's link checker is .github/workflows/link-check.yml, which the relay's workflow fence (ci.yml, check-links.yml) refuses, so a seat cannot re-run a transient link-check failure on hotcrm",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,24 @@
     "area:fleet",
     "domain:devx",
     "finding",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T11:09:20Z",
-  "updated_at": "2026-11-26T08:42:20Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T05:14:06Z",
+  "closed_at": "2026-11-28T05:13:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37280",
   "body": "repo:hotcrm#2 · sunhaolin · session_017xRBcV3h25dAMNWki8e1ns\n\n**Measured 2026-11-25 on objectstack-ai/hotcrm PR #2795, head `061cbd50`.**\n- **The failure:** the `Link Check` run 45600157624 (`.github/workflows/link-check.yml`, `pull_request`, attempt 1) failed on one link that answered GitHub `502`: `https://github.com/objectstack-ai/hotcrm/pull/2478`. Fetched directly, that PR answers; it is closed. The link was already in the edited file.\n- **The refusal:** `node scripts/pm/rerun-failed.mjs --run 45600157624 --repo objectstack-ai/hotcrm` answered `REFUSED before the dispatch — fence workflow`. The run's path is not in `RERUN_FAILED_WORKFLOWS` (`scripts/pm/fleet-write/ops.mjs:1249`: `ci.yml`, `check-links.yml`). Nothing was sent.\n- **Why:** `check-links.yml` is objectstack's link workflow. hotcrm names its own `link-check.yml` (`git ls-tree origin/main .github/workflows/` on hotcrm). The fence is one repo-agnostic path list, so the hotcrm link checker it was presumably meant to admit never matches.\n\n**Effect:** hotcrm's AGENTS.md lets a seat land a reviewer-class PR only when every check finished green. A transient link 502 therefore parks a ready PR until a human re-runs it in the Actions UI or a later push re-triggers it; empty commits are not allowed.\n\n**For the owner of `scripts/pm/fleet-write/`:**\n- Either the fence becomes per-repo (objectstack `check-links.yml`, hotcrm `link-check.yml`), or the hotcrm path is added to the list.\n- The self-tests in `validate.mjs:1757` and `rerun-failed.mjs:472` pin the list as it is, so they change with it.\n- Which one is the owner's call; this card only reports the mismatch.\n\nFiled as `finding` for first grading. ⛔ Not a claim."
