@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useHref, useNavigate } from 'react-router-dom';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useAuth } from '@object-ui/auth';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
@@ -70,6 +70,7 @@ import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
 import { listLinkTarget, recordOpenTarget, nextSectionOpening } from './aiChatLinks.js';
+import { documentHref } from '../../views/documentHref.js';
 import { hydratedMessagesToChatMessages } from './aiChatHydration.js';
 import { localizeAgentLabel, agentEmptyState, buildAgentSuggestions } from './agentCopy.js';
 import { drawerSuggestions, type EmptyConversationSize } from './emptyConversationModel.js';
@@ -278,6 +279,13 @@ export function ChatPane({
     },
     [navigate],
   );
+
+  // A draft review card's Studio links (the `data-draft-review` part) open in
+  // the app, so a live-only card is still there when the person comes back;
+  // the anchor's href carries the router's basename for a new tab.
+  const routerRootHref = useHref('/');
+  const openReviewLink = useCallback((path: string) => navigate(path), [navigate]);
+  const reviewLinkHref = useCallback((path: string) => documentHref(routerRootHref, path), [routerRootHref]);
 
   // The pane's root, measured by the composer-draft handoff below.
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -811,6 +819,8 @@ export function ChatPane({
         onInputChange={noteComposerInput}
         onOpenRecord={openRecord}
         onOpenList={openList}
+        onOpenReviewLink={openReviewLink}
+        reviewLinkHref={reviewLinkHref}
         // cloud#3565 — the record-write card's three buttons and its states.
         onOpenRecordForm={openRecordForm}
         recordWriteCreateTitle={(objectLabel) => t('console.ai.recordWriteCreateTitle', { object: objectLabel })}

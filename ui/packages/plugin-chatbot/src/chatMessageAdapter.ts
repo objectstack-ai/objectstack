@@ -90,7 +90,7 @@ import type {
  */
 type RuntimeOnlyMessageKeys = Pick<
   RuntimeChatMessage,
-  'charts' | 'recordCitations'
+  'charts' | 'recordCitations' | 'draftReview'
 >;
 
 /**
