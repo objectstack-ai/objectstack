@@ -25,7 +25,7 @@ Skills-docs: follow-up #37857
 
 | FROM | TO |
 |:--|:--|
-| `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_header'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
+| `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_page'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
 | `{ type: 'action:button', properties: { actionType: 'ask_ai' } }` | nothing: delete the row |
 
 The one-line fix: delete each `ask_ai` action and every name that points at it (a page header's `actions`, a list view's `rowActions` / `bulkActions`, a related list's `actions`, a quick-actions list, a record alert's `actionName`, an app navigation entry). `os migrate meta --from 18` lists the edits; `--write` deletes an `ask_ai` action that nothing in the stack names and every inline row and container member that spells it, and leaves a named one, with its references, for you to delete by hand.

@@ -196,14 +196,14 @@ const actionTypeAskAiRemoved: MetadataConversion = {
     // by `action-type-ask-ai-removed.test.ts`.
     before: {
       actions: [
-        { name: 'ask_about_ticket', label: 'Ask AI', objectName: 'ticket', type: 'ask_ai', locations: ['record_header'] },
-        { name: 'close_ticket', label: 'Close', objectName: 'ticket', type: 'script', locations: ['record_header'] },
+        { name: 'ask_about_ticket', label: 'Ask AI', objectName: 'ticket', type: 'ask_ai', locations: ['record_page'] },
+        { name: 'close_ticket', label: 'Close', objectName: 'ticket', type: 'script', locations: ['record_page'] },
       ],
       objects: [
         {
           name: 'ticket',
           actions: [
-            { name: 'ask_about_ticket_row', label: 'Ask AI', type: 'ask_ai', locations: ['list_item'] },
+            { name: 'ask_about_ticket_row', label: 'Ask AI', type: 'ask_ai', locations: ['record_row'] },
             { name: 'reopen_ticket', label: 'Reopen', type: 'script' },
           ],
         },
@@ -251,7 +251,7 @@ const actionTypeAskAiRemoved: MetadataConversion = {
     },
     after: {
       actions: [
-        { name: 'close_ticket', label: 'Close', objectName: 'ticket', type: 'script', locations: ['record_header'] },
+        { name: 'close_ticket', label: 'Close', objectName: 'ticket', type: 'script', locations: ['record_page'] },
       ],
       objects: [
         {
