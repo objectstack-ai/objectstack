@@ -346,6 +346,34 @@ as future work, not part of this decision.
 > seed data (the import copies none), and the hosted-cloud default namespace
 > (objectstack-ai/cloud#3624).
 
+> **Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); from
+> #36166 — PR #37065, following #35823 — PR #36138).** On the amendment's rename sentence, "a name
+> that lacks the package's prefix takes it in front". On the unmanaged rename path that sentence has
+> three bounds.
+>
+> 1. **A package that declares no `namespace`** is refused, not renamed, when no object name carries
+>    the namespace derived from its id and two or more object names share a first segment. Each
+>    object of each such group is refused (`400 INVALID_REQUEST`), whether every object shares
+>    the segment (#36138) or a stray object stands beside the group (#36166); the stray is not named
+>    and does not lift the refusal. So two-word short names the package repeats (`purchase_order`
+>    beside `purchase_item`) are refused too, and declaring `namespace` lifts the refusal
+>    (`packages/metadata-protocol/src/package-unmanaged-install.ts#derivedNamespaceContradiction`).
+> 2. **A package that declares a `namespace`** is refused for each object name the namespace-prefix
+>    judge refuses under it
+>    (`packages/spec/src/kernel/namespace-prefix.ts#validateObjectNamespacePrefix`, asked by
+>    `packages/metadata-protocol/src/package-unmanaged-install.ts#declaredNamespaceContradiction`).
+>    The rename has no declared prefix in such a name to replace, and every authoring door already
+>    refuses that name.
+> 3. **Decided to stay as written:** a namespace-less package's single object, foreign prefix or not
+>    (`demoasset_asset` alone copies as `TARGET_demoasset_asset`), because one name cannot tell a
+>    two-word short name from a foreign prefix. Namespace-less object names that share no first
+>    segment (`purchase_order` beside `asset_owner`, bare `asset` beside `site`) also stay as
+>    written.
+>
+> A body that writes the id-derived namespace out as `namespace` is judged as declared, so bound 2
+> applies to it and the shapes in bound 3 are refused for it. Each refusal is raised before the base
+> exists. Pinned in `packages/metadata-protocol/src/package-unmanaged-install.test.ts`.
+
 ### 3.6 The package-id URL is transparent; a friendly alias is optional
 
 A reverse-domain URL — `/apps/com.acme.crm/page/home` — is **self-describing**:

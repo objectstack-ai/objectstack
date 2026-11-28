@@ -108,6 +108,8 @@ Measured on `62692b7f8b` with `git grep -lE "formViews|viewKind: 'form'|viewKind
 
 `packages/spec/src/ui/view.zod.ts#defineForm` is a published export, and it is **not** this type's factory: it builds a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`), used by 17 `*.form.ts` modules under `packages/spec/src`. The obvious factory name and the obvious file suffix for the new type both collide with it in meaning. [Ruled question 1](#q1) settles the name: it goes to the new type and the Studio helper is renamed. The suffix follows the name ([D2](#d2)); that step is the owning seat's routing on question 1's logic and is not in the ruling's words.
 
+**Note (2026-11-28, #37245).** The paragraph above is Context: it describes the tree before [ruled question 1](#q1) was carried out, and it is left as written. Its anchor still resolves, onto the opposite meaning. On `main`, `packages/spec/src/ui/view.zod.ts#defineForm` is this type's factory. The Studio helper the paragraph describes is `packages/spec/src/ui/view.zod.ts#defineMetadataForm`, and its modules are named `*.metadata-form.ts`. Both changes landed for card #37086 in PR #37366, which carried PR #37422.
+
 ---
 
 ## Decision

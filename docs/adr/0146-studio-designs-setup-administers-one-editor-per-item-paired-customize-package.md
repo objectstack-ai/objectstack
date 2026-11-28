@@ -338,6 +338,16 @@ touched in two places, and the rest of it stands. **The amendment declares; the 
   same day; the same record). Datasources were Setup's already; Studio's menu is to stop drawing a row for them
   (ADR-0084).
 
+> **Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245), from
+> [#37238](https://github.com/objectstack-ai/objectstack/issues/37238)).** The amendment above reads "All 30 types" as
+> every registered type, and counts 32 at one commit. That number is a reading of that commit, and this decision keeps
+> no count: the registry has gained types since (`ai_context`, then `form` and `knowledge_source`) and will gain more.
+> "Every registered type" is each entry of
+> `packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY`, however many there are.
+> [ADR-0084](./0084-application-builder-information-architecture.md)'s type-to-group table lists them by group, and
+> the dated notes under that table say at which commit each reading was taken and which registered type has no row
+> yet. This note states no new count.
+
 > **Note (2026-11-24, epic [#36359](https://github.com/objectstack-ai/objectstack/issues/36359)).** D1 and the amendment above
 > speak of Studio. The running app is an editing surface too, for a workspace administrator. The maintainer's words
 > on the epic (2026-11-22), quoted in part: 「我同意先做页面上的「编辑」」 · 「按这个改，重画」 · 「而且不需要 studio
