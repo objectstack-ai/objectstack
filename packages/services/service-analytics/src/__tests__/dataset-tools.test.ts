@@ -333,10 +333,14 @@ describe('list_datasets — the catalogue asks the query\'s own gates', () => {
       status: 400,
     });
 
-    const failing = service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); } });
+    // [#35707] The caller is told the catalogue could not be read, in a fixed
+    // sentence; the loader's own error text goes to the server log alone.
+    const warn = vi.fn();
+    const failing = service.datasetTools({ loadDatasets: async () => { throw new Error('metadata loader down'); }, logger: { warn } });
     const failed = await failing.listDatasets({}, ME);
-    expect(failed).toMatchObject({ datasets: [], partial: true });
-    expect(failed.warning).toContain('metadata loader down');
+    expect(failed).toMatchObject({ datasets: [], partial: true, warning: 'The dataset catalogue could not be read, so no dataset is listed.' });
+    expect(JSON.stringify(failed)).not.toContain('metadata loader down');
+    expect(warn.mock.calls.map((c) => String(c[0]))).toEqual([expect.stringContaining('metadata loader down')]);
 
     const degraded = service.datasetTools({
       loadDatasets: async () => ({ items: [PIPELINE], partial: true as const, warning: 'one source unavailable' }),

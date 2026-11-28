@@ -5212,6 +5212,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-save-translation-fault-35707.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-save-translation-fault-35707.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-save-translation-fault-35707.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-view-label-not-invented.test.ts",
       "verb": "findOne",
       "pinned": 1

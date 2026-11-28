@@ -3343,11 +3343,13 @@ export async function isTranslatableMetaType(type: string): Promise<boolean> {
 /**
  * [#34993] The sentence a translation fault is said in, on every door that
  * says one: the i18n service resolved, but its translations could not be read.
+ *
+ * [#35707] A fixed sentence, the platform's client-facing failure text: the
+ * caught error is never quoted to the caller. Its text goes to the server
+ * log alone ({@link translationBundleOf}).
  */
-export function metaTranslationFaultWarning(error: unknown): string {
-    const reason = error instanceof Error ? error.message : String(error);
-    return `The translations could not be read (${reason}), so labels and descriptions are served untranslated.`;
-}
+export const META_TRANSLATION_FAULT_WARNING =
+    'The translations could not be read, so labels and descriptions are served untranslated.';
 
 /**
  * Build a `TranslationBundle` (`Record<locale, TranslationData>`) from an
@@ -3359,7 +3361,7 @@ export function metaTranslationFaultWarning(error: unknown): string {
  * translation fault, not a failed read: the answer is `undefined` (the text is
  * served untranslated, as with no bundle), the server log says so at `warn`
  * (a functional degradation), and `reportFault` hands the same sentence
- * ({@link metaTranslationFaultWarning}) to a door that carries a warning on
+ * ({@link META_TRANSLATION_FAULT_WARNING}) to a door that carries a warning on
  * its answer. One locale failing fails the whole bundle, so an answer never
  * mixes the locales that read with the fallback for the one that did not.
  */
@@ -3377,9 +3379,9 @@ export function translationBundleOf(i18n: unknown, reportFault?: (warning: strin
             if (data && typeof data === 'object') bundle[locale] = data;
         }
     } catch (error) {
-        const warning = metaTranslationFaultWarning(error);
-        logWarn(`[meta] ${warning}`);
-        reportFault?.(warning);
+        const reason = error instanceof Error ? error.message : String(error);
+        logWarn(`[meta] The translations could not be read (${reason}), so labels and descriptions are served untranslated.`);
+        reportFault?.(META_TRANSLATION_FAULT_WARNING);
         return undefined;
     }
     return Object.keys(bundle).length ? bundle : undefined;

@@ -235,6 +235,13 @@ export interface DatasetToolsDeps {
    * on a bridge that omits it. A throw is read as "cannot say".
    */
   readonly diagnoseDelegation?: DatasetToolDelegationProbe;
+  /**
+   * [#35707] Where a failure the answer says in a fixed sentence is logged
+   * with its own text: the caller is told the catalogue could not be read,
+   * never why. {@link AnalyticsService.datasetTools} binds the service's
+   * logger; absent, the text is not logged.
+   */
+  readonly logger?: { warn(message: string): void };
 }
 
 /** A tool call in the `ToolCallPart` shape's two members the executor reads. */
@@ -405,6 +412,9 @@ function text(label: unknown, locale: string | undefined, fallback?: string): st
 }
 
 /** Create the dataset tools' executor over a host's service and metadata. */
+/** [#35707] What `list_datasets` says when the catalogue read throws. */
+const DATASET_CATALOGUE_UNREADABLE_WARNING = 'The dataset catalogue could not be read, so no dataset is listed.';
+
 export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
   const maxRows = typeof deps.maxQueryLimit === 'number' && deps.maxQueryLimit > 0
     ? Math.floor(deps.maxQueryLimit)
@@ -468,10 +478,13 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
       const nextStep = terms !== undefined
         ? composeDatasetNextStep({ terms, datasets: [], candidates: [], partial: true, locales: sentence })
         : undefined;
+      // [#35707] The platform's client-facing failure text: a fixed sentence,
+      // the caught error's own text to the server log alone.
+      deps.logger?.warn(`[Analytics] list_datasets: the dataset catalogue could not be read: ${e instanceof Error ? e.message : String(e)}`);
       return {
         datasets: [],
         partial: true,
-        warning: `The dataset catalogue could not be read: ${e instanceof Error ? e.message : String(e)}`,
+        warning: DATASET_CATALOGUE_UNREADABLE_WARNING,
         ...(nextStep ? { nextStep } : {}),
       };
     }

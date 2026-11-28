@@ -80,9 +80,9 @@ describe('[#34993] REST /meta serves the authored text on a translation fault', 
         try {
             const rest = restOver(i18nWhoseReadThrows(failing));
             expect(await read(rest, '/api/v1/meta/:type', { type: 'object' }))
-                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: expect.stringContaining('bundle offline') });
+                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: 'The translations could not be read, so labels and descriptions are served untranslated.' });
             expect(await read(rest, '/api/v1/meta/:type/:name', { type: 'object', name: 'showcase_account' }))
-                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: expect.stringContaining('bundle offline') });
+                .toEqual({ status: 200, label: 'Account', field: 'Industry', translationWarning: 'The translations could not be read, so labels and descriptions are served untranslated.' });
             expect(warn.mock.calls.map((c) => String(c[0]))).toEqual(
                 expect.arrayContaining([expect.stringContaining('bundle offline')]),
             );

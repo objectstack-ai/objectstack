@@ -1425,7 +1425,8 @@ describe('[#35707] a translation fault is said as translationWarning, the same o
                 expect(doc?.label).toBe('Invoice');
             }
             const warningOf = (answer: Answer, onDispatcher: boolean) => (onDispatcher ? answer.body?.data : answer.body)?.translationWarning;
-            expect(warningOf(rest, false)).toEqual(expect.stringContaining('bundle offline'));
+            expect(warningOf(rest, false)).toBe('The translations could not be read, so labels and descriptions are served untranslated.');
+            expect(JSON.stringify(rest.body)).not.toContain('bundle offline');
             expect(warningOf(dispatcher, true)).toBe(warningOf(rest, false));
             // CONTROL — the readable double: translated, and no member on either transport.
             const healthyDispatcher = await enveloped(bootDispatcher('holder')).read(path, {}, ZH);

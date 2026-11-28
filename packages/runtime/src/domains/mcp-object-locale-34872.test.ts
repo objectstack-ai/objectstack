@@ -256,8 +256,9 @@ describe('[#34872] HTTP MCP list_objects and describe_object serve labels and de
 
     // [#35707] A translation fault: an i18n service that resolves but whose
     // reads throw. The answers are the authored text, never a refusal, and the
-    // two the object tools render carry `translationWarning` naming the
-    // reason; a healthy answer carries no such member.
+    // two the object tools render carry `translationWarning`, the fixed
+    // sentence (the i18n error's own text never reaches the caller); a healthy
+    // answer carries no such member.
     const throwingI18n = (failing: 'getLocales' | 'getTranslations') => ({
         ...i18nService,
         [failing]: () => { throw new Error('bundle offline'); },
@@ -268,10 +269,12 @@ describe('[#34872] HTTP MCP list_objects and describe_object serve labels and de
         const described = await bridge.describeObject(OBJ);
         expect(described).toMatchObject({ name: OBJ, label: 'Deal', description: OBJECT_TEXT });
         expect(field(described, 'amount')).toMatchObject({ label: 'Amount', description: AMOUNT_TEXT });
-        expect(described.translationWarning).toEqual(expect.stringContaining('bundle offline'));
+        expect(described.translationWarning).toBe('The translations could not be read, so labels and descriptions are served untranslated.');
+        expect(JSON.stringify(described)).not.toContain('bundle offline');
         const listing = await bridge.listObjectsDiagnosed();
         expect(listing.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: 'Deal', description: OBJECT_TEXT });
-        expect(listing.translationWarning).toEqual(expect.stringContaining('bundle offline'));
+        expect(listing.translationWarning).toBe('The translations could not be read, so labels and descriptions are served untranslated.');
+        expect(JSON.stringify(listing)).not.toContain('bundle offline');
     });
 
     it('[#35707] CONTROL — the reads answering: the same answers are translated and carry no translationWarning', async () => {

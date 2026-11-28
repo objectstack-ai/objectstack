@@ -216,10 +216,12 @@ describe('[#34872] stdio list_objects and describe_object serve labels and descr
     try {
       const described = await session.call('describe_object', { objectName: OBJ });
       expect(described.isError).toBe(false);
-      expect(described.json).toMatchObject({ name: OBJ, label: 'Deal', translationWarning: expect.stringContaining('bundle offline') });
+      expect(described.json).toMatchObject({ name: OBJ, label: 'Deal', translationWarning: 'The translations could not be read, so labels and descriptions are served untranslated.' });
+      expect(JSON.stringify(described.json)).not.toContain('bundle offline');
       const listed = (await session.call('list_objects', {})).json;
       expect(listed.objects.find((o: any) => o.name === OBJ)).toMatchObject({ label: 'Deal' });
-      expect(listed).toMatchObject({ totalCount: 2, translationWarning: expect.stringContaining('bundle offline') });
+      expect(listed).toMatchObject({ totalCount: 2, translationWarning: 'The translations could not be read, so labels and descriptions are served untranslated.' });
+      expect(JSON.stringify(listed)).not.toContain('bundle offline');
     } finally {
       await session.close();
     }
