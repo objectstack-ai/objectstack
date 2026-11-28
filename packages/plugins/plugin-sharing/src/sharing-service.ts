@@ -2516,6 +2516,8 @@ export class SharingService implements ISharingService {
     // record's. The resolution runs after the authorization pre-flight so a
     // refused caller never pays the record read.
     let organizationId: string | null;
+    // [#33912] Only a direct grant has its recipient judged (below).
+    let judgeRecipient = false;
     if (context?.isSystem) {
       this.assertNotInertGrant(input.object);
       organizationId = await this.resolveSystemGrantOrganization(input, context);
@@ -2526,6 +2528,7 @@ export class SharingService implements ISharingService {
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
       organizationId = await this.resolveDirectGrantOrganization(input, context);
+      judgeRecipient = true;
     }
     // [#25549] The recipient half, on both paths: after authorization, so a
     // refused caller never learns a recipient's population, and after the
@@ -2543,7 +2546,7 @@ export class SharingService implements ISharingService {
     // The direct path only: rule-materialised grants are the platform's own
     // writes, and their recipient is judged where the rule is authored
     // (`SharingRuleService.defineRule`).
-    if (!context?.isSystem) {
+    if (judgeRecipient) {
       const unresolved = await this.userRecipientRefusal(input.recipientId, organizationId, 'record');
       if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
     }
