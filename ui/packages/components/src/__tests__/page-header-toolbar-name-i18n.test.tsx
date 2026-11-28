@@ -27,6 +27,8 @@ import { I18nProvider } from '@object-ui/i18n';
 // Registers `page:header` at module scope, NOT inside a `beforeAll` — there the
 // cold transform is billed to `hookTimeout` (objectui#3010/#3021).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -39,8 +41,8 @@ const schema = {
   type: 'page:header',
   title: 'Acme Corp',
   actions: [
-    { name: 'convert', locations: ['record_header'], label: 'Convert', type: 'flow' },
-    { name: 'clone', locations: ['record_header'], label: 'Clone', type: 'flow' },
+    { name: 'convert', locations: ['record_page'], label: 'Convert', type: 'flow' },
+    { name: 'clone', locations: ['record_page'], label: 'Clone', type: 'flow' },
   ],
 };
 

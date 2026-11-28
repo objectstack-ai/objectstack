@@ -388,7 +388,7 @@ export function planRowActionMenu(input: {
  * One schema-driven row-action menu item. Extracted into its own component
  * so the `visible` CEL predicate can be evaluated with a hook
  * (`useCondition`) without violating the rules-of-hooks inside a `.map()`.
- * Mirrors `ActionMenuItem` on the record_header path: when a `visible`
+ * Mirrors `ActionMenuItem` on the record_page path: when a `visible`
  * predicate is present and evaluates false against the row, the item is
  * hidden (so e.g. "Resume" no longer shows on a running record). Bare field
  * references (`status == "active"`, `is_default != true`) resolve against
@@ -606,7 +606,7 @@ export const RowActionInlineButton: React.FC<{
  * THE row-action resolver (objectstack#28434): what ONE row offers, read by
  * both of its entry points — the "⋮" cell ({@link RowActionMenu}) and the row
  * context menu (`./RowContextMenu`). Both menus call this hook, so a
- * `list_item` action shows in both or in neither: same capability gate
+ * `record_row` action shows in both or in neither: same capability gate
  * (ADR-0066 D4), same switch-off, same per-record predicates, same order.
  *
  * `maxInlineActions` is the only input the two read differently: the cell has
@@ -634,7 +634,7 @@ export function useRowActionPlan(
   // declared set so the inline CTA, the overflow menu and `hasMenu` all agree.
   // This surface filters its own actions instead of going through
   // `ActionEngine.getActionsForLocation`, so the engine's gate never reached
-  // `list_item` — a row action declaring a capability nobody holds still
+  // `record_row` — a row action declaring a capability nobody holds still
   // rendered. Unknown capabilities fail OPEN (see `useCapabilityGate`); the
   // server remains the authority.
   const mayInvoke = useCapabilityGate();
@@ -664,7 +664,7 @@ export function useRowActionPlan(
   // while the items were filtered a second time, per row, by `visibleWhen` /
   // `visible`. Handlers present + every item suppressed for this record = a "⋮"
   // that opens an empty box — measured at 128×10 with zero `[role=menu]`
-  // children on `sys_approval_request`, whose `list_item` actions (approve /
+  // children on `sys_approval_request`, whose `record_row` actions (approve /
   // reject / recall) are gated for approvers and fail for an admin browsing the
   // "全部" view. The capability gate above was already folded in for exactly
   // this reason (objectstack-ai/objectstack#3923); the per-record predicates were not.

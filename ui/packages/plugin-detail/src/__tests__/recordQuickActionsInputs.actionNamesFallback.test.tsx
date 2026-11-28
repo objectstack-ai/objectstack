@@ -49,7 +49,7 @@ const APPROVE = {
   name: 'approve',
   label: 'Approve',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 
 const OBJECT_META = { name: 'crm_account', actions: [APPROVE] };

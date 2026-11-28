@@ -77,15 +77,15 @@ function placement() {
 
 describe('ActionPreview placement frames', () => {
   it('draws a frame for a live location', () => {
-    renderWithLocations(['record_header']);
-    expect(placement().getByText('record_header')).toBeTruthy();
+    renderWithLocations(['record_page']);
+    expect(placement().getByText('record_page')).toBeTruthy();
   });
 
   it('does NOT draw a frame for the retired global_nav location', () => {
-    // Both halves over one render: `record_header` proves the placement preview
+    // Both halves over one render: `record_page` proves the placement preview
     // is alive and drawing, `global_nav` proves the retired frame is gone.
-    renderWithLocations(['record_header', 'global_nav']);
-    expect(placement().getByText('record_header')).toBeTruthy();
+    renderWithLocations(['record_page', 'global_nav']);
+    expect(placement().getByText('record_page')).toBeTruthy();
     expect(placement().queryByText('global_nav')).toBeNull();
   });
 

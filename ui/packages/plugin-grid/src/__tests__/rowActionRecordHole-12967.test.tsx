@@ -37,7 +37,7 @@ const pauseAction = (confirmText: string) => ({
   name: 'pause_environment',
   label: 'Pause',
   type: 'api',
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
   target: '/api/v1/environments/pause',
   confirmText,
 });

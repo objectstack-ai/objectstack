@@ -29,7 +29,7 @@ const action = (source: string, capabilities?: string[], extra: Record<string, u
   label: 'Close',
   objectName: 'pr_task',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   body: { language: 'js', source, ...(capabilities ? { capabilities } : {}) },
   ...extra,
 });

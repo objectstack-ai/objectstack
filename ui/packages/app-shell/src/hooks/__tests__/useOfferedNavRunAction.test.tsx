@@ -47,7 +47,7 @@ const CREATE = {
   name: 'create_account',
   label: 'Create Account',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 function land(name: string | null): void {
@@ -59,10 +59,10 @@ const paramNow = () => new URL(window.location.href).searchParams.get(NAV_RUN_AC
 
 /** What `ObjectView` does with the hook's answer, verbatim in shape. */
 function Toolbar({ actions, enabled = true }: { actions: any[]; enabled?: boolean }) {
-  const armed = useOfferedNavRunAction(actions, (a: any) => actionRendersAt(a, 'list_toolbar'), enabled);
+  const armed = useOfferedNavRunAction(actions, (a: any) => actionRendersAt(a, 'list'), enabled);
   const composed = armed === null ? actions : actions.map((a) => (a?.name === armed ? { ...a, autoTrigger: true } : a));
   // Typed as the `action:bar` node it is (objectui#11355), as `ObjectView` types its own.
-  const bar: ActionBarSchema = { type: 'action:bar', location: 'list_toolbar', actions: composed };
+  const bar: ActionBarSchema = { type: 'action:bar', location: 'list', actions: composed };
   return <SchemaRenderer schema={bar} />;
 }
 
@@ -144,7 +144,7 @@ describe('the deep-link preparation step honours the declared visible gate (obje
 
   it('a name this surface does not render is the old quiet case — no notice, URL untouched', async () => {
     land(CREATE.name);
-    const { run } = mount([{ ...CREATE, locations: ['record_header'], visible: false }]);
+    const { run } = mount([{ ...CREATE, locations: ['record_page'], visible: false }]);
     await flush();
     expect(notice).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();

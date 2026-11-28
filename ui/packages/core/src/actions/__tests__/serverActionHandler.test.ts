@@ -171,13 +171,13 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
   it('blocks a record-scoped action with zero selection (#2210) but lets object-level actions through', () => {
     const scoped = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_item', 'list_toolbar'] } as ActionDef,
+      { name: 'a', locations: ['record_row', 'list'] } as ActionDef,
       { selectedRecords: [] },
     );
     expect(scoped.error).toMatch(/select a row first/i);
 
     const objectLevel = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_toolbar'] } as ActionDef,
+      { name: 'a', locations: ['list'] } as ActionDef,
       { selectedRecords: [] },
     );
     expect(objectLevel).toEqual({ recordId: undefined });
@@ -185,7 +185,7 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
   it('an aggregate dispatch (_selectedIds, objectui#3139) bypasses the selection fallback and its guards', () => {
     const out = resolveServerActionRecordId(
-      { name: 'a', locations: ['list_item', 'list_toolbar'], params: { _selectedIds: ['x', 'y'] } } as ActionDef,
+      { name: 'a', locations: ['record_row', 'list'], params: { _selectedIds: ['x', 'y'] } } as ActionDef,
       { selectedRecords: [{ id: 'x' }, { id: 'y' }] },
     );
     expect(out).toEqual({ recordId: undefined });
@@ -194,9 +194,9 @@ describe('resolveServerActionRecordId — the standard dance', () => {
 
 describe('isRecordScopedAction', () => {
   it('true for any record location, false for object-level-only or undeclared', () => {
-    expect(isRecordScopedAction({ locations: ['list_item'] } as ActionDef)).toBe(true);
-    expect(isRecordScopedAction({ locations: ['record_header'] } as ActionDef)).toBe(true);
-    expect(isRecordScopedAction({ locations: ['list_toolbar'] } as ActionDef)).toBe(false);
+    expect(isRecordScopedAction({ locations: ['record_row'] } as ActionDef)).toBe(true);
+    expect(isRecordScopedAction({ locations: ['record_page'] } as ActionDef)).toBe(true);
+    expect(isRecordScopedAction({ locations: ['list'] } as ActionDef)).toBe(false);
     expect(isRecordScopedAction({} as ActionDef)).toBe(false);
   });
 });
@@ -234,7 +234,7 @@ describe('createServerActionHandler — resolution wiring', () => {
 });
 
 describe('the row-count refusals carry their pack key, and are asked before input (objectui#13384)', () => {
-  const SCOPED = { name: 'a', locations: ['list_item', 'list_toolbar'] } as ActionDef;
+  const SCOPED = { name: 'a', locations: ['record_row', 'list'] } as ActionDef;
 
   it('each refusal names the locale-pack key its English text is the source of', () => {
     expect(resolveServerActionRecordId(SCOPED, { selectedRecords: [{ id: 'x' }, { id: 'y' }] })).toEqual({

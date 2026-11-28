@@ -19,7 +19,7 @@ describe('useActionEngine', () => {
       name: 'mark_complete',
       type: 'script',
       target: 'true',
-      locations: ['list_toolbar', 'record_header'],
+      locations: ['list', 'record_page'],
       // @ts-expect-error `bulkEnabled` is a retired key on `ActionDef`, kept
       // here as the only input that can prove `getBulkActions()` does not
       // harvest it (see the inverse test below). The directive is
@@ -30,13 +30,13 @@ describe('useActionEngine', () => {
       name: 'delete_record',
       type: 'api',
       endpoint: '/api/delete',
-      locations: ['record_more'],
+      locations: ['record'],
     },
     {
       name: 'view_details',
       type: 'url',
       target: '/details',
-      locations: ['list_item'],
+      locations: ['record_row'],
       // @ts-expect-error `shortcut` is retired on `ActionDef` too, and for the
       // same reason as `bulkEnabled` above: the inverse test needs metadata
       // that still declares one. On its OWN entry rather than beside
@@ -68,45 +68,44 @@ describe('useActionEngine', () => {
     },
   ];
 
-  /** The six locations `ACTION_LOCATIONS` declares as of 17.0.0-rc.6. */
+  /** The six locations `ACTION_LOCATIONS` declares as of protocol 19 (objectstack#36495). */
   const LIVE_LOCATIONS = [
-    'list_toolbar',
-    'list_item',
-    'record_header',
-    'record_more',
+    'list',
+    'record',
+    'record_page',
+    'record_row',
     'record_related',
     'record_section',
   ] as const;
 
   describe('getActionsForLocation', () => {
-    it('returns actions for list_toolbar', () => {
+    it('returns actions for list', () => {
       const { result } = renderHook(() =>
         useActionEngine({ actions: sampleActions }),
       );
 
-      const actions = result.current.getActionsForLocation('list_toolbar');
+      const actions = result.current.getActionsForLocation('list');
       expect(actions.length).toBe(1);
       expect(actions[0].name).toBe('mark_complete');
     });
 
-    it('returns actions for record_header', () => {
+    it('returns actions for record_page', () => {
       const { result } = renderHook(() =>
         useActionEngine({ actions: sampleActions }),
       );
 
-      const actions = result.current.getActionsForLocation('record_header');
-      expect(actions.length).toBe(1);
-      expect(actions[0].name).toBe('mark_complete');
+      const actions = result.current.getActionsForLocation('record_page');
+      // `delete_record` declares `record`, which covers the record page.
+      expect(actions.map((a) => a.name)).toEqual(['mark_complete', 'delete_record']);
     });
 
-    it('returns actions for record_more', () => {
+    it('returns a `record` action at record_row too (objectstack#36495)', () => {
       const { result } = renderHook(() =>
         useActionEngine({ actions: sampleActions }),
       );
 
-      const actions = result.current.getActionsForLocation('record_more');
-      expect(actions.length).toBe(1);
-      expect(actions[0].name).toBe('delete_record');
+      const actions = result.current.getActionsForLocation('record_row');
+      expect(actions.map((a) => a.name)).toEqual(['delete_record', 'view_details']);
     });
 
     it('returns empty array for location with no actions', () => {
@@ -170,7 +169,7 @@ describe('useActionEngine', () => {
       expect(rejected.error?.issues?.[0]?.message).toContain(
         'was removed from `ACTION_LOCATIONS`',
       );
-      expect(ActionLocationSchema.safeParse('record_header').success).toBe(true);
+      expect(ActionLocationSchema.safeParse('record_page').success).toBe(true);
     });
   });
 
@@ -272,7 +271,7 @@ describe('useActionEngine', () => {
         useActionEngine({ actions: [] }),
       );
 
-      const actions = result.current.getActionsForLocation('list_toolbar');
+      const actions = result.current.getActionsForLocation('list');
       expect(actions).toEqual([]);
     });
   });

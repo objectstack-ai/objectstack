@@ -7,14 +7,14 @@
  */
 
 /**
- * `record_header` actions must carry the record id even while the page record
+ * `record_page` actions must carry the record id even while the page record
  * is still being fetched (objectui#5176).
  *
  * The header is NOT gated on the record load. `isLoading` — the only state the
  * `<SkeletonDetail>` early return reads — is flipped false in a `queueMicrotask`
  * keyed on the route, while `pageRecord` arrives one `dataSource.findOne`
  * round-trip later. So for the whole duration of that fetch the page renders its
- * real header, with every `record_header` action live and clickable, and
+ * real header, with every `record_page` action live and clickable, and
  * `pageRecord` still `null`.
  *
  * In that window the `type:'api'` handler's `recordIdParam` seeding used to have
@@ -215,7 +215,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('RecordDetailView record_header actions during the page-record load window (objectui#5176)', () => {
+describe('RecordDetailView record_page actions during the page-record load window (objectui#5176)', () => {
   it('the header renders live actions while the record is still loading', async () => {
     // The premise the whole card rests on. If the header were gated on the
     // record load there would be no window to dispatch in, and the reported
@@ -235,7 +235,7 @@ describe('RecordDetailView record_header actions during the page-record load win
 
     let r: any;
     await act(async () => {
-      // A record_header action exactly as authored: no `_rowRecord` stash, no
+      // A record_page action exactly as authored: no `_rowRecord` stash, no
       // literal `recordId` override, `recordIdField` defaulting to `id`.
       r = await handlers.api({
         name: 'archive_plan',

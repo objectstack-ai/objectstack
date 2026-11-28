@@ -67,11 +67,11 @@ describe('ActionBar (action:bar)', () => {
     it('filters actions by location', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'list_toolbar',
+        location: 'list',
         actions: [
-          { name: 'toolbar_action', label: 'Toolbar Action', type: 'script', locations: ['list_toolbar'] },
-          { name: 'header_action', label: 'Header Action', type: 'script', locations: ['record_header'] },
-          { name: 'both_action', label: 'Both Action', type: 'script', locations: ['list_toolbar', 'record_header'] },
+          { name: 'toolbar_action', label: 'Toolbar Action', type: 'script', locations: ['list'] },
+          { name: 'header_action', label: 'Header Action', type: 'script', locations: ['record_page'] },
+          { name: 'both_action', label: 'Both Action', type: 'script', locations: ['list', 'record_page'] },
         ],
       }));
       expect(container.textContent).toContain('Toolbar Action');
@@ -89,12 +89,12 @@ describe('ActionBar (action:bar)', () => {
     it('hides an action that declares no locations when filtering by location', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         actions: [
           { name: 'no_loc', label: 'No Location', type: 'script' },
           { name: 'empty_loc', label: 'Empty Location', type: 'script', locations: [] },
-          { name: 'other_loc', label: 'Other Location', type: 'script', locations: ['list_toolbar'] },
-          { name: 'here_loc', label: 'Here Location', type: 'script', locations: ['record_header'] },
+          { name: 'other_loc', label: 'Other Location', type: 'script', locations: ['list'] },
+          { name: 'here_loc', label: 'Here Location', type: 'script', locations: ['record_page'] },
         ],
       }));
       expect(container.textContent).not.toContain('No Location');
@@ -109,8 +109,8 @@ describe('ActionBar (action:bar)', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
         actions: [
-          { name: 'a1', label: 'Action 1', type: 'script', locations: ['list_toolbar'] },
-          { name: 'a2', label: 'Action 2', type: 'script', locations: ['record_header'] },
+          { name: 'a1', label: 'Action 1', type: 'script', locations: ['list'] },
+          { name: 'a2', label: 'Action 2', type: 'script', locations: ['record_page'] },
         ],
       }));
       expect(container.textContent).toContain('Action 1');
@@ -137,12 +137,12 @@ describe('ActionBar (action:bar)', () => {
     it('deduplicates actions after location filtering', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         actions: [
-          { name: 'change_status', label: 'Change Status', type: 'script', locations: ['record_header'] },
-          { name: 'assign_user', label: 'Assign User', type: 'script', locations: ['record_header'] },
-          { name: 'change_status', label: 'Change Status', type: 'script', locations: ['record_header', 'record_more'] },
-          { name: 'assign_user', label: 'Assign User', type: 'script', locations: ['record_header'] },
+          { name: 'change_status', label: 'Change Status', type: 'script', locations: ['record_page'] },
+          { name: 'assign_user', label: 'Assign User', type: 'script', locations: ['record_page'] },
+          { name: 'change_status', label: 'Change Status', type: 'script', locations: ['record_page'] },
+          { name: 'assign_user', label: 'Assign User', type: 'script', locations: ['record_page'] },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -196,13 +196,13 @@ describe('ActionBar (action:bar)', () => {
     it('orders inline actions by `order` (lower = earlier / primary slot)', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         maxVisible: 5,
         actions: [
           // Registration order puts the app action first; `order` must reorder.
-          { name: 'close_deal', label: 'Close', type: 'script', locations: ['record_header'] },
-          { name: 'print', label: 'Print', type: 'script', locations: ['record_header'], order: 5 },
-          { name: 'approve', label: 'Approve', type: 'script', locations: ['record_header'], order: -10 },
+          { name: 'close_deal', label: 'Close', type: 'script', locations: ['record_page'] },
+          { name: 'print', label: 'Print', type: 'script', locations: ['record_page'], order: 5 },
+          { name: 'approve', label: 'Approve', type: 'script', locations: ['record_page'], order: -10 },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -217,11 +217,11 @@ describe('ActionBar (action:bar)', () => {
     it('promotes a low-`order` action into the primary slot even when registered last', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         maxVisible: 1,
         actions: [
-          { name: 'app_action', label: 'App Action', type: 'script', locations: ['record_header'] },
-          { name: 'approve', label: 'Approve', type: 'script', locations: ['record_header'], order: -100 },
+          { name: 'app_action', label: 'App Action', type: 'script', locations: ['record_page'] },
+          { name: 'approve', label: 'Approve', type: 'script', locations: ['record_page'], order: -100 },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -237,12 +237,12 @@ describe('ActionBar (action:bar)', () => {
     it('is stable — actions without `order` keep their registration order', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         maxVisible: 5,
         actions: [
-          { name: 'a', label: 'Alpha', type: 'script', locations: ['record_header'] },
-          { name: 'b', label: 'Bravo', type: 'script', locations: ['record_header'] },
-          { name: 'c', label: 'Charlie', type: 'script', locations: ['record_header'] },
+          { name: 'a', label: 'Alpha', type: 'script', locations: ['record_page'] },
+          { name: 'b', label: 'Bravo', type: 'script', locations: ['record_page'] },
+          { name: 'c', label: 'Charlie', type: 'script', locations: ['record_page'] },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -256,13 +256,13 @@ describe('ActionBar (action:bar)', () => {
     it('tie-break: a `primary` action wins the primary slot when nobody sets `order`', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         maxVisible: 1,
         actions: [
           // Registered first, but plain variant — the tie-break must let the
           // `primary` sibling registered after it claim the primary slot.
-          { name: 'export', label: 'Export', type: 'script', locations: ['record_header'] },
-          { name: 'submit', label: 'Submit', type: 'script', variant: 'primary', locations: ['record_header'] },
+          { name: 'export', label: 'Export', type: 'script', locations: ['record_page'] },
+          { name: 'submit', label: 'Submit', type: 'script', variant: 'primary', locations: ['record_page'] },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -278,13 +278,13 @@ describe('ActionBar (action:bar)', () => {
     it('`order` outranks the `primary` tie-break', () => {
       const { container } = renderComponent(actionBar({
         type: 'action:bar',
-        location: 'record_header',
+        location: 'record_page',
         maxVisible: 5,
         actions: [
           // `primary` variant but no `order` (= 0); the explicit low-`order`
           // sibling must still sort ahead of it — `order` is the primary key.
-          { name: 'submit', label: 'Submit', type: 'script', variant: 'primary', locations: ['record_header'] },
-          { name: 'approve', label: 'Approve', type: 'script', order: -100, locations: ['record_header'] },
+          { name: 'submit', label: 'Submit', type: 'script', variant: 'primary', locations: ['record_page'] },
+          { name: 'approve', label: 'Approve', type: 'script', order: -100, locations: ['record_page'] },
         ],
       }));
       const toolbar = container.querySelector('[role="toolbar"]');
@@ -407,7 +407,7 @@ describe('ActionBar (action:bar)', () => {
   /**
    * [ADR-0066 D4 / framework#3923] The bar filters its own action list instead
    * of going through `ActionEngine.getActionsForLocation`, so the engine's
-   * capability gate never reached `list_toolbar`: an action declaring a
+   * capability gate never reached `list`: an action declaring a
    * capability nobody holds rendered as a live button, with nothing behind it
    * for a `type: 'api'` action whose `target` is on another origin (the
    * platform action door — the source of the 403 — never sees that request;
@@ -416,7 +416,7 @@ describe('ActionBar (action:bar)', () => {
   describe('requiredPermissions capability gate', () => {
     const Bar = ({ actions, systemActions }: { actions?: any[]; systemActions?: any[] }) => {
       const Component = ComponentRegistry.get('action:bar')!;
-      return <Component schema={actionBar({ type: 'action:bar', location: 'list_toolbar', actions, systemActions })} />;
+      return <Component schema={actionBar({ type: 'action:bar', location: 'list', actions, systemActions })} />;
     };
     const withUser = (user: unknown, props: { actions?: any[]; systemActions?: any[] }) =>
       render(<ActionProvider context={{ user } as any}><Bar {...props} /></ActionProvider>);
@@ -425,8 +425,8 @@ describe('ActionBar (action:bar)', () => {
     // strict placement filter would drop them before the capability gate ever
     // ran, and every `not.toContain` below would pass VACUOUSLY — the suite
     // would keep reporting green while testing nothing.
-    const gated = { name: 'gated', label: 'Bulk Reassign', type: 'api', locations: ['list_toolbar'], requiredPermissions: ['manage_users'] };
-    const plain = { name: 'plain', label: 'Export', type: 'api', locations: ['list_toolbar'] };
+    const gated = { name: 'gated', label: 'Bulk Reassign', type: 'api', locations: ['list'], requiredPermissions: ['manage_users'] };
+    const plain = { name: 'plain', label: 'Export', type: 'api', locations: ['list'] };
 
     it('hides an action whose capability the caller lacks', () => {
       const { container } = withUser({ id: 'u1', systemPermissions: ['setup.access'] }, { actions: [gated, plain] });
