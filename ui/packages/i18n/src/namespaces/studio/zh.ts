@@ -2824,6 +2824,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.skillPreview.missingTitle': 'SkillTriggerConditionSchema 要求此项 —— 此草稿保存时会被拒绝。',
   'engine.toolPreview.openApiConsole': '在 API 控制台中打开',
   'engine.toolPreview.openApiConsoleTitle': '打开 API 控制台以测试调用',
+  'engine.toolPreview.openApiConsoleNote': '这里直接运行工具，不经过对话。托管云上需要服务端模型的调用会被拒绝，请在对话里试。',
   'engine.toolPreview.empty': '设置名称、描述和参数，即可查看工具预览。',
   'engine.toolPreview.inputParameters': '输入参数',
   'engine.toolPreview.noParameters': '此工具不接受输入参数。',

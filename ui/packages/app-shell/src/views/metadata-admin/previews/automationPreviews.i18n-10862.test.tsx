@@ -475,6 +475,7 @@ describe('ToolPreview — the designer words read engine.toolPreview.* (objectui
       expectSites(lang, [
         { key: 'engine.toolPreview.openApiConsole' },
         { key: 'engine.toolPreview.openApiConsoleTitle', in: 'title' },
+        { key: 'engine.toolPreview.openApiConsoleNote' },
         { key: 'engine.toolPreview.inputParameters' },
         { key: 'engine.toolPreview.exampleCall' },
         { key: 'engine.toolPreview.outputSchema' },
