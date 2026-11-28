@@ -86,6 +86,8 @@ const mockClient = vi.hoisted(() => ({
   getDraft: vi.fn(async () => null),
   get: vi.fn(async () => null),
   saveDraft: vi.fn(async () => ({})),
+  // A refused publish discards the draft it saved first.
+  reset: vi.fn(async () => ({})),
   save: vi.fn(async (_type: string, _name: string, _body: Record<string, unknown>) => ({})),
 }));
 
