@@ -148,6 +148,19 @@ const VECTOR_MIN_POOL = 8;
  */
 const VECTOR_RETRY_POOL = 10;
 
+/**
+ * How many times the floor ({@link VECTOR_MIN_POOL} × topK) the first
+ * approximate pass must be expected to keep in scope for a scope of record
+ * terms alone to take that pass: the `topK × vectorIndexOverfetch`
+ * candidates times the share of the passages in scope, which a count of the
+ * rows in scope, served by the record index and stopped at the cut-over,
+ * reads. A narrower scope goes straight to the exact scan, which the record
+ * index serves from the rows in scope: the one-bit pass, which reads every
+ * row of the table, would mostly leave a pool under the floor and be followed
+ * by that scan anyway. PLACEHOLDER — placed by the bench.
+ */
+const VECTOR_RECORD_SCOPE_POOL = 1.5;
+
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
 const VECTOR_BACKFILL_BATCH = 2048;
 
@@ -811,6 +824,22 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (terms.length > 0) await this.ensureKeywordIndex(tableName);
       const instance = now.active.createdAt;
       if (vectorLeg && (await this.approximateSearchable(tableName, instance))) {
+        const candidates = topK * this.vectorIndexOverfetch;
+        // A scope of record terms alone too narrow for the first pass to be
+        // expected to clear the floor (VECTOR_RECORD_SCOPE_POOL) goes straight
+        // to the exact scan, which the record index serves from the rows in
+        // scope. The count reads those rows' index entries, at most up to the cut-over.
+        if (recordScope) {
+          const cut = (VECTOR_RECORD_SCOPE_POOL * VECTOR_MIN_POOL) / this.vectorIndexOverfetch;
+          const counted = await client.execute({
+            sql: `WITH total AS (SELECT count(*) AS n FROM ${table})
+                    SELECT n, (SELECT count(*) FROM (SELECT 1 FROM ${table} WHERE ${inScope}
+                      LIMIT (SELECT CAST(n * ?${args.length + 1} AS INTEGER) + 1 FROM total))) AS k FROM total`,
+            args: [...args, cut] as InArgs,
+          });
+          const { n, k } = counted.rows[0];
+          if (Number(k) < Number(n) * cut) return client.execute(statement());
+        }
         // A failed approximate statement (its index gone under this process's
         // memory of it) forgets that memory and is answered by the exact scan.
         const approximate = (candidates: number) =>
@@ -826,7 +855,6 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         const poolOf = (near: ResultSet) => Number(near.rows[0]?.pool ?? 0);
         const stands = (near: ResultSet) =>
           poolOf(near) >= VECTOR_MIN_POOL * topK && near.rows.filter((r) => r.vpos !== null).length >= topK;
-        const candidates = topK * this.vectorIndexOverfetch;
         const near = await approximate(candidates);
         if (near === undefined) return client.execute(statement());
         if (stands(near)) return near;
