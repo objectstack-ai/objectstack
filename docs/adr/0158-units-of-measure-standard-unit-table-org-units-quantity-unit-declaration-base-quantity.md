@@ -177,6 +177,14 @@ rule: a read grant on the member baseline for a new system object.
   (`packages/spec/src/system/constants/platform-object-names.ts#PLATFORM_OBJECTS_BY_PACKAGE`), and the name
   `sys_unit` is ruled.
 
+*Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); from
+[#35498](https://github.com/objectstack-ai/objectstack/issues/35498), built by
+[#37389](https://github.com/objectstack-ai/objectstack/pull/37389)):* a standard code never becomes a `sys_unit` row.
+The decimal places an organization sets for a standard code are kept in a separate organization-owned object,
+`sys_standard_unit_setting`
+(`packages/platform-objects/src/system/sys-standard-unit-setting.object.ts#SysStandardUnitSetting`), of which the
+platform also ships zero rows. [Open item](#open-items) 10's note of the same date describes it.
+
 ### U4 — Quantity shape
 
 > **U4 · Quantity shape.** A `number` field gains a unit declaration that mirrors `currencyConfig`:
@@ -206,6 +214,14 @@ admitted by this record.
 
 The last sentence is settled under [L4](#l4--u6s-decimals-and-the-fields-scale): the field's `scale` governs storage
 and is the ceiling, and a unit's decimal places are only its display default.
+
+*Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); from
+[#35498](https://github.com/objectstack-ai/objectstack/issues/35498), built by
+[#37389](https://github.com/objectstack-ai/objectstack/pull/37389)):* a unit's decimal places have one home for each
+kind of code. An organization's own unit keeps them on its `sys_unit` row, in `decimal_places`. A standard code keeps
+them on the organization's `sys_standard_unit_setting` row for that code ([Open item](#open-items) 10, ruled A). U1's
+table carries no default, so a standard code with no row has no display default of its own and is drawn at the field's
+own width.
 
 ### U7 — Releases
 
@@ -281,6 +297,15 @@ Whose each part is:
 So no ratio lock exists, and no quantity table is scanned for "used". An edited old row is left to a later card,
 R2's ([Open item](#open-items) 5).
 
+*Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); from
+[#35490](https://github.com/objectstack-ai/objectstack/issues/35490), built by
+[#37449](https://github.com/objectstack-ai/objectstack/pull/37449)):* the display of "show the code without a label"
+is built. A retired organization unit, a code that is neither a standard code nor a `sys_unit` row the reader can
+read, and any organization unit read by someone who may not read `sys_unit` (an external member) are each shown as the
+bare code, with no decimal places of the unit's own, and never as an error
+(`ui/packages/core/src/utils/unit-display.ts#resolveQuantityUnit`,
+`ui/packages/fields/src/widgets/useQuantityUnit.ts#readUnitCatalog`).
+
 ### L2 — Organization-unit label translation
 
 > How org-unit labels are translated. No row-data translation mechanism was found.
@@ -297,6 +322,21 @@ on the same card; beyond those words it is the seat's settlement, not the mainta
 >   per-locale label table.
 
 The deferred card is [#35404](https://github.com/objectstack-ai/objectstack/issues/35404).
+
+*Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); from
+[#35490](https://github.com/objectstack-ai/objectstack/issues/35490), built by
+[#37449](https://github.com/objectstack-ai/objectstack/pull/37449)):* 2A's "platform-shipped per-locale label table"
+for standard codes is built in two places, by the maintainer's answer of 2026-11-26 on the display card's decision
+card, verbatim 「spec 基准名 + 服务端翻译」 (relayed in claim amendment
+[`7183517867`](https://github.com/objectstack-ai/objectstack/issues/35490#issuecomment-7183517867) on that card). The
+English base name of every standard code is in the spec
+(`packages/spec/src/data/standard-units.ts#STANDARD_UNIT_NAMES`). The platform serves each locale's name as the
+message `standardUnit` followed by the code, in the platform-objects bundles
+(`packages/platform-objects/src/apps/translations/standard-unit-names.ts#standardUnitMessageKey`), and the English
+bundle copies the spec base. A reader whose locale has no served name sees the English base
+(`ui/packages/fields/src/widgets/useQuantityUnit.ts#useStandardUnitLabel`). Organization-unit labels are as 2A says:
+one label per unit, with their translation left to
+[#35404](https://github.com/objectstack-ai/objectstack/issues/35404).
 
 ### L3 — U4's key spellings, and following a parent
 
@@ -415,6 +455,14 @@ The `scale` it names is the existing key, enforced on writes of a `number` field
 ([Context](#2-what-the-platform-has-today-read-at-3819afec) §2). A field that declares no `scale`, and what the
 display default does at render, are [Open item](#open-items) 6. For a standard code, a unit's org-editable decimal
 places have no home: [Open item](#open-items) 10.
+
+*Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* the last sentence above no
+longer holds. A standard code's decimal places have a home, the organization's `sys_standard_unit_setting` row for
+that code ([Open item](#open-items) 10, ruled A, built by
+[#37389](https://github.com/objectstack-ai/objectstack/pull/37389)). The settlement quoted above binds that value as
+it binds an organization unit's: a display default only, never above the field's `scale`, and nothing is rounded at
+write by it. What the display default does at render is [Open item](#open-items) 6's second half, settled on the
+display card: the display rounds, at the smaller of the unit's decimal places and the field's `scale`.
 
 ## Releases
 
@@ -596,6 +644,20 @@ amended with each answer, the way ADR-0144's open items were.
    ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490)) and the decimal-places setting card
    ([#35498](https://github.com/objectstack-ai/objectstack/issues/35498)) add them, so nothing reads a required scale
    today. A declared `scale` stays what L4 names it: the ceiling. The display half stays with R1's display card.
+   *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)), second half:* settled on
+   the display card ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490), built by
+   [#37449](https://github.com/objectstack-ai/objectstack/pull/37449)), by the maintainer's answer of 2026-11-26 on
+   its decision card, verbatim 「A 渲染时四舍五入」 (relayed in claim amendment
+   [`7183517867`](https://github.com/objectstack-ai/objectstack/issues/35490#issuecomment-7183517867) on that card).
+   - A quantity's display rounds at render, half away from zero, at a fixed width
+     (`ui/packages/fields/src/widgets/quantity-format.ts#formatQuantity`).
+   - The width is the smaller of the unit's decimal places and the field's `scale`, per L4. A field with no `scale`
+     takes the unit's places. A unit with no places of its own is drawn at the field's own width
+     (`ui/packages/fields/src/widgets/quantity-format.ts#quantityDisplayPlaces`).
+   - Only the display rounds. The stored value, an export, the API and MCP keep the exact value. No marker is shown
+     when the display hides places.
+   - The list footer is unchanged. It draws a `fixed`-mode quantity's sum at the field's own width, with no unit, and
+     it withholds a `record`-mode quantity's sum.
 7. **The release of each declaration.** U7 lists readers; U8 binds each key to its reader's release
    ([Releases](#releases)).
 8. **A unit code with no quantity beside it: a ruling is owed.** U4 puts the unit declaration on the `number` field,
@@ -623,6 +685,14 @@ amended with each answer, the way ADR-0144's open items were.
    standalone `unitMode: 'code'` field the same way it reaches a `unitField`. The field has no quantity beside it, so
    its blank is owed nothing and is never written, with or without a `""` entry
    ([#35492](https://github.com/objectstack-ai/objectstack/issues/35492)).
+   *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* the picker is built
+   ([#37471](https://github.com/objectstack-ai/objectstack/issues/37471), by
+   [#37449](https://github.com/objectstack-ai/objectstack/pull/37449)). A unit code field gets a picker on the form
+   face: a `text` field with `unitMode: 'code'`, or the `unitField` of a `record`-mode quantity
+   (`ui/packages/fields/src/widgets/UnitCodeField.tsx#UnitCodeField`). It offers the organization's non-retired units,
+   then the standard codes, each by its name in the reader's language and restricted to the field's `unitDimension`
+   (`ui/packages/core/src/utils/unit-display.ts#unitPickerOptions`). It stores the code. Read-only, the field shows
+   the unit's name, and a retired or unreadable code shows bare.
 9. **Which writes U5 judges.** The membership card states it for three cases: a code written; a quantity written
    beside a resting code that is no longer a member (an org unit deleted under L1); and a quantity written beside a
    blank code. The two precedents this record mirrors answer differently. The record validator judges a
@@ -682,6 +752,16 @@ amended with each answer, the way ADR-0144's open items were.
    Version Packages release until the backfill door merged (release pairing A,
    [#35492](https://github.com/objectstack-ai/objectstack/issues/35492) `7037347112`), so no release carries the
    stricter write without its door.
+
+   *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* the re-point that the
+   last bullet above leaves to [#35885](https://github.com/objectstack-ai/objectstack/issues/35885) is built by
+   [#37268](https://github.com/objectstack-ai/objectstack/pull/37268). A stored `record`-mode quantity whose
+   `unitField` is re-pointed onto a field that held no stored unit before the save (a field new in that save, or one
+   that was not stored before it) raises `unit_mode_to_record` on the quantity, for the blank units beside it. A
+   re-point onto a stored text field that the save makes a unit code field is reported once, as
+   `unit_code_field_declared` on that field. A re-point onto a field that already was a unit code field still raises
+   nothing in R1 (the sibling of `currency_field_repointed`). The rest of that bullet stands. Pinned in
+   `packages/objectql/src/protocol-destructive-unit-mode.test.ts`.
 10. **U6's decimal places for a standard code: a ruling is owed.** U3: `sys_unit` "holds org-added units only, and the
     platform ships zero rows", and org codes live in a namespace no standard code enters. U1 is a closed spec
     constant. U6 makes a unit's decimal places "an org-editable default" and argues from Rec 20, which is to say from
@@ -689,6 +769,39 @@ amended with each answer, the way ADR-0144's open items were.
     name `sys_unit` fields. For a standard code such as `KGM` or `H87` the value has nowhere to be stored or edited,
     and R1's display member is its first reader. The question sits between U3 and U6 and owes the maintainer a
     ruling. Not settled here.
+    *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* ruled A on
+    [#35339](https://github.com/objectstack-ai/objectstack/issues/35339) (record
+    [`7008551416`](https://github.com/objectstack-ai/objectstack/issues/35339#issuecomment-7008551416), 2026-11-19).
+    The question, as the decision card put it: 「千克、件这类标准单位显示几位小数,组织能改吗?」. Picked, verbatim: 「组织可改,新开一处设置」. Built on
+    the decimal-places setting card ([#35498](https://github.com/objectstack-ai/objectstack/issues/35498), by
+    [#37389](https://github.com/objectstack-ai/objectstack/pull/37389)). The home is a `sys_*` object beside
+    `sys_unit`, following `sys_unit.decimal_places`, and not a settings key like ADR-0144 D4's
+    `localization.currency`: `sys_standard_unit_setting`
+    (`packages/platform-objects/src/system/sys-standard-unit-setting.object.ts#SysStandardUnitSetting`). The seat
+    settled its shape on that card (claim amendments `7178077326`, `7178144166` and `7179529249`):
+    - **One row per standard code an organization has set.** `code` is a `text` column admitted by a format rule over
+      exactly U1's codes, in exact uppercase. It is unique within the organization and immutable after create. The
+      platform ships zero rows.
+    - **`decimal_places`** is a whole number from 0 to 12, `sys_unit`'s range, and is required. L4 binds it as it
+      binds an organization unit's: a display default only, never above the field's `scale`, and nothing rounds at
+      write.
+    - **Clearing is deleting the row.** The standard code then has no display default of its own. While a row remains,
+      the organization's own delete is refused `409 DELETE_RESTRICTED`.
+    - **Grants.** Every member reads it (`member_default`, read only). `organization_admin` creates, edits and
+      deletes. An external member holds no read, as with `sys_unit`. Every create, edit and delete is audited, with
+      the old and new values kept.
+    - **Tenancy.** `organization_id` is injected on every row. Under the `isolated` posture the tenant wall keeps
+      another organization's rows out of every read and write; `single` raises no wall and `group` walls by
+      membership.
+    - **The row a display reads** ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490), by
+      [#37449](https://github.com/objectstack-ai/objectstack/pull/37449)). A standard code's decimal places come from
+      the row whose `organization_id` matches the record's. A record whose `organization_id` was read and is empty
+      matches the row that has none. A record whose `organization_id` was not read at all takes a row only when
+      exactly one candidate exists. An organization unit's places and label come from its own `sys_unit` row, chosen
+      the same way (`ui/packages/core/src/utils/unit-display.ts#pickRowForOrganization`).
+
+    Pinned in `packages/platform-objects/src/system/sys-standard-unit-setting.object.test.ts` and
+    `packages/plugins/plugin-security/src/default-permission-sets.standard-unit-setting.integration.test.ts`.
 11. **A deleted code created again.** The seat's L1 settlement allows deleting an org unit and makes a unit's code and
     dimension immutable after create. That does not survive a delete followed by a new create of the same code. A
     `sys_*` row has no recycle bin, and a deleted row frees its unique value at once
@@ -725,6 +838,11 @@ amended with each answer, the way ADR-0144's open items were.
     delete's own cascade removes its units. It is not built in R1. Until
     [#35812](https://github.com/objectstack-ai/objectstack/issues/35812) lands, the refusal holds for that cascade
     too, so an organization that holds a unit cannot be deleted.
+    *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* the display card
+    ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490), built by
+    [#37449](https://github.com/objectstack-ai/objectstack/pull/37449)) answers the question the note of 2026-11-19
+    left to it. A resting row shows a retired unit's bare code, not the label still on file, as L1 wrote for a deleted
+    unit ([L1](#l1--the-ratio-lock)'s note of the same date).
 12. **R1's backfill and its raw aggregates.** The backfill mirrors `os migrate record-currency-codes` loosely. That
     door writes one code, the operator's, into the rows whose code is blank
     (`packages/objectql/src/record-currency-backfill.ts#backfillRecordCurrencyCodes`); the unit door rewrites free
@@ -788,6 +906,24 @@ amended with each answer, the way ADR-0144's open items were.
     No error code is added. A dataset is judged when it is queried, as currency is; the build-time guard for both
     families is not built and is [#36083](https://github.com/objectstack-ai/objectstack/issues/36083). The sentence
     above is left as written.
+
+    *Note (2026-11-28, [#37245](https://github.com/objectstack-ai/objectstack/issues/37245)):* on the backfill's "Dry
+    run and apply" point above, the sentence "A preview cut short at its row limit is reported as truncated". Since
+    [#37268](https://github.com/objectstack-ai/objectstack/pull/37268) (card
+    [#35885](https://github.com/objectstack-ai/objectstack/issues/35885)), a walk cut short at its row limit judges
+    only the rows it examined, in a dry run and in an apply run alike. An apply run writes those rows, and the report
+    says that the rows past the limit were not judged, as the currency backfill's report does. Such a run is not
+    complete. A mapping entry whose key is itself stored as a unit code, and that no row used, is named in the report
+    (`packages/objectql/src/unit-code-backfill.ts#backfillUnitCodes`). Pinned in
+    `packages/objectql/src/unit-code-backfill.test.ts`.
+13. **A unit's own refusal of over-precise values at write (added 2026-11-28,
+    [#37245](https://github.com/objectstack-ai/objectstack/issues/37245); not built).** Open item 6 is settled as
+    display rounding only, so a value the field's `scale` admits with more places than its unit's decimal places is
+    stored exactly and shown rounded. An optional rule on a unit could refuse such a value at write instead: refused,
+    never rounded. That stays within L4, since the field's `scale` remains the ceiling and nothing rounds at write.
+    The item is carried from the display card ([#35490](https://github.com/objectstack-ai/objectstack/issues/35490)).
+    Its owner is seat repo:objectstack#5 (area o5-D, `area:data`). No card is open for it; one opens when a consumer
+    asks. Not settled here.
 
 ## Verification notes
 
