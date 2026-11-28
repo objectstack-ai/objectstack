@@ -87,12 +87,12 @@ describe('which entries carry a relevance question (ENUMERATION)', () => {
     expect(actual).toEqual(EXPECTED_RELEVANCE);
   });
 
-  it('is 29 entries: 5 of protocol 17, 22 of protocol 18 and 2 of protocol 19', () => {
+  it('is 30 entries: 5 of protocol 17, 22 of protocol 18 and 3 of protocol 19', () => {
     const keys = Object.keys(EXPECTED_RELEVANCE);
-    expect(keys).toHaveLength(29);
+    expect(keys).toHaveLength(30);
     expect(keys.filter((k) => k.startsWith('17:'))).toHaveLength(5);
     expect(keys.filter((k) => k.startsWith('18:'))).toHaveLength(22);
-    expect(keys.filter((k) => k.startsWith('19:'))).toHaveLength(2);
+    expect(keys.filter((k) => k.startsWith('19:'))).toHaveLength(3);
   });
 
   it('the table names only registered entries (anti-vacuity for the comparison above)', () => {

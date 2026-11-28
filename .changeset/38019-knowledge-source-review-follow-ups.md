@@ -10,7 +10,7 @@ Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 Skills-docs: follow-up #37310
 
-<!-- adr-0087: registered knowledge-source-publish-refuses-missing-references-and-gated-objects -->
+<!-- adr-0087: not-required (already-registered knowledge-source-publish-refuses-missing-references-and-gated-objects) the entry that registered this rule's publish refusal landed with the rule itself; this change extends its surface to an absent platform object name judged against the whole collection the host serves, says the platform-name warning is the command line's, and lists the entry only for a stack that declares knowledge sources. No id is added and no key is added, removed or re-shaped. -->
 
 ADR-0161 K4, row 4.
 
