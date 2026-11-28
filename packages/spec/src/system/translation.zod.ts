@@ -3025,9 +3025,10 @@ export function defineTranslationBundle(config: z.input<typeof TranslationBundle
  *
  * #3494: the aspirational knobs `fileOrganization`, `messageFormat`, `lazyLoad`
  * and `cache` were removed — no runtime ever read them (there is no ICU engine;
- * interpolation is always simple `{{variable}}` substitution — a single-brace
- * `{variable}` is left as written), so authoring them was a silent no-op
- * (liveness audit #1878/#1893).
+ * interpolation in a message read through `t()` is always simple `{{variable}}`
+ * substitution — a single-brace `{variable}` is left as written; activity-milestone
+ * summaries keep their own `{field}` tokens), so authoring them was a silent
+ * no-op (liveness audit #1878/#1893).
  *
  * @example
  * ```typescript
@@ -3054,7 +3055,7 @@ export const TranslationConfigSchema = lazySchema(() => strictObject({
   // that tells an author upgrading from <17 why their setting vanished.
   guidance: {
     fileOrganization: '`fileOrganization` was removed — no runtime ever read it; how you split bundle files is a convention of your source tree, and the loader reads whatever `translations` you hand `defineStack`',
-    messageFormat: '`messageFormat` was removed — there is no ICU engine; interpolation is always simple `{{variable}}` substitution (double braces — a single-brace `{variable}` is left as written)',
+    messageFormat: '`messageFormat` was removed — there is no ICU engine; interpolation in a message read through `t()` is always simple `{{variable}}` substitution (double braces — a single-brace `{variable}` is left as written; activity-milestone summaries keep their own `{field}` tokens)',
     lazyLoad: '`lazyLoad` was removed — no runtime ever read it, so setting it changed nothing',
     cache: '`cache` was removed — no runtime ever read it, so setting it changed nothing',
   },
