@@ -30,8 +30,11 @@
  *
  * ## What is answered here
  *
- * Exactly a sandboxed body's REPORTED refusal: {@link sandboxBusinessMessage}
- * answers (a body that threw, and did not crash). That is the throw
+ * Exactly a hook's REPORTED refusal: {@link sandboxBusinessMessage} answers (a
+ * sandboxed body that threw and did not crash, or an in-process handler's
+ * declared refusal, which the runtime raises as the same `SandboxError`), whatever
+ * code it declares, `PERMISSION_DENIED` included: the foot catch asks this
+ * before its permission-denial arm, which matches that code. That is the throw
  * `classifyDataError`'s unwrap door answers, so the status, `code`, demoted
  * `declaredCode`, bounded `userMessage` and whole `details.refusals` are the
  * REST routes' by construction. A crash, the sandbox's own fault and every

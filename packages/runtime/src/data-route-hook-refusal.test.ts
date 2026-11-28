@@ -5,7 +5,8 @@
  * write as `RestServer`'s `/data` routes answer it (`mapDataError`): the same
  * status, `code`, `declaredCode`, sentence, `userMessage` (cut at 500
  * characters) and `details.refusals` (whole), whether the hook refused with a
- * code of its own or a registered one; and a free-text throw with no code as
+ * code of its own or a registered one (`PERMISSION_DENIED` among them, which
+ * the dispatcher's permission-denial arm also matches); and a free-text throw with no code as
  * those routes' `400 HOOK_ABORTED`.
  *
  * ## The rig
@@ -48,15 +49,17 @@ const CLIENT_MESSAGE_MAX = 500;
 /** One object per refusal code, so each hook binds to its own object. */
 const CASES = [
     // A code of the hook's own: not a member of the registered vocabulary.
-    { code: 'OVERLAP', object: 'booking_own_38232' },
+    { code: 'OVERLAP', object: 'booking_own_38232', status: 409 },
     // A registered code.
-    { code: 'RESOURCE_CONFLICT', object: 'booking_registered_38232' },
+    { code: 'RESOURCE_CONFLICT', object: 'booking_registered_38232', status: 409 },
+    // The registered code the dispatcher's permission-denial arm also answers.
+    { code: 'PERMISSION_DENIED', object: 'booking_denied_38232', status: 403 },
 ] as const;
 /** A hook with no catalogue that throws free text: no code, no status. */
 const UNDECLARED_OBJECT = 'booking_undeclared_38232';
 
 /** A sandboxed hook that refuses every insert with a three-reason list under `code`. */
-function refusingHook(code: string, object: string) {
+function refusingHook(code: string, object: string, status: number) {
     return {
         name: 'refuse_overlap',
         object,
@@ -73,7 +76,7 @@ function refusingHook(code: string, object: string) {
             [code]: {
                 message: 'Pick another slot.',
                 params: ['n'],
-                status: 409,
+                status,
                 reasons: {
                     a: { message: 'First clash {{ n }}' },
                     b: { message: 'Second clash {{ n }}' },
@@ -102,13 +105,13 @@ beforeAll(async () => {
     }), true);
     await engine.init();
     const bind = hookBodyRunnerFactory(runner, { ql: engine, appId: 'crm' });
-    for (const { code, object } of CASES) {
+    for (const { code, object, status } of CASES) {
         engine.registry.registerObject({
             name: object,
             label: 'Booking',
             fields: { name: { name: 'name', type: 'text' as const, label: 'Name' } },
         } as any, TEST_PACKAGE_ID);
-        engine.registerHook('beforeInsert', bind(refusingHook(code, object) as any)!, { object });
+        engine.registerHook('beforeInsert', bind(refusingHook(code, object, status) as any)!, { object });
     }
     engine.registry.registerObject({
         name: UNDECLARED_OBJECT,
@@ -150,7 +153,7 @@ async function restAnswer(object: string, body: Record<string, unknown>) {
 }
 
 describe('[#38232] `dispatch()` answers a hook refusal on `/data` as the REST routes do', () => {
-    for (const { code, object } of CASES) {
+    for (const { code, object, status: declared } of CASES) {
         it(`a refusal coded \`${code}\``, async () => {
             const result: any = await post(object, { name: 'clash' });
             const rest = await restAnswer(object, { name: 'clash' });
@@ -160,7 +163,7 @@ describe('[#38232] `dispatch()` answers a hook refusal on `/data` as the REST ro
             const { status, body, headers } = result.response;
             const error = body.error;
 
-            expect(rest.status).toBe(409);
+            expect(rest.status).toBe(declared);
             expect(status).toBe(rest.status);
             expect(body.success).toBe(false);
             expect(error.code).toBe(rest.body.code);
