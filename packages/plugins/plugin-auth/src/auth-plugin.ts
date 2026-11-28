@@ -160,6 +160,7 @@ import {
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
 import { describeEmailPasswordLiveStatus, type AuthLiveStatus } from './auth-settings-live-status.js';
+import { registerAuthDeclaredDefaults } from './auth-settings-declared-defaults.js';
 import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -265,6 +266,12 @@ interface SettingsReadSurface {
     namespace: string,
     provider: (input: { ctx: Record<string, unknown>; locale?: string }) => Promise<AuthLiveStatus | undefined>,
   ): void;
+  /**
+   * State what a key takes in the running system while nothing is stored
+   * (`SettingsService.registerDeclaredDefault`). Optional, like `subscribe`.
+   * See auth-settings-declared-defaults.ts.
+   */
+  registerDeclaredDefault?(namespace: string, key: string, provider: () => unknown): void;
 }
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
@@ -2502,8 +2509,10 @@ export class AuthPlugin implements Plugin {
    * Bind the small open-source auth settings namespace to better-auth config.
    *
    * Only explicit settings values (stored or OS_AUTH_* env overrides) affect
-   * runtime config. Manifest defaults are UI defaults and do not mask code or
-   * deployment configuration.
+   * runtime config. A `source: 'default'` value is never applied: it is the
+   * manifest's UI default, or, for the keys in auth-settings-declared-defaults.ts,
+   * the deployment's own declaration read back, which the running config
+   * already holds.
    *
    * Call through {@link ensureAuthSettingsBound}, never directly.
    */
@@ -2521,6 +2530,16 @@ export class AuthPlugin implements Plugin {
     // The save door refuses turning off the last sign-in method, before the
     // value is stored; the pass below would only apply it. See the module.
     registerSignInMethodFloor(settings, this.signInMethodFloorDeps(ctx, this.authManager), ctx.logger);
+
+    // With nothing stored, the switches read what the deployment declares (the
+    // value the running config takes), not the manifest's console default.
+    // See auth-settings-declared-defaults.ts.
+    const declaringManager = this.authManager;
+    registerAuthDeclaredDefaults(settings, {
+      declared: () => this.declaredAuthOptions,
+      resolveDisableSignUp: (declared) => declaringManager.resolveDisableSignUp(declared),
+      audiencePosture: () => declaringManager.getAudience().posture,
+    }, ctx.logger);
 
     const applySettings = async (): Promise<void> => {
       if (!this.authManager) return;
@@ -2600,8 +2619,7 @@ export class AuthPlugin implements Plugin {
         // off keeps it off: the host refuses every password door there, so a
         // stored value that reads on would only advertise a form that signs
         // nobody in. The save door refuses turning it on (sign-in-method-floor.ts);
-        // a row stored before that check, or a re-save of the manifest default
-        // the save door is never asked about, is not applied. An
+        // a row stored before that check is not applied. An
         // `OS_AUTH_EMAIL_PASSWORD_ENABLED` value is the deployment's own
         // declaration and still applies.
         let emailPasswordHeldOff = false;
@@ -3175,8 +3193,8 @@ export class AuthPlugin implements Plugin {
     const runPass = (): Promise<void> => (pass = applySettings());
 
     // Setup → Authentication states what runs when the switch says otherwise:
-    // with nothing stored the switch shows the manifest default while the
-    // running config takes the deployment's declaration. See auth-settings-live-status.ts.
+    // a value stored on that a cloud-managed runtime does not apply, or any
+    // other disagreement. See auth-settings-live-status.ts.
     if (typeof settings.registerLiveStatus === 'function') {
       const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
       try {
@@ -3194,8 +3212,8 @@ export class AuthPlugin implements Plugin {
       } catch (err: any) {
         ctx.logger.warn(
           '[auth] Setup → Authentication: the live status was NOT registered '
-            + `(${String(err?.message ?? err)}), so where the deployment declares email and password sign-in off `
-            + 'with nothing saved, the page shows the switch on with nothing saying it is off.',
+            + `(${String(err?.message ?? err)}), so where a saved email and password value is not what runs `
+            + '(a cloud-managed environment holding it off), the page shows the switch on with nothing saying it is off.',
         );
       }
     }

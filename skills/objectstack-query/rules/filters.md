@@ -4,31 +4,31 @@ Every block below is a `where` fragment, so `check:skill-examples` skips it.
 
 ## Operator Reference
 
-| Category | Operator | SQL Equivalent | Example |
-|:---------|:---------|:---------------|:--------|
-| Equality | `$eq` | `=` | `{ status: { $eq: 'active' } }` |
-| Equality | `$ne` | `<>` | `{ status: { $ne: 'deleted' } }` |
-| Comparison | `$gt` | `>` | `{ age: { $gt: 18 } }` |
-| Comparison | `$gte` | `>=` | `{ amount: { $gte: 100 } }` |
-| Comparison | `$lt` | `<` | `{ price: { $lt: 50 } }` |
-| Comparison | `$lte` | `<=` | `{ score: { $lte: 100 } }` |
-| Set | `$in` | `IN (...)` | `{ status: { $in: ['active', 'pending'] } }` |
-| Set | `$nin` | `NOT IN (...)` | `{ role: { $nin: ['guest'] } }` |
-| Range | `$between` | `BETWEEN ? AND ?` | `{ age: { $between: [18, 65] } }` |
-| String | `$contains` | `LIKE %?%` | `{ name: { $contains: 'john' } }` |
-| String | `$notContains` | `NOT LIKE %?%` | `{ email: { $notContains: 'spam' } }` |
-| String | `$startsWith` | `LIKE ?%` | `{ code: { $startsWith: 'PRJ-' } }` |
-| String | `$endsWith` | `LIKE %?` | `{ file: { $endsWith: '.pdf' } }` |
-| String | `$icontains` | `LIKE %?%`, case-blind | `{ name: { $icontains: 'john' } }` |
-| String | `$like` | `LIKE ?` — caller binds `%` / `_` | `{ code: { $like: 'PRJ-%-26' } }` |
-| String | `$ilike` | `$like`, case-blind | `{ code: { $ilike: 'prj-%' } }` |
-| Null | `$null` | `IS NULL` / `IS NOT NULL` | `{ deleted_at: { $null: true } }` |
-| Null | `$exists` | `IS NOT NULL` / `IS NULL` | `{ metadata: { $exists: true } }` |
-| Null | `$empty` | `IS NULL`, `''` or `[]` by type | `{ notes: { $empty: true } }` |
+An example of each operator:
 
-Case sensitivity: SKILL.md, **String Operators**. `$like`/`$ilike` match the
+- `{ status: { $eq: 'active' } }`
+- `{ status: { $ne: 'deleted' } }`
+- `{ age: { $gt: 18 } }`
+- `{ amount: { $gte: 100 } }`
+- `{ price: { $lt: 50 } }`
+- `{ score: { $lte: 100 } }`
+- `{ status: { $in: ['active', 'pending'] } }`
+- `{ role: { $nin: ['guest'] } }`
+- `{ age: { $between: [18, 65] } }`
+- `{ name: { $contains: 'john' } }`
+- `{ email: { $notContains: 'spam' } }`
+- `{ code: { $startsWith: 'PRJ-' } }`
+- `{ file: { $endsWith: '.pdf' } }`
+- `{ name: { $icontains: 'john' } }`
+- `{ code: { $like: 'PRJ-%-26' } }`
+- `{ code: { $ilike: 'prj-%' } }`
+- `{ deleted_at: { $null: true } }`
+- `{ metadata: { $exists: true } }`
+- `{ notes: { $empty: true } }`
+
+Purpose, SQL equivalent, case sensitivity: SKILL.md, **Filter Operators**. `$like`/`$ilike` match the
 WHOLE value, so a pattern with no wildcard is an exact comparison, not
-a substring search. Their reach is narrower than the rest of the table: the SQL
+a substring search. Their reach is narrower than the other operators': the SQL
 family, `driver-memory` and `@objectstack/formula` answer them, while
 `driver-mongodb`, objectql `having` and service-analytics each keep an operator
 allowlist that omits them and refuse — `Unsupported filter operator`,
@@ -43,9 +43,7 @@ unpaired backslash is refused by every face.
 
 ```typescript
 // ✅ Projects that ran over budget
-where: {
-  actual_cost: { $gt: { $field: 'budget' } }
-}
+where: { actual_cost: { $gt: { $field: 'budget' } } }
 ```
 
 Legal in a **comparison** position only. As an `$in` / `$nin` member or a
@@ -61,10 +59,8 @@ reference there.
 
 ```typescript
 // ✅ Overdue by each record's own grace period: due_at < now + grace_days_offset,
-//    the number field holding the grace period as NEGATIVE days
-where: {
-  due_at: { $lt: { $now: true, addDays: { $field: 'grace_days_offset' } } }
-}
+// the number field holding the grace period as NEGATIVE days
+where: { due_at: { $lt: { $now: true, addDays: { $field: 'grace_days_offset' } } } }
 ```
 
 `addDays` is **required** and always ADDED: an integer of any sign (`-30`
@@ -81,22 +77,33 @@ answers it — not a stored formula field plus a hook.
 ## Relation Filters
 
 A condition on a related record's fields beneath a relation field (`lookup`,
-`master_detail`, `user`, `tree`) is served in `where`: the engine reads the
-related object with it **as the caller**, then matches the field against the
-ids it returns (`$in`; any member when `multiple: true`).
+`master_detail`, `user`, `tree`) is served in `where`, each hop read **as the caller**. On `find` /
+`findOne` / `count` / `aggregate` a single-valued relation is matched with one
+in-database subquery per relationship — no id list, no cap — on drivers
+declaring `DriverCapabilities.readableIdsLeaf` (every `driver-sql` dialect,
+Turso; `driver-memory` evaluates it in process); a driver without it
+(MongoDB, OData) refuses the condition before anything is read,
+`INVALID_FILTER` / 400.
 
 ```typescript
 // ✅ Orders whose customer is in the US
 where: { customer: { country: 'US' } }
 ```
 
-Limits — one level: every key a field the related object declares, no relation
-or dotted key inside; forward only: never a parent by its children; `where`
-only: an aggregation's `filter` and `having` refuse it, `INVALID_FILTER` / 400;
-at most 1000 related ids, refused past that, `INVALID_FILTER` / 400, never
-truncated; as the caller: the related object's row scope and field permissions
-apply, so a field the caller cannot read is refused, `PERMISSION_DENIED` / 403,
-never an empty result. Past the cap, run the two steps yourself — filter the
+Limits — up to three relationships (ADR-0071's hop limit): every key a field the related object
+declares, and a relation key may carry its own condition
+(`{ customer: { owner: { region: 'NA' } } }`); a fourth, and a dotted key
+inside, are refused, `INVALID_FILTER` / 400; forward only: never a parent by
+its children; `where` only: an aggregation's `filter` and `having` refuse it,
+`INVALID_FILTER` / 400; where ids are read and matched (`$in`; any member when `multiple: true`) — a
+multi-valued relation, `update` / `delete`, and on a read verb a
+related object on another datasource, federated, shaped by a middleware or
+`afterFind` hook, or read under different driver options — at most 1000,
+refused past that, `INVALID_FILTER` / 400, never truncated; as the caller, at
+every hop: the related object's row scope and field permissions apply, so a
+field the caller cannot read is refused, `PERMISSION_DENIED` / 403, never an
+empty result, and a related record the caller cannot read excludes the row,
+`$ne` included. Past the cap, run the two steps yourself — filter the
 related object, then `$in` its ids:
 
 ```typescript
@@ -140,9 +147,7 @@ State absence with `$null`: `null` is not an ordering comparand
 For **ad-hoc queries in application code**, compute the date yourself:
 
 ```typescript
-where: {
-  created_at: { $gte: new Date('2025-01-01') }
-}
+where: { created_at: { $gte: new Date('2025-01-01') } }
 ```
 
 ### Date Macros (declarative filter metadata)
@@ -152,10 +157,7 @@ pages — cannot run code, so they use **date macro tokens** instead
 (defined in `@objectstack/spec` `data/date-macros.zod.ts`):
 
 ```typescript
-where: {
-  signal_at:    { $gte: '{30_days_ago}' },
-  published_at: { $gte: '{last_quarter_start}' }
-}
+where: { signal_at: { $gte: '{30_days_ago}' }, published_at: { $gte: '{last_quarter_start}' } }
 ```
 
 - **Fixed tokens:** `{today}`, `{yesterday}`, `{tomorrow}`, `{now}`, plus

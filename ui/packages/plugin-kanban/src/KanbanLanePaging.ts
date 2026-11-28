@@ -108,6 +108,15 @@ export function uncolumnedQueryFilter(base: unknown, laneField: string, laneIds:
 }
 
 /**
+ * The view's filter AND "no lane value": the records of the trailing
+ * "Uncategorized" lane on a board whose lanes come from the data
+ * (objectstack#37517), where every value the records hold is a lane of its own.
+ */
+export function emptyLaneQueryFilter(base: unknown, laneField: string): unknown {
+  return mergeFilterNodes(base, [laneField, 'is_null']);
+}
+
+/**
  * One lane query's answer as a page: its records, and the lane's count when the
  * source answered one. `loadedBefore` is what the lane already held, for a
  * "Load more" page. Without a count, a full page is the only sign of more.

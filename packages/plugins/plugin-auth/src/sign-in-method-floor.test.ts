@@ -1117,14 +1117,37 @@ describe('a cloud-managed runtime keeps email and password off when its deployme
     return state;
   };
 
-  it('a stored value that reads on is not applied: the public config keeps answering off, said once', async () => {
-    const { settings, manager, heldOffSaid } = await boot();
+  it('with nothing stored the switch reads the declaration, so a save of on is a change the save door refuses', async () => {
+    const { settings, manager } = await boot();
     expect(passwordOn(manager)).toBe(false);
+    // The deployment's declaration (off) answers the bottom rung, not the manifest default (on).
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: false, source: 'default' });
 
-    // With nothing stored the value resolves to the manifest default (on), so
-    // this save is no change to the settings service, reaches no predicate,
-    // and is stored. Measured before the fix: the public config answered true.
-    await settings.setMany('auth', { email_password_enabled: true });
+    // Before the declared default, `true` resolved as the current value, so
+    // this save was no change, reached no predicate, and was stored.
+    const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: true }));
+    expect(refusal.code).toBe('SETTINGS_VALIDATION');
+    expect(refusal.fields).toEqual([
+      expect.objectContaining({
+        field: 'email_password_enabled',
+        code: 'invalid_value',
+        constraint: { cloudManaged: true, declaredEmailPassword: false },
+      }),
+    ]);
+    expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: false, source: 'default' });
+
+    const http = await put(settings, { email_password_enabled: true });
+    expect(http.status).toBe(400);
+    expect(http.body.error.code).toBe('SETTINGS_VALIDATION');
+    await settle();
+    expect(passwordOn(manager)).toBe(false);
+  });
+
+  it('a stored value that reads on is not applied: the public config keeps answering off, said once', async () => {
+    // Stored before boot, as a row written before the save door existed.
+    const seeded = makeSettings();
+    await seeded.set('auth', 'email_password_enabled', true, {});
+    const { settings, manager, heldOffSaid } = await boot({ settings: seeded });
     expect(await settings.get('auth', 'email_password_enabled')).toMatchObject({ value: true, source: 'global' });
     await settle();
     expect(passwordOn(manager)).toBe(false);
@@ -1175,8 +1198,9 @@ describe('a cloud-managed runtime keeps email and password off when its deployme
   });
 
   it('a row stored on is put right by clearing it, which the sign-in floor does not refuse', async () => {
-    const { settings, manager, heldOffSaid } = await boot();
-    await settings.setMany('auth', { email_password_enabled: true });
+    const seeded = makeSettings();
+    await seeded.set('auth', 'email_password_enabled', true, {});
+    const { settings, manager, heldOffSaid } = await boot({ settings: seeded });
     await settle();
     expect(heldOffSaid()).toHaveLength(1);
 
@@ -1192,11 +1216,16 @@ describe('a cloud-managed runtime keeps email and password off when its deployme
     await vi.waitFor(() => expect(
       manager.getPublicConfig().socialProviders.some((p: { id: string }) => p.id === 'google'),
     ).toBe(true));
-    // `true` is the resolved default here, so no predicate is asked at that key;
-    // the Google key must not read it as a way in the runtime will offer.
+    // The key's own save door refuses `true` (the declaration, off, is what it
+    // resolves to); the Google key must not read it as a way in either.
     const refusal = await refusalOf(settings.setMany('auth', { email_password_enabled: true, google_enabled: false }));
     expect(refusal.code).toBe('SETTINGS_VALIDATION');
     expect(refusal.fields).toEqual([
+      expect.objectContaining({
+        field: 'email_password_enabled',
+        code: 'invalid_value',
+        constraint: { cloudManaged: true, declaredEmailPassword: false },
+      }),
       expect.objectContaining({ field: 'google_enabled', code: 'invalid_value', constraint: { lastSignInMethod: 'google' } }),
     ]);
     expect(await settings.get('auth', 'google_enabled')).toMatchObject({ value: true });

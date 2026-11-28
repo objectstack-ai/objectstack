@@ -492,10 +492,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The #13080 category: `type-surface-only`': 29,
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
-  'TSO-U: unit pins on predicate 4\'s readers': 37,
+  'TSO-U: unit pins on predicate 4\'s readers': 45,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
-  'TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body': 20,
+  'TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body': 25,
   'The #22918 category: `runtime-export-retired`': 49,
   'REX-N: the predicate set is pinned BY NAME, never by count': 3,
   'REX-U: unit pins on the operand grammar and the FROM-side reader': 24,
@@ -3686,17 +3686,89 @@ function sitsInTypePosition(masked, pos) {
  * annotations: an `interface` or `class` body, a `type` alias's (or a type
  * parameter default's) object type, an object type inside a union or intersection
  * or a type argument, or one that follows a `:` which itself sits in a type
- * position. Read from the header since the previous `;` / `{` / `}`; a header with
- * braces of its own (`class C implements I<{ a: 1 }>`) is not classified.
+ * position. Read from the header `braceHeader` returns, so a header that carries a
+ * type literal of its own (`interface P<T extends { id: string }>`,
+ * `class C extends Base<{ a: 1 }>`) is still an interface or class header.
  */
 function braceOpensTypeBody(masked, open) {
-  let start = open - 1;
-  while (start >= 0 && !';{}'.includes(masked[start])) start--;
-  const header = masked.slice(start + 1, open).trim();
+  const header = braceHeader(masked, open);
   if (/(?:^|[^\w$.])(?:interface|class)\b/.test(header)) return true;
   if (/^(?:export\s+)?(?:declare\s+)?type\s+[\w$]/.test(header) && header.endsWith('=')) return true;
   if (/(?:^|[^|&])[|&]$/.test(header) || header.endsWith('<')) return true;
   if (header.endsWith(':')) return sitsInTypePosition(masked, open);
+  return false;
+}
+
+/**
+ * The header of the `{` at `open` in the masked text, trimmed: everything since the
+ * previous `;`, `{` or `}`, except that a balanced `{ … }` group whose `{` follows a
+ * type-literal position -- `<`, `,`, `(`, `|`, `&`, `=` or the word `extends` -- AND
+ * that sits inside an angle, paren or bracket still open after it
+ * (`closesAnOpenerBefore`) is stepped over and BLANKED. That group is a type literal
+ * inside the header (a type-parameter constraint or default, a type argument in
+ * heritage), not the end of the statement before it.
+ *
+ * ⚠️ Reading back only to the previous brace stops inside such a literal, so
+ * `interface P<T extends { id: string }> {` reads as the header `>`: the body is not
+ * classified, and an annotated `f: (...) => T` in it reads as UNANNOTATED -- a
+ * concrete surface called erased, which predicate 4 admits (the permissive
+ * direction). A `}` whose `{` follows anything else -- `)`, `=>`, a name, `>` --
+ * closes a statement or a block and still ends the header, so a prior `class A {}`
+ * never leaks its keyword into the next brace's header. Blanking keeps a keyword
+ * spelled INSIDE a stepped-over group (`{ class: 1 }`) out of the header too.
+ */
+function braceHeader(masked, open) {
+  let header = '';
+  let i = open - 1;
+  for (;;) {
+    let start = i;
+    while (start >= 0 && !';{}'.includes(masked[start])) start--;
+    header = masked.slice(start + 1, i + 1) + header;
+    if (start < 0 || masked[start] !== '}') break;
+    let depth = 0;
+    let groupOpen = -1;
+    for (let j = start; j >= 0; j--) {
+      if (masked[j] === '}') depth++;
+      else if (masked[j] === '{' && --depth === 0) { groupOpen = j; break; }
+    }
+    if (groupOpen < 0) break;
+    const before = masked.slice(0, groupOpen).trimEnd();
+    if (!/(?:[<,(|&]|(?<![=!<>])=|(?:^|[^\w$.])extends)$/.test(before)) break;
+    if (!closesAnOpenerBefore(masked, start + 1, open)) break;
+    header = ' '.repeat(start - groupOpen + 1) + header;
+    i = groupOpen - 1;
+  }
+  return header.trim();
+}
+
+/**
+ * Whether the masked text in `[from, to)` closes a `<`, `(` or `[` it never opened --
+ * that is, whether a brace group ending just before `from` sits INSIDE an angle,
+ * paren or bracket that is still open where the group ends. Brace groups in the span
+ * are skipped whole, and the `>` of an arrow is not a closer.
+ *
+ * ⚠️ This is what makes `braceHeader`'s step a header question and not a statement
+ * question. Every type literal a declaration header carries sits inside one: a
+ * constraint or default (`<T extends { id: string }>`, `<T = {}>`), a heritage type
+ * argument (`Base<{ a: 1 }>`), a mixin call (`extends mixin({ … })`). A `}` that
+ * closes a STATEMENT is followed by no such closer -- `type S = { … }` with no `;`,
+ * then `const initial: S = {` -- and stepping over it would hand the value literal
+ * the alias's `type S =` header, so its unannotated `f: () => null` would read as a
+ * function TYPE returning `null` (a value called concrete).
+ */
+function closesAnOpenerBefore(masked, from, to) {
+  let depth = 0;
+  let braces = 0;
+  for (let k = from; k < to; k++) {
+    const c = masked[k];
+    if (c === '{') braces++;
+    else if (c === '}') braces--;
+    else if (braces > 0) continue;
+    else if (c === '<' || c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']' || (c === '>' && masked[k - 1] !== '=')) {
+      if (--depth < 0) return true;
+    }
+  }
   return false;
 }
 
@@ -3809,12 +3881,14 @@ function classBodiesFor(structural, name, from, to) {
 
 /**
  * Every body a path segment named `name` can name inside `[from, to)`: an object
- * literal or a class (#17279), in file order.
+ * literal, a class (#17279), an interface or a type-literal alias (#37445), in file
+ * order.
  *
- * ⚠️ The union is what makes the count meaningful. A segment naming BOTH an object
- * literal and a class is AMBIGUOUS in exactly the way two object literals are, and
- * counting the two kinds separately would let one of each through as "one of each
- * kind" -- a silent pick, which is the "writable but wrong" reference the dotted
+ * ⚠️ The union is what makes the count meaningful. A segment naming bodies of two
+ * kinds -- an object literal and a class, or the companion object that an
+ * `interface X` plus an `X = {` literal makes -- is AMBIGUOUS in exactly the way two
+ * object literals are, and counting the kinds separately would let one of each
+ * through as "one of each kind" -- a silent pick, which is the "writable but wrong" reference the dotted
  * spelling exists to avoid.
  *
  * @returns {{ open: number, close: number, kind: string }[]}
@@ -4583,9 +4657,9 @@ export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, 
         `      ${read.refusal}\n` +
         '      A dotted member path is walked through the nesting it names -- an object literal, a\n' +
         '      class body (#17279), or an interface or type-literal alias body (#37445) -- and a walk\n' +
-        '      that lands on zero or on several candidates is\n' +
-        '      REPORTED rather than guessed at -- a reference that resolves to the wrong same-named\n' +
-        '      member reads as a true sentence about a member the diff never touched (#15627).\n' +
+        '      that lands on zero or on several candidates is REPORTED rather than guessed at -- a\n' +
+        '      reference that resolves to the wrong same-named member reads as a true sentence about\n' +
+        '      a member the diff never touched (#15627).\n' +
         HOW(null),
       );
       continue;
@@ -7931,6 +8005,44 @@ function selfTest() {
     memberReturnAnnotation('export const o = { nested: { f: async (x) => x } };\n', 'f')?.annotation === null &&
     memberReturnAnnotation('export interface A { nested: { f: (x: number) => Row } }\n', 'f')?.annotation === 'Row', 'TSO-U37: an `any` return stays readable as `any`, an `async` arrow is a value, and a type literal nested under a type keeps its type reading');
 
+  // U38-U42: a type literal in the HEADER of an interface or class -- a
+  // type-parameter constraint, a type argument in heritage -- still leaves the
+  // body a type body. `braceHeader` steps over that literal; before it the header
+  // read back stopped inside the literal's braces, the body went unclassified, and
+  // an annotated `f: (...) => T` read as UNANNOTATED (erased: the permissive
+  // direction for predicate 4). U41-U42 are the lit controls: a brace group that
+  // ends a statement still ends the header, and an object literal whose header
+  // carries a type literal is still a value.
+  assert(memberReturnAnnotation('export interface P<T extends { id: string }> {\n  items: readonly T[];\n  renderRow: (item: T, drag: DragProps) => React.ReactNode;\n}\n', 'renderRow')?.annotation === 'React.ReactNode', 'TSO-U38: an interface whose TYPE-PARAMETER CONSTRAINT is a type literal (`T extends { id: string }`) keeps its body a type body -- the function-typed property reads its return type');
+  assert(memberReturnAnnotation('export interface P<T = { a: 1 }> extends Base<{ b: 2 }>, Other<{ c: 3 } | null> {\n  f: (x: T) => Row;\n}\n', 'f')?.annotation === 'Row', 'TSO-U39: a type literal in a type-parameter DEFAULT and in interface HERITAGE type arguments is stepped over -- the body is still the interface body');
+  assert(memberReturnAnnotation('export class C<T extends { id: string }> extends Base<{ a: 1 }> implements I<{ b: 2 }> {\n  f: (id: string) => Promise<T>;\n}\n', 'f')?.annotation === 'Promise<T>', 'TSO-U40: a CLASS whose constraint, `extends` and `implements` clauses all carry type literals keeps its field annotation');
+  assert(memberReturnAnnotation('export class A { m() { return 1; } }\nexport const o = {\n  f: (x: number) => x + 1,\n};\n', 'f')?.annotation === null &&
+    memberReturnAnnotation('const k = { class: 1 }\nexport const o = {\n  f: (x: number) => x + 1,\n};\n', 'f')?.annotation === null, 'TSO-U41: LIT CONTROL -- a class BODY before an object literal still ends its header (its `{` follows a name, not a type-literal position), and a stepped-over `{ class: 1 }` is blanked, so neither leaks a `class` keyword into the literal\'s header: the arrow stays an unannotated VALUE');
+  assert(memberReturnAnnotation('export const o = call<{ a: 1 }>({\n  f: (x: number) => x + 1,\n});\n', 'f')?.annotation === null, 'TSO-U42: LIT CONTROL -- an object literal whose own header carries a stepped-over type argument is still a VALUE, not a type body');
+
+  // U43-U45: a `}` that closes a STATEMENT is never stepped over, however the `{`
+  // before it was preceded. The shape is `ui/packages/app-shell/src/chrome/ThemeProvider.tsx`
+  // (and the theme-provider file `ui/packages/cli/src/utils/app-generator.ts` emits):
+  // a type alias with no `;`, then a typed `const` literal. Stepping over the alias
+  // body because its `{` follows `=` handed the literal the header `type S = … const
+  // initialState: S =`, so the VALUE `setTheme: () => null` read as a function TYPE
+  // returning `null`, and the alias's own members lost their header to the import
+  // before them. `closesAnOpenerBefore` is the rule: a header's type literal always
+  // sits inside a `<`, `(` or `[` still open after it.
+  {
+    const THEME_HEAD = 'import { createContext, useContext, useEffect, useState } from "react"\n\n' +
+      'type Theme = "dark" | "light" | "auto" | "system"\n\n' +
+      'type ThemeProviderProps = {\n  children: React.ReactNode\n  defaultTheme?: Theme\n  storageKey?: string\n}\n\n';
+    const ALIAS = 'type ThemeProviderState = {\n  theme: Theme\n  setTheme: (theme: Theme) => void\n}\n\n';
+    const VALUE = 'const initialState: ThemeProviderState = {\n  theme: "system",\n  setTheme: () => null,\n}\n';
+    const aliasOnly = ALIAS.replace('setTheme: (theme: Theme) => void', 'other: string');
+    assert(memberReturnAnnotation(aliasOnly + VALUE, 'setTheme')?.annotation === null &&
+      memberReturnAnnotation(THEME_HEAD + aliasOnly + VALUE, 'setTheme')?.annotation === null, 'TSO-U43: LIT CONTROL, THE ThemeProvider SHAPE (its lines 13-21, and the whole head of the file) -- an alias closed by a bare `}` (no `;`), then a typed `const` object literal: the literal\'s arrow stays an unannotated VALUE, never a function type returning `null`');
+    assert(memberReturnAnnotation(THEME_HEAD + ALIAS + VALUE, 'setTheme')?.annotation === 'void', 'TSO-U44: ...and in the same file the ALIAS member reads its annotation (`void`) -- the alias body before it is a statement, not a header literal, so the import before it never becomes part of its header');
+  }
+  assert(memberReturnAnnotation('type C<T> = T extends { a: 1 } ? A : B\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null &&
+    memberReturnAnnotation('type U = A | { a: 1 }\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null, 'TSO-U45: the same statement boundary behind an `extends` (a conditional type) and a `|` (a union) with no `;` -- neither leaks its `type X =` header into the value literal after it');
+
   // ---- TSO-D (#15627): a DOTTED member path, resolved through the nesting ---
   //
   // The grammar and the reader were widened in ONE commit, and this battery is
@@ -8520,6 +8632,50 @@ function selfTest() {
     run(mk(IFC_FIXTURE(`type-surface-only ${IFC('AuthClient.updateUser')}`,
       IFC_TYPES + '\nexport interface AuthClient {\n  signOut(): Promise<void>;\n}\n'))),
     [/cannot be resolved at HEAD/, /AMBIGUOUS/, /opens 2 interfaces/]);
+
+  // -- the companion object, and an interface whose HEADER carries a type literal --
+  {
+    const companion = 'export interface AuthClient {\n  updateUser(): Promise<Ifc>;\n}\n' +
+      'export const AuthClient = {\n  updateUser: async (): Promise<Obj> => ({} as Obj),\n};\n';
+    const r = readRef(companion, IFC('AuthClient.updateUser'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /opens 2 object literals and interface bodies/.test(r.refusal ?? ''),
+      `TSO-I17: THE COMPANION OBJECT -- \`interface X\` plus an object literal \`X = {\` is AMBIGUOUS across kinds: the segment names two bodies, and walking the object literal (as before interfaces were containers) would be a silent pick. Got: ${JSON.stringify(r)}`,
+    );
+  }
+  const HDR_TYPES = (ret) =>
+    'export interface SortableRowsProps<T extends { id: string }> {\n' +
+    '  items: readonly T[];\n' +
+    '  onReorder: (ids: string[]) => void;\n' +
+    `  renderRow: (item: T, drag: RowDragProps) => ${ret};\n` +
+    '}\n';
+  const HDR = (spelling) => `packages/client/src/rows.ts#${spelling}`;
+  {
+    const r = readRef(HDR_TYPES('React.ReactNode'), HDR('SortableRowsProps.renderRow'));
+    assert(
+      r.refusal === null && r.surface?.type === 'React.ReactNode' && r.surface?.erased === false,
+      `TSO-I18: an interface whose TYPE-PARAMETER CONSTRAINT is a type literal resolves its function-typed property to its return annotation, never "carries NO return annotation" (the app-shell \`SortableFavoriteRowsProps.renderRow\` shape). Got: ${JSON.stringify(r)}`,
+    );
+  }
+  const HDR_FIXTURE = (baseRet) => ({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/rows.ts': HDR_TYPES(baseRet) },
+    files: {
+      'packages/client/src/rows.ts': HDR_TYPES('React.ReactElement'),
+      '.changeset/x.md': CS({
+        bumps: [['@objectstack/client', 'minor']],
+        body: 'fix(client): type the sortable rows\' render callback\n\n' +
+          '**BREAKING**: `SortableRowsProps.renderRow` now returns `React.ReactElement`.\n\n' +
+          '## Migration\n\n| you wrote | write instead |\n| --- | --- |\n| `renderRow={() => null}` | `renderRow={() => <></>}` |\n' +
+          `\n<!-- adr-0087: not-required (type-surface-only ${HDR('SortableRowsProps.renderRow')}) ${TSO_WHY} -->\n`,
+      }),
+    },
+  });
+  red('TSO-I19 a CONCRETE base behind a header type literal is refused as not narrowed-from-erased -- both revs are READ through the header, neither is called unannotated',
+    run(mk(HDR_FIXTURE('React.ReactNode'))),
+    [/predicate 4: narrowed-from-erased\] is FALSE/]);
+  green('TSO-I20 the admitted counterpart -- a truly erased base (`=> any`) narrowed behind the same header is admitted, the HEAD side read as annotated',
+    run(mk(HDR_FIXTURE('any'))));
 
   // ---- The #22918 category: `runtime-export-retired` -------------------------
   //

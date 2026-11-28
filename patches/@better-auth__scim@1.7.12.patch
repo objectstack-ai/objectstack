@@ -1,0 +1,32 @@
+TEMPORARY vendor patch — maintainer ruling record 6845302116 (objectstack
+card "SCIM: a PATCH that replaces only name.givenName / name.familyName leaves
+displayName and sys_user.name on the old name", option C). The ruling sets
+AGENTS.md's "No workarounds ... not temporary patches" aside for this patch
+only; patches/ gains no other better-auth patch.
+
+What it changes: setNamePart() stored the part and never recomposed
+name.formatted / displayName (composeName() served only the name.formatted
+remove path). It now recomposes name.formatted, and through setFormattedName()
+displayName, when name.formatted equalled composeName() of the parts BEFORE
+the part changed. An explicit (non-derived) name is never overwritten.
+
+Removal condition: delete this file and its patchedDependencies row in the
+upgrade PR to the first @better-auth/scim release that ships the recompose.
+The regression pin packages/plugins/plugin-auth/src/scim-name-recompose.test.ts
+stays.
+
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 725b7ad56a19d2b4b9a3a5e9a79b9f665972a22e..f74ef80f51d8a7945872e6ebd151fa0da5de0c3c 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -6001,7 +6001,10 @@ function composeName(state) {
+ 	return [state.givenName, state.familyName].filter(Boolean).join(" ");
+ }
+ function setNamePart(state, attribute, value) {
++	const formattedNameWasDerived = state.formattedName === composeName(state);
+ 	state[attribute] = value;
++	const composedName = composeName(state);
++	if (formattedNameWasDerived && composedName) setFormattedName(state, composedName);
+ }
+ function setEmails(state, emails) {
+ 	state.emails = readEmailSet(emails, state.userName);

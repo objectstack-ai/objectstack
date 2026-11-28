@@ -43,7 +43,7 @@ import {
 // paid here, during collection, never inside a clocked case.
 import { MetadataManager } from '@objectstack/metadata';
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
-import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataCreateSeed, getMetadataTypeSchema, SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataCreateSeed, getMetadataTypeSchema, MetadataProtectionFields, SEMVER_2_0_0_VERSION_PATTERN } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 import { handleMcpRequest } from './mcp.js';
@@ -1401,6 +1401,28 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
       expect(Object.keys(contract.schema.properties ?? {}), type).toEqual(Object.keys(full.properties ?? {}));
       expect((contract.schema.anyOf ?? []).length, type).toBe((full.anyOf ?? []).length);
     }
+  });
+
+  it('[#35879] the lean contract lists no key the platform stamps: not on object, not in its field entry, not in a view arm', async () => {
+    // "Write only keys these show" reads this key set as the offer, and the
+    // ADR-0010 envelope is the platform's to write. The control: the type's
+    // own Zod shape still declares the envelope, so the absence is the served
+    // schema's, not a shape that lost the keys.
+    const stamped = Object.keys(MetadataProtectionFields);
+    const declared = z.toJSONSchema(getMetadataTypeSchema('object')!, { unrepresentable: 'any' }) as { properties: Record<string, unknown> };
+    expect(Object.keys(declared.properties)).toEqual(expect.arrayContaining(stamped));
+    const { authoring } = await servedTypes();
+    const object = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true })).body.contract;
+    expect(object.form).toBe('lean');
+    expect(Object.keys(object.schema.properties)).toEqual(expect.arrayContaining(['name', 'label', 'fields']));
+    expect(Object.keys(object.schema.properties).filter((k) => stamped.includes(k))).toEqual([]);
+    const field = (await call(authoring, 'list_metadata_items', { type: 'object', contract: true, contractPath: '/properties/fields/additionalProperties' })).body.contract;
+    expect(Object.keys(field.schema.properties)).toContain('type');
+    expect(Object.keys(field.schema.properties).filter((k) => stamped.includes(k))).toEqual([]);
+    const view = (await call(authoring, 'list_metadata_items', { type: 'view', contract: true })).body.contract;
+    const arms = (view.schema.anyOf ?? []) as Array<{ properties?: Record<string, unknown> }>;
+    expect(arms.length).toBeGreaterThan(0);
+    expect(JSON.stringify(view.schema)).not.toMatch(/"_(lock|lockReason|lockSource|lockDocsUrl|provenance|packageId|packageVersion)"/);
   });
 
   it('[#35761] contractPath drills the served object schema under the cap; a key that fits answers whole; a missing path is refused naming the keys', async () => {
