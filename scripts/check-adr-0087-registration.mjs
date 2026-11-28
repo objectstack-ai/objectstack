@@ -8615,10 +8615,10 @@ function selfTest() {
       }),
     },
   });
-  red('TSO-I19 a CONCRETE base behind a header type literal is not narrowed-from-erased -- read as erased, predicate 4 admitted it (the permissive direction)',
+  red('TSO-I19 a CONCRETE base behind a header type literal is refused as not narrowed-from-erased -- both revs are READ through the header, neither is called unannotated',
     run(mk(HDR_FIXTURE('React.ReactNode'))),
     [/predicate 4: narrowed-from-erased\] is FALSE/]);
-  green('TSO-I20 LIT CONTROL -- the same header with a truly erased base (`=> any`) is still admitted',
+  green('TSO-I20 the admitted counterpart -- a truly erased base (`=> any`) narrowed behind the same header is admitted, the HEAD side read as annotated',
     run(mk(HDR_FIXTURE('any'))));
 
   // ---- The #22918 category: `runtime-export-retired` -------------------------
