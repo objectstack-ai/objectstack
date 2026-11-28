@@ -75,7 +75,7 @@ function makeClient() {
 
 const AI_CHANGE: Change = { path: ['fields', 'notes'], by: 'copilot', actor: 'u1', at: '2026-11-27T10:00:00.000Z' };
 
-function freshServer(changes: Change[] | undefined = [AI_CHANGE]): Server {
+function freshServer(changes: Change[] | null = [AI_CHANGE]): Server {
   const account = { name: 'crm_account', label: 'Account', sharingModel: 'private', fields: { name: { type: 'text' } } };
   const contact = { name: 'crm_contact', label: 'Contact', sharingModel: 'private' };
   return {
@@ -84,7 +84,9 @@ function freshServer(changes: Change[] | undefined = [AI_CHANGE]): Server {
       ['crm_contact', contact],
     ]),
     // The AI added a field to Account: its draft is the whole object.
-    drafts: new Map([['crm_account', { body: { ...account, fields: { ...account.fields, notes: { type: 'textarea' } } }, changes }]]),
+    drafts: new Map([
+      ['crm_account', { body: { ...account, fields: { ...account.fields, notes: { type: 'textarea' } } }, changes: changes ?? undefined }],
+    ]),
     saves: [],
     publishes: [],
     resets: [],
@@ -92,7 +94,7 @@ function freshServer(changes: Change[] | undefined = [AI_CHANGE]): Server {
 }
 
 let client: ReturnType<typeof makeClient>;
-let confirmSpy: ReturnType<typeof vi.spyOn>;
+const confirmSpy = vi.fn((_message?: string) => true);
 
 function renderPanel() {
   client = makeClient();
@@ -114,11 +116,13 @@ const contactRow = () => screen.getByTestId('owd-row-crm_contact');
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  confirmSpy.mockReset();
+  confirmSpy.mockReturnValue(true);
+  vi.stubGlobal('confirm', confirmSpy);
 });
 afterEach(() => {
   cleanup();
-  confirmSpy.mockRestore();
+  vi.unstubAllGlobals();
 });
 
 describe('PackageOwdOverviewPanel — an object whose pending draft is the AI assistant\'s (objectstack#36660)', () => {
@@ -145,7 +149,7 @@ describe('PackageOwdOverviewPanel — an object whose pending draft is the AI as
   });
 
   it('a person\'s own draft, or one whose read recorded nothing, keeps the plain unpublished chip and no AI line', async () => {
-    for (const changes of [[{ ...AI_CHANGE, by: 'studio' }], undefined]) {
+    for (const changes of [[{ ...AI_CHANGE, by: 'studio' }], null]) {
       server = freshServer(changes);
       renderPanel();
       await screen.findByTestId('owd-row-crm_account');

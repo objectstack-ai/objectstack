@@ -83,7 +83,7 @@ const aiDraft = (by: 'copilot' | 'mcp' = 'copilot'): DraftRow => ({
   draftChanges: [{ path: ['condition'], by, actor: 'u1', at: '2026-11-27T10:00:00.000Z' }],
 });
 
-let confirmSpy: ReturnType<typeof vi.spyOn>;
+const confirmSpy = vi.fn((_message?: string) => true);
 
 beforeEach(() => {
   door.drafts.clear();
@@ -91,7 +91,9 @@ beforeEach(() => {
   for (const fn of [mockClient.list, mockClient.listDrafts, mockClient.getDraft, mockClient.save, mockClient.publish, mockClient.reset]) {
     fn.mockClear();
   }
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  confirmSpy.mockReset();
+  confirmSpy.mockReturnValue(true);
+  vi.stubGlobal('confirm', confirmSpy);
   __setCelFormulaLoader(() =>
     Promise.resolve({
       validateExpression: () => ({ ok: true, errors: [], warnings: [] }),
@@ -102,7 +104,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  confirmSpy.mockRestore();
+  vi.unstubAllGlobals();
   __setCelFormulaLoader(undefined);
 });
 
@@ -188,7 +190,8 @@ describe('ObjectHooksPanel — the AI assistant\'s pending draft of a hook (obje
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(door.drafts.has('guard_hook')).toBe(false), { timeout: 8000 });
     expect(door.resets[0]).toEqual({ type: 'hook', name: 'guard_hook', options: { state: 'draft', packageId: PKG } });
-    await waitFor(() => expect(screen.queryByTestId('studio-ai-draft-notice')).toBeNull(), { timeout: 8000 });
-    expect(screen.queryByText('Guard (AI)')).toBeNull();
+    // The list re-read installs the published hook.
+    await waitFor(() => expect(screen.queryAllByText('Guard (AI)')).toHaveLength(0), { timeout: 8000 });
+    expect(screen.queryByTestId('studio-ai-draft-notice')).toBeNull();
   });
 });

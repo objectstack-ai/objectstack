@@ -118,7 +118,15 @@ const mockClient = {
   ),
   get: vi.fn(async () => null),
   // The pair's action drafts are kept, so a read after a write serves them.
-  publish: vi.fn(async () => ({})),
+  // A publish makes the pair's draft its published action, as the door does.
+  publish: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) => {
+    if (type === 'action' && opts?.packageId === PAIR && srv.pairDrafts[name]) {
+      srv.pairPublished = [...srv.pairPublished.filter((a) => a.name !== name), srv.pairDrafts[name]!];
+      delete srv.pairDrafts[name];
+      delete srv.pairDraftChanges[name];
+    }
+    return {};
+  }),
   save: vi.fn(async (type: string, name: string, body: unknown, opts?: { packageId?: string }) => {
     if (type === 'action' && opts?.packageId === PAIR) srv.pairDrafts[name] = body as Record<string, unknown>;
     return { ok: true, version: 'v2', state: 'draft' };
@@ -186,7 +194,7 @@ const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();
 
 const L = (key: string) => t(key, 'en');
-let confirmSpy: ReturnType<typeof vi.spyOn>;
+const confirmSpy = vi.fn((_message?: string) => true);
 const ensure = vi.fn(async (): Promise<string> => PAIR);
 
 /** The base's customization read: the pair overrides nothing. */
@@ -221,13 +229,15 @@ beforeEach(() => {
   srv.pairDrafts = {};
   srv.pairDraftChanges = {};
   srv.stored = {};
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  confirmSpy.mockReset();
+  confirmSpy.mockReturnValue(true);
+  vi.stubGlobal('confirm', confirmSpy);
   ensure.mockImplementation(async () => PAIR);
 });
 
 afterEach(() => {
   cleanup();
-  confirmSpy.mockRestore();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -255,10 +265,10 @@ const AI_KEPT = { ...KEPT, label: 'Qualify (AI)', patch: { status: 'new' } };
 const AI_CHANGE = { path: ['patch'], by: 'copilot', actor: 'u1', at: '2026-11-27T10:00:00.000Z' };
 const notice = () => screen.queryByTestId('studio-ai-draft-notice');
 
-async function openAiRow(changes: Array<Record<string, unknown>> | undefined = [AI_CHANGE]) {
+async function openAiRow(changes: Array<Record<string, unknown>> | null = [AI_CHANGE]) {
   srv.pairPublished = [KEPT];
   srv.pairDrafts = { [KEPT.name]: AI_KEPT };
-  if (changes) srv.pairDraftChanges = { [KEPT.name]: changes };
+  srv.pairDraftChanges = changes ? { [KEPT.name]: changes } : {};
   await mountOnActions({ readOnly: true, customization: customizationOf() });
   fireEvent.click(await within(list()).findByText('Qualify (AI)', undefined, { timeout: 8000 }));
 }
@@ -286,7 +296,7 @@ describe('a pair action\'s pending draft written by the AI assistant (objectstac
     expect(screen.getByRole('textbox', { name: L('engine.inspector.action.label') })).toHaveValue('Qualify (AI)');
     expect(notice()).toBeNull();
     cleanup();
-    await openAiRow(undefined);
+    await openAiRow(null);
     expect(screen.getByRole('textbox', { name: L('engine.inspector.action.label') })).toHaveValue('Qualify (AI)');
     expect(notice()).toBeNull();
   }, 30_000);
