@@ -59,13 +59,15 @@ because they read the tree, and a bare `git commit` builds from the **index** �
 that deletes your own fix, in a PR whose body accurately describes a change it does not
 contain.
 
-## Windowed history on a shallow clone
+## Shallow-clone history
 
 ← [`AGENTS.md` › Multi-agent working discipline](../../AGENTS.md#multi-agent-working-discipline)
 
 A shallow clone answers windowed
 `git log`/`rev-list` questions from truncated history at exit 0 with no warning; the tool
-proves the window is covered first.
+proves the window is covered first. Containment (`merge-base --is-ancestor`) fails one way: a cut
+only withholds an ancestor path, never invents one, so exit 0 stands in any clone while a "not an
+ancestor" may be the cut; `git-history.mjs ancestor` proves the negative with a control leg or refuses.
 
 ## The shared identity’s accepted blind spot
 

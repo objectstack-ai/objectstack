@@ -82,7 +82,8 @@
  *              own wait, and a `HOLD` beside `HELD` is one letter from a misread.
  *   trigger    the first that holds: (a) a hand-off line naming the current
  *              head, or the waiting label — taken the same round; (b) the head
- *              has waited a full round (`TRIAGE_ROUND_MINUTES`) and no
+ *              has waited a full round (`TRIAGE_ROUND_MINUTES`, the
+ *              `seat-lifecycle.md` round line) and no
  *              live hold names it; (c) the lane's seat has stood down or is
  *              absent from the seat roster. A live hold holds (b) alone: the
  *              lane that holds ends it with (a), and a lane gone is (c).
@@ -115,6 +116,7 @@ import { GOVERNED_APPROVERS, NARROWING_FACE_LINE, narrowingDeclarationsIn, recor
 import { FLEET_BOT_LOGIN } from './check-handover.mjs';
 import { readClause2Line } from './clause2-line.mjs';
 import { parseSeat } from './fleet-roster.mjs';
+import { ROUND_MINUTES } from './round-open.mjs';
 import { isL2ReviewLane } from './mailbox-open.mjs';
 import { ghApi, readAllPages } from './gh-pages.mjs';
 import {
@@ -135,8 +137,8 @@ export const EXIT_USAGE = 2;
 export const DEFAULT_REPO = 'objectstack-ai/objectstack';
 /** The waiting label the dispatching seat hangs at ACCEPT (`references/contract-review.md` 〈等 L2 标记〉). */
 export const WAITING_LABEL = 'needs:contract-review';
-/** One full round — the rule's 「一轮(约 60 分钟)」, trigger (b). The name is kept: importers read it. */
-export const TRIAGE_ROUND_MINUTES = 60;
+/** One full round, trigger (b): `round-open.mjs`'s `ROUND_MINUTES`, the number on `seat-lifecycle.md`'s round line — one source, never a second copy. The name is kept: importers read it. */
+export const TRIAGE_ROUND_MINUTES = ROUND_MINUTES;
 /** The seat posts' label (`seat-post-protocol.md`); `parseSeat` reads each one. */
 export const SEAT_LABEL = 'pm:seat';
 
