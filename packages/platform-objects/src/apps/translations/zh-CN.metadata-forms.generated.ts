@@ -425,6 +425,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "校验规则",
         helpText: "对象级校验规则——由规则对象组成的数组，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。状态机转移表也在此声明（ADR-0020）"
       },
+      uiReadonlyWhen: {
+        label: "记录界面只读条件",
+        helpText: "基于记录的 CEL 谓词（例如 record.status in ['confirmed', 'done']）——为 TRUE 时，用户无法在控制台中编辑已有记录的任何字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。自行声明了手动锁定（uiReadonly 或 uiReadonlyWhen）的字段按其自身声明裁决，因此字段上的 uiReadonlyWhen: false 可让它保持可编辑。动作、导入、API 和流程仍可写入每个字段，并由对象的校验规则裁决。读取记录自身的列。代表用户操作的应用内助手暂不遵循此设置。"
+      },
       activityMilestones: {
         label: "活动里程碑",
         helpText: "由字段到达某个值触发的时间线条目（ADR-0052 §5b.2）：当一次更新把被监视的字段变为该值时，审计插件会把该里程碑的摘要写入记录的活动时间线，代替字段变更条目。第一个匹配的里程碑生效。"

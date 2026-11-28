@@ -425,6 +425,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Validações",
         helpText: "Regras de validação no nível do objeto — um array de objetos de regra, por exemplo [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. As tabelas de transição de máquinas de estado também são declaradas aqui (ADR-0020)"
       },
+      uiReadonlyWhen: {
+        label: "Registro inteiro somente leitura na interface quando",
+        helpText: "Predicado CEL sobre o registro (por exemplo, record.status in ['confirmed', 'done']) — enquanto for TRUE, ninguém pode editar nenhum campo de um registro existente no console (o diálogo de edição, a página do registro, grades, kanban, arrastar no calendário e no Gantt, a planilha de horas); o diálogo de criação de um novo registro não é avaliado. Um campo que declara seu próprio bloqueio manual (uiReadonly ou uiReadonlyWhen) é julgado por ele, então uiReadonlyWhen: false em um campo o mantém editável. Ações, importações, a API e fluxos continuam gravando todos os campos, julgados pelas validações do objeto. Lê as colunas do próprio registro. O assistente no aplicativo que age por uma pessoa ainda não respeita isso."
+      },
       activityMilestones: {
         label: "Marcos de atividade",
         helpText: "Entradas da linha do tempo disparadas quando um campo atinge um valor (ADR-0052 §5b.2): quando uma atualização leva o campo observado para o valor, o plugin de auditoria grava o resumo do marco na linha do tempo de atividades do registro em vez da entrada de alteração de campo. O primeiro marco correspondente vence."

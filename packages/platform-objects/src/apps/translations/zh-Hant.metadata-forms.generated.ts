@@ -425,6 +425,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "驗證規則",
         helpText: "物件級驗證規則——由規則物件組成的陣列，例如 [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。狀態機轉移表也在此宣告（ADR-0020）"
       },
+      uiReadonlyWhen: {
+        label: "記錄介面唯讀條件",
+        helpText: "基於記錄的 CEL 述詞（例如 record.status in ['confirmed', 'done']）——為 TRUE 時，使用者無法在主控台中編輯既有記錄的任何欄位（編輯對話框、記錄頁、表格、看板、行事曆與甘特圖拖曳、工時表）；新記錄的建立對話框不做判斷。自行宣告了手動鎖定（uiReadonly 或 uiReadonlyWhen）的欄位依其自身宣告裁決，因此欄位上的 uiReadonlyWhen: false 可讓它保持可編輯。動作、匯入、API 與流程仍可寫入每個欄位，並由物件的驗證規則裁決。讀取記錄自身的欄。代表使用者操作的應用程式內助理暫不遵循此設定。"
+      },
       activityMilestones: {
         label: "活動里程碑",
         helpText: "由欄位到達某個值觸發的時間軸條目（ADR-0052 §5b.2）：當一次更新把被監視的欄位變為該值時，稽核外掛會把該里程碑的摘要寫入記錄的活動時間軸，代替欄位變更條目。第一個比對的里程碑生效。"

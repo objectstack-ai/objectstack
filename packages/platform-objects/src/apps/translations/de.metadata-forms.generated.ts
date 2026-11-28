@@ -425,6 +425,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Validierungen",
         helpText: "Validierungsregeln auf Objektebene – ein Array von Regelobjekten, z. B. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Übergangstabellen von Zustandsautomaten werden ebenfalls hier deklariert (ADR-0020)"
       },
+      uiReadonlyWhen: {
+        label: "Ganzer Datensatz in der Oberfläche schreibgeschützt wenn",
+        helpText: "CEL-Prädikat über den Datensatz (z. B. record.status in ['confirmed', 'done']) – solange es TRUE ist, kann niemand in der Konsole ein Feld eines bestehenden Datensatzes bearbeiten (Bearbeitungsdialog, Datensatzseite, Tabellen, Kanban, Kalender- und Gantt-Ziehen, Zeiterfassung); der Erstellungsdialog eines neuen Datensatzes wird nicht geprüft. Ein Feld, das eine eigene manuelle Sperre (uiReadonly oder uiReadonlyWhen) festlegt, wird stattdessen danach beurteilt, sodass uiReadonlyWhen: false an einem Feld es bearbeitbar hält. Aktionen, Importe, die API und Flows schreiben weiterhin jedes Feld, beurteilt durch die Validierungen des Objekts. Liest die eigenen Spalten des Datensatzes. Der In-App-Assistent, der für eine Person handelt, beachtet dies noch nicht."
+      },
       activityMilestones: {
         label: "Aktivitätsmeilensteine",
         helpText: "Zeitleisteneinträge, die ausgelöst werden, wenn ein Feld einen Wert erreicht (ADR-0052 §5b.2): Wenn eine Aktualisierung das beobachtete Feld auf den Wert setzt, schreibt das Audit-Plugin die Zusammenfassung des Meilensteins statt des Feldänderungseintrags in die Aktivitätszeitleiste des Datensatzes. Der erste passende Meilenstein gewinnt."

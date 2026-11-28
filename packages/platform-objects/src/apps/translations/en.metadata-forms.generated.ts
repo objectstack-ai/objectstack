@@ -425,6 +425,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Validations",
         helpText: "Object-level validation rules — an array of rule objects, e.g. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. State-machine transition tables are declared here too (ADR-0020)"
       },
+      uiReadonlyWhen: {
+        label: "Ui Readonly When",
+        helpText: "CEL predicate over the record (e.g. record.status in ['confirmed', 'done']) — while it is TRUE, people cannot edit any field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. A field that sets its own hand lock (uiReadonly or uiReadonlyWhen) is judged by that instead, so uiReadonlyWhen: false on a field keeps it editable. Actions, imports, the API and flows still write every field, judged by the object's validations. Reads the record's own columns. The in-app assistant acting for a person does not honour it yet."
+      },
       activityMilestones: {
         label: "Activity Milestones",
         helpText: "Timeline entries fired by a field reaching a value (ADR-0052 §5b.2): when an update moves the watched field into the value, the audit plugin writes the milestone's summary to the record's activity timeline instead of the field-change entry. The first milestone that matches wins."
