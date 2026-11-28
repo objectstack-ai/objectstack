@@ -197,15 +197,18 @@ export function stripLegacyApiMethods(
  * history — the `enable.trash` and `versioning` tombstones share it, so the
  * two prescriptions cannot drift apart. It states the model
  * `resolveFieldHistory` (`field-history-default.ts`) enforces: values show by
- * default, the object's off switch is `enable.fieldHistory: false`, a field's
- * is its own `fieldHistory: false`. ⛔ Never `trackHistory` here: on a field it
+ * default except for the `FIELD_HISTORY_DEFAULT_OFF_TYPES` (media and
+ * structured JSON), which opt in with `fieldHistory: true`; the object's off
+ * switch is `enable.fieldHistory: false`, a field's is its own
+ * `fieldHistory: false`. ⛔ Never `trackHistory` here: on a field it
  * only opts a media or structured-JSON type in, and `false` is not an off
  * switch; on the object it opens the history ledger, not the values.
  */
 const FIELD_HISTORY_PRESCRIPTION =
-  'Field history needs no key: a changed field\'s old → new values show on the record ' +
-  'activity timeline by default. `enable.fieldHistory: false` turns them off for the ' +
-  'object, and a field opts out with its own `fieldHistory: false`.';
+  'Field history is on by default: a changed field\'s old → new values show on the record ' +
+  'activity timeline, except a media or structured-JSON field, which opts in with ' +
+  '`fieldHistory: true`. `enable.fieldHistory: false` turns them off for the object, and a ' +
+  'field opts out with its own `fieldHistory: false`.';
 
 /**
  * Tombstones for RETIRED capability flags — same doctrine as the tenancy

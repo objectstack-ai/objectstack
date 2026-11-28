@@ -104,7 +104,8 @@ describe('ObjectCapabilities', () => {
   // `enable.trash` and `versioning` both promised history, so both refusals
   // say where field history lives now. It is the model `resolveFieldHistory`
   // enforces (values on by default, `enable.fieldHistory: false` for the
-  // object, a field's own `fieldHistory: false`), never `trackHistory`: on a
+  // object, a field's own `fieldHistory: false`, a media or structured-JSON
+  // field opting in with `fieldHistory: true`), never `trackHistory`: on a
   // field that only opts a media or JSON type in and `false` turns nothing off.
   describe('retired history-promising keys prescribe the field-history model that runs', () => {
     const trashMessage = (): string => {
@@ -129,7 +130,10 @@ describe('ObjectCapabilities', () => {
       it(`${key}: values show by default, and the two off switches are named`, () => {
         const message = read();
         expect(message).toContain(
-          'Field history needs no key: a changed field\'s old → new values show on the record activity timeline by default.',
+          'Field history is on by default: a changed field\'s old → new values show on the record activity timeline',
+        );
+        expect(message, 'the default-off types are named with their opt-in').toContain(
+          'except a media or structured-JSON field, which opts in with `fieldHistory: true`.',
         );
         expect(message).toContain('`enable.fieldHistory: false` turns them off for the object');
         expect(message).toContain('a field opts out with its own `fieldHistory: false`');
@@ -147,6 +151,12 @@ describe('ObjectCapabilities', () => {
       expect(resolveFieldHistory(text, { enable: { fieldHistory: false } }), 'object off switch').toBe(false);
       expect(resolveFieldHistory({ ...text, fieldHistory: false }, {}), 'field off switch').toBe(false);
       expect(resolveFieldHistory({ ...text, trackHistory: false }, {}), 'trackHistory: false is no off switch').toBe(true);
+      const json = { type: 'json' } as const;
+      expect(resolveFieldHistory(json, {}), 'a structured-JSON field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...json, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
+      const image = { type: 'image' } as const;
+      expect(resolveFieldHistory(image, {}), 'a media field is off by default').toBe(false);
+      expect(resolveFieldHistory({ ...image, fieldHistory: true }, {}), 'fieldHistory: true opts it in').toBe(true);
     });
   });
 
