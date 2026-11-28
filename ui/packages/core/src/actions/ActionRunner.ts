@@ -638,6 +638,10 @@ export type ConfirmationHandler = (message: string, options?: {
 export type ToastHandler = (message: string, options?: {
   type?: 'success' | 'error' | 'info' | 'warning';
   duration?: number;
+  /** A second line under `message`, one entry per line (`\n`-joined). Set on
+   *  a `warning` toast to carry the warnings of the write the action made
+   *  (objectstack#37867), as a record save's toast carries them. */
+  description?: string;
   /** When set, the toast offers an "Undo" affordance (the runner has already
    *  pushed the operation onto the global UndoManager). */
   undo?: { label?: string };
@@ -1284,6 +1288,32 @@ const SPEC_DEFAULT_ACTION_TYPE: RunnableActionType = 'script';
  */
 function isUpdateOperationAction(action: ActionDef): boolean {
   return action.operation === 'update';
+}
+
+/**
+ * The advisory warning messages the route answered for an `operation:
+ * 'update'` action's write, distinct, in answer order (objectstack#37867).
+ *
+ * The route's declarative-update answer carries `warnings` when the write
+ * tripped a `severity: 'warning'` (or `'info'`) validation rule, in the data
+ * door's own element shape (`{ field, code, message, rule?, severity? }`) —
+ * the write went through, and the person who clicked owes the rule's words,
+ * exactly as a record save shows them (`@object-ui/react`'s
+ * `answerWarningLines`, which this package sits below and cannot import).
+ * Asked of an update action only: no other action's answer declares the
+ * member, so a script's own `warnings` key is never read as one.
+ */
+function updateAnswerWarningLines(action: ActionDef, result: ActionResult): string[] {
+  if (!isUpdateOperationAction(action)) return [];
+  const payload = readActionPayload(result.data);
+  const wire = payload && typeof payload === 'object' ? (payload as { warnings?: unknown }).warnings : undefined;
+  if (!Array.isArray(wire)) return [];
+  const lines: string[] = [];
+  for (const entry of wire) {
+    const message = (entry as { message?: unknown } | null)?.message;
+    if (typeof message === 'string' && message.trim() !== '' && !lines.includes(message)) lines.push(message);
+  }
+  return lines;
 }
 
 /**
@@ -2319,6 +2349,10 @@ export class ActionRunner {
     if (this.toastHandler) {
       const showToast = action.toast ?? { showOnSuccess: true, showOnError: true };
       const duration = action.toast?.duration;
+      // objectstack#37867 — the warnings the write raised. They ride the
+      // success toast, which then takes the warning variant: one toast, as a
+      // record save raises one.
+      const warnings = result.success ? updateAnswerWarningLines(action, result) : [];
 
       if (result.success && !hasResultDialog && !result.silent && showToast.showOnSuccess !== false) {
         // The server returns FACTS and the console writes the sentence
@@ -2333,9 +2367,21 @@ export class ActionRunner {
           try { globalUndoManager.push(result.undo); } catch { /* non-fatal */ }
         }
         this.toastHandler(message, {
-          type: 'success',
+          type: warnings.length > 0 ? 'warning' : 'success',
           duration,
+          ...(warnings.length > 0 ? { description: warnings.join('\n') } : {}),
           undo: result.undo ? { label: this.runnerText(RUNNER_TEXT.undo) } : undefined,
+        });
+      } else if (warnings.length > 0 && !result.silent) {
+        // The success toast is not shown (the author turned it off, or a
+        // result dialog replaces it), but a warning is not a success message:
+        // the rule's author asked for the person to be told. The rule's own
+        // words are the whole toast, so no runner text is needed for it.
+        const [first, ...rest] = warnings;
+        this.toastHandler(first, {
+          type: 'warning',
+          duration,
+          ...(rest.length > 0 ? { description: rest.join('\n') } : {}),
         });
       }
 

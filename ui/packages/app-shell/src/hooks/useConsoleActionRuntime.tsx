@@ -404,6 +404,19 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
 
   const toastHandler = useCallback<ToastHandler>((message, options) => {
     if (options?.type === 'error') { toast.error(message); return; }
+    // objectstack#37867 — a write that went through with warnings: the
+    // runner's success toast on its warning variant, the warnings under the
+    // title, the Undo button kept (the same toast a record save raises).
+    if (options?.type === 'warning') {
+      toast.warning(message, {
+        duration: options.duration,
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.undo
+          ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+          : {}),
+      });
+      return;
+    }
     if (options?.undo) {
       toast.success(message, {
         duration: options.duration,

@@ -1946,8 +1946,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     },
   });
 
-  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; undo?: { label?: string } }) => {
+  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; description?: string; undo?: { label?: string } }) => {
     if (options?.type === 'error') { toast.error(message); return; }
+    // objectstack#37867 — a write that went through with warnings: the
+    // runner's success toast on its warning variant, the warnings under the
+    // title, the Undo button kept (the same toast a record save raises).
+    if (options?.type === 'warning') {
+      toast.warning(message, {
+        duration: options.duration,
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.undo
+          ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+          : {}),
+      });
+      return;
+    }
     if (options?.undo) {
       toast.success(message, {
         duration: options.duration,
