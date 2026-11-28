@@ -278,16 +278,13 @@ import {
 } from '@objectstack/spec/system';
 import { isRecordPageBuiltinTab, relatedListNameCovers } from '@objectstack/spec/data';
 import { walkFlowNodes } from './flow-walk.js';
+import { objectExtensionsByTarget, packagesOf, recordsOf, suggestName } from './object-graph.js';
 import {
   addOwnerRelatedLists,
   emptyRelatedListTitles,
   foldRelatedListExtensions,
-  objectExtensionsByTarget,
-  packagesOf,
-  recordsOf,
-  suggestName,
   type RelatedListTitles,
-} from './object-graph.js';
+} from './related-list-titles.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';

@@ -206,7 +206,8 @@ import { APPROVAL_NODE_TYPE, flowDecisionEdgeBranch, isFlowTechnicalNodeType } f
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
-import { addOwnerRelatedLists, emptyRelatedListTitles, foldRelatedListExtensions, objectExtensionsByTarget } from './object-graph.js';
+import { objectExtensionsByTarget } from './object-graph.js';
+import { addOwnerRelatedLists, emptyRelatedListTitles, foldRelatedListExtensions } from './related-list-titles.js';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
