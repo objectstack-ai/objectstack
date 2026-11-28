@@ -26,6 +26,9 @@
 import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
+// The platform's knowledge service, for the doors' wording of its own verdict.
+import { KnowledgeServicePlugin, type KnowledgeService } from '@objectstack/service-knowledge';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 const ctx = (executionContext: any): any => ({ request: {}, environmentId: 'platform', executionContext });
@@ -414,4 +417,124 @@ describe('/packages — what the gate leaves alone', () => {
         expect(r.response?.status).not.toBe(403);
         expect(s.registry.installPackage).toHaveBeenCalled();
     });
+});
+
+/**
+ * The verdict the platform's own knowledge service answers, through both doors
+ * that ask it: the package duplicate and the `/meta` save. A real kernel runs
+ * `KnowledgeServicePlugin` over host doubles (the engine, the security
+ * service, the metadata protocol), so the sentence each door returns is the
+ * one `admitAuthoredSource` composes for that door, not a double's.
+ *
+ * The duplicate's caller copies a package: never told to save a source, and
+ * told once, by the door's prefix, that nothing was copied. The `/meta`
+ * save's sentences are the control, pinned byte for byte.
+ */
+describe('/packages duplicate and /meta save on a real kernel running KnowledgeServicePlugin: each door words the service\'s own verdict', () => {
+    const ARTICLE = {
+        name: 'article',
+        fields: { id: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' }, salary: { type: 'textarea' } },
+    };
+    const FIELDS = Object.keys(ARTICLE.fields);
+    type Arm = 'transient' | 'content' | 'where' | 'title';
+    const sourceFor = (arm: Arm) => ({
+        name: 'faq', label: 'FAQ', adapter: 'memory',
+        source: {
+            kind: 'object', object: 'article', content: arm === 'content' ? ['body', 'salary'] : ['body'],
+            ...(arm === 'where' ? { where: { salary: { $ne: null } } } : {}),
+        },
+    });
+    /** What the save door answers today, byte for byte. */
+    const SAVE_VERDICT: Record<Arm, { status: number; code: string; message: string }> = {
+        transient: {
+            status: 503, code: 'SERVICE_UNAVAILABLE',
+            message: 'The knowledge source "faq" was not saved: whether you may search object \'article\' could not be judged '
+                + '(registry unavailable), and an author must be allowed to search what their source indexes. Nothing was written; try again.',
+        },
+        content: {
+            status: 403, code: 'PERMISSION_DENIED',
+            message: 'The knowledge source "faq" was not saved: you may not query field \'salary\' of object \'article\' (it is hidden '
+                + 'from you, or served to you masked), and the index would hold its text unmasked. Remove the field from `content` '
+                + 'and `metadataFields`, or have someone who may query it save the source.',
+        },
+        where: {
+            status: 403, code: 'PERMISSION_DENIED',
+            message: 'The knowledge source "faq" was not saved: its `where` reads field \'salary\' of object \'article\', which you may '
+                + 'not query (it is hidden from you, or served to you masked), and the source would select its records by that '
+                + 'field. Remove the field from `where`, or have someone who may query it save the source.',
+        },
+        title: {
+            status: 403, code: 'PERMISSION_DENIED',
+            message: 'The knowledge source "faq" was not saved: you may not query field \'title\' of object \'article\' (it is hidden '
+                + 'from you, or served to you masked), and the index would hold its text unmasked. The source does not list it: '
+                + "it is the object's display field, which every document carries as its title. Have someone who may query it save the source.",
+        },
+    };
+
+    async function bootPlatformKnowledge(arm: Arm) {
+        const s = make({ items: [sourceFor(arm)] });
+        const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+        Object.assign(s.protocol, { saveMetaItem });
+        // The engine the knowledge service reads schemas through; the package registry rides on it.
+        Object.assign(s.kernelServices.objectql, {
+            getSchema: (name: string) => {
+                if (arm === 'transient') throw new Error('registry unavailable');
+                return name === 'article' ? ARTICLE : undefined;
+            },
+            find: vi.fn(async () => []),
+        });
+        const hidden = arm === 'title' ? 'title' : arm === 'transient' ? undefined : 'salary';
+        const security = {
+            getQueryableFields: vi.fn(async () => FIELDS.filter((f) => f !== hidden)),
+            getReadableFields: vi.fn(async () => FIELDS),
+        };
+        const doubles: Record<string, unknown> = { ...s.kernelServices, security };
+        const host: Plugin = {
+            name: 'test.duplicate-door.host',
+            version: '1.0.0',
+            type: 'standard',
+            async init(ctx: PluginContext) {
+                for (const [name, service] of Object.entries(doubles)) ctx.registerService(name, service);
+            },
+        } as Plugin;
+        const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
+        kernel.use(host);
+        kernel.use(new KnowledgeServicePlugin({ enableEventSync: false }));
+        await kernel.bootstrap();
+        const knowledge = kernel.getService<KnowledgeService>('knowledge');
+        knowledge.registerAdapter('memory', { id: 'memory', upsert: async () => undefined, delete: async () => undefined, search: async () => [] });
+        const dispatcher = new HttpDispatcher(kernel as any);
+        return {
+            ...s, kernel, saveMetaItem,
+            duplicate: (caller: any) => dispatcher.handlePackages('/pkg-a/duplicate', 'POST', { targetPackageId: 'pkg-b' }, {}, caller),
+            save: (caller: any) => dispatcher.handleMetadata('/knowledge_source/faq', caller, 'PUT', JSON.parse(JSON.stringify(sourceFor(arm)))),
+        };
+    }
+
+    for (const arm of ['transient', 'content', 'where', 'title'] as const) {
+        it(`${arm}: the duplicate is told nothing was copied once and to duplicate the package, never to save; the /meta save's sentence is unchanged`, async () => {
+            const stack = await bootPlatformKnowledge(arm);
+            try {
+                const expected = SAVE_VERDICT[arm];
+                const r = await stack.duplicate(authed(BOTH));
+                expect(r.response?.status).toBe(expected.status);
+                expect(r.response?.body?.error?.code).toBe(expected.code);
+                const message: string = r.response?.body?.error?.message;
+                expect(message.startsWith('Duplicating package "pkg-a" is refused, and nothing was copied. The knowledge source "faq" cannot be copied: '), message).toBe(true);
+                expect(message).not.toMatch(/save the source|save it again|Nothing was written|was not saved|the save /);
+                expect(message.match(/nothing was copied/gi)).toHaveLength(1);
+                expect(message).toMatch(arm === 'title' ? /Have someone who may query it duplicate the package\.$/ : /duplicate the package again/);
+                expect(stack.protocol.duplicatePackage).not.toHaveBeenCalled();
+
+                // CONTROL: the same verdict at the /meta save door, byte for byte as before.
+                const saved = await stack.save(authed(BOTH));
+                expect(saved.response?.status).toBe(expected.status);
+                expect(saved.response?.body?.error?.code).toBe(expected.code);
+                expect(saved.response?.body?.error?.message).toBe(expected.message);
+                expect(stack.saveMetaItem).not.toHaveBeenCalled();
+            } finally {
+                await stack.kernel.shutdown();
+            }
+        });
+    }
 });

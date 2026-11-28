@@ -81,6 +81,7 @@
     "@objectstack/service-analytics": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-job": "workspace:*",
+    "@objectstack/service-knowledge": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
     "@objectstack/service-record-context": "workspace:*",

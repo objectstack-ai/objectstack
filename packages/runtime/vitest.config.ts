@@ -216,6 +216,15 @@ export default defineConfig({
       // the #4567 regression (croner rejecting the expression envelope) is
       // reproduced by the actual scheduler rather than by a double.
       { find: '@objectstack/service-job', replacement: path.resolve(__dirname, '../services/service-job/src/index.ts') },
+      // Dev-only: packages-knowledge-source-gate.test.ts drives the package
+      // duplicate and the `/meta` save over the REAL `KnowledgeServicePlugin`
+      // (ADR-0161 K4, guard two), so the verdict each door words is the
+      // service's in the checkout, never a built copy of it. Anchored: the pin
+      // imports only the root entry.
+      {
+        find: /^@objectstack\/service-knowledge$/,
+        replacement: path.resolve(__dirname, '../services/service-knowledge/src/index.ts'),
+      },
       // Dev-only: src/security/request-execution-context.conformance.test.ts
       // drives the REAL settings door (`SettingsServicePlugin`'s context
       // resolver) as one row of ruling record 6227928430's conformance test, so

@@ -2902,6 +2902,9 @@ importers:
       '@objectstack/service-job':
         specifier: workspace:*
         version: link:../services/service-job
+      '@objectstack/service-knowledge':
+        specifier: workspace:*
+        version: link:../services/service-knowledge
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../services/service-messaging
