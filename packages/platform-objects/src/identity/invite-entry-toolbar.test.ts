@@ -71,10 +71,10 @@ function action(object: unknown, name: string): AnyAction {
   return found as AnyAction;
 }
 
-/** Declared `list_toolbar` actions, in declaration order. */
+/** Declared `list` actions, in declaration order. */
 function toolbarActions(object: unknown): AnyAction[] {
   return (((object as { actions?: AnyAction[] }).actions) ?? [])
-    .filter((a) => (a.locations ?? []).includes('list_toolbar'));
+    .filter((a) => (a.locations ?? []).includes('list'));
 }
 
 /** The three declaration sites of `invite_user`, as [label, object] rows. */
@@ -86,7 +86,7 @@ const MIRRORS: Array<[string, unknown]> = [
 
 /**
  * Every declaration site: the three toolbar mirrors plus sys_organization's
- * `record_header` copy (ruling 6228318638, B′ on #24034), which a
+ * `record_page` copy (ruling 6228318638, B′ on #24034), which a
  * `page:header` can name because it lives on the page's own object. Its
  * placement is pinned in `sys-organization-invite-action.test.ts`; what the
  * four must share — endpoint, gates, inputs — is pinned here.
@@ -99,11 +99,11 @@ const ALL_MIRRORS: Array<[string, unknown]> = [
 describe('invite_user — reachable from the default Members tab (#11544)', () => {
   it('is declared on sys_member, in the toolbar the Members tab renders', () => {
     // The regression itself: the whole defect was this action's ABSENCE from
-    // this one object. `list_toolbar` is what the org record page's
+    // this one object. `list` is what the org record page's
     // `record:related_list` over sys_member surfaces as header buttons
     // (objectui `RelatedRecordActionsBridge.deriveActions` → `RelatedList`).
     const invite = action(SysMember, 'invite_user');
-    expect(invite.locations).toContain('list_toolbar');
+    expect(invite.locations).toContain('list');
     expect(invite.type).toBe('api');
     expect(invite.target).toBe(INVITE_ENDPOINT);
   });
@@ -159,7 +159,7 @@ describe('invite_user — the mirrors agree (#11544)', () => {
   });
 
   it.each(MIRRORS)('%s offers it from the list toolbar', (_name, object) => {
-    expect(action(object, 'invite_user').locations).toContain('list_toolbar');
+    expect(action(object, 'invite_user').locations).toContain('list');
   });
 
   it.each(ALL_MIRRORS)('%s carries the same lowered `organization` capability gate', (_name, object) => {

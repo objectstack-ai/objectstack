@@ -144,19 +144,19 @@ export interface ServerActionHandlerConfig {
 }
 
 /**
- * An action that also mounts on list rows (`list_item`) or record pages is
+ * An action that also mounts on list rows (`record_row`) or record pages is
  * designed to run against a single record. When such an action is launched
  * from the list toolbar with nothing selected, there is no record context to
  * resolve — block up front instead of triggering a run that fails at its
  * first record-bound step (#2210: "Update requires an ID"). Actions declaring
- * only object-level locations (e.g. `['list_toolbar']`) are left alone: they
+ * only object-level locations (e.g. `['list']`) are left alone: they
  * legitimately run without a record.
  */
 export function isRecordScopedAction(action: ActionDef): boolean {
   const locations = action.locations;
   if (!Array.isArray(locations)) return false;
   return locations.some((l) =>
-    l === 'list_item' || l === 'record_header' || l === 'record_more' || l === 'record_section');
+    l === 'record' || l === 'record_page' || l === 'record_row' || l === 'record_section');
 }
 
 /**
@@ -199,8 +199,8 @@ function collectsRecordIdParam(action: ActionDef): boolean {
  * `newTabUrl` fast path). Pure — reads the action/context, mutates nothing.
  *
  * Order: explicit `params.recordId` → the stashed `_rowRecord`'s
- * `recordIdField` (list_item invocations) → the grid's checkbox selection from
- * the runner context (`selectedRecords`, list_toolbar invocations). An
+ * `recordIdField` (record_row invocations) → the grid's checkbox selection from
+ * the runner context (`selectedRecords`, list invocations). An
  * AGGREGATE bulk dispatch (objectui#3139) carries the whole selection as
  * `params._selectedIds` — the server reads that array, not `recordId`, so the
  * selection fallback must not touch it (resolving a recordId would mislabel
@@ -264,7 +264,7 @@ export function createServerActionHandler(config: ServerActionHandlerConfig): Se
       return { success: false, error: 'Action has no name — a server action must declare one' };
     }
 
-    // The row record is a CLIENT-side stash (list_item invocations park it
+    // The row record is a CLIENT-side stash (record_row invocations park it
     // under `params._rowRecord` for param defaults and id resolution) — never
     // part of the server contract, so it is stripped from the POSTed params.
     const params = (action.params && !Array.isArray(action.params))

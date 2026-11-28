@@ -32,9 +32,9 @@ vi.mock('../environment/EnvironmentListToolbar', () => ({
 import { ObjectViewPageBarActions } from './objectViewPageHeader';
 
 const TOOLBAR = [
-  { name: 'new_task', label: 'New task', locations: ['list_toolbar'] },
-  { name: 'mass_assign', label: 'Assign', locations: ['list_toolbar'] },
-  { name: 'export_csv', label: 'CSV', locations: ['list_toolbar'] },
+  { name: 'new_task', label: 'New task', locations: ['list'] },
+  { name: 'mass_assign', label: 'Assign', locations: ['list'] },
+  { name: 'export_csv', label: 'CSV', locations: ['list'] },
 ];
 
 const t = ((k: string, o?: { defaultValue?: string }) => o?.defaultValue ?? k) as never;

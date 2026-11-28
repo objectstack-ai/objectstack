@@ -11,7 +11,7 @@
  * `pred == null || pred === ''`, so a whitespace-only `visible` counted as
  * declared there, was evaluated, and failed closed: the action showed in the
  * related list's header and was missing from its rows. That held for an
- * action placed on the rows by `record_related` and by `list_item` alike.
+ * action placed on the rows by `record_related` and by `record_row` alike.
  *
  * Every case mounts what a record page mounts, as the objectui#11270 suite
  * beside this file does: the real `RelatedRecordActionsBridge` around the
@@ -54,8 +54,8 @@ afterEach(() => {
 
 const CHILD_NAME = 'task';
 
-/** Each action is on the header (`list_toolbar`) and on the rows by one row location. */
-const both = (row: 'record_related' | 'list_item') => ['list_toolbar', row];
+/** Each action is on the header (`list`) and on the rows by one row location. */
+const both = (row: 'record_related' | 'record_row') => ['list', row];
 
 /**
  * The card's measured table, plus the controls that keep the verdict honest.
@@ -71,12 +71,12 @@ const both = (row: 'record_related' | 'list_item') => ['list_toolbar', row];
  */
 const ROW_ONLY_BLANK = '     ';
 const CHILD_ACTIONS = [
-  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['list_item'] },
+  { name: 'send_reminder', label: 'Send Reminder', type: 'api', target: '/api/remind', locations: ['record_row'] },
   { name: 'blank_rr', label: 'Blank RR', type: 'api', target: '/api/b1', locations: both('record_related'), visible: '   ' },
-  { name: 'blank_li', label: 'Blank LI', type: 'api', target: '/api/b2', locations: both('list_item'), visible: '   ' },
+  { name: 'blank_li', label: 'Blank LI', type: 'api', target: '/api/b2', locations: both('record_row'), visible: '   ' },
   { name: 'empty_rr', label: 'Empty RR', type: 'api', target: '/api/e1', locations: both('record_related'), visible: '' },
-  { name: 'empty_li', label: 'Empty LI', type: 'api', target: '/api/e2', locations: both('list_item'), visible: '' },
-  { name: 'never_li', label: 'Never LI', type: 'api', target: '/api/n', locations: both('list_item'), visible: false },
+  { name: 'empty_li', label: 'Empty LI', type: 'api', target: '/api/e2', locations: both('record_row'), visible: '' },
+  { name: 'never_li', label: 'Never LI', type: 'api', target: '/api/n', locations: both('record_row'), visible: false },
   { name: 'cel_yes_rr', label: 'CEL Yes', type: 'api', target: '/api/c1', locations: ['record_related'], visible: "record.name == 'Write spec'" },
   { name: 'cel_no_rr', label: 'CEL No', type: 'api', target: '/api/c2', locations: ['record_related'], visible: "record.name == 'Other'" },
   { name: 'blank_row_only', label: 'Blank Row Only', type: 'api', target: '/api/r', locations: ['record_related'], visible: ROW_ONLY_BLANK },
@@ -176,13 +176,13 @@ async function firstRowMenuNames(): Promise<string[]> {
 }
 
 describe('objectui#11294 — one blank `visible` gives one answer on a related list’s toolbar and rows', () => {
-  it('a whitespace-only `visible` shows on the toolbar AND the rows, by `record_related` and by `list_item`; `\'\'` is the control', async () => {
+  it('a whitespace-only `visible` shows on the toolbar AND the rows, by `record_related` and by `record_row`; `\'\'` is the control', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       mount();
       await screen.findByText('Write spec');
 
-      // The toolbar: every `list_toolbar` action whose gate is blank or empty
+      // The toolbar: every `list` action whose gate is blank or empty
       // shows, and the declared `false` does not.
       await waitFor(() => expect(toolbarNames()).toContain('blank_rr'));
       expect(toolbarNames()).toEqual(['blank_rr', 'blank_li', 'empty_rr', 'empty_li']);

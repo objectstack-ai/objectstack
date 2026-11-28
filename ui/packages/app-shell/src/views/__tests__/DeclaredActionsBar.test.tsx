@@ -118,7 +118,7 @@ const ACTIONS = [
   {
     name: 'approval_bulk', type: 'api', label: 'Bulk',
     target: '/api/v1/approvals/bulk',
-    locations: ['list_toolbar'],
+    locations: ['list'],
   },
 ];
 
@@ -136,7 +136,7 @@ describe('DeclaredActionsBar', () => {
     );
     expect(screen.getByTestId('declared-action-approval_approve')).toBeInTheDocument();
     expect(screen.getByTestId('declared-action-approval_reassign')).toBeInTheDocument();
-    // `list_toolbar`-only action must not surface at `record_section`.
+    // `list`-only action must not surface at `record_section`.
     expect(screen.queryByTestId('declared-action-approval_bulk')).toBeNull();
   });
 
@@ -175,7 +175,7 @@ describe('DeclaredActionsBar', () => {
       <DeclaredActionsBar
         objectName="sys_approval_request"
         record={REQUEST}
-        location="record_header"
+        location="record_page"
         actions={ACTIONS as any}
       />,
     );
@@ -261,7 +261,7 @@ describe('DeclaredActionsBar', () => {
       <DeclaredActionsBar
         objectName="sys_approval_request"
         record={REQUEST}
-        location="record_header"
+        location="record_page"
         label="Actions"
         actions={ACTIONS as any}
       />,

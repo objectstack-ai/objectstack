@@ -31,7 +31,7 @@ function renderDraft(copy: (s: string) => unknown) {
         label: 'Pause',
         type: 'script',
         target: 'pauseAccount',
-        locations: ['record_header'],
+        locations: ['record_page'],
         confirmText: copy('Pause {{ record.name }}?'),
         successMessage: copy('Paused {{ record.name }}'),
         params: [{ name: 'reason', label: 'Reason', type: 'text', helpText: copy('Why {{ record.name }} is paused') }],

@@ -18,6 +18,8 @@ import { ObjectSchema } from '@objectstack/spec/data';
 import { ActionSchema } from '@objectstack/spec/ui';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The engine surface the repository write path touches (as the external-binding harness). */
 function makeProtocol() {
@@ -56,16 +58,16 @@ function storedBody(rows: Record<string, unknown>[], type: string, name: string)
 
 const SSO_ONLY = {
     name: 'sso_only', label: 'SSO only', type: 'url' as const, target: 'https://example.com/sso',
-    locations: ['record_header' as const], requiresFeature: 'ssoEnforced' as const,
+    locations: ['record_page' as const], requiresFeature: 'ssoEnforced' as const,
 };
 const OWNER_ONLY = {
     name: 'owner_only', label: 'Owner only', type: 'url' as const, target: 'https://example.com/owner',
-    locations: ['record_header' as const], visible: "record.name != ''",
+    locations: ['record_page' as const], visible: "record.name != ''",
     requiresMembershipReach: 'delete_organization' as const,
 };
 const PLAIN = {
     name: 'plain', label: 'Plain', type: 'url' as const, target: 'https://example.com/plain',
-    locations: ['record_header' as const],
+    locations: ['record_page' as const],
 };
 
 const order = (actions: unknown[]) => ({

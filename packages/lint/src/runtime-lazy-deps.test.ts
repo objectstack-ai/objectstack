@@ -164,7 +164,7 @@ const GATED_ACTION = {
   label: 'Approve',
   objectName: 'leave_request',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   body: { language: 'js', source: "await ctx.api.object('leave_request').update({ id: ctx.recordId, owner: 'x' });" },
 };
 

@@ -179,7 +179,7 @@ describe('view-declared bulk actions (objectui#3002)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/plans/push');
     // Each dispatch carries ITS OWN record under `_rowRecord` — the same
-    // row-context key the list_item path attaches, which is what lets the
+    // row-context key the record_row path attaches, which is what lets the
     // host's api handler perform `recordIdParam` injection unchanged.
     const sentIds = fetchMock.mock.calls
       .map(c => JSON.parse((c[1] as any).body)._rowRecord.id)

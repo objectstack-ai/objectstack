@@ -51,7 +51,7 @@ function offered(source: string, record: Record<string, unknown>): string {
 describe('sys_scim_connection_credential: mint and revoke reach the platform-admin mounts', () => {
   it('mint POSTs the mint mount from the list toolbar, with the body keys the mount reads', () => {
     const mint = action('mint_scim_credential');
-    expect(mint).toMatchObject({ type: 'api', method: 'POST', target: MINT_ROUTE, locations: ['list_toolbar'] });
+    expect(mint).toMatchObject({ type: 'api', method: 'POST', target: MINT_ROUTE, locations: ['list'] });
     const params = (mint.params ?? []) as Array<{ name?: string; required?: boolean; type?: string; reference?: string }>;
     expect(params.map((p) => p.name)).toEqual(['connectionId', 'label', 'organizationId', 'provisioningDomainId', 'expiresAt']);
     // The mount refuses a mint with no connection id; nothing else is required.
@@ -69,7 +69,7 @@ describe('sys_scim_connection_credential: mint and revoke reach the platform-adm
       method: 'POST',
       target: REVOKE_ROUTE,
       recordIdParam: 'credentialId',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
     });
     // No param dialog: the row is the whole input, so the confirmation is the one dialog.
     expect(revoke.params ?? []).toEqual([]);

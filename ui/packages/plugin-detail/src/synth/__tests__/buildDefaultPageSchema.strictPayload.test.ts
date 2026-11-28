@@ -105,7 +105,7 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
 
   it('is accepted with every optional surface the synthesizer can emit', () => {
     const body = createBody({ ...leadDef, enable: { files: true } }, {
-      headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_header'] }],
+      headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_page'] }],
       related: [
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks', limit: 10, icon: 'check' },
         { objectName: 'note', relationshipField: 'parent_id', isPrimary: true },
@@ -131,7 +131,7 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
    */
   it('every synthesized component node parses as a PageComponentSchema', () => {
     const common = {
-      headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_header'] }],
+      headerActions: [{ name: 'convert', label: 'Convert', locations: ['record_page'] }],
       related: [
         { objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' },
         { objectName: 'note', relationshipField: 'parent_id', isBody: true },

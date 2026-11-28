@@ -141,7 +141,7 @@ export const SysUser = ObjectSchema.create({
         'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       // Gated on the org CAPABILITY, not multi-org (cloud ADR-0081 D1): the
@@ -211,7 +211,7 @@ export const SysUser = ObjectSchema.create({
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
     // UI surfaces them under the row menu AND the
-    // record-detail header (`record_header`, overflowing into the ⋯
+    // record-detail header (`record_page`, overflowing into the ⋯
     // "More" menu) so platform admins can manage an account from either
     // the Users list or an open user record — without dropping to SQL or
     // a custom Setup wizard.
@@ -245,7 +245,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Ban User',
       icon: 'ban',
       variant: 'danger',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/ban-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -283,7 +283,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Unban User',
       icon: 'check-circle-2',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/unban-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -312,7 +312,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Unlock Account',
       icon: 'lock-open',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/unlock-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -352,7 +352,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Create User',
       icon: 'user-plus',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/create-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -479,7 +479,7 @@ export const SysUser = ObjectSchema.create({
         "Add someone by email address before their first sign-in. They sign in through your organization's identity provider; no password is set here.",
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/add-sso-user',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -541,7 +541,7 @@ export const SysUser = ObjectSchema.create({
         "Add many people at once from CSV text. Each row is added on its own, so a bad row fails alone. They sign in through your organization's identity provider; no password is set here.",
       icon: 'upload',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/import-sso-users',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -606,7 +606,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Remove Pending User',
       icon: 'user-minus',
       variant: 'danger',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/remove-sso-user',
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
@@ -623,7 +623,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Set Password',
       icon: 'key-round',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       // #2766 V1 — same path as better-auth's stock route, but served by the
       // plugin-auth wrapper registered ahead of the catch-all: it accepts the
@@ -693,7 +693,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Impersonate User',
       icon: 'user-cog',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/impersonate-user',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -745,7 +745,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Set Manager',
       icon: 'network',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/set-user-manager',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -833,7 +833,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Remove Manager',
       icon: 'user-minus',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/admin/set-user-manager',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -862,7 +862,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Platform Administrators',
       icon: 'shield-check',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/admin/list-platform-admins',
       // The door's platform-admin gate, declared where both action doors read it (#30771).
@@ -896,7 +896,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Register AI Service Account',
       icon: 'bot',
       variant: 'secondary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/service-account/register',
       // Offered in a cloud-managed environment too: an account is no person
@@ -932,7 +932,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Create API Key',
       icon: 'key-round',
       variant: 'secondary',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/service-account/create-key',
       // An AI service account's row only. Its owner is admitted by the door
@@ -992,7 +992,7 @@ export const SysUser = ObjectSchema.create({
       icon: 'user-pen',
       variant: 'primary',
       mode: 'edit',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       target: '/api/v1/auth/update-user',
       visible: 'has(record.id) && record.id == ctx.user.id',
@@ -1014,7 +1014,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Password',
       icon: 'key',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-password',
       // Managed (IdP-provisioned) users hold no local credential — hide the
@@ -1035,7 +1035,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Change Email',
       icon: 'mail',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/change-email',
       // A managed user's email is owned by the IdP — a local change would
@@ -1052,7 +1052,7 @@ export const SysUser = ObjectSchema.create({
       label: 'Resend Verification Email',
       icon: 'mail-check',
       variant: 'secondary',
-      locations: ['record_header', 'record_more', 'record_section'],
+      locations: ['record_page', 'record_section'],
       type: 'api',
       target: '/api/v1/auth/send-verification-email',
       // Only render for the row owner AND when their email is still
@@ -1074,7 +1074,7 @@ export const SysUser = ObjectSchema.create({
       icon: 'user-x',
       variant: 'danger',
       mode: 'delete',
-      locations: ['record_more', 'record_section'],
+      locations: ['record_page', 'record_section'], component: 'action:menu',
       type: 'api',
       target: '/api/v1/auth/delete-user',
       // Self-delete needs a local password; managed users are deprovisioned
