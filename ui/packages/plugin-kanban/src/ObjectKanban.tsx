@@ -1179,15 +1179,19 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   const hostPageQuestionRef = React.useRef(hostPageQuestion);
   hostPageQuestionRef.current = hostPageQuestion;
   const hostLaneRowsHeld = hostLaneRows && hostLaneRows.question === hostPageQuestion && hostPageQuestion !== '' ? hostLaneRows : null;
-  const hostBoardData = useMemo(() => {
-    if (!hasExternalData) return undefined;
-    if (!hostLaneRowsHeld || hostLaneRowsHeld.rows.length === 0) return externalData;
-    const seen = new Set((externalData as any[]).map((row) => String(row?.id ?? row?._id)));
-    return [...(externalData as any[]), ...hostLaneRowsHeld.rows.filter((row) => !seen.has(String(row?.id ?? row?._id)))];
-  }, [hasExternalData, externalData, hostLaneRowsHeld]);
 
   // Determine which data to use: external -> bound -> inline -> fetched
-  const rawData = hostBoardData || boundData || schema.data || fetchedData;
+  const rawData = (hasExternalData ? externalData : undefined) || boundData || schema.data || fetchedData;
+  /**
+   * The records the board draws: `rawData`, and on the board handed one page,
+   * the host's rows followed by the ones its lanes loaded past it
+   * (`hostLaneRows`), each record once.
+   */
+  const boardData = useMemo(() => {
+    if (!hostLaneRowsHeld || hostLaneRowsHeld.rows.length === 0 || rawData !== externalData) return rawData;
+    const seen = new Set((rawData as any[]).map((row) => String(row?.id ?? row?._id)));
+    return [...(rawData as any[]), ...hostLaneRowsHeld.rows.filter((row) => !seen.has(String(row?.id ?? row?._id)))];
+  }, [rawData, externalData, hostLaneRowsHeld]);
 
   /**
    * Are the lane counts about to be drawn counts of a WINDOW (`5591f03bd`)?
@@ -1250,7 +1254,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   // (objectui#11815).
   const predicateScope = usePredicateScope();
   const effectiveData = useMemo(() => {
-    if (!Array.isArray(rawData)) return [];
+    if (!Array.isArray(boardData)) return [];
 
     // The author's card-title choice — `cardTitle`, else the legacy
     // `titleField`, and `''` on either counts as unset. Resolved by the shared
@@ -1305,7 +1309,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     // if the second rung is ever added here.
     const nameFieldKey: string | undefined = resolveNameField(objectDef);
 
-    return rawData.map(item => {
+    return boardData.map(item => {
       let resolvedTitle: any = undefined;
 
       // 1. The explicit title field (`resolveKanbanTitleField`).
@@ -1635,7 +1639,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         ...(cardOwner ? { cardOwner } : {}),
       };
     });
-  }, [rawData, schema, objectDef, ownerField, ownerReadable, ownerPersonObject, perms, predicateScope]);
+  }, [boardData, schema, objectDef, ownerField, ownerReadable, ownerPersonObject, perms, predicateScope]);
 
   // Generate columns if missing but groupBy is present
   const effectiveColumns = useMemo(() => {
@@ -1930,10 +1934,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    */
   const hostLanePagingOn = pastPageLanes && !!hostLaneCounts;
   const hostLanePages = useMemo((): Record<string, KanbanLanePage> | null => {
-    if (!hostLanePagingOn || !hostLaneCounts || !schema.groupBy || !Array.isArray(rawData)) return null;
+    if (!hostLanePagingOn || !hostLaneCounts || !schema.groupBy || !Array.isArray(boardData)) return null;
     const groupBy = schema.groupBy;
     const onBoard: Record<string, number> = Object.create(null);
-    for (const row of rawData as any[]) {
+    for (const row of boardData as any[]) {
       const key = laneKeyOf(row?.[groupBy]);
       const laneId = key === '' ? KANBAN_UNCOLUMNED_ID : key;
       onBoard[laneId] = (onBoard[laneId] ?? 0) + 1;
@@ -1946,7 +1950,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       if (hasMore || loading) pages[laneId] = { total, loaded, hasMore, loading };
     }
     return pages;
-  }, [hostLanePagingOn, hostLaneCounts, schema.groupBy, rawData, hostLaneRowsHeld]);
+  }, [hostLanePagingOn, hostLaneCounts, schema.groupBy, boardData, hostLaneRowsHeld]);
   // Read by `loadMoreHostLane`, which must not change on every render.
   const hostLaneReadRef = React.useRef<{
     question: string;
@@ -2289,7 +2293,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       // foreign key, and that is what the write sends; the record held locally
       // keeps the referenced record expanded, as a refetch would return it, so
       // the card goes on naming it (and the rollback restores what it held).
-      const loaded: Array<Record<string, unknown>> = Array.isArray(rawData) ? rawData : [];
+      const loaded: Array<Record<string, unknown>> = Array.isArray(boardData) ? boardData : [];
       const priorValue = loaded.find((r) => String(r?.id ?? r?._id) === String(cardId))?.[groupBy];
       const movedValue = laneValueOf(loaded, groupBy, toColumnId);
 
@@ -2385,7 +2389,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         return { kind: 'refused', message: refusal };
       }
     },
-    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, rawData],
+    [schema.groupBy, schema.objectName, dataSource, hasExternalData, tt, boardData],
   );
 
   /**
@@ -2494,7 +2498,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       // The record as stored, not the card-shaped projection: `effectiveData`
       // overlays a derived `title`/`badges`, and the predicates must see the
       // record's own field values.
-      const record = (Array.isArray(rawData) ? rawData : []).find(
+      const record = (Array.isArray(boardData) ? boardData : []).find(
         (r) => String(r?.id ?? r?._id) === String(cardId),
       );
       // The lane field's conditional lock over THIS record (`readonlyWhen`, the
@@ -2522,7 +2526,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
 
       return persistCardMove(cardId, fromColumnId, toColumnId);
     },
-    [schema.groupBy, rawData, objectDef, persistCardMove, tt, predicateScope],
+    [schema.groupBy, boardData, objectDef, persistCardMove, tt, predicateScope],
   );
 
   // Label + localized options for each prompted field, resolved with the same
