@@ -4203,6 +4203,7 @@ const fr = {
         metric: "Nombre",
         table: "Tableau",
         showValues: "Afficher les valeurs",
+        showEmptyGroups: "Afficher les groupes sans enregistrements",
         targetLine: "Ligne d’objectif",
         targetLabel: "Objectif",
         secondLayerTableOnly: "Ce graphique trace le premier regroupement ; le second figure dans les valeurs calculées.",

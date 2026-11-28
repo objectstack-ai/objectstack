@@ -4202,6 +4202,7 @@ const pt = {
         metric: "Número",
         table: "Tabela",
         showValues: "Mostrar valores",
+        showEmptyGroups: "Mostrar grupos sem registros",
         targetLine: "Linha de meta",
         targetLabel: "Meta",
         secondLayerTableOnly: "Este gráfico desenha o primeiro agrupamento; o segundo está nos valores calculados.",

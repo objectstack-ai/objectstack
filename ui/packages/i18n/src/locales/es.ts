@@ -4207,6 +4207,7 @@ const es = {
         metric: "Número",
         table: "Tabla",
         showValues: "Mostrar valores",
+        showEmptyGroups: "Mostrar grupos sin registros",
         targetLine: "Línea objetivo",
         targetLabel: "Objetivo",
         secondLayerTableOnly: "Este gráfico dibuja la primera agrupación; la segunda está en los valores calculados.",

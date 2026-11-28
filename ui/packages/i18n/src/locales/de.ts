@@ -4119,6 +4119,7 @@ const de = {
         metric: "Zahl",
         table: "Tabelle",
         showValues: "Werte anzeigen",
+        showEmptyGroups: "Gruppen ohne Datensätze anzeigen",
         targetLine: "Ziellinie",
         targetLabel: "Ziel",
         secondLayerTableOnly: "Dieses Diagramm zeigt die erste Gruppierung; die zweite steht in den berechneten Werten.",
