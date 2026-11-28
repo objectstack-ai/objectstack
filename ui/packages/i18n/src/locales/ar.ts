@@ -2499,6 +2499,8 @@ const ar = {
         ctaUpgrade: "قم بالترقية للمتابعة",
         ctaTopUp: "أضف أرصدة للمتابعة",
         ariaLabel: "استخدام الذكاء الاصطناعي: {{status}}",
+        tierPersonal: "الحصة الشخصية",
+        tierTeamPool: "الرصيد المشترك للفريق",
       },
       openChats: "فتح المحادثات",
       chats: "المحادثات",

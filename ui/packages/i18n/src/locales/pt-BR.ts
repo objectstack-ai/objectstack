@@ -2310,6 +2310,8 @@ const pt = {
         ctaUpgrade: "Faça upgrade para continuar",
         ctaTopUp: "Adicione créditos para continuar",
         ariaLabel: "Uso de IA: {{status}}",
+        tierPersonal: "Cota pessoal",
+        tierTeamPool: "Reserva da equipe",
       },
       openChats: "Abrir conversas",
       chats: "Conversas",
