@@ -45,6 +45,8 @@ describe('knowledge_source form (ADR-0161 K4 clause 2)', () => {
     expect(row('label')).toMatchObject({ required: true });
     const adapter = row('adapter');
     expect(adapter).toMatchObject({ type: 'text' });
+    // The docs' cost callout: the memory store re-embeds the whole source on every boot.
+    expect(adapter?.helpText).toMatch(/every boot builds its index again/);
     expect(adapter?.required).toBeUndefined();
     expect(adapter?.helpText).toMatch(/blank for the deployment's store/i);
   });
@@ -73,6 +75,7 @@ describe('knowledge_source form (ADR-0161 K4 clause 2)', () => {
   it('says beside `content` that its fields are sent to the embedding provider on the first build, billed and kept', () => {
     const help = sourceRow('content')?.helpText ?? '';
     expect(help).toMatch(/egress/i);
+    expect(help).toMatch(/costs money/);
     expect(help).toMatch(/first build/);
     expect(help).toMatch(/embedding provider/);
     expect(help).toMatch(/bills/);

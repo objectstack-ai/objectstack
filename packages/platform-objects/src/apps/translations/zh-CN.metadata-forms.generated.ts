@@ -3490,6 +3490,98 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   knowledge_source: {
-    label: "知识源"
+    label: "知识源",
+    sections: {
+      basics: {
+        label: "基本信息",
+        description: "知识源的标识、智能体能否检索它，以及存放其索引的存储。"
+      },
+      records: {
+        label: "记录",
+        description: "索引哪个对象的哪些记录，以及记录的哪些字段。每个字段选择器提供此处所选对象的字段。"
+      },
+      refresh: {
+        label: "刷新",
+        description: "索引如何跟随记录更新。"
+      }
+    },
+    fields: {
+      name: {
+        label: "名称",
+        helpText: "唯一标识（snake_case）。search_knowledge 以它列出该知识源，其 sourceIds 参数也以它指名该知识源。"
+      },
+      label: {
+        label: "标签",
+        helpText: "显示名称，显示在 search_knowledge 回答的知识源列表中。"
+      },
+      description: {
+        label: "描述",
+        helpText: "知识源包含的内容，显示在 search_knowledge 回答的知识源列表中、名称旁边。"
+      },
+      aiExposed: {
+        label: "可供 AI 智能体检索",
+        helpText: "search_knowledge 是否可为 AI 智能体检索此知识源。默认开启。"
+      },
+      adapter: {
+        label: "存储",
+        helpText: "存放索引的存储，按其适配器 ID 填写（pgvector、turso、memory）。留空则使用部署的存储：PostgreSQL 上为 pgvector，否则为 turso，再否则为唯一挂载的存储。本部署未挂载的存储会在保存时被拒绝。memory 存储在重启后不保留任何内容，因此每次启动都会重新构建其索引，并把整个知识源再次发送给嵌入服务商。"
+      },
+      source: {
+        label: "来源",
+        helpText: "知识源索引的内容：一个对象的记录。"
+      },
+      "source.kind": {
+        label: "类型",
+        helpText: "知识源索引的内容。一个知识源索引一个对象的记录。",
+        options: {
+          object: "对象的记录"
+        }
+      },
+      "source.object": {
+        label: "对象",
+        helpText: "其记录被索引的对象。每条匹配的记录成为一个文档。"
+      },
+      "source.content": {
+        label: "内容字段",
+        helpText: "其文本被索引的字段，按顺序排列。每个字段都需逐一指名：没有通配符。嵌入即数据外发，且构建会产生费用：首次构建会读取筛选条件匹配的每条记录，把每个所列字段的文本发送给你的嵌入服务商（由其计费），这些文本会保存在记录存储之外的索引中。更换嵌入模型或切分方式后重建，会再次发送全部内容。之后添加到对象上的字段，在你于此处添加之前不会被索引。凭据类字段和内部字段即使列出也永远不会被索引。"
+      },
+      "source.metadataFields": {
+        label: "筛选字段",
+        helpText: "保存在每个段落旁边的字段，使检索可以按它们筛选（例如状态或负责人）。每个字段都必须是你可以查询的字段。"
+      },
+      "source.where": {
+        label: "要索引的记录",
+        helpText: "对该对象的 ObjectQL 筛选条件，例如 {\"status\": {\"$ne\": \"done\"}}。只有匹配的记录会被索引。留空：所有记录。"
+      },
+      "source.split": {
+        label: "段落",
+        helpText: "每个文档如何切分为段落。留空：递归切分，使用设置页的分块大小（未修改时为 800 个字符）。"
+      },
+      "source.split.strategy": {
+        label: "策略",
+        helpText: "整篇：每个文档一个段落。递归：依次在空行、换行、句末处切分。Markdown：每个标题一个段落，并带上其标题路径。",
+        options: {
+          whole: "整篇文档",
+          recursive: "递归",
+          markdown: "Markdown 章节"
+        }
+      },
+      "source.split.maxChars": {
+        label: "最长段落",
+        helpText: "以字符计。优先于设置页的分块大小；嵌入模型的输入上限可能会降低它。整篇文档策略不读取此值。"
+      },
+      "source.split.minChars": {
+        label: "最短段落",
+        helpText: "短于此长度的相邻片段会被合并，直至达到此长度（默认 200）。仅适用于递归和 Markdown。"
+      },
+      refresh: {
+        label: "刷新",
+        helpText: "索引如何与记录保持同步。"
+      },
+      "refresh.onRecordChange": {
+        label: "记录变更时同步",
+        helpText: "在记录创建、修改和删除时保持索引同步（默认开启）。关闭：由外部索引器维护索引，平台既不同步也不构建它。"
+      }
+    }
   }
 };

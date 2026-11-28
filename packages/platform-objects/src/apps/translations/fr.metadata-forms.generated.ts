@@ -3490,6 +3490,98 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   knowledge_source: {
-    label: "Source de connaissances"
+    label: "Source de connaissances",
+    sections: {
+      basics: {
+        label: "Basics",
+        description: "The source's identity, whether agents may search it, and the store that holds its index."
+      },
+      records: {
+        label: "Records",
+        description: "Which records of which object are indexed, and which of their fields. Each field picker offers the fields of the object chosen here."
+      },
+      refresh: {
+        label: "Refresh",
+        description: "How the index follows the records."
+      }
+    },
+    fields: {
+      name: {
+        label: "Name",
+        helpText: "Unique identifier (snake_case). search_knowledge lists the source by it, and its sourceIds argument names the source by it."
+      },
+      label: {
+        label: "Label",
+        helpText: "Display name, shown in the sources list of a search_knowledge answer."
+      },
+      description: {
+        label: "Description",
+        helpText: "What the source holds, shown beside its name in the sources list of a search_knowledge answer."
+      },
+      aiExposed: {
+        label: "Searchable by AI agents",
+        helpText: "Whether search_knowledge may search this source for AI agents. On by default."
+      },
+      adapter: {
+        label: "Store",
+        helpText: "The store that holds the index, by its adapter id (pgvector, turso, memory). Leave it blank for the deployment's store: pgvector on PostgreSQL, turso otherwise, else the only store mounted. A store this deployment does not mount is refused at save. The memory store keeps nothing across a restart, so every boot builds its index again and sends the whole source to the embedding provider."
+      },
+      source: {
+        label: "Source",
+        helpText: "What the source indexes: the records of one object."
+      },
+      "source.kind": {
+        label: "Kind",
+        helpText: "What the source indexes. A source indexes the records of one object.",
+        options: {
+          object: "Records of an object"
+        }
+      },
+      "source.object": {
+        label: "Object",
+        helpText: "The object whose records are indexed. Each matching record becomes one document."
+      },
+      "source.content": {
+        label: "Content fields",
+        helpText: "The fields whose text is indexed, in order. Each field is named: there is no wildcard. Embedding is egress, and a build costs money: the first build reads every record the filter matches and sends the text of each listed field to your embedding provider, which bills for it, and that text is kept in an index outside the record store. A rebuild after you change the embedding model or the split sends all of it again. A field added to the object later is not indexed until you add it here. Credential and internal fields are never indexed, even when listed."
+      },
+      "source.metadataFields": {
+        label: "Filter fields",
+        helpText: "Fields kept beside each passage, so a search can filter on them (for example a status or an owner). Each one must be a field you may query."
+      },
+      "source.where": {
+        label: "Records to index",
+        helpText: "An ObjectQL filter on the object, for example {\"status\": {\"$ne\": \"done\"}}. Only the records it matches are indexed. Blank: every record."
+      },
+      "source.split": {
+        label: "Passages",
+        helpText: "How each document is cut into passages. Blank: recursive, with the settings page's chunk size (800 characters unless changed)."
+      },
+      "source.split.strategy": {
+        label: "Strategy",
+        helpText: "Whole: one passage per document. Recursive: cut at blank lines, then line breaks, then sentence ends. Markdown: one passage per heading, carrying its heading path.",
+        options: {
+          whole: "Whole document",
+          recursive: "Recursive",
+          markdown: "Markdown sections"
+        }
+      },
+      "source.split.maxChars": {
+        label: "Longest passage",
+        helpText: "In characters. Wins over the settings page's chunk size; the embedding model's input limit can lower it. Not read by Whole document."
+      },
+      "source.split.minChars": {
+        label: "Shortest passage",
+        helpText: "Adjacent pieces shorter than this are merged, up to this length (default 200). Recursive and Markdown only."
+      },
+      refresh: {
+        label: "Refresh",
+        helpText: "How the index is kept in step with the records."
+      },
+      "refresh.onRecordChange": {
+        label: "Sync on record changes",
+        helpText: "Keep the index in step as records are created, changed and deleted (on by default). Off: an external indexer keeps the index, and the platform neither syncs nor builds it."
+      }
+    }
   }
 };

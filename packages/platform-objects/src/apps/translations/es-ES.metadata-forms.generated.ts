@@ -3490,6 +3490,98 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   knowledge_source: {
-    label: "Fuente de conocimiento"
+    label: "Fuente de conocimiento",
+    sections: {
+      basics: {
+        label: "Datos básicos",
+        description: "La identidad de la fuente, si los agentes pueden buscar en ella y el almacén que guarda su índice."
+      },
+      records: {
+        label: "Registros",
+        description: "Qué registros de qué objeto se indexan, y cuáles de sus campos. Cada selector de campos ofrece los campos del objeto elegido aquí."
+      },
+      refresh: {
+        label: "Actualización",
+        description: "Cómo sigue el índice a los registros."
+      }
+    },
+    fields: {
+      name: {
+        label: "Nombre",
+        helpText: "Identificador único (snake_case). search_knowledge lista la fuente por él, y su argumento sourceIds nombra la fuente por él."
+      },
+      label: {
+        label: "Etiqueta",
+        helpText: "Nombre visible, que aparece en la lista de fuentes de una respuesta de search_knowledge."
+      },
+      description: {
+        label: "Descripción",
+        helpText: "Lo que contiene la fuente, que aparece junto a su nombre en la lista de fuentes de una respuesta de search_knowledge."
+      },
+      aiExposed: {
+        label: "Buscable por agentes de IA",
+        helpText: "Si search_knowledge puede buscar en esta fuente para los agentes de IA. Activado de forma predeterminada."
+      },
+      adapter: {
+        label: "Almacén",
+        helpText: "El almacén que guarda el índice, por su id de adaptador (pgvector, turso, memory). Déjelo en blanco para usar el almacén de la implementación: pgvector en PostgreSQL, turso en otro caso y, si no, el único almacén montado. Un almacén que esta implementación no monta se rechaza al guardar. El almacén memory no conserva nada tras un reinicio, así que cada arranque vuelve a construir su índice y envía de nuevo toda la fuente al proveedor de embeddings."
+      },
+      source: {
+        label: "Origen",
+        helpText: "Lo que indexa la fuente: los registros de un objeto."
+      },
+      "source.kind": {
+        label: "Tipo",
+        helpText: "Lo que indexa la fuente. Una fuente indexa los registros de un objeto.",
+        options: {
+          object: "Registros de un objeto"
+        }
+      },
+      "source.object": {
+        label: "Objeto",
+        helpText: "El objeto cuyos registros se indexan. Cada registro que coincide se convierte en un documento."
+      },
+      "source.content": {
+        label: "Campos de contenido",
+        helpText: "Los campos cuyo texto se indexa, en orden. Cada campo se nombra: no hay comodín. Generar embeddings es una salida de datos, y una construcción cuesta dinero: la primera construcción lee cada registro que coincide con el filtro y envía el texto de cada campo indicado a su proveedor de embeddings, que lo factura, y ese texto se guarda en un índice fuera del almacén de registros. Una reconstrucción tras cambiar el modelo de embeddings o la división lo envía todo de nuevo. Un campo que se añada al objeto más adelante no se indexa hasta que lo añada aquí. Los campos de credenciales e internos nunca se indexan, aunque se indiquen."
+      },
+      "source.metadataFields": {
+        label: "Campos de filtro",
+        helpText: "Campos que se guardan junto a cada pasaje, para que una búsqueda pueda filtrar por ellos (por ejemplo, un estado o un propietario). Cada uno debe ser un campo que usted pueda consultar."
+      },
+      "source.where": {
+        label: "Registros que indexar",
+        helpText: "Un filtro ObjectQL sobre el objeto, por ejemplo {\"status\": {\"$ne\": \"done\"}}. Solo se indexan los registros que coinciden. En blanco: todos los registros."
+      },
+      "source.split": {
+        label: "Pasajes",
+        helpText: "Cómo se divide cada documento en pasajes. En blanco: recursiva, con el tamaño de fragmento de la página de configuración (800 caracteres si no se ha cambiado)."
+      },
+      "source.split.strategy": {
+        label: "Estrategia",
+        helpText: "Documento completo: un pasaje por documento. Recursiva: corta en las líneas en blanco, luego en los saltos de línea y luego en los finales de frase. Markdown: un pasaje por encabezado, con su ruta de encabezados.",
+        options: {
+          whole: "Documento completo",
+          recursive: "Recursiva",
+          markdown: "Secciones Markdown"
+        }
+      },
+      "source.split.maxChars": {
+        label: "Pasaje más largo",
+        helpText: "En caracteres. Prevalece sobre el tamaño de fragmento de la página de configuración; el límite de entrada del modelo de embeddings puede reducirlo. Documento completo no lo lee."
+      },
+      "source.split.minChars": {
+        label: "Pasaje más corto",
+        helpText: "Las piezas adyacentes más cortas que esto se fusionan, hasta esta longitud (200 de forma predeterminada). Solo Recursiva y Markdown."
+      },
+      refresh: {
+        label: "Actualización",
+        helpText: "Cómo se mantiene el índice al día con los registros."
+      },
+      "refresh.onRecordChange": {
+        label: "Sincronizar con los cambios de registros",
+        helpText: "Mantiene el índice al día a medida que se crean, cambian y eliminan registros (activado de forma predeterminada). Desactivado: un indexador externo mantiene el índice, y la plataforma ni lo sincroniza ni lo construye."
+      }
+    }
   }
 };
