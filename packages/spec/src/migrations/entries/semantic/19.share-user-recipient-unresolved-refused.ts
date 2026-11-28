@@ -21,9 +21,10 @@ export const entry: SemanticMigration = {
     + 'SharingRuleService.defineRule under a non-system context) whose recipientType is user, when recipientId '
     + 'names no existing sys_user (tenancy posture single) or, on a deployment walled by organization (tenancy '
     + 'posture isolated or group) with the record or rule organization known, no member of that organization. A '
-    + 'rule upsert that keeps its stored user recipient is not judged, and neither is a recipient on a walled '
-    + 'deployment where the record or rule organization does not resolve: that write is already refused for every '
-    + 'recipient alike',
+    + 'rule\'s organization is the caller\'s or, when a platform operator with no active organization updates a '
+    + 'stored rule, the stored rule\'s own. A rule upsert that keeps its stored user recipient is not judged, and '
+    + 'neither is a recipient on a walled deployment where the record or rule organization does not resolve (an '
+    + 'insert there is already refused for every recipient alike)',
   replacement:
     'Send the id of an existing user, on a multi-organization deployment a member of the organization the record '
     + 'or the rule belongs to (GET /api/v1/data/sys_user lists the users a caller may read). The write then '
@@ -38,7 +39,9 @@ export const entry: SemanticMigration = {
     + 'with the same sentence, so the door tells no caller who exists in another tenant. Where the wall stands '
     + 'but the organization does not resolve, the recipient is not judged at all: the engine refuses that insert '
     + '(500 ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED) for every recipient alike, and a directory lookup there would '
-    + 'answer an unknown id differently from a real one. Shares and rules '
+    + 'answer an unknown id differently from a real one. A platform operator with no active organization who '
+    + 'moves a stored rule writes an update, which the engine\'s organization rule (insert-only) does not refuse, so the '
+    + 'recipient is judged in the organization the stored rule already grants in. Shares and rules '
     + 'already stored are not rewritten or removed: there is no mechanical answer to which user an inert row '
     + 'was meant for, and the platform\'s own rule-materialised grants are not judged here.',
   acceptanceCriteria:
@@ -50,7 +53,9 @@ export const entry: SemanticMigration = {
     + 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED, and nothing is written; the same call naming an existing user (a '
     + 'member of the record organization when walled) answers '
     + '201 and the row is listed. POST /api/v1/sharing/rules with a user recipient that does not resolve answers '
-    + '400 VALIDATION_FAILED and stores no rule; saving a stored rule again with its recipient unchanged '
+    + '400 VALIDATION_FAILED and stores no rule; on a walled deployment, a platform operator with no active '
+    + 'organization who moves a stored rule onto a user that is not a member of that rule\'s organization gets the '
+    + 'same answer and the stored recipient stands; saving a stored rule again with its recipient unchanged '
     + '(for example to set active false) succeeds as before. To find inert rows stored before this change, list '
     + 'sys_record_share rows with source manual and recipient_type user whose recipient_id matches no sys_user id, '
     + 'and re-grant or revoke each.',
