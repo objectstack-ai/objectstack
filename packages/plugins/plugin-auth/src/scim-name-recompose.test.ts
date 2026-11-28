@@ -37,6 +37,10 @@
  *      formatted name was explicit too, and when only `displayName` was), and
  *      a `displayName` sent in the same PATCH as the parts wins in either
  *      operation order.
+ *  (c) the edge of the value test: a name supplied explicitly but equal to
+ *      the composition of the parts cannot be told from a derived one, so it
+ *      moves too. The vendor's own suite pins the opposite for that shape;
+ *      the case keeps the reversal visible to the upgrade PR.
  *
  * Every case drives `AuthManager.handleRequest()` with a real SCIM bearer on a
  * real `ObjectQL` over better-sqlite3, the harness
@@ -325,6 +329,30 @@ describe('SCIM name parts: a part-only PATCH recomposes a derived display name',
       givenName: 'Entra',
       familyName: 'Style',
       userName: 'Custom Name',
+    });
+  });
+
+  it('(c) a formatted and display name supplied explicitly but EQUAL to the parts reads as derived and moves', async () => {
+    // The derived test is a value test (ruling record 6845302116: "the same
+    // test setFormattedName already makes"), and the vendor stores no record
+    // of whether a name was supplied or composed. So a supplied name equal to
+    // the composition is recomposed. The vendor's own 1.7.12 suite pins the
+    // opposite for this exact shape ("preserves explicitly supplied formatted
+    // and display names when patching one name part"); this case keeps that
+    // reversal visible, so the upgrade PR that removes the patch reads it.
+    const h = await boot();
+    const user = await provision(h, 'equal', {
+      givenName: 'Ada',
+      familyName: 'Lovelace',
+      formatted: 'Ada Lovelace',
+    }, 'Ada Lovelace');
+    await patchUser(h, user, [{ op: 'replace', path: 'name.givenName', value: 'Augusta' }]);
+    expect(await readName(h, user)).toEqual({
+      displayName: 'Augusta Lovelace',
+      formatted: 'Augusta Lovelace',
+      givenName: 'Augusta',
+      familyName: 'Lovelace',
+      userName: 'Augusta Lovelace',
     });
   });
 
