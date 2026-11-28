@@ -512,7 +512,7 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
     }
 
     for (const arm of ['transient', 'content', 'where', 'title'] as const) {
-        it(`${arm}: the duplicate is told nothing was copied once and to duplicate the package, never to save; the /meta save's sentence is unchanged`, async () => {
+        it(`${arm}: the duplicate is told nothing was copied once and to duplicate the package, never to save, and nothing is copied`, async () => {
             const stack = await bootPlatformKnowledge(arm);
             try {
                 const expected = SAVE_VERDICT[arm];
@@ -525,8 +525,15 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
                 expect(message.match(/nothing was copied/gi)).toHaveLength(1);
                 expect(message).toMatch(arm === 'title' ? /Have someone who may query it duplicate the package\.$/ : /duplicate the package again/);
                 expect(stack.protocol.duplicatePackage).not.toHaveBeenCalled();
+            } finally {
+                await stack.kernel.shutdown();
+            }
+        });
 
-                // CONTROL: the same verdict at the /meta save door, byte for byte as before.
+        it(`${arm}: CONTROL — the same verdict at the /meta save door is byte for byte what it was, and nothing is saved`, async () => {
+            const stack = await bootPlatformKnowledge(arm);
+            try {
+                const expected = SAVE_VERDICT[arm];
                 const saved = await stack.save(authed(BOTH));
                 expect(saved.response?.status).toBe(expected.status);
                 expect(saved.response?.body?.error?.code).toBe(expected.code);
@@ -536,5 +543,7 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
                 await stack.kernel.shutdown();
             }
         });
+    }
+});
     }
 });
