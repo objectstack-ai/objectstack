@@ -1386,7 +1386,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         const from = sql.length;
         const hits = await adapter.search(QUERY, { source: s, topK: 2, scope });
         const want = await exact.adapter.search(QUERY, { source: t, topK: 2, scope });
-        expect(hits.map((h) => h.chunkId)).toEqual(want.map((h) => h.chunkId));
+        // The passages the exact scan ranks, by record and passage: the two sources' chunk ids differ by their name.
+        const passages = (found: typeof hits) => found.map((h) => h.chunkId.slice(h.chunkId.indexOf(':')));
+        expect(passages(hits)).toEqual(passages(want));
         return vectorLegs(sql, from);
       };
 
@@ -1394,8 +1396,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(await search([{ kind: 'record', ids: records(141, 240) }])).toEqual({ approximate: 0, exact: 1 });
       // 100 (records 140…239): the first pass, which keeps about 20 of its 80 candidates, and answers.
       expect(await search([{ kind: 'record', ids: records(140, 240) }])).toEqual({ approximate: 1, exact: 0 });
-      // The passages in scope are counted, not the ids: 20 records holding 100 passages take the first pass.
-      expect(await search([{ kind: 'record', ids: records(0, 20) }])).toEqual({ approximate: 1, exact: 0 });
+      // The passages in scope are counted, not the ids: 20 records holding 100 passages take the first pass
+      // (whose pool of near-duplicate passages may then fall short, and the exact scan follow).
+      expect((await search([{ kind: 'record', ids: records(0, 20) }])).approximate).toBe(1);
       // Two terms of 40 records each, one id in both: 80 passages, under the cut.
       expect(await search([{ kind: 'record', ids: records(100, 140) }, { kind: 'record', ids: records(139, 180) }])).toEqual({ approximate: 0, exact: 1 });
       // The narrow records beside a parent (metadata) term: the record index does not serve that scan, so
