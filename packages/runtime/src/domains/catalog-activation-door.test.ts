@@ -1164,3 +1164,60 @@ describe('[#37811] the no-ledger 501 follows the request\'s language, its noun i
         }
     });
 });
+
+// [#37864] Every type the door accepts names its noun through the catalog, in
+// every catalog locale. The type list is read off the door's own shape refusal
+// (it enumerates `CatalogActivationType`), so a type added there without a
+// `catalog_activation_noun_<type>` key, or without a row here, fails.
+describe('[#37864] the no-ledger 501 names every activation type\'s noun in the request\'s language', () => {
+    const RULE = 'share_red_projects';
+    const HOOK = 'crm_contact_changed';
+    const QUEUE = 'support_intake';
+    const ASSIGN = 'route_new_cases';
+    const declared = (name: string) => ({ name, packageId: 'crm' });
+    const TYPES: ReadonlyArray<readonly [string, string, EngineOptions, Record<string, unknown>]> = [
+        ['position', POSITION, {}, {}],
+        ['permission', SET, {}, {}],
+        ['sharing_rule', RULE, {}, { sharingRules: { async declaredRuleNamed(n: string) { return n === RULE ? declared(n) : null; } } }],
+        ['webhook', HOOK, {}, {
+            declaredWebhooks: {
+                async declaredWebhookNamed(n: string) { return n === HOOK ? { webhook: { name: n }, active: true, packageId: 'crm' } : null; },
+            },
+        }],
+        ['queue', QUEUE, {}, { 'ownership-queue': { async declaredQueueNamed(n: string) { return n === QUEUE ? declared(n) : null; } } }],
+        ['assignment_rule', ASSIGN, { registryItems: { assignment_rule: [{ name: ASSIGN, object: 'crm_case', _packageId: 'crm' }] } }, {}],
+    ];
+    const LANGS = [
+        ['en', {}],
+        ['ja-JP', { request: { headers: { 'accept-language': 'ja-JP,ja;q=0.9' } } }],
+        ['zh-CN', { request: { headers: { 'accept-language': 'zh-CN' } } }],
+        ['es-ES', { request: { headers: { 'accept-language': 'es-ES' } } }],
+    ] as const;
+    const fill = (locale: string, key: string, params: Record<string, string> = {}): string =>
+        BUILTIN_OPERATION_MESSAGES[locale][key].replace(/\{\{(\w+)\}\}/g, (_m, name: string) => params[name] ?? '');
+
+    it('the rows here are exactly the types the door accepts', async () => {
+        const refusal = await flip(boot('single'), TENANT_ADMIN(), '/_activation/no_such_type/x');
+        expect(statusOf(refusal)).toBe(400);
+        const accepted = [...String(messageOf(refusal)).matchAll(/`([a-z_]+)`/g)].map((m) => m[1]);
+        expect(accepted.sort()).toEqual(TYPES.map(([type]) => type).sort());
+    });
+
+    it.each(TYPES)('%s: the catalog defines its noun in every locale, and the door renders it in the request\'s', async (type, name, opts, services) => {
+        for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
+            expect(BUILTIN_OPERATION_MESSAGES[locale][`catalog_activation_noun_${type}`], `${locale} ${type}`).toBeTruthy();
+        }
+        for (const [locale, extra] of LANGS) {
+            const h = boot('single', { ...opts, omitLedger: true }, services);
+            const res = await flip(h, { ...TENANT_ADMIN(), ...extra } as HttpProtocolContext, `/_activation/${type}/${name}`, { enabled: false });
+            expect(statusOf(res), `${locale} ${type}`).toBe(501);
+            expect(messageOf(res), `${locale} ${type}`).toBe(fill(locale, 'catalog_activation_ledger_missing_off', {
+                table: METADATA_ACTIVATION_TABLE,
+                noun: fill(locale, `catalog_activation_noun_${type}`),
+                name,
+            }));
+            expect(vary37811(res.response), `${locale} ${type}`).toBe('Accept-Language');
+            expect(h.writes).toEqual([]);
+        }
+    });
+});
