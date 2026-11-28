@@ -23,8 +23,8 @@
  *
  * The population is the intersection the two filter chains treat identically
  * — `locations` (`list_only` renders on neither) and `requiredPermissions`
- * (`gated` is denied on both) — with no `order` and no `record_more`: the
- * header sorts by `order` and routes `record_more` into its overflow menu,
+ * (`gated` is denied on both) — with no `order` and no folded (`component: 'action:menu'`): the
+ * header sorts by `order` and routes folded (`component: 'action:menu'`) into its overflow menu,
  * neither of which the bar does, and those are pre-existing differences of
  * the two surfaces' chains, not of the array's meaning. The cross-surface
  * control (object render vs object render) is what proves the population is
@@ -61,14 +61,14 @@ beforeAll(() => {
 });
 
 const ACTIONS: Record<string, any> = {
-  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'] },
-  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_header'] },
-  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['list_item'] },
+  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'] },
+  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_page'] },
+  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['record_row'] },
   gated: {
     name: 'gated',
     label: 'Gated Action',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     requiredPermissions: ['nobody_holds_this'],
   },
 };
@@ -109,7 +109,7 @@ function mount(type: 'page:header' | 'record:quick_actions', actions: unknown[])
   const schema =
     type === 'page:header'
       ? { type, title: 'Lead', actions }
-      : { type, location: 'record_header', actions };
+      : { type, location: 'record_page', actions };
   return render(
     <MetadataCtx.Provider value={METADATA}>
       <ActionProvider context={{ user: USER } as any}>

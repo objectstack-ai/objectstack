@@ -12,7 +12,7 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-import { catalogNotImplemented } from './own-door-bridge.js';
+import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
 
 /**
  * The route this domain claims — `/auth` and its slash-separated sub-paths,
@@ -107,7 +107,8 @@ export async function handleAuthRequest(deps: DomainHandlerDeps, _path: string, 
     // that reached `handleAuth` directly WITH an auth service registered used to
     // get that mock's `mock_<uuid>` session instead of real authentication. It
     // now gets the auth service; #4113 removed the mock entirely (see below).
-    const authService = await deps.getService(context, CoreServiceName.enum.auth);
+    // The request's own kernel serves the door, and only it (`readDoorSlot`).
+    const authService = await readDoorSlot(deps, context, CoreServiceName.enum.auth);
     if (authService && typeof authService.handleRequest === 'function') {
         // [#5085] The auth service owns the routing, so whatever it THROWS is
         // unattributable here: this domain never inspected the sub-path, never

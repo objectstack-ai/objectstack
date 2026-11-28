@@ -32,7 +32,7 @@ describe('send_in_app_message ↔ POST /api/v1/messaging/in-app-messages', () =>
     it('is a same-origin api action on the Notification Events list toolbar, aimed at the door', () => {
         expect(action).toBeDefined();
         expect(action!.type).toBe('api');
-        expect(action!.locations).toEqual(['list_toolbar']);
+        expect(action!.locations).toEqual(['list']);
         expect(action!.target).toBe(IN_APP_MESSAGE_ROUTE);
     });
 

@@ -516,7 +516,7 @@ describe.each(BLOCKS)('%s — keys the runner acts on, forwarded by the block', 
   });
 
   it('`locations` members: a record-scoped placement refuses to run with no record in scope', async () => {
-    mount(node(type, { actionType: 'script', locations: ['list_toolbar', 'record_header'] }), {
+    mount(node(type, { actionType: 'script', locations: ['list', 'record_page'] }), {
       handlers: { script: serverAction() },
     });
     press();
@@ -526,7 +526,7 @@ describe.each(BLOCKS)('%s — keys the runner acts on, forwarded by the block', 
     expect(fetchSpy).not.toHaveBeenCalled();
     cleanup();
     // Control: object-level placements only — the same action runs without a record.
-    mount(node(type, { actionType: 'script', locations: ['list_toolbar'] }), {
+    mount(node(type, { actionType: 'script', locations: ['list'] }), {
       handlers: { script: serverAction() },
     });
     press();

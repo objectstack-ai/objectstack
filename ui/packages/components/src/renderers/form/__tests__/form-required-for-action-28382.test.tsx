@@ -49,7 +49,7 @@ const SUBMIT_SIGNOFF = {
   operation: 'update',
   patch: { status: 'sent' },
   visible: { dialect: 'cel', source: "has(record.status) && record.status != 'sent'" },
-  locations: ['list_item', 'record_header'],
+  locations: ['record'],
 };
 
 const FIELDS = [
@@ -228,9 +228,9 @@ describe('form renderer — fields an update action would require (objectstack#2
     renderInvoiceForm({
       actions: [
         SUBMIT_SIGNOFF,
-        { name: 'mark_paid', label: 'Mark Paid', operation: 'update', patch: { status: 'paid' }, locations: ['record_header'] },
+        { name: 'mark_paid', label: 'Mark Paid', operation: 'update', patch: { status: 'paid' }, locations: ['record_page'] },
         // Writes a status the rule does not name: no line.
-        { name: 'void_it', label: 'Void', operation: 'update', patch: { status: 'void' }, locations: ['record_header'] },
+        { name: 'void_it', label: 'Void', operation: 'update', patch: { status: 'void' }, locations: ['record_page'] },
       ],
     });
 

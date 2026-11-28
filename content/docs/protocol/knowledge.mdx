@@ -351,8 +351,36 @@ credential-class or `internal` field, when the value is empty, and when
 the object resolves no display field. A source over an object with no
 registered definition reads a field named `title`. Documents indexed
 before this rule carry the value of a field named `title` until a complete
-reindex writes them again, so the source admission below still asks about a
-declared `title` field as well as the display field.
+reindex writes them again. So a source over an object that declares a
+`title` field the index may carry and the source does not serve (the display
+field is another field, none resolves, or the object's fields cannot be
+enumerated) is searched for a caller other than the system context only once
+its adapter's index status reports the fingerprint and the recipe hash the
+service computes now. The recipe hash names the title rule and is recorded
+only when a complete build completes, and only a build that purges removes
+the documents it did not walk. Until then the search refuses the source
+`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass, a source
+reload, the reconcile or `os knowledge rebuild` builds it. Under
+`buildAtBoot: false` (which also turns off the build on reload) nothing but
+the reconcile, where it runs, or `os knowledge rebuild` builds it. No build
+proves such a source, so it stays refused, when its
+`refresh.onRecordChange` is `false` (its builds purge nothing, and the boot
+pass and the reconcile leave it alone) or when its adapter has no
+`listDocuments`, no `completeBuild` or no index status.
+
+The proof covers the index as its last complete build left it. So each hit of
+a proven source is also checked against its record as it reads now, with one
+read per source per search round in the system context. A hit is served only
+when the record still belongs to the source (its `where` included) and the
+document the store holds is the one the current recipe assembles from it (the
+same `docHash`). A document the build's purge left in place, or one written
+after the build under an earlier recipe, is never served. The search repairs
+a stale or missing record's own document in the background, once per document
+until a later search finds it current; a document under a foreign id is
+dropped and not repaired. A check that cannot be made drops the hit: the
+read fails, the hit names no record or carries no hash, the hash cannot be
+computed, or the tenancy posture cannot be read. The read decides only whether
+a hit is served; nothing it reads is added to the hit.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -926,10 +954,9 @@ searched for a non-system caller, the service asks, once per object per search:
 - **System objects** — a `sys_*` object is searched only when it declares
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `content`
-  member; each `metadataFields`
-  member; the display field the title is read from, and a declared `title`
-  field), less the credential-class and `internal: true` fields an
-  index never carries, must be one the caller may **query**, per the `security`
+  member; each `metadataFields` member; the display field the title is read
+  from), less the credential-class and `internal: true` fields an index never
+  carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
   all: every field except those declaring a `maskingRule`. Queryable, not
@@ -1143,8 +1170,13 @@ later for a new object gets its hooks when it arrives.
   every object that already carries a per-row hook (the audit plugin's, for
   one): over it the write is refused and nothing is written.
 - **A recycle-bin restore** runs no hooks (a restore is not a create, ADR-0148
-  D2), so on such a kernel a restored row is not re-indexed by itself; a
-  `reindexSource` brings it back.
+  D2), so the plugin also registers one engine middleware that hears the
+  `restore` operation: once a restore has answered, each row it wrote back is
+  synced, the master first, through the same seams (the queue, or the deferral
+  above, so a restore inside a unit that rolls back indexes nothing). A restore
+  that refuses or fails syncs nothing; one that landed with a stale roll-up
+  (`ERR_SUMMARY_RECOMPUTE`) syncs its rows. A restored row is re-read under each
+  source's `where`, as a write's is.
 
 The inline sync is in-process: a sync that has not finished when the process
 stops is lost, and the next reconcile or `reindexSource` repairs it. Through the

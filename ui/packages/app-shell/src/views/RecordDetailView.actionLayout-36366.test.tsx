@@ -52,10 +52,10 @@ import { DesignModeProvider } from '../layout/designMode';
 
 const RECORD_ID = 'rec-1';
 
-const CONVERT = { name: 'convert', label: 'Convert', type: 'url', target: 'https://example.com/c', locations: ['record_header'], order: 1 };
-const MARK_WON = { name: 'mark_won', label: 'Mark Won', type: 'url', target: 'https://example.com/w', locations: ['record_header'], order: 2 };
-const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_header'], order: 3 };
-const LOG_CALL = { name: 'log_call', label: 'Log Call', type: 'url', target: 'https://example.com/l', locations: ['record_more'], order: 4 };
+const CONVERT = { name: 'convert', label: 'Convert', type: 'url', target: 'https://example.com/c', locations: ['record_page'], order: 1 };
+const MARK_WON = { name: 'mark_won', label: 'Mark Won', type: 'url', target: 'https://example.com/w', locations: ['record_page'], order: 2 };
+const SHARE = { name: 'share', label: 'Share', type: 'url', target: 'https://example.com/s', locations: ['record_page'], order: 3 };
+const LOG_CALL = { name: 'log_call', label: 'Log Call', type: 'url', target: 'https://example.com/l', locations: ['record_page'], component: 'action:menu', order: 4 };
 const ACTIONS = [CONVERT, MARK_WON, SHARE, LOG_CALL];
 const LABELS = ACTIONS.map((a) => a.label);
 
@@ -184,14 +184,14 @@ describe.each([
   ['the synthesized default page, in the side preview', false],
   ['an authored page:header with placedActions: true', true],
 ] as const)('#36366 record header pins: %s', (_face, authored) => {
-  it('CONTROL — no pins: the header draws as before (record_header inline by order, record_more in ⋯)', async () => {
+  it('CONTROL — no pins: the header draws as before (record_page inline by order, folded in ⋯)', async () => {
     mount(undefined, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Convert', 'Mark Won', 'Share']);
     expect(menu).toEqual(['Log Call']);
   });
 
-  it('the pinned actions are the buttons, in pin order (a record_more one too); the rest are in ⋯', async () => {
+  it('the pinned actions are the buttons, in pin order (a folded one too); the rest are in ⋯', async () => {
     mount({ record: { pinned: ['log_call', 'share'] } }, authored);
     const { inline, menu } = await headerFaces();
     expect(inline).toEqual(['Log Call', 'Share']);
