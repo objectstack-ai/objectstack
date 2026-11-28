@@ -5545,8 +5545,6 @@ const zhHant = {
     openAppNamed: '開啟 {{name}}',
     editApp: '編輯應用',
     editAppNamed: '編輯 {{name}}',
-    editWithAi: '用 AI 編輯',
-    editWithAiNamed: '用 AI 編輯 {{name}}',
     enableApp: '啟用應用',
     disableApp: '停用應用',
     enableAppNamed: '啟用 {{name}}',

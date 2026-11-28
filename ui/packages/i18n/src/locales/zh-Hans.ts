@@ -5545,8 +5545,6 @@ const zh = {
     openAppNamed: '打开 {{name}}',
     editApp: '编辑应用',
     editAppNamed: '编辑 {{name}}',
-    editWithAi: '用 AI 编辑',
-    editWithAiNamed: '用 AI 编辑 {{name}}',
     enableApp: '启用应用',
     disableApp: '停用应用',
     enableAppNamed: '启用 {{name}}',

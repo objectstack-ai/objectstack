@@ -5647,8 +5647,6 @@ const pt = {
     openAppNamed: "Abrir {{name}}",
     editApp: "Editar aplicativo",
     editAppNamed: "Editar {{name}}",
-    editWithAi: "Editar com IA",
-    editWithAiNamed: "Editar {{name}} com IA",
     enableApp: "Habilitar aplicativo",
     disableApp: "Desabilitar aplicativo",
     enableAppNamed: "Habilitar {{name}}",

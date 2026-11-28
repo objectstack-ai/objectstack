@@ -6114,8 +6114,6 @@ const ar = {
     openAppNamed: "فتح {{name}}",
     editApp: "تعديل التطبيق",
     editAppNamed: "تعديل {{name}}",
-    editWithAi: "التعديل بالذكاء الاصطناعي",
-    editWithAiNamed: "تعديل {{name}} بالذكاء الاصطناعي",
     enableApp: "تفعيل التطبيق",
     disableApp: "تعطيل التطبيق",
     enableAppNamed: "تفعيل {{name}}",

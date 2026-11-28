@@ -5499,8 +5499,6 @@ const de = {
     openAppNamed: "{{name}} öffnen",
     editApp: "App bearbeiten",
     editAppNamed: "{{name}} bearbeiten",
-    editWithAi: "Mit KI bearbeiten",
-    editWithAiNamed: "{{name}} mit KI bearbeiten",
     enableApp: "App aktivieren",
     disableApp: "App deaktivieren",
     enableAppNamed: "{{name}} aktivieren",
