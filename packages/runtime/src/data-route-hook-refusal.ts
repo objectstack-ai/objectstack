@@ -33,9 +33,10 @@
  * Exactly a throw a hook body raised: a `SandboxError` carrying the body's own
  * `innerMessage` (a sandboxed body that threw, or an in-process handler's
  * declared refusal, which the runtime raises as the same `SandboxError`), the
- * read `classifyDataError` calls a sandbox origin. Whatever code it carries,
- * `PERMISSION_DENIED` included: the foot catch asks this before its
- * permission-denial arm, which matches that code.
+ * read `classifyDataError` calls a sandbox origin (`isSandboxOrigin`, the same
+ * export, so the two doors cannot disagree on which throws are a body's).
+ * Whatever code it carries, `PERMISSION_DENIED` included: the foot catch asks
+ * this before its permission-denial arm, which matches that code.
  *
  *  - A REPORTED refusal (`sandboxBusinessMessage` answers) is the throw
  *    `classifyDataError`'s unwrap door answers, so the status, `code`, demoted
@@ -58,7 +59,7 @@
  * flat body is context, and joins `details`, as the NOT NULL arm's members do.
  */
 
-import { mapDataError } from '@objectstack/types';
+import { isSandboxOrigin, mapDataError } from '@objectstack/types';
 
 /** What `dispatch()`'s foot catch builds its envelope from. */
 export interface DataRouteHookRefusalAnswer {
@@ -77,23 +78,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A throw a hook body raised: `classifyDataError`'s sandbox-origin read (a
- * non-empty `innerMessage`), which a reported refusal and a crash both answer
- * and the sandbox's own fault does not. Read the same way here so the two
- * doors cannot disagree on which throws are a body's.
- */
-function isHookBodyThrow(error: unknown): boolean {
-    const inner = isRecord(error) || error instanceof Error ? (error as { innerMessage?: unknown }).innerMessage : undefined;
-    return typeof inner === 'string' && inner.length > 0;
-}
-
-/**
  * The answer to `error`, thrown on the `/data/:object` route that names
  * `object`, when a hook body raised it (a refusal or a crash); `undefined`
  * otherwise.
  */
 export function dataRouteHookRefusalAnswer(error: unknown, object: string): DataRouteHookRefusalAnswer | undefined {
-    if (!isHookBodyThrow(error)) return undefined;
+    if (!isSandboxOrigin(error)) return undefined;
     const { status, body } = mapDataError(error, object);
 
     const context = Object.fromEntries(Object.entries(body).filter(([key]) => !ENVELOPE_KEYS.has(key)));
