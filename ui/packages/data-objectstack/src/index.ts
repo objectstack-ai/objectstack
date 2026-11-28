@@ -3549,6 +3549,28 @@ function isCallerAbort(error: unknown, init?: RequestInit): boolean {
 }
 
 /**
+ * Whether `url` is a request to this data source's server (objectstack#38163),
+ * judged by the URL parser rather than by spelling: `url` is resolved against
+ * the server, which is `baseUrl`, or the page's origin when `baseUrl` is `''`,
+ * and it is this server only when the resolved origin is the server's and, for
+ * a `baseUrl` with a path, the resolved path lies under that path. A server
+ * that cannot be read, or a URL that does not parse, is not this server.
+ */
+function isRequestToServer(url: string, baseUrl: string): boolean {
+  const base = baseUrl !== '' ? baseUrl : (globalThis as { location?: { origin?: unknown } }).location?.origin;
+  if (typeof base !== 'string' || base === '') return false;
+  try {
+    const server = new URL(base);
+    const resolved = new URL(url, server);
+    if (resolved.origin !== server.origin) return false;
+    const path = server.pathname.replace(/\/+$/, '');
+    return path === '' || resolved.pathname.startsWith(`${path}/`);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `uploadFile` / `uploadFiles` refuse `fieldName` and `metadata` before any
  * request (objectstack#38163): the storage service's presigned flow, the one
  * upload route the standard server serves, carries neither, so sending the
@@ -3846,11 +3868,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     this.token = config.token;
     this.storageUploadFetch = (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      // A path on this server: one leading `/` (a protocol-relative `//host/...` names another host), or
-      // this server's own origin.
-      const toThisServer =
-        (url.startsWith('/') && !url.startsWith('//')) || (this.baseUrl !== '' && url.startsWith(`${this.baseUrl}/`));
-      if (!toThisServer) return transport(input, init);
+      if (!isRequestToServer(url, this.baseUrl)) return transport(input, init);
       const headers = new Headers(init?.headers);
       for (const [name, value] of Object.entries(this.getAuthHeaders())) {
         if (!headers.has(name)) headers.set(name, value);
