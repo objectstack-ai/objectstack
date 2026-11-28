@@ -1350,7 +1350,9 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // all three locales.
       // 845 since #37304: the `knowledge_source` type's own label (ADR-0161
       // K4), authored in every locale.
-      expect(translated.length, `${locale} positive control`).toBe(845);
+      // 846 since #37402: the object form's `uiReadonlyWhen` row (the
+      // whole-record hand lock), authored in every locale.
+      expect(translated.length, `${locale} positive control`).toBe(846);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

@@ -967,10 +967,13 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // action arrangement per scope) and its `list` / `record` rows — a label
     // and a help text each, three rows and six leaves, all translated leaves
     // authored by that card. `advanced` reads 106 → 112.
-    expect(PANEL_LEAVES.length).toBe(125);
+    // 127 since #37402 gave `advanced` the object's whole-record hand lock
+    // (`uiReadonlyWhen`) — a label and a help text, two leaves, all translated
+    // leaves authored in every locale by that card. `advanced` reads 112 → 114.
+    expect(PANEL_LEAVES.length).toBe(127);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(13);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(112);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(114);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {

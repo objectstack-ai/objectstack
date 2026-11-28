@@ -4254,6 +4254,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
     for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
     for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
+    // [#37402] The object's own `uiReadonlyWhen` — the whole-record hand lock,
+    // the object level of the field slot below (the two-tier field-lock model)
+    // — is judged exactly as that slot is: the `record`-scoped `check` and the
+    // root verdict over FIELD_RULE_BOUND_ROOTS, with the same consequence
+    // clause (the console locks every field that inherits it). No server reads
+    // it, so it carries no write gate. `obj.uiReadonlyWhen` is read literally
+    // so #5017's source scan checks it against `ObjectSchema`.
+    {
+      const where = `object '${objectName}' uiReadonlyWhen`;
+      const raw: unknown = obj.uiReadonlyWhen;
+      const verdict = fieldRuleRootVerdict('uiReadonlyWhen', raw);
+      check(where, raw, objectName, 'record', verdict !== null);
+      if (verdict) {
+        issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+      }
+    }
     for (const [fname, f] of fieldList) {
       // [#22032, pass 2] NOT fenced on an object write: the field-rule slots
       // below — the four slots' root verdict, the `parent` gate, the

@@ -19,6 +19,7 @@ import { fieldInlineReadOnlyKind, isFieldInlineEditable } from './inline-edit-op
 
 const OPEN: CellReadOnlyInputs = {
   fieldDef: { type: 'text' },
+  object: null,
   fieldWritable: true,
   gridEditable: true,
   objectEditable: true,
@@ -64,5 +65,25 @@ describe('grid hand lock (#36806)', () => {
   it('controls: a plain column edits', () => {
     expect(fieldInlineReadOnlyKind({ type: 'text' })).toBeNull();
     expect(cellReadOnlyKind({ ...OPEN, row: { status: 'approved' } })).toBeNull();
+  });
+});
+
+/**
+ * #37402 — the object level: a cell over a field that declares no hand lock is
+ * judged by the object's whole-record `uiReadonlyWhen` over its row, and a
+ * field's own `uiReadonlyWhen` wins over it.
+ */
+describe('grid cells read the object-level hand lock (#37402)', () => {
+  const object = { uiReadonlyWhen: "record.status in ['confirmed', 'done']" };
+  it('locks a plain column on a locked row, and only there', () => {
+    expect(cellReadOnlyKind({ ...OPEN, object, row: { status: 'confirmed' } })).toBe('readonly');
+    expect(cellReadOnlyKind({ ...OPEN, object, row: { status: 'draft' } })).toBeNull();
+    // The control: the same row with no object lock edits.
+    expect(cellReadOnlyKind({ ...OPEN, row: { status: 'confirmed' } })).toBeNull();
+  });
+
+  it('a column whose field keeps itself editable edits on a locked row', () => {
+    const fieldDef = { type: 'text', uiReadonlyWhen: 'false' };
+    expect(cellReadOnlyKind({ ...OPEN, object, fieldDef, row: { status: 'confirmed' } })).toBeNull();
   });
 });

@@ -2150,7 +2150,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // editor, auto-schedule, the conflict reschedule, undo and redo — so the
       // field hand lock is judged here, over the stored record: a locked field
       // the write changes refuses it, one it only echoes is left out of it.
-      const verdict = ganttPatchByHand(patch, stored, objectSchema?.fields as GanttLockDefs, predicateScope);
+      const verdict = ganttPatchByHand(patch, stored, objectSchema?.fields as GanttLockDefs, objectSchema, predicateScope);
       if (verdict.kind === 'refused') {
         refuseLockedWrite();
         return;
@@ -2213,7 +2213,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       // A link is an edit by hand of the TARGET's dependencies field: its
       // hand lock over that record refuses it (`ganttPatchByHand`).
       const target = data.find((r) => String(r.id ?? r._id) === String(targetId)) ?? {};
-      if (ganttPatchByHand({ [depField]: nextValue }, target, objectSchema?.fields as GanttLockDefs, predicateScope).kind === 'refused') {
+      if (ganttPatchByHand({ [depField]: nextValue }, target, objectSchema?.fields as GanttLockDefs, objectSchema, predicateScope).kind === 'refused') {
         refuseLockedWrite();
         return;
       }

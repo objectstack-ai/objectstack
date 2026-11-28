@@ -25,7 +25,7 @@
  *   judged on the write itself, so every commit path — undo and redo too —
  *   meets it.
  */
-import { fieldReadOnlyByHand, fieldStaticallyReadOnlyByHand, type FieldHandLockDef } from '@object-ui/core';
+import { fieldReadOnlyByHand, fieldStaticallyReadOnlyByHand, type FieldHandLockDef, type ObjectHandLockDef } from '@object-ui/core';
 import type { GanttInteractions } from './GanttView';
 
 /** The field definitions the verdict reads, keyed by field name. */
@@ -86,17 +86,20 @@ function sameStoredValue(next: unknown, stored: unknown): boolean {
  * record whose value the patch CHANGES refuses the whole patch (the chart puts
  * the bar back); one the patch leaves unchanged is dropped from it, so an
  * in-place edit of the title does not send the locked dates it echoes back.
+ * `object` is the object definition the fields belong to: its `uiReadonlyWhen`
+ * is the hand lock of every field that declares none of its own.
  */
 export function ganttPatchByHand(
   patch: Record<string, unknown>,
   stored: Record<string, unknown>,
   defs: GanttLockDefs,
+  object: ObjectHandLockDef | null | undefined,
   scope: Record<string, unknown> | undefined,
 ): GanttPatchVerdict {
   const out: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(patch)) {
     const def = defs?.[field];
-    if (!fieldReadOnlyByHand(def, stored, { scope, fieldContext: `field '${field}'` })) {
+    if (!fieldReadOnlyByHand(def, stored, { object, scope, fieldContext: `field '${field}'` })) {
       out[field] = value;
       continue;
     }

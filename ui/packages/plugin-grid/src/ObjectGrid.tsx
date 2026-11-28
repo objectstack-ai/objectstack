@@ -1562,6 +1562,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           const kind = cellReadOnlyKind({
             fieldDef,
             row,
+            object: objectSchema,
             scope: cellLockScope,
             fieldWritable: !objectName || resolveFieldAffordance('listInlineEdit', perms, objectName, columnKey),
             gridEditable,

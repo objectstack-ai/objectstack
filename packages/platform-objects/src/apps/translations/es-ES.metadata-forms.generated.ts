@@ -425,6 +425,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Validaciones",
         helpText: "Reglas de validación a nivel de objeto — un array de objetos de regla, p. ej. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Las tablas de transición de máquinas de estado también se declaran aquí (ADR-0020)"
       },
+      uiReadonlyWhen: {
+        label: "Condición de solo lectura en la interfaz para todo el registro",
+        helpText: "Predicado CEL sobre el registro (p. ej. record.status in ['confirmed', 'done']): mientras sea TRUE, nadie puede editar ningún campo de un registro existente en la consola (el diálogo de edición, la página del registro, las cuadrículas, el kanban, el arrastre del calendario y del Gantt, la hoja de horas); el diálogo de creación de un registro nuevo no se evalúa. Un campo que declara su propio bloqueo manual (uiReadonly activado, o uiReadonlyWhen) se juzga por él, así que uiReadonlyWhen: false en un campo lo mantiene editable; uiReadonly desactivado no cuenta y el campo sigue este bloqueo. Las acciones, las importaciones, la API y los flujos siguen escribiendo todos los campos, juzgados por las validaciones del objeto. Lee las columnas propias del registro. El asistente integrado que actúa por una persona aún no lo respeta."
+      },
       activityMilestones: {
         label: "Hitos de actividad",
         helpText: "Entradas de la cronología que se disparan cuando un campo alcanza un valor (ADR-0052 §5b.2): cuando una actualización cambia el campo vigilado a ese valor, el plugin de auditoría escribe el resumen del hito en la cronología de actividad del registro en lugar de la entrada de cambio de campo. Gana el primer hito que coincide."

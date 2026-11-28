@@ -722,6 +722,7 @@
     "data/Object:systemFields",
     "data/Object:tenancy",
     "data/Object:titleFormat",
+    "data/Object:uiReadonlyWhen",
     "data/Object:userActions",
     "data/Object:validations",
     "data/ObjectAccessConfig:default",

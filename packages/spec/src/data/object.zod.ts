@@ -4765,6 +4765,34 @@ const ObjectSchemaBase = strictObject(
   // `/meta/objects/:name/state/:field?from=` introspection endpoint.
 
   /**
+   * The WHOLE-RECORD hand lock (ruling on the two-tier field-lock model, the
+   * object level of `Field.uiReadonlyWhen`): while TRUE no person edits any
+   * field of an existing record at the console — the same surfaces a field's
+   * own `uiReadonlyWhen` locks — and every other write keeps them. For a
+   * record that changes only through actions once it reaches a state, e.g. a
+   * confirmed order: P`record.status in ['confirmed', 'done']`.
+   *
+   * It is a DEFAULT for every field: a field that declares a hand lock of its
+   * own — `uiReadonly: true` or a `uiReadonlyWhen` — is judged by that instead,
+   * so `uiReadonlyWhen: P\`false\`` on a field keeps it editable inside a
+   * locked record (notes, internal tags). `uiReadonly: false` is NOT such a
+   * declaration: it is that key's default, and the field follows the object lock. The server lock of a field (`readonly`,
+   * `readonlyWhen`) is not a hand-lock declaration and still locks on its own.
+   * A create is not judged, as at the field level.
+   *
+   * Same scope and fault direction as the field key: the bound record's OWN
+   * columns; a predicate the console cannot evaluate fails CLOSED (every field
+   * that inherits it locks) because no server judges this key (ADR-0137 D2).
+   * `objectstack validate` checks the predicate.
+   *
+   * Read by the console only, through the one hand-lock verdict in
+   * `@object-ui/core` (`fieldReadOnlyByHand`); `describe_object` (MCP)
+   * reports it. The engine never reads it: a TRUE predicate refuses no REST,
+   * import, action or flow write, and drops nothing from one.
+   */
+  uiReadonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — every field of an existing record is read-only BY HAND while TRUE: the console surfaces a field's own `uiReadonlyWhen` locks (the edit dialog, record-page inline edit and the stage path, the highlight-strip chip, grid inline edit and multi-row save, kanban column drag, calendar drag, the Gantt, the timesheet cell, the line-item grid) do not let a person edit the record, while REST, import, action and flow writes keep every field, judged by the object's validations. e.g. P`record.status in ['confirmed', 'done']` on an order moved by Confirm / Cancel actions. A default for every field: a field that declares `uiReadonly: true` or its own `uiReadonlyWhen` is judged by that instead, so a field whose own `uiReadonlyWhen` is P`false` stays editable inside a locked record; `uiReadonly: false` is not such a declaration and the field follows the object lock. A create is not judged. A predicate the console cannot evaluate locks every field that inherits it. Same scope as a field's `readonlyWhen`: the record's OWN columns. The engine never reads this key."),
+
+  /**
    * Display & UI Hints (Data-Layer)
    */
   /**

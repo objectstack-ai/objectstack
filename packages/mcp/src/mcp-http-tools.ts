@@ -4022,7 +4022,10 @@ export function registerObjectTools(
           + 'does not honour it yet; '
           + 'your write may still set it, judged by the validations), system, '
           + 'options (send the value) and defaultValue (omit the field to get it; never copy the value); the active '
-          + 'validations; the enabled features. readonly is the schema\'s, not your edit permission.',
+          + 'validations; the enabled features; the object\'s uiReadonlyWhen where set (while true no person edits '
+          + 'the record at the console, but a field listing its own uiReadonly / uiReadonlyWhen is judged by that, '
+          + 'which may lock it too; use an action; your write may still set every field). '
+          + 'readonly is the schema\'s, not your edit permission.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
           { objectName: z.string().describe('The object/table name, e.g. "task"') },

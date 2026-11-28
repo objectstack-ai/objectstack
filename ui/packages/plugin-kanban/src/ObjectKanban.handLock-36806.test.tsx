@@ -71,16 +71,16 @@ const schema = {
   ],
 } satisfies ObjectKanbanSchema;
 
-function makeDataSource(lock: Record<string, unknown>) {
+function makeDataSource(lock: Record<string, unknown>, objectLock: Record<string, unknown> = {}) {
   return {
-    getObjectSchema: vi.fn(async () => ({ name: OBJECT, fields: { title: { type: 'text', label: 'Title' }, status: statusField(lock) } })),
+    getObjectSchema: vi.fn(async () => ({ name: OBJECT, ...objectLock, fields: { title: { type: 'text', label: 'Title' }, status: statusField(lock) } })),
     find: vi.fn(async () => ({ value: [{ id: 't1', title: CARD, status: 'backlog' }] })),
     update: vi.fn(async () => ({ id: 't1', status: 'in_progress' })),
   } as unknown as DataSource & { update: ReturnType<typeof vi.fn> };
 }
 
-async function mountBoard(lock: Record<string, unknown>) {
-  const ds = makeDataSource(lock);
+async function mountBoard(lock: Record<string, unknown>, objectLock: Record<string, unknown> = {}) {
+  const ds = makeDataSource(lock, objectLock);
   render(<ObjectKanban schema={schema} dataSource={ds} />);
   expect(await screen.findByText(CARD)).toBeTruthy();
   await act(async () => {
@@ -136,6 +136,28 @@ describe('ObjectKanban: the lane field\'s lock closes the drag (objectstack#3680
       await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 't1', { status: 'in_progress' }));
       cleanup();
     }
+  });
+});
+
+/**
+ * objectstack#37402 — the object level: the object's whole-record
+ * `uiReadonlyWhen` TRUE over the dragged record locks a lane field that
+ * declares no hand lock of its own, and a lane field's own declaration wins.
+ */
+describe('ObjectKanban: the object-level hand lock closes the drop (objectstack#37402)', () => {
+  const OBJECT_LOCK = { uiReadonlyWhen: "record.status == 'backlog'" };
+
+  it('TRUE over the dragged record: the drop writes nothing', async () => {
+    const ds = await mountBoard({}, OBJECT_LOCK);
+    expect(cardNode().getAttribute('aria-disabled')).toBe('false');
+    await dropOnInProgress();
+    expect(ds.update).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — a lane field that keeps itself editable writes the move inside a locked record', async () => {
+    const ds = await mountBoard({ uiReadonlyWhen: 'false' }, OBJECT_LOCK);
+    await dropOnInProgress();
+    await waitFor(() => expect(ds.update).toHaveBeenCalledWith(OBJECT, 't1', { status: 'in_progress' }));
   });
 });
 

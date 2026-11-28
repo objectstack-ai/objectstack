@@ -425,6 +425,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Validations",
         helpText: "Règles de validation au niveau de l’objet — un tableau d’objets de règle, par ex. [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]. Les tables de transition des machines à états sont également déclarées ici (ADR-0020)"
       },
+      uiReadonlyWhen: {
+        label: "Enregistrement entier en lecture seule dans l'interface si",
+        helpText: "Prédicat CEL sur l'enregistrement (par ex. record.status in ['confirmed', 'done']) — tant qu'il est TRUE, personne ne peut modifier un champ d'un enregistrement existant dans la console (boîte de dialogue de modification, page de l'enregistrement, grilles, kanban, glisser-déposer du calendrier et du Gantt, feuille de temps) ; la boîte de dialogue de création d'un nouvel enregistrement n'est pas évaluée. Un champ qui déclare son propre verrou manuel (uiReadonly activé, ou uiReadonlyWhen) est jugé par celui-ci, donc uiReadonlyWhen: false sur un champ le garde modifiable ; uiReadonly désactivé ne compte pas, et le champ suit ce verrou. Les actions, les imports, l'API et les flux écrivent toujours chaque champ, jugés par les validations de l'objet. Lit les colonnes propres de l'enregistrement. L'assistant intégré agissant pour une personne ne le respecte pas encore."
+      },
       activityMilestones: {
         label: "Jalons d’activité",
         helpText: "Entrées de chronologie déclenchées lorsqu’un champ atteint une valeur (ADR-0052 §5b.2) : lorsqu’une mise à jour fait passer le champ surveillé à cette valeur, le plugin d’audit écrit le résumé du jalon dans la chronologie d’activité de l’enregistrement au lieu de l’entrée de modification de champ. Le premier jalon qui correspond l’emporte."

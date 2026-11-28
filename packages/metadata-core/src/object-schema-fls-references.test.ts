@@ -472,6 +472,19 @@ describe('[ADR-0106 D1] references to a denied field — inside a READABLE field
         expect(locked.fields.title.readonly).toBe(true);
     });
 
+    // [#37402] The object level: the whole-record hand lock fails closed the same way.
+    it('[#37402] serves the object-level `uiReadonlyWhen` as the constant `true` when it reads the denied field', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith(), uiReadonlyWhen: 'record.secret_score > 0' });
+        expect(served.uiReadonlyWhen).toBe('true');
+        const envelope = mask({ name: 'thing', fields: fieldsWith(), uiReadonlyWhen: { dialect: 'cel', source: 'record.secret_score > 0' } });
+        expect(envelope.uiReadonlyWhen).toEqual({ dialect: 'cel', source: 'true' });
+    });
+
+    it('[#37402] CONTROL: an object-level `uiReadonlyWhen` over readable fields is served as written', () => {
+        const served = mask({ name: 'thing', fields: fieldsWith(), uiReadonlyWhen: "record.title != ''" });
+        expect(served.uiReadonlyWhen).toBe("record.title != ''");
+    });
+
     it('drops a `lookupAutofill` pair whose target is denied, and keeps a source named on the referenced object', () => {
         // #27945 — `target` is a field of THIS object; `source` names a field of
         // the lookup's `reference` object, which this projection cannot judge.

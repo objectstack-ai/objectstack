@@ -731,6 +731,24 @@ const readableField: Scrub = (value, denied, scope) => {
 
 // ── Object level ──────────────────────────────────────────────────────────────
 
+/**
+ * [#37402] The object's whole-record hand lock (`uiReadonlyWhen`, the object
+ * level of {@link readableField}'s rule): a predicate that mentions a field
+ * denied to the caller cannot be evaluated by them, and nothing judges the hand
+ * lock but the console, which fails it CLOSED — so deleting it outright would
+ * silently OPEN every record for exactly the caller who cannot see why it is
+ * locked. It is served as the constant predicate `true` instead: every field
+ * that declares no hand lock of its own stays locked by hand for that caller,
+ * and a field's own `uiReadonlyWhen` still wins, as it does over the authored
+ * predicate. Its text, which describes the denied field, is never served.
+ */
+const objectHandLock: Scrub = (value, denied) => {
+    if (!mentionsDenied(value, denied, 'include', 'classified')) return value;
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? { dialect: 'cel', source: 'true' }
+        : 'true';
+};
+
 /** A row-CRUD override flag: `boolean`, or `{ enabled, visibleWhen, disabledWhen }`. */
 const crudFlag: Scrub = (value, denied) => (
     value && typeof value === 'object' && !Array.isArray(value)
@@ -831,6 +849,7 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     relatedLists: keep,
     // Expressions.
     titleFormat: expression,
+    uiReadonlyWhen: objectHandLock,
     // Rule entries — dropped whole when they mention a denied field.
     validations: ruleEntries,
     indexes: ruleEntries,
