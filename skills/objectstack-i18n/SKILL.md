@@ -125,13 +125,13 @@ const zhCN: TranslationData = {
   },
 };
 
-// src/translations/index.ts — assemble the locales into one bundle…
+// src/translations/index.ts
 export const TodoTranslations = defineTranslationBundle({
   en,
   'zh-CN': zhCN,
 });
 
-// objectstack.config.ts — …and register it on the stack
+// objectstack.config.ts
 export default defineStack({
   i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
   translations: [TodoTranslations],
@@ -173,8 +173,8 @@ the pages themselves localize through `doc.translations`, and the inline `transl
 book once carried stays retired), `mappings` (an import mapping's `label` by its `name`:
 `mappings.{mapping}.label`), `packages` (`name` / `description` by `manifest.id`, the dotted id one
 key: `packages: { 'com.acme.crm': { name: '客户关系' } }`; a locale with no row shows
-`manifest.name`, and `os i18n check` warns `i18n/missing-package` until that package's own
-bundle carries it), `metadataForms`, `settingsCommon`; `reports`, `positions` and
+`manifest.name`, and `os lint` warns `i18n/missing-package` (`os i18n check` lists the key)
+until that package's own bundle carries it), `metadataForms`, `settingsCommon`; `reports`, `positions` and
 `permissions` hold `label` + `description` by name, so do `datasets` and each dataset member at
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at

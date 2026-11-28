@@ -363,8 +363,9 @@ example ships a completeness test alongside its bundles — worth copying.
 
 A package's own display name is part of that report. `os i18n extract` scaffolds
 `packages.<manifest id>.name` / `.description` for the stack's manifest and
-every composed package, and `os i18n check` / `os lint` report a missing one as
-the warning `i18n/missing-package`. Clear it by adding the row to that package's
+every composed package. `os lint` reports a missing one as the warning
+`i18n/missing-package`, and `os i18n check` lists the same gap by its key
+(`packages.com.acme.crm.name`). Clear it by adding the row to that package's
 own bundle for the locale; the source locale needs one only when the displayed
 name should differ from `manifest.name`:
 

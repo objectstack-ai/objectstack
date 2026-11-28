@@ -254,7 +254,7 @@ and parent + children save in **one atomic transaction**. A parent or child
 declaring `enable.apiMethods` must list `'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
-// PARENT `invoice`: the group places the lines and holds no fields
+// PARENT `invoice`: the group holds no fields
 fieldGroups: [{ key: 'lines', label: 'Line Items', relatedList: 'invoice_line' }],
 
 // CHILD `invoice_line`: its master_detail FK, declaring no `relatedList`
@@ -360,7 +360,7 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
   arrangement re-stating the entry with no `label`, or hiding it, leaves none (a
   bare child's name, labelled or not, covers each of its `child.field` lists too) and
   `os validate` refuses the key: drop it, or re-state the entry, shown, with the
-  owner's `label`, or its own, translated at that key in the `.custom`
+  owner's `label`, or the arrangement's own, translated at that key in the `.custom`
   package's bundle. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata

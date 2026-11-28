@@ -1236,9 +1236,10 @@ options: { 'direct-mail': '直邮' }  // ❌ a variant spelling of the value
 `packages` keys are held to the manifest id grammar at parse and are not
 resolved against the artifact's manifests here. Their coverage is a separate
 report: `os i18n extract` scaffolds `packages.{id}.name` / `.description` for
-the stack's manifest and every composed package, and `os i18n check` and
-`os lint` report a missing one as the warning `i18n/missing-package`, cleared
-by adding the row to that package's own bundle for the locale.
+the stack's manifest and every composed package. `os lint` reports a missing
+one as the warning `i18n/missing-package`, and `os i18n check` lists the same
+gap by its key; adding the row to that package's own bundle for the locale
+clears both.
 
 `messages`, `settingsCommon` and `metadataForms` are **not** checked: their
 keys are owned by application code, plugins, and the platform's own
