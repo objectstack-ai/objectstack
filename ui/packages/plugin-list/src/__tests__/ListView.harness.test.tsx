@@ -3109,6 +3109,93 @@ describe('ListView.nameFieldSelect-13116', () => {
   });
 });
 
+// ── ListView.highlightFieldsSelect-37891 ───────────────────────────────────────
+
+/**
+ * objectstack#37891 — an ungrouped list asks for the object's
+ * `highlightFields` (ADR-0085). On a phone the grid draws each row this fetch
+ * hands it as a card whose amount and subtitle are those fields, in that
+ * order, whether or not a column shows them; without this arm a list showing
+ * `unit_price` but not `total_price` handed the grid rows with no total to
+ * put in the amount slot. Fetched, never drawn as columns. A grouped grid
+ * that owns its fetch projects through `ObjectGrid`'s `getSelectFields`,
+ * pinned in plugin-grid's `phoneCardAmount-34615.test.tsx`.
+ *
+ *   a highlighted field no column shows is in `$select`, not drawn    RED on the base tree
+ *   control: an object with no highlightFields sends the same select GREEN
+ */
+describe('ListView.highlightFieldsSelect-37891', () => {
+  restoreAfterBlock();
+
+  const LINE = 'crm_sales_order_line';
+  const lineFields = {
+    id: { name: 'id', type: 'text' },
+    product_title: { name: 'product_title', type: 'text', label: 'Product Title' },
+    quantity: { name: 'quantity', type: 'number', label: 'Quantity' },
+    unit_price: { name: 'unit_price', type: 'currency', label: 'Sales Price' },
+    discount: { name: 'discount', type: 'percent', label: 'Discount %' },
+    total_price: { name: 'total_price', type: 'formula', returnType: 'currency', label: 'Total', expression: 'record.quantity * record.unit_price' },
+  };
+  const ROWS = [{ id: 'l1', product_title: 'Workshop', quantity: 2, unit_price: 6000, discount: 10, total_price: 10800 }];
+
+  let lastGridProps: any = null;
+  let prevObjectGrid: any;
+  beforeAll(() => {
+    prevObjectGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      lastGridProps = props;
+      return <div data-testid="grid-stub" />;
+    });
+  });
+  afterAll(() => {
+    if (prevObjectGrid) ComponentRegistry.register('object-grid', prevObjectGrid);
+    else ComponentRegistry.unregister('object-grid');
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    lastGridProps = null;
+  });
+  afterEach(() => {
+    cleanup();
+    lastGridProps = null;
+  });
+
+  async function mount(def: Record<string, unknown>, columns: string[]) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: ROWS, total: ROWS.length })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (name: string) => (name === def.name ? def : null)),
+    } as any;
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
+          dataSource={dataSource}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    return [...((dataSource.find.mock.calls.at(-1)?.[1]?.$select as string[] | undefined) ?? [])].sort();
+  }
+
+  it('asks for a highlighted field no column shows, and does not draw it as a column', async () => {
+    const def = { name: LINE, nameField: 'product_title', highlightFields: ['total_price', 'quantity', 'unit_price', 'discount'], fields: lineFields };
+    const select = await mount(def, ['product_title', 'quantity', 'unit_price']);
+    expect(select).toEqual(['discount', 'id', 'product_title', 'quantity', 'total_price', 'unit_price']);
+    const drawn = (lastGridProps?.columns ?? lastGridProps?.fields ?? []) as unknown[];
+    expect(JSON.stringify(drawn)).not.toContain('total_price');
+  });
+
+  it('control: an object with no highlightFields sends the same $select as before', async () => {
+    const def = { name: LINE, nameField: 'product_title', fields: lineFields };
+    const select = await mount(def, ['product_title', 'quantity', 'unit_price']);
+    expect(select).toEqual(['id', 'product_title', 'quantity', 'unit_price']);
+  });
+});
+
 // ── ListView.recordDrawerCount-27545 ────────────────────────────────────────────
 
 /**
