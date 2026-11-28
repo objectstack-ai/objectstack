@@ -79,8 +79,12 @@ vi.mock('../hooks/useActionModal', () => ({
     resolveModalTarget: vi.fn(async () => null),
   }),
 }));
+// What the route answers: by default the bare success, else the
+// declarative-update answer a case sets (objectstack#37867's `warnings`).
+const route = vi.hoisted(() => ({ answerData: undefined as Record<string, unknown> | undefined }));
 vi.mock('../utils/consoleServerAction', () => ({
-  createConsoleServerActionHandler: () => vi.fn(async () => ({ success: true })),
+  createConsoleServerActionHandler: () => vi.fn(async () =>
+    (route.answerData ? { success: true, data: route.answerData } : { success: true })),
 }));
 
 type ProviderProps = React.ComponentProps<typeof import('@object-ui/react').ActionProvider>;
@@ -206,7 +210,11 @@ function operationUpdate(patch: Record<string, unknown>, row: Record<string, unk
  * Mount the page on `record`, run `action` through the page's own runner, and
  * hand back the success toast's Undo button.
  */
-async function runOnRecordPage(record: Record<string, unknown>, action: (loaded: Record<string, unknown>) => ActionDef) {
+async function runOnRecordPage(
+  record: Record<string, unknown>,
+  action: (loaded: Record<string, unknown>) => ActionDef,
+  variant: 'success' | 'warning' = 'success',
+) {
   const dataSource = {
     find: vi.fn(async () => ({ data: [] })),
     findOne: vi.fn(async () => structuredClone(record)),
@@ -245,20 +253,22 @@ async function runOnRecordPage(record: Record<string, unknown>, action: (loaded:
   });
   expect(result.success).toBe(true);
 
-  const call = vi.mocked(toast.success).mock.calls.find(([message]) => message === MESSAGE);
+  const call = vi.mocked(toast[variant]).mock.calls.find(([message]) => message === MESSAGE);
   expect(call).toBeTruthy();
-  const options = call![1] as { action?: { label: string; onClick: () => void } } | undefined;
+  const options = call![1] as { description?: string; action?: { label: string; onClick: () => void } } | undefined;
   expect(options?.action).toBeDefined();
   const undo = async () => {
     await act(async () => { options!.action!.onClick(); });
   };
-  return { dataSource, result, context: provider.context, undo };
+  return { dataSource, result, context: provider.context, undo, description: options?.description };
 }
 
 afterEach(() => {
   cleanup();
   captured.length = 0;
+  route.answerData = undefined;
   vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
   globalUndoManager.clear();
 });
 
@@ -305,5 +315,32 @@ describe('record page — Undo of a lookup update restores the stored id (object
         OBJECT_NAME, RECORD_ID, { account: 'a1', config: { id: 'cfg1', mode: 'strict' } },
       ),
     );
+  });
+});
+
+describe('record page — an update whose write raised warnings warns, on one toast (objectstack#37867)', () => {
+  it('the page raises the warning toast: the success message, the warning under it, and Undo', async () => {
+    const WARNING = 'This deal takes its account over the credit limit.';
+    route.answerData = {
+      operation: 'update',
+      object: OBJECT_NAME,
+      id: RECORD_ID,
+      record: { id: RECORD_ID, account: 'a2' },
+      warnings: [{ field: 'account', code: 'rule_violation', message: WARNING, rule: 'credit_limit', severity: 'warning' }],
+    };
+    const { dataSource, description, undo } = await runOnRecordPage(
+      EXPANDED_RECORD,
+      (loaded) => operationUpdate({ account: 'a2' }, loaded),
+      'warning',
+    );
+
+    expect(description).toBe(WARNING);
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    // One toast: the warning variant replaces the success one, never joins it.
+    expect(vi.mocked(toast.success).mock.calls.filter(([m]) => m === MESSAGE)).toHaveLength(0);
+
+    // The kept Undo is the page's real one.
+    await undo();
+    await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT_NAME, RECORD_ID, { account: 'a1' }));
   });
 });
