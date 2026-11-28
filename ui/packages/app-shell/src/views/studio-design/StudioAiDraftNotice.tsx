@@ -18,11 +18,14 @@ import { t } from '../metadata-admin/i18n.js';
 
 export function StudioAiDraftNotice({
   locale,
+  text,
   onDiscard,
   busy = false,
   className,
 }: {
   locale: string;
+  /** The sentence, where the page names what the draft covers; else the item line's own. */
+  text?: string;
   /** Drop the item's draft; `undefined` draws no button (a read-only item). */
   onDiscard?: () => void;
   busy?: boolean;
@@ -39,7 +42,7 @@ export function StudioAiDraftNotice({
     >
       <span data-testid="studio-ai-draft-notice" className="inline-flex items-center gap-1.5 text-amber-800 dark:text-amber-200">
         <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-        {t('engine.studio.aiDraft.notice', locale)}
+        {text ?? t('engine.studio.aiDraft.notice', locale)}
       </span>
       {onDiscard && (
         <button

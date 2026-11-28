@@ -3535,6 +3535,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.owd.none': '本包未声明任何对象。',
   'engine.studio.owd.loadFailed': '加载本包对象失败。',
   'engine.studio.owd.unsaved': '未保存',
+  // objectstack#36660 — 见英文条目。
+  'engine.studio.owd.aiDraftNotice': '这个对象有 AI 未发布的改动，保存这一行会让它们全部生效',
+  'engine.studio.owd.aiDraftDiscardConfirmUnsaved':
+    '放弃 AI 的改动会丢掉这个对象全部未发布的改动，以及这一行还没保存的改动。仍要放弃吗？',
   'engine.studio.owd.byParent': '跟随所属的{master}',
   'engine.studio.owd.cbpPrereqTitle': '将该关系设为必填？',
   'engine.studio.owd.cbpPrereqDesc':

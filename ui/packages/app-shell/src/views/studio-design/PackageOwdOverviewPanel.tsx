@@ -29,6 +29,10 @@
  *     read of the load the edit was made on (objectstack#37515): a draft
  *     written since, or one that appeared after the page loaded, is refused
  *     and asked about, never overwritten or published unseen.
+ *   • A row whose object holds the AI assistant's pending draft (copilot or
+ *     MCP) says so (objectstack#36660): its Save publishes that whole draft,
+ *     not only the sharing model, and its discard drops that object's draft
+ *     at the package, asking first only over the row's own unsaved edit.
  *   • `controlled_by_parent` rows show the master link (read-only) under the
  *     row's dial.
  *   • There is no external column: `externalSharingModel` is retired by
@@ -46,7 +50,10 @@ import type { MetadataClient, MetadataLayered } from '@object-ui/data-objectstac
 // …and `formatMetadataError`, the one metadata-save error reader (objectui#11302).
 // …and `dropServedPicklistOptions`, the served -> authored conversion of a
 // picklist-bound field (objectui#10202, objectui#11692).
-import { dropServedPicklistOptions, extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
+import { dropServedPicklistOptions, extractDraftBody, formatMetadataError, readDraftChanges } from '@object-ui/data-objectstack';
+import { StudioAiDraftNotice } from './StudioAiDraftNotice.js';
+import { isAgentDraftSurface } from './StudioDraftMark.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import {
   Button,
   Dialog,
@@ -109,6 +116,12 @@ interface OwdRow {
   master?: string;
   /** True when this object already has an unpublished draft. */
   hasDraft: boolean;
+  /**
+   * objectstack#36660 — that draft was written by the AI assistant (a
+   * `copilot` or `mcp` entry in its read's `draftChanges`). The row's Save
+   * publishes the whole draft, so the row says so and offers its discard.
+   */
+  aiDraft: boolean;
   /** True when the package's published list held this object at load (objectui#11799). */
   saved: boolean;
   /** What this load read, for an edit made on this row ({@link RowBasis}). */
@@ -466,6 +479,7 @@ export function PackageOwdOverviewPanel({
               internal === 'controlled_by_parent' ? body.fields : requireCbpMasterDetails(body.fields),
             ),
             hasDraft: !!draftBody,
+            aiDraft: !!draftBody && (readDraftChanges(draftRead.answer) ?? []).some((change) => isAgentDraftSurface(change.by)),
             saved,
             basis: { ...draftBasis, published: publishedPinOfRow(layRaw, saved) },
           };
@@ -747,6 +761,38 @@ export function PackageOwdOverviewPanel({
     }
   }, [rowState, client, packageId, load, locale, publishPinned, recordPublished, recordRead, saveDraftGuarded, heldDraftVersion]);
 
+  // objectstack#36660 (epic objectstack#36510 decision 1) — 放弃 AI 的改动 on a
+  // row: that object's whole pending draft is dropped at this package
+  // (`DELETE /meta/object/NAME?state=draft&package=`), never the package's
+  // batch. The table is read back; the other rows keep their unsaved edits,
+  // and this row's own unsaved edit, which goes with the draft, is asked about first.
+  const [discardingAiDraft, setDiscardingAiDraft] = React.useState<string | null>(null);
+  const discardAiDraft = React.useCallback(
+    async (name: string) => {
+      const own = rowState.find((s) => s.row.name === name);
+      if (!own?.row.aiDraft) return;
+      if (own.dirty && !window.confirm(t('engine.studio.owd.aiDraftDiscardConfirmUnsaved', locale))) return;
+      const others = rowState.filter((s) => s.dirty && s.row.name !== name);
+      setDiscardingAiDraft(name);
+      setSaveError(null);
+      try {
+        await client.reset('object', name, { state: 'draft', packageId });
+        // The ledger behind Changes re-reads, one item fewer.
+        emitMetadataRefresh();
+        if (await load(new Set(others.map((o) => o.row.name)))) {
+          if (others.length > 0) {
+            setEdits((prev) => ({ ...prev, ...Object.fromEntries(others.map((o) => [o.row.name, o.edit])) }));
+          }
+        }
+      } catch (e) {
+        setSaveError(tFormat('engine.studio.aiDraft.discardFailed', locale, { reason: formatMetadataError(e) }));
+      } finally {
+        setDiscardingAiDraft(null);
+      }
+    },
+    [rowState, client, packageId, load, locale],
+  );
+
   // Cancel: every dial back at what the server holds, nothing sent.
   const doCancel = React.useCallback(() => {
     setEdits(Object.fromEntries(rows.map((r) => [r.name, { internal: r.internal }])));
@@ -879,12 +925,23 @@ export function PackageOwdOverviewPanel({
                               {t('engine.studio.owd.unsaved', locale)}
                             </span>
                           )}
-                          {row.hasDraft && !dirty && (
+                          {row.hasDraft && !row.aiDraft && !dirty && (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                               {t('engine.studio.unpublishedDraft', locale)}
                             </span>
                           )}
                         </span>
+                        {/* objectstack#36660 — the object's pending draft is the
+                            AI assistant's: this row's Save publishes all of it. */}
+                        {row.aiDraft && (
+                          <StudioAiDraftNotice
+                            locale={locale}
+                            text={t('engine.studio.owd.aiDraftNotice', locale)}
+                            onDiscard={readOnly ? undefined : () => void discardAiDraft(row.name)}
+                            busy={discardingAiDraft !== null || saving}
+                            className="mt-1"
+                          />
+                        )}
                       </span>
                     </td>
 

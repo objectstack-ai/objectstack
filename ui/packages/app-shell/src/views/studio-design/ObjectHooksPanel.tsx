@@ -34,6 +34,7 @@ import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js'
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import type { HookItem, ObjectHooksBuffer } from './objectHooksBuffer.js';
+import { StudioAiDraftNotice } from './StudioAiDraftNotice.js';
 
 export function ObjectHooksPanel({
   buffer,
@@ -80,6 +81,9 @@ export function ObjectHooksPanel({
     replace,
     addHook,
     reportCel,
+    aiDraft,
+    discardAiDraft,
+    discardingAiDraft,
   } = buffer;
 
   // objectui#12514 — an object no hook targets is one centered block whose
@@ -203,6 +207,17 @@ export function ObjectHooksPanel({
                 </span>
               ) : null}
             </div>
+            {/* objectstack#36660 — the AI assistant's draft of this hook is what
+                the buffer holds: Save makes it live too, and its discard drops
+                that one hook's draft, the designers' line. */}
+            {aiDraft && (
+              <StudioAiDraftNotice
+                locale={locale}
+                onDiscard={disabled ? undefined : discardAiDraft}
+                busy={discardingAiDraft || saving}
+                className="m-3 mb-0"
+              />
+            )}
             {renamedFrom !== null && !disabled && (
               <p
                 role="status"
