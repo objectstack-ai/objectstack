@@ -8,12 +8,12 @@ name: Framework Build Base Image
 # instead of installing and building the whole framework on every cold cache.
 # It is NOT the runtime image; that one is docker-publish.yml.
 #
-# Triggers (why per commit, and what that costs: the note above `on:`):
-#   - push to main: every landing is packaged with no human step, so whichever
-#     commit a downstream pins has its image about 20 minutes after it lands;
+# Triggers (why per push, and what that costs: the note above `on:`):
+#   - push to main: the push's HEAD commit (github.sha) is packaged, one image
+#     per push; a commit inside a multi-commit queue push gets none by itself;
 #   - workflow_dispatch from main (`sha` = a full commit on main), and
 #     repository_dispatch `framework-build-base` with client_payload {"sha"}:
-#     backfill and replace. A pull_request touching this file or the directory
+#     inner commits, backfill and replace. A pull_request touching this file or
 #     docker/framework-build-base/ is a dry run that pushes nothing.
 #
 # A tag is written once. A request for a commit whose tag already exists reports
@@ -44,17 +44,23 @@ name: Framework Build Base Image
 # dispatch-gates: no-check-families -- the steps are an image build and push, registry reads and digest-tag writes, and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
 
 # Why every push to main, measured on 2026-11-28 (objectstack main, the week
-# 2026-11-21..27): main took 984 landings, about 141 a day, and a downstream pins
-# any of them by commit (cloud's .objectstack-sha moved to ecd10e9e, a feature
-# landing, not a release). So a trigger on releases or `next` snapshots alone
-# would package roughly one commit a day and miss the pin. Coalescing pushes to
-# the newest head (one build running, one waiting) was simulated over that week:
-# about 61 builds a day, and main's head had its image only 12% of the time.
-# Per commit costs about 21 runner-minutes a landing (the dispatch run of
-# 2026-11-28 took 21.5 min), against about 600 for the merge-queue CI run each
-# landing already pays (ci.yml 527 + lint.yml 76 on one queue run): about 3.5%
-# more. A push for a commit already packaged builds nothing, and a push never
-# carries `rebuild` or `replace_published`, so it never moves a published tag.
+# 2026-11-21..27). The merge queue lands up to 5 squash commits in one push:
+# that week, 984 commits arrived in 692 pushes, about 99 a day, so about 30% of
+# main's commits are inside a push and are packaged only on request (dispatch).
+# A downstream pins by commit (cloud's .objectstack-sha moved to ecd10e9e, a
+# push head and a feature landing, not a release), so releases or `next`
+# snapshots alone would package about one commit a day and miss the pin.
+# Head coverage, replaying that week's push times with a 21-minute build: per
+# push, main's head already had its image 24% of the time, and every push head
+# gets one; coalesced to the newest head (one running, one waiting), 15%, and
+# 41% of push heads never get one. Cost per push: about 21 runner-minutes (the
+# dispatch run of 2026-11-28 took 21.5 min) against the one merge-queue CI run
+# each push already pays, about 600 (ci.yml 527 + lint.yml 76 on one queue
+# run): about 3.5% more. Storage: about 0.8 GB per build with no layer shared
+# between builds (no cache-from), so about 80 GB a day; digest tags are never
+# deleted, and retention is a decision of its own. A push for a commit already
+# packaged builds nothing, and a push never carries `rebuild` or
+# `replace_published`, so it never moves a published tag.
 on:
   push:
     branches: [main]
@@ -166,10 +172,11 @@ jobs:
 
   publish:
     name: Build & push ghcr.io/objectstack-ai/framework-build-base
-    # Trusted runs only: a push to main, a dispatch from main, or a
-    # repository_dispatch (which always runs main's copy of this file). This `if` is the policy, not a
+    # Trusted runs only, in this repository (a fork's copy never publishes): a
+    # push to main, a dispatch from main, or a repository_dispatch (which
+    # always runs main's copy of this file). This `if` is the policy, not a
     # security boundary: anyone who can push a branch can also edit it there.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.repository == 'objectstack-ai/objectstack' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # One cold reading on record, the `verify` job of run 42464408854: job wall
     # 18m45s, of which the build 15m25s (install 33 s, 82 framework tasks
