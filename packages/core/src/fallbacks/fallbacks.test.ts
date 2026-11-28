@@ -224,6 +224,13 @@ describe('createMemoryI18n', () => {
         expect(i18n.t('greeting', 'en', { name: 'World' })).toBe('Hello, World!');
     });
 
+    it('fills a hole written with spaces inside the braces, as the Console does', () => {
+        const i18n = createMemoryI18n();
+        i18n.loadTranslations('en', { greeting: 'Hello, {{ name }}!', missing: 'Hello, {{ who }}!' });
+        expect(i18n.t('greeting', 'en', { name: 'World' })).toBe('Hello, World!');
+        expect(i18n.t('missing', 'en', { name: 'World' })).toBe('Hello, {{ who }}!');
+    });
+
     it('should fall back to default locale', () => {
         const i18n = createMemoryI18n();
         i18n.loadTranslations('en', { hello: 'Hello' });

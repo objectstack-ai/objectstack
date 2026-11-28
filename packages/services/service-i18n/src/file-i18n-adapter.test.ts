@@ -590,3 +590,29 @@ describe('the retired `messageFormat` guidance names the placeholder `t()` fills
     expect(i18n.t('greeting', 'en', { variable: 'Ada' })).toBe('Hello, {variable}!');
   });
 });
+
+describe('both server `t()` fill a bundle string the way the Console does', () => {
+  // One bundle string feeds the server `t()` and the Console's i18next, so a
+  // hole the Console fills must be filled here too, or a server message shows
+  // the braces. Each `console` value below is what i18next (the Console's
+  // default `{{ }}` interpolation) answered for the same template and params.
+  const servers: Array<[string, () => II18nService]> = [
+    ['FileI18nAdapter', () => new FileI18nAdapter()],
+    ['createMemoryI18n', () => createMemoryI18n() as unknown as II18nService],
+  ];
+  const forms: Array<[string, string, string]> = [
+    ['no spaces', 'Hi {{name}}!', 'Hi Ada!'],
+    ['spaces inside the braces', 'Hi {{ name }}!', 'Hi Ada!'],
+    ['a tab and two spaces', 'Hi {{  name\t}}!', 'Hi Ada!'],
+    ['single braces (not a placeholder)', 'Hi {name}!', 'Hi {name}!'],
+    ['a spaced hole with no value', 'Hi {{ missing }}!', 'Hi {{ missing }}!'],
+  ];
+
+  for (const [server, make] of servers) {
+    it.each(forms)(`${server}: %s`, (_form, template, console) => {
+      const i18n = make();
+      i18n.loadTranslations('en', { greeting: template });
+      expect(i18n.t('greeting', 'en', { name: 'Ada' })).toBe(console);
+    });
+  }
+});

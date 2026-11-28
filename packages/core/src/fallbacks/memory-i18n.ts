@@ -184,8 +184,10 @@ export function createMemoryI18n() {
 
       if (value == null) return key;
       if (!params) return value;
-      // Interpolation format: {{paramName}} — matches FileI18nAdapter convention
-      return value.replace(/\{\{(\w+)\}\}/g, (_, name) => String(params[name] ?? `{{${name}}}`));
+      // Interpolation format: {{paramName}}, inner whitespace allowed
+      // ({{ paramName }}) as the Console's i18next reads the same string —
+      // matches FileI18nAdapter. A hole with no value stays exactly as written.
+      return value.replace(/\{\{\s*(\w+)\s*\}\}/g, (hole, name) => (params[name] == null ? hole : String(params[name])));
     },
 
     getTranslations(locale: string): Record<string, unknown> {
