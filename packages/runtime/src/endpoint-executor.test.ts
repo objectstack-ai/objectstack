@@ -16,6 +16,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// [#37864] Paid at collection: the executor's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
 import { ApiEndpointSchema, ApiErrorSchema, BaseResponseSchema, DispatcherErrorCode, envelopeViolations, SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import type { ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
